@@ -1,0 +1,112 @@
+3339: function renderContent(){
+3340:   const isAdmin=currentUser.id==='admin';
+3341:   const ytConnected=D.integrations.youtube.connected;
+3342:   const ytSync=D.integrations.youtube.syncStatus;
+3343:   return `
+3344:     ${ytConnected
+3345:       ?`<div class="card" style="border-color:rgba(239,68,68,0.2);margin-bottom:12px;padding:12px 14px">
+3346:           <div style="display:flex;align-items:center;justify-content:space-between">
+3347:             <div style="display:flex;align-items:center;gap:8px">
+3348:               <span style="font-size:16px">▶️</span>
+3349:               <div>
+3350:                 <div style="font-size:12px;font-weight:700;color:#ef4444">YouTube Connected</div>
+3351:                 <div style="font-size:10px;color:var(--dim)">Last sync: ${D.integrations.youtube.lastSync?new Date(D.integrations.youtube.lastSync).toLocaleDateString():'Never'}</div>
+3352:               </div>
+3353:             </div>
+3354:             <div style="display:flex;gap:6px;align-items:center">
+3355:               ${ytSync==='error'?badge('⚠ Error','#ef4444'):ytSync==='syncing'?badge('Syncing…','#3b82f6'):badge('● Live','#22c55e')}
+3356:               <button onclick="ytSyncAll()" style="padding:4px 10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px;color:#ef4444;font-size:10px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">↺ Sync All</button>
+3357:             </div>
+3358:           </div>
+3359:         </div>`
+3360:       :`<div class="card" style="margin-bottom:12px;padding:12px 14px">
+3361:           <div style="display:flex;align-items:center;justify-content:space-between">
+3362:             <div style="font-size:12px;color:var(--dim)">YouTube not connected — showing cached data</div>
+3363:             <button onclick="renderTab('integrations')" style="padding:4px 10px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.2);border-radius:6px;color:var(--gold);font-size:10px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">Connect →</button>
+3364:           </div>
+3365:         </div>`
+3366:     }
+3367:     <div style="margin-bottom:12px">${D.channels.map(ch=>{
+3368:       const isExpanded=expandedChannels.has(ch.id);
+3369:       const hasVideos=ch.ytConnected&&ch.recentVideos&&ch.recentVideos.length>0;
+3370:       const intel=calculateIntelligence(ch);
+3371:       const fmtViews=n=>n==null?'—':n>=1000000?(n/1000000).toFixed(1)+'M':n>=1000?(n/1000).toFixed(1)+'K':n.toLocaleString();
+3372:       return`<div class="ch-card" style="border-color:${ch.color}20">
+3373:         <div class="ch-header">
+3374:           <div class="ch-icon" style="background:${ch.color}15">${ch.icon}</div>
+3375:           <div style="flex:1">
+3376:             <div class="ch-name" style="color:${ch.color}">${ch.name}</div>
+3377:             <div style="font-size:10px;color:var(--dim);margin-top:2px;display:flex;align-items:center;gap:6px">
+3378:               ${ch.ytConnected&&ch.lastUploadDate?`Last upload: ${new Date(ch.lastUploadDate).toLocaleDateString()}`:`Last: ${ch.lastPost}`}
+3379:               ${intel.growthClass?`<span style="${intel.badgeStyle}">${intel.growthClass}</span>`:''}
+3380:             </div>
+3381:           </div>
+3382:         </div>
+3383:         <div class="ch-stats">
+3384:           <div class="ch-stat">
+3385:             <div class="ch-stat-val" style="color:${ch.color};display:flex;align-items:center;justify-content:center;gap:3px">
+3386:               ${isAdmin?`<input class="editable" type="number" value="${ch.subs}" data-type="channels" data-id="${ch.id}" data-field="subs" style="color:${ch.color};font-size:17px;width:56px;text-align:center">`:`<span>${ch.subs.toLocaleString()}</span>`}
+3387:               ${intel.trend?`<span style="${intel.trendStyle}">${intel.trend}</span>`:''}
+3388:             </div>
+3389:             <div class="ch-stat-label">${ch.ytConnected?'LIVE SUBS':'SUBS'}</div>
+3390:           </div>
+3391:           <div class="ch-stat">
+3392:             <div class="ch-stat-val" style="color:#3b82f6">${ch.videos}</div>
+3393:             <div class="ch-stat-label">VIDEOS</div>
+3394:           </div>
+3395:           ${ch.ytConnected?`
+3396:           <div class="ch-stat">
+3397:             <div class="ch-stat-val" style="color:#6b7280;font-size:13px">${fmtViews(ch.totalViews||null)}</div>
+3398:             <div class="ch-stat-label">VIEWS</div>
+3399:           </div>
+3400:           <div class="ch-stat">
+3401:             <div class="ch-stat-val" style="color:#a78bfa;font-size:13px">${fmtViews(intel.avgViews)}</div>
+3402:             <div class="ch-stat-label">AVG/VIDEO</div>
+3403:           </div>`:''}
+3404:         </div>
+3405:         ${hasVideos?`<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+3406:           <button onclick="toggleChannelVideos(${ch.id})" style="width:100%;background:none;border:none;color:var(--dim);font-size:10px;cursor:pointer;padding:2px 0;font-family:'Syne',sans-serif;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.5px">
+3407:             <span>▶ RECENT VIDEOS (${ch.recentVideos.length})</span><span>${isExpanded?'▲':'▼'}</span>
+3408:           </button>
+3409:           ${isExpanded?`<div style="margin-top:8px">
+3410:             ${intel.momentum!=null||intel.consistency!=null||ch.bestVideo?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+3411:               ${intel.momentum!=null?`<span style="font-size:9px;color:var(--dim);background:var(--border);padding:2px 6px;border-radius:3px">MOMENTUM ${intel.momentum}/100</span>`:''}
+3412:               ${intel.consistency!=null?`<span style="font-size:9px;color:var(--dim);background:var(--border);padding:2px 6px;border-radius:3px">1 VIDEO / ${intel.consistency}d</span>`:''}
+3413:               ${ch.bestVideo?.title?`<span style="font-size:9px;color:#eab308;background:#eab30818;padding:2px 6px;border-radius:3px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ch.bestVideo.title.replace(/"/g,'&quot;')}">★ ${ch.bestVideo.title.length>30?ch.bestVideo.title.slice(0,30)+'…':ch.bestVideo.title}${ch.bestVideo.viewCount!=null?' · '+fmtViews(ch.bestVideo.viewCount):''}</span>`:''}
+3414:             </div>`:''}
+3415:             ${ch.recentVideos.map(v=>`
+3416:             <div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+3417:               ${v.thumbnailUrl?`<img src="${v.thumbnailUrl}" style="width:64px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0">`:`<div style="width:64px;height:36px;background:var(--border);border-radius:4px;flex-shrink:0"></div>`}
+3418:               <div style="flex:1;min-width:0">
+3419:                 <div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)">${v.title}</div>
+3420:                 <div style="font-size:10px;color:var(--dim);margin-top:2px">${v.publishedAt?new Date(v.publishedAt).toLocaleDateString():'—'}${v.viewCount!=null?' · '+fmtViews(v.viewCount)+' views':''}</div>
+3421:               </div>
+3422:             </div>`).join('')}</div>`:''}
+3423:         </div>`:''}
+3424:       </div>`;
+3425:     }).join('')}
+3426:     </div>
+3427:     <div class="card"><div class="card-title">Song Catalog</div>${D.catalog.map((s,i)=>`<div class="row"><span style="font-size:10px;color:var(--dim);min-width:20px" class="mono">#${i+1}</span><span style="flex:1;font-size:13px;font-weight:600;padding:0 10px">${s.title}</span><span style="font-size:10px;color:var(--dim);margin-right:8px">${s.date}</span>${badge(s.engine,'#c9a84c')}</div>`).join('')}</div>
+3428:     ${renderSRVAssetLibrary()}
+3429:     ${renderCapCutTemplateSystem()}
+3430:     ${renderAssetLibrarySection()}
+3431:   `;
+3432: }
+3433: 
+3434: // ── SRV ASSET LIBRARY ─────────────────────────────────────────────────────────
+3435: 
+3436: function renderSRVAssetLibrary(){
+3437:   const cats=[
+3438:     {engine:'SRV Farsi',mood:'Emotional Male',tag:'Emotional',color:'#a78bfa',style:'Dark room · candle · foggy street · rainy window',template:'Emotional-SRV-v1',folder:'Drive / SRV / Emotional-Male'},
+3439:     {engine:'SRV Farsi',mood:'Emotional Female',tag:'Emotional',color:'#a78bfa',style:'Dark palette · softer framing · candlelight',template:'EmotionalF-SRV-v1',folder:'Drive / SRV / Emotional-Female'},
+3440:     {engine:'SRV Farsi',mood:'Romantic Male',tag:'Romantic',color:'#f472b6',style:'Warm golden bokeh · candlelight · sunset',template:'Romantic-SRV-v1',folder:'Drive / SRV / Romantic-Male'},
+3441:     {engine:'SRV Farsi',mood:'Romantic Female',tag:'Romantic',color:'#f472b6',style:'Soft petals · warm blur · golden hour',template:'RomanticF-SRV-v1',folder:'Drive / SRV / Romantic-Female'},
+3442:     {engine:'SRV Farsi',mood:'Happy',tag:'Happy',color:'#22c55e',style:'Bright daylight · flowers · sunshine · colorful bokeh',template:'Happy-SRV-v1',folder:'Drive / SRV / Happy'},
+3443:     {engine:'SRV Farsi',mood:'Duet',tag:'Duet',color:'#f59e0b',style:'Two silhouettes · walking together · warm light',template:'Duet-SRV-v1',folder:'Drive / SRV / Duet'},
+3444:     {engine:'SRV English',mood:'Emotional Female',tag:'Emotional',color:'#a78bfa',style:'Bedroom interior · warm lamp · dark navy background',template:'EmotionalF-SRVE-v1',folder:'Drive / SRV / English-Emotional'},
+3445:     {engine:'SRV English',mood:'Romantic Female',tag:'Romantic',color:'#f472b6',style:'Soft golden tones · blurred bokeh · intimacy',template:'RomanticF-SRVE-v1',folder:'Drive / SRV / English-Romantic'},
+3446:     {engine:'SRV English',mood:'Bold / American Female',tag:'Bold',color:'#3b82f6',style:'Urban textures · cool tones · power framing',template:'Bold-SRVE-v1',folder:'Drive / SRV / English-Bold'},
+3447:   ];
+3448:   const farsi=cats.filter(c=>c.engine==='SRV Farsi');
+3449:   const english=cats.filter(c=>c.engine==='SRV English');
+3450: 

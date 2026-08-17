@@ -1,0 +1,42 @@
+{
+  "version": 2,
+  "functions": {
+    "api/ops.js": { "maxDuration": 60 }
+  },
+  "headers": [
+    {
+      "source": "/tiktok4ELBHwLXkHco86p4aPL1arfqRy9uceaM.txt",
+      "headers": [
+        { "key": "Content-Type",                "value": "text/plain" },
+        { "key": "Cache-Control",               "value": "no-cache" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    }
+  ],
+  "crons": [
+    { "path": "/api/youtube/autosync", "schedule": "0 0 * * *" },
+    { "path": "/api/reports/weekly", "schedule": "0 8 * * 1" }
+  ],
+  "rewrites": [
+    { "source": "/api/youtube/auth", "destination": "/api/youtube/callback.js" },
+    { "source": "/api/youtube/callback", "destination": "/api/youtube/callback.js" },
+    { "source": "/api/youtube/sync", "destination": "/api/youtube/sync.js" },
+    { "source": "/api/youtube/status", "destination": "/api/youtube/status.js" },
+    { "source": "/api/youtube/autosync", "destination": "/api/youtube/autosync.js" },
+    { "source": "/api/youtube/link", "destination": "/api/youtube/detect.js" },
+    { "source": "/api/packages/sync", "destination": "/api/youtube/detect.js" },
+    { "source": "/api/ops",           "destination": "/api/ops.js" },
+    { "source": "/api/queue/process", "destination": "/api/queue.js" },
+    { "source": "/api/queue/add",     "destination": "/api/queue.js" },
+    { "source": "/api/queue/status",  "destination": "/api/queue.js" },
+    { "source": "/api/youtube/detect", "destination": "/api/youtube/detect.js" },
+    { "source": "/api/reports/weekly", "destination": "/api/reports/weekly.js" },
+    { "source": "/api/generate", "destination": "/api/generate.js" },
+    { "source": "/api/tiktok/auth",     "destination": "/api/tiktok/callback.js" },
+    { "source": "/api/tiktok/callback", "destination": "/api/tiktok/callback.js" },
+    { "source": "/api/tiktok/sync",     "destination": "/api/tiktok/sync.js" },
+    { "source": "/api/tiktok/status",   "destination": "/api/tiktok/sync.js" },
+    { "source": "/api/instagram/auth",     "destination": "/api/instagram/callback.js" },
+    { "source": "/api/instagram/callback", "destination": "/api/instagram/callback.js" }
+  ]
+}

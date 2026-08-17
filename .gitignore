@@ -1,0 +1,21 @@
+.vercel
+.env*
+!.env.example
+
+# Supabase CLI local cache — project refs, pooler host info, version metadata.
+supabase/.temp
+
+# Local Cowork/Claude tool config — command-permission history, local dev
+# launch config. Not app source, not needed for deployment.
+.claude
+
+# Local artifacts from this program's own diagnostic/checkpoint work — not
+# app source.
+*.md
+!README.md
+
+# OS/editor noise
+.DS_Store
+node_modules
+*.bak
+*.tmp
