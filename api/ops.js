@@ -10071,6 +10071,7 @@ export default async function handler(req, res) {
     if (action === 'engineering_task_home_list')   return await engineeringTaskHomeList(req, res);   // v15.0.0
     if (action === 'engineering_task_review_packet') return await engineeringTaskReviewPacket(req, res); // v16.39.0
     if (action === 'production_deployment_authorize') return await productionDeploymentAuthorize(req, res); // v16.40.0 — CEO-only, see function comment
+    if (action === 'production_deployment_reconcile') return await productionDeploymentReconcile(req, res); // v16.43.0 — CEO Decision #10 (deployment reconciliation), see function comment
     // v16.35.0 — Phase 4B: Engineering Agent authorization/claim boundary (CEO-approved 2026-08-16)
     if (action === 'engineering_task_ceo_authorize_agent')            return await engineeringTaskCeoAuthorizeAgent(req, res);
     if (action === 'engineering_task_ceo_revoke_agent_authorization') return await engineeringTaskCeoRevokeAgentAuthorization(req, res);
@@ -11113,6 +11114,156 @@ async function productionDeploymentAuthorize(req, res) {
     const vercelDeploymentId = hookResp?.job?.id || hookResp?.id || null;
     await sbPatch('production_deployments', `id=eq.${row.id}`, { vercel_deployment_id: vercelDeploymentId, result: hookResp });
     return res.status(200).json({ ok: true, deployment_row: row.id, vercel_deployment_id: vercelDeploymentId, status: 'triggered' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── Production Deployment Reconciliation ───────────────────────────────────── v16.43.0
+// CEO Decision #10 (deployment reconciliation), CEO-approved 2026-08-18.
+// NOT a deployment path. This exists for exactly one situation: an
+// already-CEO-approved task's implementation commit turns out to already be
+// live in production (an ancestor of the currently-deployed commit), because
+// of how vercel.json's git.deploymentEnabled:false forces every release
+// through a single serialized channel — so two independently-approved tasks
+// can end up shipping in the same physical release. Without this, the task
+// would sit forever in "Approved — Pending Production Release" with a
+// release-authorization button that can only fail (the real integrity check
+// in productionDeploymentAuthorize requires an EXACT match against the
+// current branch head, and that head has legitimately moved on).
+//
+// This function is intentionally NOT CEO-session-gated — same trust class as
+// engineeringTaskUpdate (informational record-keeping, not a grant of
+// authority). It cannot substitute for CEO approval (still requires
+// status==='done' && ceo_decision==='approved', already set by the CEO) and
+// it cannot authorize or trigger anything: no Deploy Hook is ever read or
+// called here, and engineering_tasks is never written by this function — the
+// task's original git_commit_sha is preserved exactly as recorded.
+//
+// Two independent, server-derived checks must BOTH pass before anything is
+// recorded — nothing here trusts the caller's narrative on its own:
+//   1. GitHub commit-ancestry check (using the same read-only GITHUB_TOKEN /
+//      GITHUB_REPO already configured for the real integrity check): the
+//      task's own recorded commit must be identical to, or a genuine git
+//      ancestor of, the commit being claimed as currently deployed. A
+//      made-up or unrelated SHA fails this closed (GitHub 404s or returns
+//      "diverged"/"behind").
+//   2. Current branch-head cross-check (reusing _prodDeployBranchHeadSha):
+//      the commit claimed as "currently deployed" must also be the actual
+//      current tip of the deploy branch right now. This is deliberately
+//      required IN ADDITION to the Vercel-attested fields below — branch
+//      head alone is never treated as proof of production (that's what the
+//      real exact-match integrity check already guards), but combined with
+//      an attested READY/production Vercel deployment it corroborates that
+//      the claim isn't describing a stale or hypothetical commit.
+// The Vercel deployment identity/state (id, ready state, target) is supplied
+// by Engineering, exactly as vercel_deployment_id has always been recorded
+// in this table (this server has no Vercel API credential and none is being
+// added) — the caller must assert READY + production, or this fails closed.
+async function productionDeploymentReconcile(req, res) {
+  try {
+    const body = req.body || {};
+    const { engineering_task_id, deployed_commit_sha, vercel_deployment_id, vercel_ready_state, vercel_target, deploy_branch } = body;
+    if (!engineering_task_id || !deployed_commit_sha || !vercel_deployment_id || !vercel_ready_state) {
+      return res.status(400).json({ ok: false, error: 'engineering_task_id, deployed_commit_sha, vercel_deployment_id, and vercel_ready_state are required' });
+    }
+    if (vercel_ready_state !== 'READY') {
+      return res.status(409).json({ ok: false, error: 'deployment_not_ready', vercel_ready_state });
+    }
+    if (vercel_target !== undefined && vercel_target !== null && vercel_target !== 'production') {
+      return res.status(409).json({ ok: false, error: 'deployment_not_production', vercel_target });
+    }
+
+    const taskRows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(engineering_task_id)}&select=id,status,ceo_decision,git_commit_sha,packet`);
+    const task = taskRows[0];
+    if (!task) return res.status(404).json({ ok: false, error: 'engineering_task_not_found' });
+    if (task.status !== 'done' || task.ceo_decision !== 'approved') {
+      return res.status(409).json({ ok: false, error: 'engineering_task_not_yet_ceo_approved' });
+    }
+    if (!task.git_commit_sha) {
+      return res.status(409).json({ ok: false, error: 'task_has_no_recorded_commit' });
+    }
+
+    const branch = deploy_branch || 'main';
+    const originDecisionId = task.packet?.origin_decision?.id || null;
+
+    // Idempotency: if this exact reconciliation already exists, return it
+    // rather than writing a duplicate audit row.
+    const existing = await sbGetSafe(
+      `production_deployments?engineering_task_id=eq.${encodeURIComponent(engineering_task_id)}&status=eq.reconciled_already_deployed&commit_sha=eq.${encodeURIComponent(task.git_commit_sha)}&order=created_at.desc&limit=5`
+    );
+    const already = (existing || []).find(r => r.result && r.result.deployed_commit_sha === deployed_commit_sha);
+    if (already) {
+      return res.status(200).json({ ok: true, deployment_row: already.id, state: 'production_satisfied_already_deployed', already_recorded: true, result: already.result });
+    }
+
+    // Check 1 — GitHub ancestry (server-derived, not trusted from the caller).
+    let ancestryStatus;
+    if (task.git_commit_sha === deployed_commit_sha) {
+      ancestryStatus = 'identical';
+    } else {
+      const repo = process.env.GITHUB_REPO;
+      const token = process.env.GITHUB_TOKEN;
+      if (!repo || !token) {
+        return res.status(502).json({ ok: false, error: 'github_integrity_check_not_configured' });
+      }
+      try {
+        const cr = await fetch(`https://api.github.com/repos/${repo}/compare/${encodeURIComponent(task.git_commit_sha)}...${encodeURIComponent(deployed_commit_sha)}`, {
+          headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json' },
+        });
+        if (!cr.ok) return res.status(502).json({ ok: false, error: `github_compare_api_error_${cr.status}` });
+        const cj = await cr.json();
+        ancestryStatus = cj.status; // 'ahead' | 'behind' | 'identical' | 'diverged'
+      } catch (e) {
+        return res.status(502).json({ ok: false, error: 'github_compare_unreachable: ' + e.message });
+      }
+    }
+    if (ancestryStatus !== 'identical' && ancestryStatus !== 'ahead') {
+      return res.status(409).json({ ok: false, error: 'commit_not_ancestor', task_commit: task.git_commit_sha, deployed_commit_sha, github_compare_status: ancestryStatus });
+    }
+
+    // Check 2 — current branch-head cross-check (corroboration, not sole proof).
+    const head = await _prodDeployBranchHeadSha(branch);
+    if (!head.ok) {
+      return res.status(502).json({ ok: false, error: head.error });
+    }
+    if (head.sha !== deployed_commit_sha) {
+      return res.status(409).json({ ok: false, error: 'deployed_commit_not_current_branch_head', deployed_commit_sha, branch_head: head.sha });
+    }
+
+    const now = new Date().toISOString();
+    const row = await sbInsert('production_deployments', {
+      origin_decision_id: originDecisionId,
+      engineering_task_id,
+      commit_sha: task.git_commit_sha, // unchanged — the task's original recorded commit, never rewritten
+      deploy_branch: branch,
+      status: 'reconciled_already_deployed',
+      // ceo_authorized_at is NOT NULL on this table (every prior row came from
+      // the CEO-gated release path, so this was never optional before). Set to
+      // the verification timestamp purely to satisfy that constraint —
+      // ceo_authorized_by is deliberately left null (never 'CEO') so this row
+      // can never be misread as an actual CEO release authorization.
+      ceo_authorized_at: now,
+      branch_head_sha_at_check: head.sha,
+      vercel_deployment_id,
+      completed_at: now,
+      result: {
+        reconciliation: true,
+        verification_type: 'ancestor_containment',
+        task_original_commit_sha: task.git_commit_sha,
+        deployed_commit_sha,
+        github_compare_status: ancestryStatus,
+        ancestor_check_passed: true,
+        vercel_deployment_id,
+        vercel_ready_state,
+        vercel_target: vercel_target || null,
+        no_deployment_triggered: true,
+        verified_by: 'engineering',
+        verified_at: now,
+      },
+    });
+    if (!row) return res.status(500).json({ ok: false, error: 'reconcile_insert_failed' });
+    return res.status(200).json({ ok: true, deployment_row: row.id, state: 'production_satisfied_already_deployed', result: row.result });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }

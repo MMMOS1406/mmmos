@@ -24150,13 +24150,25 @@ function renderEngineeringBrain(){
             const sha=t.git_commit_sha;
             const deploys=p.production_deployments||[];
             const lastAttempt=deploys[0];
-            return `<div style="background:rgba(168,85,247,0.04);border:1px solid rgba(168,85,247,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+            // v16.43.0 — CEO Decision #10 (deployment reconciliation): a task
+            // whose implementation commit is already an ancestor of what's
+            // actually live in production (verified server-side; see
+            // productionDeploymentReconcile) is a terminal, satisfied state —
+            // never another deployment path. The real "Authorize Production
+            // Release" button is replaced here, not just relabeled: that
+            // button would only ever fail (exact-match integrity check
+            // against a branch head that has legitimately moved on).
+            const reconciled=lastAttempt&&lastAttempt.status==='reconciled_already_deployed';
+            return `<div style="background:${reconciled?'rgba(34,197,94,0.05)':'rgba(168,85,247,0.04)'};border:1px solid ${reconciled?'rgba(34,197,94,0.3)':'rgba(168,85,247,0.25)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
               <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
               <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
               ${sha?`<div style="font-size:10px;color:#8b9cc4;font-family:'JetBrains Mono',monospace;margin-bottom:8px">commit ${sha.slice(0,12)}…</div>`
                 :`<div style="font-size:11px;color:var(--dim);margin-bottom:8px">Awaiting Engineering to push the approved commit — nothing to release yet.</div>`}
-              ${lastAttempt?`<div style="font-size:10px;margin-bottom:8px;color:${lastAttempt.status==='deployed'?'#22c55e':lastAttempt.status==='integrity_check_failed'||lastAttempt.status==='failed'?'#ef4444':'#f59e0b'}">Last attempt: ${lastAttempt.status} ${lastAttempt.vercel_deployment_id?('· '+lastAttempt.vercel_deployment_id):''}</div>`:''}
-              <button ${sha?'':'disabled'} onclick="_engReviewAuthorizeRelease('${t.id}','${sha||''}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(168,85,247,0.5);background:${sha?'rgba(168,85,247,0.15)':'rgba(255,255,255,0.03)'};color:${sha?'#a855f7':'var(--dim)'};font-size:11px;font-weight:700;cursor:${sha?'pointer':'not-allowed'}">🚀 Authorize Production Release</button>
+              ${reconciled?`<div style="font-size:11px;font-weight:700;margin-bottom:8px;color:#22c55e">✅ Production Satisfied — Already Deployed</div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:8px;line-height:1.5">This commit is already contained in the currently deployed production release (verified via GitHub ancestry + current branch head, deployment ${lastAttempt.vercel_deployment_id||'—'}). No release action needed — nothing was deployed by this check.</div>
+                <button disabled style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.08);color:#22c55e;font-size:11px;font-weight:700;cursor:not-allowed">✅ Already Live — No Release Needed</button>`
+                :`${lastAttempt?`<div style="font-size:10px;margin-bottom:8px;color:${lastAttempt.status==='deployed'?'#22c55e':lastAttempt.status==='integrity_check_failed'||lastAttempt.status==='failed'?'#ef4444':'#f59e0b'}">Last attempt: ${lastAttempt.status} ${lastAttempt.vercel_deployment_id?('· '+lastAttempt.vercel_deployment_id):''}</div>`:''}
+                <button ${sha?'':'disabled'} onclick="_engReviewAuthorizeRelease('${t.id}','${sha||''}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(168,85,247,0.5);background:${sha?'rgba(168,85,247,0.15)':'rgba(255,255,255,0.03)'};color:${sha?'#a855f7':'var(--dim)'};font-size:11px;font-weight:700;cursor:${sha?'pointer':'not-allowed'}">🚀 Authorize Production Release</button>`}
             </div>`;
           }).join('')}
         </div>`;
