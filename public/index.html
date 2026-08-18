@@ -10517,14 +10517,30 @@ function renderEngines(){
 // ── TASKS ──
 // ── v12.5 Operator Workspace ──────────────────────────────────────────────────
 
-async function loadOperatorTasks(){
+async function loadOperatorTasks(retrying){
+  // v16.41.0 — Decision #9 acceptance-test fix: this fetch was observed to
+  // intermittently throw "TypeError: Failed to fetch" (a network-layer
+  // failure, not an HTTP error status — fetch() never throws for a non-2xx
+  // response) when called as part of the Home tab's parallel load burst.
+  // Non-blocking (the page still rendered), but silent and permanent — one
+  // dropped request meant the Operator Tasks card just stayed stale with no
+  // recovery and no operator-visible signal. Smallest safe fix: one automatic
+  // retry after a short delay before giving up, and a warn (not error) log
+  // level to match its already-established non-blocking severity.
   try{
     const r=await fetch('/api/ops?action=list_tasks');
     const j=await r.json();
     operatorTasks=j.tasks||[];
     const el=document.getElementById('op-task-list');
     if(el)el.innerHTML=renderOpTaskList();
-  }catch(e){console.error('[v12.5] loadOperatorTasks:',e);}
+  }catch(e){
+    if(!retrying){
+      console.warn('[v16.41.0] loadOperatorTasks: fetch failed, retrying once in 1.5s —',e.message);
+      setTimeout(()=>loadOperatorTasks(true),1500);
+    } else {
+      console.warn('[v16.41.0] loadOperatorTasks: retry also failed —',e.message);
+    }
+  }
 }
 
 async function loadOpTaskActivity(id){
@@ -22786,19 +22802,27 @@ async function _ebV2Load(action,params=''){
       // have a completed production release, so the CEO can see and act on
       // Production Release authorization — a SEPARATE gate from task
       // approval (v16.40.0 MMMOS Production Deployment Control).
-      const [lr,dr]=await Promise.all([
+      const [lr,dr,orr]=await Promise.all([
         fetch('/api/ops?action=engineering_task_list&status=ready_for_ceo'),
         fetch('/api/ops?action=engineering_task_list&status=done'),
+        fetch('/api/ops?action=engineering_task_list&status=open'),
       ]);
-      const [lj,dj]=await Promise.all([lr.json(),dr.json()]);
+      const [lj,dj,orj]=await Promise.all([lr.json(),dr.json(),orr.json()]);
       const awaitingTasks=lj.tasks||[];
       const doneTasks=(dj.tasks||[]).slice(0,10); // already created_at desc; bound the fetch
+      // v16.41.0 — Decision #9: surface decision-routed tasks that exist but have
+      // no agent authorization yet, so the CEO can mint an Engineering Agent
+      // token from the UI (existing engineering_task_ceo_authorize_agent backend,
+      // Phase 4B — previously had no CEO-clickable control anywhere). Narrowly
+      // filtered to origin_decision_id-bearing tasks only, so this never surfaces
+      // the general manually-authored backlog.
+      const pendingAuth=(orj.tasks||[]).filter(t=>t.origin_decision_id && !t.agent_authorized_at);
       const [awaitingPackets,donePackets]=await Promise.all([
         Promise.all(awaitingTasks.map(t=>fetch('/api/ops?action=engineering_task_review_packet&id='+encodeURIComponent(t.id)).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
         Promise.all(doneTasks.map(t=>fetch('/api/ops?action=engineering_task_review_packet&id='+encodeURIComponent(t.id)).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
       ]);
       const pendingRelease=donePackets.filter(p=>p.ok && !(p.production_deployments||[]).some(d=>d.status==='deployed'));
-      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease};
+      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth};
     }
     _ebV2Cache[key]=data;
   } catch(e){ _ebV2Cache[key]={ok:false,error:e.message}; }
@@ -24018,6 +24042,7 @@ function renderEngineeringBrain(){
     if(!_ebV2Cache[ck]){setTimeout(()=>_ebV2Load(ck),80);body=`<div style="color:var(--dim);text-align:center;padding:40px;font-size:12px">Loading Engineering Review…</div>`;}
     else{
       const packets=(_ebV2Cache[ck]?.packets)||[];
+      const pendingAuth=(_ebV2Cache[ck]?.pendingAuth)||[];
       body=`
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div>
@@ -24026,6 +24051,14 @@ function renderEngineeringBrain(){
         </div>
         <button onclick="_ebV2Cache['b2_engreview']=null;_ebV2Load('b2_engreview')" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:10px;cursor:pointer">⟳ Refresh</button>
       </div>
+      ${pendingAuth.length?`<div style="margin-bottom:18px">
+        <div style="font-size:10px;font-weight:700;color:#38bdf8;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">🔑 Awaiting Agent Authorization (${pendingAuth.length})</div>
+        ${pendingAuth.map(t=>`<div style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · decision-routed · not yet authorized for agent execution</div>
+          <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(56,189,248,0.5);background:rgba(56,189,248,0.15);color:#38bdf8;font-size:11px;font-weight:700;cursor:pointer">🔑 Authorize Agent</button>
+        </div>`).join('')}
+      </div>`:''}
       ${packets.length===0?'<div style="font-size:12px;color:var(--dim);padding:10px 0">No Engineering Agent work is currently awaiting CEO review.</div>':''}
       ${packets.map(p=>{
         const t=p.task||{};
@@ -24171,6 +24204,26 @@ function _ebSetSub(sub){_ebActiveSub=sub;if(typeof renderTab==='function')render
 // no new approval path, no new authority. The Agent's own completion never
 // reaches these; only an authenticated CEO session can invoke them, and the
 // server independently re-verifies that session on every call.
+// v16.41.0 — Decision #9: CEO-clickable control for the existing (Phase 4B,
+// previously button-less) engineering_task_ceo_authorize_agent action. Mints
+// a one-time bearer token scoped to this exact task only; the token is shown
+// once via prompt() (selectable/copyable) and never persisted client-side —
+// same "shown once" discipline the backend itself documents. Capability scope
+// is intentionally minimal (no file paths) since the Gateway's sandboxed
+// workspace-file ops only ever address paths under sandbox/, not the real
+// repository — see Decision #9 audit finding C. This grants no deployment
+// authority and cannot mark the task done; that remains Approve/Reject below.
+async function _engReviewAuthorizeAgent(id){
+  if(!confirm('Authorize an Engineering Agent to claim this task? A one-time token will be shown — copy it immediately, it will not be shown again.'))return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_ceo_authorize_agent',{id,capability_scope:{read_paths:[],write_paths:[],validation_ops:[]}});
+    const j=await r.json();
+    if(!j.ok){alert('Authorize agent failed: '+j.error);return;}
+    prompt('Agent token (copy now — shown once only):',j.agent_token);
+    _ebV2Cache['b2_engreview']=null;
+    _ebV2Load('b2_engreview');
+  }catch(e){alert('Error: '+e.message);}
+}
 async function _engReviewApprove(id){
   if(!confirm('Approve this Engineering Agent result? This marks the task DONE.'))return;
   try{
