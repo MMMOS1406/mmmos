@@ -22817,12 +22817,20 @@ async function _ebV2Load(action,params=''){
       // filtered to origin_decision_id-bearing tasks only, so this never surfaces
       // the general manually-authored backlog.
       const pendingAuth=(orj.tasks||[]).filter(t=>t.origin_decision_id && !t.agent_authorized_at);
+      // v16.42.0 — Decision #9B: recovery path for a minted-but-lost token (the
+      // one-time token was shown once and closed before the Agent could claim
+      // it). Distinct from pendingAuth above — these tasks WERE authorized, just
+      // never claimed. Read-only filter; the actual re-mint still goes through
+      // the existing, unmodified engineering_task_ceo_authorize_agent, which
+      // already safely overwrites the token hash without touching status,
+      // decision, boundary, or claim state.
+      const needsReauth=(orj.tasks||[]).filter(t=>t.status==='open' && t.agent_authorized_at && !t.agent_claimed_at);
       const [awaitingPackets,donePackets]=await Promise.all([
         Promise.all(awaitingTasks.map(t=>fetch('/api/ops?action=engineering_task_review_packet&id='+encodeURIComponent(t.id)).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
         Promise.all(doneTasks.map(t=>fetch('/api/ops?action=engineering_task_review_packet&id='+encodeURIComponent(t.id)).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
       ]);
       const pendingRelease=donePackets.filter(p=>p.ok && !(p.production_deployments||[]).some(d=>d.status==='deployed'));
-      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth};
+      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth,needsReauth};
     }
     _ebV2Cache[key]=data;
   } catch(e){ _ebV2Cache[key]={ok:false,error:e.message}; }
@@ -24043,6 +24051,7 @@ function renderEngineeringBrain(){
     else{
       const packets=(_ebV2Cache[ck]?.packets)||[];
       const pendingAuth=(_ebV2Cache[ck]?.pendingAuth)||[];
+      const needsReauth=(_ebV2Cache[ck]?.needsReauth)||[];
       body=`
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div>
@@ -24057,6 +24066,14 @@ function renderEngineeringBrain(){
           <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
           <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · decision-routed · not yet authorized for agent execution</div>
           <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(56,189,248,0.5);background:rgba(56,189,248,0.15);color:#38bdf8;font-size:11px;font-weight:700;cursor:pointer">🔑 Authorize Agent</button>
+        </div>`).join('')}
+      </div>`:''}
+      ${needsReauth.length?`<div style="margin-bottom:18px">
+        <div style="font-size:10px;font-weight:700;color:#f59e0b;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">🔁 Awaiting Re-Authorization (${needsReauth.length})</div>
+        ${needsReauth.map(t=>`<div style="background:rgba(245,158,11,0.04);border:1px solid rgba(245,158,11,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · previously authorized, never claimed · minting a new token invalidates the old one</div>
+          <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(245,158,11,0.5);background:rgba(245,158,11,0.15);color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer">🔁 Re-authorize Agent</button>
         </div>`).join('')}
       </div>`:''}
       ${packets.length===0?'<div style="font-size:12px;color:var(--dim);padding:10px 0">No Engineering Agent work is currently awaiting CEO review.</div>':''}
