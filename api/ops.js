@@ -10064,6 +10064,7 @@ export default async function handler(req, res) {
     if (action === 'engineering_brain_seed')     return await engineeringBrainSeed(req, res);
     if (action === 'engineering_brain_save')     return await engineeringBrainSave(req, res);
     if (action === 'engineering_task_create')    return await engineeringTaskCreate(req, res);
+    if (action === 'engineering_task_create_from_decision') return await engineeringTaskCreateFromDecision(req, res); // v16.44.0 — CEO Decision #14
     if (action === 'engineering_task_list')      return await engineeringTaskList(req, res);
     if (action === 'engineering_task_update')    return await engineeringTaskUpdate(req, res);
     if (action === 'engineering_task_ceo_approve') return await engineeringTaskCeoApprove(req, res); // v15.0.0
@@ -10767,6 +10768,37 @@ async function _buildEngineeringPacketWithKnowledge(task) {
   return packet;
 }
 
+// v16.44.0 — CEO Decision #14 (Task Generator simplification): extracted the
+// packet-generation + Supabase insert tail out of engineeringTaskCreate into a
+// shared helper so both the existing manual 4-field flow (engineeringTaskCreate,
+// unchanged below) and the new one-field "paste a CEO decision" flow
+// (engineeringTaskCreateFromDecision, further down) go through the EXACT same
+// packet generation + insert path — one canonical task-creation path, not two
+// diverging copies (rule_15 SSOT). Behavior-preserving extraction, same pattern
+// already used for _buildEngineeringPacketWithKnowledge (v16.33.0).
+async function _insertEngineeringTaskRow({ problem, expected_result, affected_engine, priority, acceptance_criteria, packetExtra }) {
+  const task = { problem, expected_result, affected_engine, priority: priority || 'medium', acceptance_criteria: acceptance_criteria || '', status: 'open', packet: {} };
+  task.packet = await _buildEngineeringPacketWithKnowledge(task);
+  if (packetExtra) Object.assign(task.packet, packetExtra);
+
+  const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/engineering_tasks`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify([task]),
+  });
+  if (!insertRes.ok) {
+    const t = await insertRes.text();
+    throw new Error(`Insert failed: ${insertRes.status} ${t.slice(0,200)}`);
+  }
+  const inserted = await insertRes.json();
+  return inserted[0] || task;
+}
+
 async function engineeringTaskCreate(req, res) {
   try {
     const body = req.body || {};
@@ -10774,30 +10806,106 @@ async function engineeringTaskCreate(req, res) {
     if (!problem || !expected_result || !affected_engine) {
       return res.status(400).json({ ok: false, error: 'problem, expected_result, affected_engine required' });
     }
-    const task = { problem, expected_result, affected_engine, priority: priority || 'medium', acceptance_criteria: acceptance_criteria || '', status: 'open', packet: {} };
+    const task = await _insertEngineeringTaskRow({ problem, expected_result, affected_engine, priority, acceptance_criteria });
+    return res.status(200).json({ ok: true, task });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
 
-    // v16.33.0 — Phase 3B: now calls the shared helper (see above) instead of an
-    // inline copy. Same brain fetch, same knowledge query, same ranking, same
-    // merge — this is a reuse refactor, not a behavior change.
-    task.packet = await _buildEngineeringPacketWithKnowledge(task);
+// ── Engineering Task: Create from a pasted CEO Decision (CEO Decision #14) ─────
+// v16.44.0 — Task Intelligence v3. CEO pastes the full text of an approved
+// decision into ONE field; this derives problem/expected_result/affected_engine/
+// priority/acceptance_criteria/scope_boundaries via Claude, then calls the EXACT
+// SAME _insertEngineeringTaskRow path used by the manual 4-field form above —
+// same packet generation, same engineering_tasks row shape, same downstream
+// governance (CEO approve/reject, agent authorization, production release
+// authorization are all untouched by this function). The manual form
+// (engineeringTaskCreate) is completely unchanged and still works standalone.
+async function engineeringTaskCreateFromDecision(req, res) {
+  try {
+    const body = req.body || {};
+    const decisionText = String(body.decision_text || '').trim();
+    if (!decisionText) return res.status(400).json({ ok: false, error: 'decision_text is required' });
+    if (decisionText.length > 20000) return res.status(400).json({ ok: false, error: 'decision_text too long (20000 char max) — paste the decision text, not an entire chat log' });
 
-    // Insert task
-    const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/engineering_tasks`, {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify([task]),
-    });
-    if (!insertRes.ok) {
-      const t = await insertRes.text();
-      throw new Error(`Insert failed: ${insertRes.status} ${t.slice(0,200)}`);
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    const KNOWN_COMPONENTS = [
+      'SRV Farsi', 'SRV English', 'AI Creation Studio', 'NextWave Systems', 'Finance', 'Investment Engine', 'Uber Engine',
+      'Task Generator', 'Engineering Tasks', 'Roadmap', 'Brain v2 — Knowledge', 'Brain v2 — Learning', 'Brain v2 — Autonomous Agents',
+      'CEO Command Center', 'Continuous Decision Protocol (CDP)', 'Production Pipeline', 'Scheduler', 'YouTube Upload', 'Submagic Captions',
+      'Canvas Renderer — SRV', 'Canvas Renderer — AI Studio', 'Upload Engine', 'HeyGen Video Proxy', 'Frontend', 'Backend', 'Database',
+      'Auth System', 'Supabase Schema', 'All Systems',
+    ];
+
+    let derived = null;
+    if (ANTHROPIC_API_KEY) {
+      const prompt = `You are extracting a structured Engineering Task from an approved CEO decision document for MMMOS (an internal operating system). Read the decision text below and produce exactly these fields:
+- problem: what needs to change/be built (1-3 sentences, engineering-actionable)
+- expected_result: what the system should do once this is done (1-3 sentences)
+- affected_engine: the single MOST relevant component name. STRONGLY prefer an exact match from this known list if one clearly fits: ${KNOWN_COMPONENTS.join(', ')}. If genuinely none fit, output a short (2-4 word) descriptive label instead — never leave it blank.
+- priority: one of critical | high | medium | low. "critical" = production is broken or blocking revenue right now. "high" = CEO explicitly marked this urgent/important. "medium" = normal approved work (default). "low" = nice-to-have. Infer from tone/urgency; default to medium if unclear.
+- acceptance_criteria: concise, testable criteria for when this is DONE. If the decision text contains an explicit "ACCEPTANCE TEST" / "ACCEPTANCE CRITERIA" section, base this closely on that section.
+- scope_boundaries: any explicit "do not modify / out of scope / do not do X" constraints stated in the decision (1-3 sentences). Empty string if none stated.
+
+Return STRICT JSON only, wrapped in <task> tags, matching exactly this schema:
+<task>{"problem":"...","expected_result":"...","affected_engine":"...","priority":"critical|high|medium|low","acceptance_criteria":"...","scope_boundaries":"..."}</task>
+
+CEO decision text:
+"""
+${decisionText}
+"""`;
+      try {
+        const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5',
+            max_tokens: 1000,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+        if (claudeRes.ok) {
+          const d = await claudeRes.json();
+          const text = (d.content && d.content[0] && d.content[0].text) || '';
+          const m = text.match(/<task>([\s\S]*?)<\/task>/);
+          if (m) { try { derived = JSON.parse(m[1]); } catch (_) { derived = null; } }
+        }
+      } catch (_) { /* fall through to deterministic fallback below */ }
     }
-    const inserted = await insertRes.json();
-    return res.status(200).json({ ok: true, task: inserted[0] || task });
+
+    // Deterministic fallback — never block task creation just because the LLM call
+    // failed or ANTHROPIC_API_KEY is missing. Keeps this feature usable regardless.
+    if (!derived || typeof derived !== 'object' || !derived.problem) {
+      const firstLine = (decisionText.split('\n').find(l => l.trim().length > 0) || decisionText.slice(0, 160)).trim();
+      derived = {
+        problem: `CEO decision (auto-extraction unavailable — using raw text): ${firstLine.slice(0, 200)}`,
+        expected_result: decisionText.slice(0, 800),
+        affected_engine: 'All Systems',
+        priority: 'medium',
+        acceptance_criteria: '',
+        scope_boundaries: '',
+      };
+    }
+    if (!derived.affected_engine || typeof derived.affected_engine !== 'string') derived.affected_engine = 'All Systems';
+    if (!['critical', 'high', 'medium', 'low'].includes(derived.priority)) derived.priority = 'medium';
+    derived.expected_result = derived.expected_result || decisionText.slice(0, 800);
+    derived.acceptance_criteria = derived.acceptance_criteria || '';
+    derived.scope_boundaries = derived.scope_boundaries || '';
+
+    const task = await _insertEngineeringTaskRow({
+      problem: derived.problem,
+      expected_result: derived.expected_result,
+      affected_engine: derived.affected_engine,
+      priority: derived.priority,
+      acceptance_criteria: derived.acceptance_criteria,
+      packetExtra: {
+        derived_from: 'ceo_decision_paste',
+        origin_decision_text: decisionText.slice(0, 8000),
+        scope_boundaries: derived.scope_boundaries || null,
+      },
+    });
+    return res.status(200).json({ ok: true, task, derived });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
