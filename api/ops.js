@@ -10900,6 +10900,30 @@ ${decisionText}
     derived.acceptance_criteria = derived.acceptance_criteria || '';
     derived.scope_boundaries = derived.scope_boundaries || '';
 
+    // v16.47.0 — CEO Decision #15: the existing Phase 4B Agent Authorization gate
+    // (engineeringTaskCeoAuthorizeAgent, unmodified below) requires
+    // packet.origin_decision.authorization_boundary — until now that was only
+    // ever populated by the older CDP recommendation->task bridge, never by this
+    // decision-paste Task Generator flow. So every task created here derived a
+    // real, well-formed scope_boundaries string but had nowhere for it to reach
+    // the actual field the gate checks, making it permanently ineligible for
+    // Authorize Agent ("no_authorization_boundary") regardless of how well-scoped
+    // its own derived constraints were. Fixed by populating that SAME existing
+    // field via the SAME existing shape (packet.origin_decision.authorization_
+    // boundary) the gate already reads — reusing the established architecture,
+    // not adding a parallel one. Deterministic, never empty (scope_boundaries
+    // alone may legitimately be blank when the pasted decision has no explicit
+    // "do not..." language): always anchors to this task's own problem and
+    // affected_engine first, so the boundary can never read as broader than the
+    // single task it was minted for, then folds in scope_boundaries when present.
+    const authorizationBoundary =
+      `task_generator_decision_scope_only — constrained to exactly this Engineering Task ` +
+      `(affected_engine=${derived.affected_engine}): ${derived.problem}` +
+      (derived.scope_boundaries
+        ? ` Additional constraints from the CEO decision: ${derived.scope_boundaries}`
+        : ' No additional CEO-stated constraints beyond the task itself.') +
+      ' No other engineering task, engine, or system may be modified under this authorization.';
+
     const task = await _insertEngineeringTaskRow({
       problem: derived.problem,
       expected_result: derived.expected_result,
@@ -10910,6 +10934,12 @@ ${decisionText}
         derived_from: 'ceo_decision_paste',
         origin_decision_text: decisionText.slice(0, 8000),
         scope_boundaries: derived.scope_boundaries || null,
+        origin_decision: {
+          id: null,
+          decision_type: 'ceo_decision_paste',
+          title: derived.problem.slice(0, 160),
+          authorization_boundary: authorizationBoundary,
+        },
       },
     });
     return res.status(200).json({ ok: true, task, derived });
