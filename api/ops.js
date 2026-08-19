@@ -10779,6 +10779,13 @@ async function _buildEngineeringPacketWithKnowledge(task) {
 async function _insertEngineeringTaskRow({ problem, expected_result, affected_engine, priority, acceptance_criteria, packetExtra }) {
   const task = { problem, expected_result, affected_engine, priority: priority || 'medium', acceptance_criteria: acceptance_criteria || '', status: 'open', packet: {} };
   task.packet = await _buildEngineeringPacketWithKnowledge(task);
+  // v16.45.0 — CEO Decision #14A: every task created through this shared
+  // Task Generator insert path (both the manual 4-field form and the
+  // paste-a-decision flow) is stamped so CEO Engineering Review can find
+  // it for Agent Authorization. Tasks created any other way (direct DB
+  // writes, ad-hoc scripts, legacy backlog) are intentionally left
+  // unmarked — Engineering Review must never surface that general backlog.
+  task.packet.created_via = 'task_generator';
   if (packetExtra) Object.assign(task.packet, packetExtra);
 
   const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/engineering_tasks`, {
