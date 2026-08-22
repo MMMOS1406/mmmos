@@ -11070,7 +11070,30 @@ async function engineeringTaskCeoApprove(req, res) {
     }
     const finalTask = Array.isArray(updated) ? updated[0] : updated;
     // v16.33.0 — Phase 3B: terminal-outcome Learning, decision-routed tasks only.
-    if (finalTask && finalTask.origin_decision_id) {
+    // v16.48.0 — CEO Decision #16 Step 2A: the older CDP bridge stamps the
+    // origin_decision_id COLUMN, but the newer Task Generator decision-paste flow
+    // (engineeringTaskCreateFromDecision, CEO Decision #14/#15) carries the same
+    // provenance in packet.origin_decision (an OBJECT) instead, leaving
+    // origin_decision_id null. The column-only check above silently excluded every
+    // legitimate paste-flow task from Learning. Trigger on EITHER signal — the
+    // legacy column (unchanged, still sufficient on its own) OR a real
+    // packet.origin_decision object (identified by a non-empty title,
+    // authorization_boundary, or decision_type field — never merely the key's
+    // presence, so a stray/empty object can't false-positive). Purely manual
+    // tasks (engineeringTaskCreate, the 4-field form) set neither field and are
+    // still correctly excluded — verified via that function's source, which
+    // passes no origin_decision-shaped data into packetExtra at all.
+    // _writeTaskLearning itself is completely unchanged: its own idempotency
+    // guard (early-return when a brain_learning_memory row already exists for
+    // this task_id) and its own optional origin_decision_id lookup are untouched.
+    const _originDecisionObj = finalTask && finalTask.packet && typeof finalTask.packet.origin_decision === 'object'
+      ? finalTask.packet.origin_decision
+      : null;
+    const _hasDecisionProvenance = !!(finalTask && (
+      finalTask.origin_decision_id ||
+      (_originDecisionObj && (_originDecisionObj.title || _originDecisionObj.authorization_boundary || _originDecisionObj.decision_type))
+    ));
+    if (_hasDecisionProvenance) {
       try { await _writeTaskLearning(finalTask); } catch (e) { console.error('[engineeringTaskCeoApprove] learning write failed:', e.message); }
     }
     return res.status(200).json({ ok: true, task: finalTask, ceo_decision: 'approved', ceo_decision_at: now });
