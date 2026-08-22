@@ -289,6 +289,98 @@ function _agentSanitizeScope(raw) {
   return out;
 }
 
+// ── Engineering Worker Identity (v16.49.0 — CEO Decision #16 Step 2C) ──────────
+// Smallest slice of the Step 2B architecture checkpoint: a registered Engineering
+// Worker (Cowork today; any future vendor-independent worker later) authenticates
+// with its OWN standing identity credential, entirely separate from any task's
+// CEO authorization. Architectural rule enforced throughout this section and the
+// new claim path below: CEO authority (did the CEO authorize THIS task) and
+// worker identity (which registered worker is asking) are two independent
+// checks — a claim requires BOTH. Nothing in this section can set or clear
+// agent_authorized_at / agent_authorization_revoked_at on any task; those remain
+// exclusively engineeringTaskCeoAuthorizeAgent / engineeringTaskCeoRevokeAgent-
+// Authorization, both completely unmodified by this change. The existing
+// per-task one-time-token claim path (engineeringTaskAgentClaim, below) is kept
+// fully intact as a fallback — this is an additive alternative, not a
+// replacement.
+
+// CEO-session-gated. Mints a new standing worker identity. The raw credential is
+// returned exactly once, here, and is never persisted or logged anywhere —
+// only its SHA-256 hash is stored, reusing _agentHashHex verbatim (the same
+// primitive already used for per-task agent tokens, not a new one). This
+// credential proves WHO is asking; on its own it authorizes nothing (see
+// engineeringWorkerClaimTask's independent authOk check below).
+async function engineeringWorkerProvision(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const body = req.body || {};
+    const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 100) : 'Engineering Worker';
+    const rawCredential = randomBytes(32).toString('hex');
+    const credentialHash = _agentHashHex(rawCredential);
+    const worker = await sbInsert('engineering_workers', { label, credential_hash: credentialHash, active: true, created_by: 'ceo' });
+    if (!worker) return res.status(500).json({ ok: false, error: 'provision_failed' });
+    return res.status(200).json({
+      ok: true, worker_id: worker.id, label: worker.label, worker_credential: rawCredential,
+      note: 'Store this credential securely in the worker\'s own environment — it will not be shown again. It identifies this worker only; it does not by itself authorize any Engineering Task.',
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// CEO-session-gated. Revokes a worker identity immediately — every subsequent
+// discovery/claim call using its credential fails closed from that instant,
+// regardless of any task's own authorization state. Does not touch any
+// engineering_tasks row: a task this worker already claimed keeps its existing
+// claim/lease exactly as-is. Task-level revocation remains the separate,
+// unmodified engineeringTaskCeoRevokeAgentAuthorization action — the two are
+// intentionally independent (per Decision #16 Step 2B's trust model).
+async function engineeringWorkerRevoke(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const body = req.body || {};
+    const { id } = body;
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const now = new Date().toISOString();
+    const worker = await sbPatch('engineering_workers', `id=eq.${encodeURIComponent(id)}`, { active: false, revoked_at: now, revoked_by: 'ceo' });
+    if (!worker) return res.status(404).json({ ok: false, error: 'worker_not_found' });
+    return res.status(200).json({ ok: true, worker_id: id, active: false, revoked_at: now });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// CEO-session-gated, read-only. Metadata only — credential_hash is deliberately
+// never included in this or any other response. There is no reason to return
+// it and every reason not to normalize doing so, even though a SHA-256 hash of
+// a value the CEO no longer holds is not itself secret-shaped information.
+async function engineeringWorkerList(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const rows = await sbGetSafe(`engineering_workers?select=id,label,active,created_at,created_by,revoked_at,revoked_by,last_seen_at&order=created_at.desc`);
+    return res.status(200).json({ ok: true, workers: rows });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// NOT CEO-session-gated — this is the Worker-side entry point, symmetric to the
+// existing per-task token check. Verifies a presented raw worker credential
+// against every ACTIVE worker row using the exact same constant-time comparison
+// already used for per-task agent tokens (_agentTokenMatches, reused verbatim —
+// not reimplemented, not a new comparison primitive). Worker counts are
+// expected to stay tiny (a handful of registered workers at most), so a linear
+// scan over active rows is the simplest correct approach. Returns the matching
+// worker's {id, label} — never the credential itself — or null.
+async function _engineeringWorkerAuthenticate(rawCredential) {
+  if (!rawCredential || typeof rawCredential !== 'string') return null;
+  const rows = await sbGetSafe(`engineering_workers?active=eq.true&select=id,label,credential_hash`);
+  for (const w of rows) {
+    if (_agentTokenMatches(rawCredential, w.credential_hash)) return { id: w.id, label: w.label };
+  }
+  return null;
+}
+
 // ── Engineering Task: CEO Authorizes Agent Execution ──────────────────────── Phase 4B
 // CEO-session-gated. Marks exactly one task as eligible for an Engineering Agent
 // to later claim, and mints that task's one-time bearer token. Does NOT execute,
@@ -375,6 +467,31 @@ async function engineeringTaskCeoRevokeAgentAuthorization(req, res) {
 // only one PATCH can match and return a row — the other deterministically
 // matches zero rows and gets a safe "already_claimed" response. No new locking
 // primitive was invented for this.
+// ── Shared atomic claim primitive (v16.49.0 — CEO Decision #16 Step 2C) ────────
+// Extracted, behavior-preserving, from the original engineeringTaskAgentClaim
+// (Phase 4B) so the existing token-based claim path below and the new
+// worker-identity claim path (engineeringWorkerClaimTask) share the EXACT SAME
+// atomic conditional-claim/lease logic — one implementation, not two that could
+// drift apart. Callers are responsible for their OWN authorization check
+// (token match, or worker identity + task authorization) before calling this —
+// this function only performs the atomic state transition once a caller has
+// already decided a claim should be attempted. extraPatch lets a caller attach
+// additional columns to the SAME atomic PATCH (used by the worker path to also
+// stamp claimed_by_worker_id) without altering the WHERE-clause atomicity.
+async function _engineeringTaskAtomicClaim(task_id, claimedBy, extraPatch) {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const leaseExpires = new Date(now + AGENT_LEASE_MS).toISOString();
+  const runId = randomBytes(16).toString('hex');
+  const claimed = await sbPatch(
+    'engineering_tasks',
+    `id=eq.${encodeURIComponent(task_id)}&or=(agent_claimed_at.is.null,lease_expires_at.lt.${encodeURIComponent(nowIso)})`,
+    { agent_claimed_at: nowIso, agent_claimed_by: claimedBy, agent_run_id: runId, lease_expires_at: leaseExpires, updated_at: nowIso, ...(extraPatch || {}) }
+  );
+  if (!claimed) return null;
+  return { runId, nowIso, leaseExpires };
+}
+
 async function engineeringTaskAgentClaim(req, res) {
   try {
     const body = req.body || {};
@@ -391,21 +508,16 @@ async function engineeringTaskAgentClaim(req, res) {
       && _agentTokenMatches(agent_token, task.agent_authorization_token_hash);
     if (!authOk) return res.status(401).json({ ok: false, error: 'agent_authorization_invalid' });
 
-    const now = Date.now();
-    const nowIso = new Date(now).toISOString();
-    const leaseExpires = new Date(now + AGENT_LEASE_MS).toISOString();
-    const runId = randomBytes(16).toString('hex');
-
     // Atomic conditional claim: matches only if never claimed, or the existing
     // lease has expired. An active, unexpired lease cannot be stolen.
-    const claimed = await sbPatch(
-      'engineering_tasks',
-      `id=eq.${encodeURIComponent(task_id)}&or=(agent_claimed_at.is.null,lease_expires_at.lt.${encodeURIComponent(nowIso)})`,
-      { agent_claimed_at: nowIso, agent_claimed_by: agent_identity || 'engineering-agent', agent_run_id: runId, lease_expires_at: leaseExpires, updated_at: nowIso }
-    );
-    if (!claimed) {
+    // v16.49.0 — Step 2C: now calls the shared _engineeringTaskAtomicClaim
+    // helper. Same WHERE clause, same columns, same values — behavior is
+    // byte-for-byte identical to before this refactor.
+    const claimResult = await _engineeringTaskAtomicClaim(task_id, agent_identity || 'engineering-agent', null);
+    if (!claimResult) {
       return res.status(409).json({ ok: false, error: 'already_claimed', message: 'This task already has an active, unexpired agent claim.' });
     }
+    const { runId, nowIso, leaseExpires } = claimResult;
 
     // Audit trail — reuses the existing brain_agent_runs table (already surfaced
     // in the CEO's Brain v2 / Autonomous Agents UI panel), no new table.
@@ -422,6 +534,111 @@ async function engineeringTaskAgentClaim(req, res) {
     } catch (e) { console.error('[engineeringTaskAgentClaim] audit insert failed:', e.message); }
 
     return res.status(200).json({ ok: true, task_id, run_id: runId, agent_claimed_at: nowIso, lease_expires_at: leaseExpires });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── Engineering Worker: Authorized-Task Discovery (v16.49.0 — Step 2C) ─────────
+// Worker-identity-gated (NOT CEO-session-gated) — symmetric in trust class to
+// engineeringTaskAgentClaim above. Exposes ONLY what a worker needs to pick a
+// task: id/problem (truncated)/affected_engine/priority/authorized-since.
+// Never the full packet, never the authorization boundary text, never any
+// credential — a worker fetches the packet/boundary only AFTER claiming, via
+// the existing, completely unmodified engineeringAgentGateway
+// read_task_packet/read_authorization_boundary ops. Independently re-derives
+// every eligibility condition from the database: worker identity valid+active;
+// CEO authorization present (agent_authorized_at set); not revoked; not
+// currently validly claimed by anyone (unclaimed OR lease expired) — nothing
+// here is inferred from the caller. Authorization-boundary presence is not
+// re-checked here because agent_authorized_at can only ever be set by
+// engineeringTaskCeoAuthorizeAgent, which already refuses to set it without a
+// real boundary — re-verified anyway, defense-in-depth, at claim time below.
+async function engineeringWorkerListAuthorizedTasks(req, res) {
+  try {
+    const body = req.body || {};
+    const worker = await _engineeringWorkerAuthenticate(body.worker_credential);
+    if (!worker) return res.status(401).json({ ok: false, error: 'worker_authentication_failed' });
+
+    const nowIso = new Date().toISOString();
+    const rows = await sbGetSafe(
+      `engineering_tasks?select=id,problem,affected_engine,priority,agent_authorized_at&` +
+      `agent_authorized_at=not.is.null&agent_authorization_revoked_at=is.null&` +
+      `or=(agent_claimed_at.is.null,lease_expires_at.lt.${encodeURIComponent(nowIso)})&` +
+      `order=agent_authorized_at.asc&limit=50`
+    );
+    try { await sbPatch('engineering_workers', `id=eq.${encodeURIComponent(worker.id)}`, { last_seen_at: nowIso }); } catch (_) {}
+
+    return res.status(200).json({
+      ok: true, worker_id: worker.id,
+      tasks: (rows || []).map(t => ({
+        id: t.id, problem: String(t.problem || '').slice(0, 300),
+        affected_engine: t.affected_engine, priority: t.priority, agent_authorized_at: t.agent_authorized_at,
+      })),
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── Engineering Worker: Secure Claim (v16.49.0 — Step 2C) ──────────────────────
+// The new worker-identity claim path, additive alongside the existing per-task
+// token path above (engineeringTaskAgentClaim, unmodified in behavior). Requires
+// BOTH an independently-authenticated worker identity AND an independently
+// re-verified, CEO-set task authorization (agent_authorized_at + a real,
+// non-empty authorization_boundary + not revoked) — either alone is refused,
+// per Decision #16's architectural rule that worker identity must never itself
+// grant task authorization. Reuses the exact same atomic conditional-claim/
+// lease primitive as the token path via _engineeringTaskAtomicClaim — no new
+// locking mechanism, no duplicated claim logic. Additionally stamps
+// claimed_by_worker_id so the CEO/Engineering Review can see exactly which
+// registered worker claimed a task, alongside the existing agent_claimed_by
+// label.
+async function engineeringWorkerClaimTask(req, res) {
+  try {
+    const body = req.body || {};
+    const { task_id } = body;
+    if (!task_id) return res.status(400).json({ ok: false, error: 'task_id required' });
+
+    const worker = await _engineeringWorkerAuthenticate(body.worker_credential);
+    if (!worker) return res.status(401).json({ ok: false, error: 'worker_authentication_failed' });
+
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,packet,agent_authorized_at,agent_authorization_revoked_at,agent_claimed_at,lease_expires_at&limit=1`);
+    const task = rows?.[0];
+    if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
+
+    // Independent re-verification of CEO authority — never inferred from the
+    // worker's identity, never inferred from the caller's say-so. Same
+    // boundary-presence check engineeringTaskCeoAuthorizeAgent already enforces
+    // before it will ever set agent_authorized_at — re-checked here too
+    // (defense-in-depth, not trust that the earlier gate was never bypassed).
+    const boundary = task.packet?.origin_decision?.authorization_boundary;
+    const authOk = !!task.agent_authorized_at
+      && !task.agent_authorization_revoked_at
+      && !!boundary && typeof boundary === 'string' && !!boundary.trim();
+    if (!authOk) return res.status(409).json({ ok: false, error: 'task_not_authorized' });
+
+    const claimedByLabel = `worker:${worker.label}`;
+    const claimResult = await _engineeringTaskAtomicClaim(task_id, claimedByLabel, { claimed_by_worker_id: worker.id });
+    if (!claimResult) {
+      return res.status(409).json({ ok: false, error: 'already_claimed', message: 'This task already has an active, unexpired claim.' });
+    }
+    const { runId, nowIso, leaseExpires } = claimResult;
+
+    try {
+      await sbInsert('brain_agent_runs', {
+        session_id: claimedByLabel, task_id: String(task_id), action: 'engineering_worker_claim_task', status: 'claimed',
+        input: { worker_id: worker.id, agent_authorized_at: task.agent_authorized_at, lease_ms: AGENT_LEASE_MS },
+        output: { run_id: runId, lease_expires_at: leaseExpires },
+        started_at: nowIso,
+      });
+    } catch (e) { console.error('[engineeringWorkerClaimTask] audit insert failed:', e.message); }
+    try { await sbPatch('engineering_workers', `id=eq.${encodeURIComponent(worker.id)}`, { last_seen_at: nowIso }); } catch (_) {}
+
+    return res.status(200).json({
+      ok: true, task_id, run_id: runId, agent_claimed_at: nowIso, lease_expires_at: leaseExpires,
+      worker_id: worker.id, worker_label: worker.label,
+    });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
@@ -10077,6 +10294,11 @@ export default async function handler(req, res) {
     if (action === 'engineering_task_ceo_authorize_agent')            return await engineeringTaskCeoAuthorizeAgent(req, res);
     if (action === 'engineering_task_ceo_revoke_agent_authorization') return await engineeringTaskCeoRevokeAgentAuthorization(req, res);
     if (action === 'engineering_task_agent_claim')                    return await engineeringTaskAgentClaim(req, res);
+    if (action === 'engineering_worker_provision')                    return await engineeringWorkerProvision(req, res);             // v16.49.0 — Step 2C
+    if (action === 'engineering_worker_revoke')                       return await engineeringWorkerRevoke(req, res);                // v16.49.0 — Step 2C
+    if (action === 'engineering_worker_list')                         return await engineeringWorkerList(req, res);                  // v16.49.0 — Step 2C
+    if (action === 'engineering_worker_list_authorized_tasks')        return await engineeringWorkerListAuthorizedTasks(req, res);   // v16.49.0 — Step 2C
+    if (action === 'engineering_worker_claim_task')                   return await engineeringWorkerClaimTask(req, res);             // v16.49.0 — Step 2C
     if (action === 'engineering_agent_gateway')                       return await engineeringAgentGateway(req, res); // v16.36.0 — Phase 4D
     // v13.91.0 — MMMOS Stabilization Roadmap
     if (action === 'roadmap_load')               return await roadmapLoad(req, res);
