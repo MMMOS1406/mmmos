@@ -22867,8 +22867,16 @@ async function _ebV2Load(action,params=''){
       // Engineering Worker identities. Wired to the existing, unmodified
       // Step 2C engineering_worker_list backend (CEO-session-gated) — never
       // returns a credential hash or raw credential.
-      const r=await _ceoAuthedFetch('/api/ops?action=engineering_worker_list',{});
-      data=await r.json();
+      // v16.52.0 — CEO Decision #17 Step 2D: also loads pending Cowork
+      // pairing connection requests in parallel. Neither call ever returns
+      // any credential/hash material — see engineeringWorkerList and
+      // engineeringWorkerPairingListPending in api/ops.js.
+      const [wr,pr]=await Promise.all([
+        _ceoAuthedFetch('/api/ops?action=engineering_worker_list',{}),
+        _ceoAuthedFetch('/api/ops?action=engineering_worker_pairing_list_pending',{}),
+      ]);
+      const [wj,pj]=await Promise.all([wr.json(),pr.json()]);
+      data={ok:wj.ok,error:wj.error,workers:wj.workers||[],pending:(pj.ok?(pj.requests||[]):[])};
     }
     _ebV2Cache[key]=data;
   } catch(e){ _ebV2Cache[key]={ok:false,error:e.message}; }
@@ -24237,14 +24245,24 @@ function renderEngineeringBrain(){
     // entirely here; it is never sufficient on its own to execute a task —
     // that still requires a separate CEO Authorize Execution click in
     // Engineering Review (WHETHER) plus the task's own authorization
-    // boundary (WHAT). Provision/Revoke call the existing, unmodified
-    // engineering_worker_provision/_revoke actions — no new authority, no
-    // new gate. Never renders a credential hash or a stored raw credential.
+    // boundary (WHAT). Revoke calls the existing, unmodified
+    // engineering_worker_revoke action — no new authority, no new gate.
+    // Never renders a credential hash or a stored raw credential.
+    // v16.52.0 — CEO Decision #17 Step 2D: the manual "Connect / Provision"
+    // button (which showed a raw worker_credential to the CEO for hand
+    // transport) is removed — that handoff is exactly the failure mode this
+    // step closes. Cowork now initiates its own connection; it appears
+    // below as a pending request the CEO approves or rejects with a single
+    // click. Approve/Reject only ever flip a request's status — neither
+    // response can carry a credential (see engineeringWorkerPairingApprove/
+    // Reject in api/ops.js), so there is nothing here for the CEO to copy,
+    // paste, or transport.
     const ck='b2_workers';
     if(!_ebV2Cache[ck]){setTimeout(()=>_ebV2Load(ck),80);body=`<div style="color:var(--dim);text-align:center;padding:40px;font-size:12px">Loading Engineering Workers…</div>`;}
     else{
       const j=_ebV2Cache[ck]||{};
       const workers=j.ok?(j.workers||[]):[];
+      const pending=j.pending||[];
       body=`
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div>
@@ -24257,7 +24275,17 @@ function renderEngineeringBrain(){
       <div style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.2);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:11px;color:#8b9cc4;line-height:1.5">
         A connected Engineering Worker can discover and claim only the specific tasks you separately authorize in Engineering Review — connecting a worker here grants it no standing authority to execute anything on its own. Worker identity (WHO), your task authorization (WHETHER), and each task's own authorization boundary (WHAT) remain three independent checks.
       </div>
-      <button onclick="_engWorkerProvision()" style="width:100%;padding:10px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:16px">🔌 Connect / Provision Engineering Worker</button>
+      <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;margin-bottom:8px">PENDING CONNECTION REQUESTS ${pending.length?('('+pending.length+')'):''}</div>
+      ${pending.length===0?'<div style="font-size:12px;color:var(--dim);padding:0 0 16px 0">No pending requests. When Cowork attempts to connect, it will appear here for you to approve or reject.</div>':pending.map(p=>`
+      <div style="background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${(p.label||'Engineering Worker').replace(/</g,'&lt;')}</div>
+        <div style="font-size:10px;color:var(--dim);margin-bottom:10px">requested ${p.created_at?new Date(p.created_at).toLocaleString():'—'} · expires ${p.expires_at?new Date(p.expires_at).toLocaleString():'—'}</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="_engWorkerPairingApprove('${p.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve Connection</button>
+          <button onclick="_engWorkerPairingReject('${p.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">✖ Reject</button>
+        </div>
+      </div>`).join('')}
+      <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;margin:18px 0 8px 0">CONNECTED WORKERS</div>
       ${workers.length===0?'<div style="font-size:12px;color:var(--dim);padding:10px 0">No Engineering Workers connected yet.</div>':''}
       ${workers.map(w=>`<div style="background:${w.active?'rgba(34,197,94,0.04)':'rgba(255,255,255,0.02)'};border:1px solid ${w.active?'rgba(34,197,94,0.25)':'var(--border)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
@@ -24339,25 +24367,31 @@ function _ebSetSub(sub){_ebActiveSub=sub;if(typeof renderTab==='function')render
 // workspace-file ops only ever address paths under sandbox/, not the real
 // repository — see Decision #9 audit finding C. This grants no deployment
 // authority and cannot mark the task done; that remains Approve/Reject below.
-// v16.50.0 — CEO Decision #16 Step 2D: Engineering Worker CEO control.
-// Both call the existing, unmodified Step 2C engineering_worker_provision /
-// engineering_worker_revoke actions (CEO-session-gated) — no new authority,
-// no new gate. Provisioning is a ONE-TIME standing worker identity, not a
-// per-task token: unlike _engReviewAuthorizeAgent's per-task token below,
-// the CEO does this once per worker, not once per task. The raw credential
-// is shown here exactly once (same "shown once" discipline as the per-task
-// token) and is never stored, logged, or displayed anywhere else. Getting
-// that one-time credential into the worker's own environment is a separate,
-// genuine one-time setup step — see the Step 2D CEO checkpoint.
-async function _engWorkerProvision(){
-  const label=prompt('Label for this Engineering Worker (e.g. "Cowork — Primary Engineering Worker"):','Cowork — Primary Engineering Worker');
-  if(label===null)return;
-  if(!confirm('Provision a new Engineering Worker identity? A one-time credential will be shown next — it identifies this worker only and by itself authorizes no task. It will not be shown again.'))return;
+// v16.52.0 — CEO Decision #17 Step 2D: Secure Cowork Pairing Flow. Approve/
+// Reject call the new engineering_worker_pairing_approve/_reject actions
+// (CEO-session-gated, identical gate to every other CEO-only action). Both
+// responses are status-only — see engineeringWorkerPairingApprove/Reject in
+// api/ops.js — so there is never a credential in this code path for the CEO
+// to see, copy, or transport. The real worker_credential is minted only
+// after approval, and only inside engineeringWorkerPairingComplete, which
+// Cowork calls directly and which never routes through this CEO-session
+// gate or this browser at all.
+async function _engWorkerPairingApprove(id){
+  if(!confirm('Approve this Engineering Worker connection request? Cowork will be able to connect once approved — this grants connection only, not authority to execute any task.'))return;
   try{
-    const r=await _ceoAuthedFetch('/api/ops?action=engineering_worker_provision',{label});
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_worker_pairing_approve',{id});
     const j=await r.json();
-    if(!j.ok){alert('Provision failed: '+j.error);return;}
-    prompt('Engineering Worker credential — copy now, shown once only. This is a ONE-TIME setup credential (not a per-task token): it still needs to be placed into this worker\'s own environment before it can discover or claim tasks — see the Step 2D CEO checkpoint for that one remaining step.', j.worker_credential);
+    if(!j.ok){alert('Approve failed: '+j.error);return;}
+    _ebV2Cache['b2_workers']=null;
+    _ebV2Load('b2_workers');
+  }catch(e){alert('Error: '+e.message);}
+}
+async function _engWorkerPairingReject(id){
+  if(!confirm('Reject this Engineering Worker connection request?'))return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_worker_pairing_reject',{id});
+    const j=await r.json();
+    if(!j.ok){alert('Reject failed: '+j.error);return;}
     _ebV2Cache['b2_workers']=null;
     _ebV2Load('b2_workers');
   }catch(e){alert('Error: '+e.message);}

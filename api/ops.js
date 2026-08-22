@@ -381,6 +381,162 @@ async function _engineeringWorkerAuthenticate(rawCredential) {
   return null;
 }
 
+// ── Engineering Worker: Secure Pairing Protocol ──────────────────────────── v16.52.0 — CEO Decision #17 Step 2D
+// Replaces the abandoned manual credential-copy handoff (Step 2C) with a
+// pairing flow modeled on standard device-pairing patterns (OAuth
+// device-code, SSH pairing codes): Cowork generates its own one-time secret
+// locally and never sends the raw value to MMMOS until the final,
+// single completion call. The CEO never sees or handles a raw
+// worker_credential — approval only flips a pending row's status; the
+// credential itself is minted (and returned directly to Cowork's own HTTP
+// call, never to the CEO's browser) only after BOTH gates pass:
+//   (a) CEO approval (requireCeoSession, unchanged — the exact same gate
+//       every other CEO-only action in this file uses), AND
+//   (b) Cowork proving possession of the original pairing secret (hash
+//       comparison, reusing the existing _agentHashHex/_agentTokenMatches
+//       primitives verbatim — no new crypto primitive introduced).
+// No new worker-authorization concept is introduced: a successfully paired
+// worker is just a normal engineering_workers row, created exactly the way
+// engineeringWorkerProvision already creates one. Pairing approval grants
+// connection only — it is never sufficient on its own to claim or execute
+// any Engineering Task; that remains the fully separate, unmodified task
+// authorization chain (engineering_task_ceo_authorize_agent + the Step 2A
+// Gateway's independent re-verification).
+const ENGINEERING_WORKER_PAIRING_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+// NOT CEO-session-gated — this is Cowork's own unauthenticated first call,
+// symmetric to an OAuth device-authorization request. The row it creates is
+// useless on its own: nothing can be claimed, read, minted, or executed from
+// a pending/approved pairing row until engineeringWorkerPairingComplete
+// succeeds below, and that requires the raw secret this endpoint never sees.
+async function engineeringWorkerPairingRequest(req, res) {
+  try {
+    const body = req.body || {};
+    const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 100) : 'Engineering Worker';
+    const pairingSecretHash = body.pairing_secret_hash;
+    if (!pairingSecretHash || typeof pairingSecretHash !== 'string' || pairingSecretHash.length < 32) {
+      return res.status(400).json({ ok: false, error: 'pairing_secret_hash required' });
+    }
+    const expiresAt = new Date(Date.now() + ENGINEERING_WORKER_PAIRING_TTL_MS).toISOString();
+    const row = await sbInsert('engineering_worker_pairing_requests', {
+      label, pairing_secret_hash: pairingSecretHash, status: 'pending', expires_at: expiresAt,
+    });
+    if (!row) return res.status(500).json({ ok: false, error: 'pairing_request_failed' });
+    return res.status(200).json({ ok: true, pairing_id: row.id, label: row.label, status: row.status, expires_at: row.expires_at });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// CEO-session-gated, read-only. Powers the Engineering Workers panel's new
+// "Pending Connection Requests" list. Never returns pairing_secret_hash —
+// there is no legitimate reason for it to reach the browser, exactly the
+// same discipline engineeringWorkerList already applies to credential_hash.
+// Expired-but-not-yet-swept rows are filtered out here rather than trusted
+// to a background job, so the CEO never sees a request they can no longer
+// meaningfully approve.
+async function engineeringWorkerPairingListPending(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const rows = await sbGetSafe(`engineering_worker_pairing_requests?status=eq.pending&select=id,label,status,created_at,expires_at&order=created_at.desc`);
+    const now = Date.now();
+    const active = (rows || []).filter(r => new Date(r.expires_at).getTime() > now);
+    return res.status(200).json({ ok: true, requests: active });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// CEO-session-gated. Approval alone never mints or returns a worker_credential
+// — it only flips this one row's status, so there is nothing secret in this
+// response for the CEO's browser to ever hold. The real credential is minted
+// later, only inside engineeringWorkerPairingComplete, and only ever returned
+// to the caller of THAT action (Cowork itself, via its own direct HTTP call —
+// never routed through this CEO-session-gated path).
+async function engineeringWorkerPairingApprove(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const body = req.body || {};
+    const { id } = body;
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const rows = await sbGetSafe(`engineering_worker_pairing_requests?id=eq.${encodeURIComponent(id)}&select=id,status,expires_at&limit=1`);
+    const reqRow = rows?.[0];
+    if (!reqRow) return res.status(404).json({ ok: false, error: 'pairing_request_not_found' });
+    if (reqRow.status !== 'pending') return res.status(409).json({ ok: false, error: 'pairing_request_not_pending' });
+    if (new Date(reqRow.expires_at).getTime() <= Date.now()) {
+      await sbPatch('engineering_worker_pairing_requests', `id=eq.${encodeURIComponent(id)}`, { status: 'expired' });
+      return res.status(409).json({ ok: false, error: 'pairing_request_expired' });
+    }
+    const now = new Date().toISOString();
+    const updated = await sbPatch('engineering_worker_pairing_requests', `id=eq.${encodeURIComponent(id)}`, { status: 'approved', approved_at: now, approved_by: 'ceo' });
+    if (!updated) return res.status(500).json({ ok: false, error: 'approve_failed' });
+    return res.status(200).json({ ok: true, pairing_id: id, status: 'approved' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// CEO-session-gated. Symmetric reject path — lets the CEO dismiss a pending
+// request (e.g. an unrecognized/unexpected connection attempt) without ever
+// needing to know or handle a credential. Guarded to only affect a row that
+// is still 'pending' (a compound filter, not a separate read-then-write) so
+// it can't rewrite the outcome of a request some other path already resolved.
+async function engineeringWorkerPairingReject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const body = req.body || {};
+    const { id } = body;
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const updated = await sbPatch('engineering_worker_pairing_requests', `id=eq.${encodeURIComponent(id)}&status=eq.pending`, { status: 'rejected' });
+    if (!updated) return res.status(404).json({ ok: false, error: 'pairing_request_not_found_or_not_pending' });
+    return res.status(200).json({ ok: true, pairing_id: id, status: 'rejected' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// NOT CEO-session-gated — this is Cowork's own second and final call, made
+// directly (never via the CEO's browser). Succeeds only when BOTH are true:
+// the CEO has already approved this exact pairing_id, AND the caller
+// presents the original raw pairing secret Cowork generated in step 1 and
+// never sent anywhere until now. Only then is a real worker identity minted
+// — via the exact same insert shape engineeringWorkerProvision already
+// uses — with its raw, one-time worker_credential returned directly in THIS
+// response only. The pairing row is consumed immediately afterward: status
+// flips to 'completed' and pairing_secret_hash is cleared, so this call can
+// never succeed twice for the same pairing_id (no replay).
+async function engineeringWorkerPairingComplete(req, res) {
+  try {
+    const body = req.body || {};
+    const { pairing_id, pairing_secret } = body;
+    if (!pairing_id || !pairing_secret) return res.status(400).json({ ok: false, error: 'pairing_id and pairing_secret required' });
+    const rows = await sbGetSafe(`engineering_worker_pairing_requests?id=eq.${encodeURIComponent(pairing_id)}&select=id,label,status,pairing_secret_hash,expires_at&limit=1`);
+    const reqRow = rows?.[0];
+    if (!reqRow) return res.status(404).json({ ok: false, error: 'pairing_request_not_found' });
+    if (reqRow.status !== 'approved') return res.status(409).json({ ok: false, error: 'pairing_not_approved' });
+    if (new Date(reqRow.expires_at).getTime() <= Date.now()) {
+      await sbPatch('engineering_worker_pairing_requests', `id=eq.${encodeURIComponent(pairing_id)}`, { status: 'expired' });
+      return res.status(409).json({ ok: false, error: 'pairing_request_expired' });
+    }
+    if (!_agentTokenMatches(pairing_secret, reqRow.pairing_secret_hash)) {
+      return res.status(401).json({ ok: false, error: 'pairing_secret_mismatch' });
+    }
+    const rawCredential = randomBytes(32).toString('hex');
+    const credentialHash = _agentHashHex(rawCredential);
+    const worker = await sbInsert('engineering_workers', { label: reqRow.label, credential_hash: credentialHash, active: true, created_by: 'pairing' });
+    if (!worker) return res.status(500).json({ ok: false, error: 'worker_creation_failed' });
+    await sbPatch('engineering_worker_pairing_requests', `id=eq.${encodeURIComponent(pairing_id)}`, {
+      status: 'completed', completed_at: new Date().toISOString(), worker_id: worker.id, pairing_secret_hash: null,
+    });
+    return res.status(200).json({
+      ok: true, worker_id: worker.id, label: worker.label, worker_credential: rawCredential,
+      note: 'Store this credential in your own local storage now — it will not be returned again.',
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
 // ── Engineering Task: CEO Authorizes Agent Execution ──────────────────────── Phase 4B
 // CEO-session-gated. Marks exactly one task as eligible for an Engineering Agent
 // to later claim, and mints that task's one-time bearer token. Does NOT execute,
@@ -10395,6 +10551,11 @@ export default async function handler(req, res) {
     if (action === 'engineering_worker_list_authorized_tasks')        return await engineeringWorkerListAuthorizedTasks(req, res);   // v16.49.0 — Step 2C
     if (action === 'engineering_worker_claim_task')                   return await engineeringWorkerClaimTask(req, res);             // v16.49.0 — Step 2C
     if (action === 'engineering_worker_submit_task')                    return await engineeringWorkerSubmitTask(req, res);            // v16.50.0 — Step 2E
+    if (action === 'engineering_worker_pairing_request')              return await engineeringWorkerPairingRequest(req, res);        // v16.52.0 — Step 2D
+    if (action === 'engineering_worker_pairing_list_pending')         return await engineeringWorkerPairingListPending(req, res);    // v16.52.0 — Step 2D
+    if (action === 'engineering_worker_pairing_approve')              return await engineeringWorkerPairingApprove(req, res);        // v16.52.0 — Step 2D
+    if (action === 'engineering_worker_pairing_reject')               return await engineeringWorkerPairingReject(req, res);         // v16.52.0 — Step 2D
+    if (action === 'engineering_worker_pairing_complete')             return await engineeringWorkerPairingComplete(req, res);       // v16.52.0 — Step 2D
     if (action === 'engineering_agent_gateway')                       return await engineeringAgentGateway(req, res); // v16.36.0 — Phase 4D
     // v13.91.0 — MMMOS Stabilization Roadmap
     if (action === 'roadmap_load')               return await roadmapLoad(req, res);
