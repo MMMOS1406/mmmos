@@ -813,12 +813,12 @@ async function _agentGatewayAudit(task_id, agent_run_id, op, status, extra) {
 async function engineeringAgentGateway(req, res) {
   try {
     const body = req.body || {};
-    const { task_id, agent_token, agent_run_id, op } = body;
-    if (!task_id || !agent_token || !agent_run_id || !op) {
-      return res.status(400).json({ ok: false, error: 'task_id, agent_token, agent_run_id, and op are required' });
+    const { task_id, agent_token, agent_run_id, worker_credential, op } = body;
+    if (!task_id || !agent_run_id || !op || (!agent_token && !worker_credential)) {
+      return res.status(400).json({ ok: false, error: 'task_id, agent_run_id, op, and either agent_token or worker_credential are required' });
     }
 
-    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_run_id,lease_expires_at,agent_capability_scope&limit=1`);
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_run_id,claimed_by_worker_id,lease_expires_at,agent_capability_scope&limit=1`);
     const task = rows?.[0];
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
 
@@ -827,13 +827,41 @@ async function engineeringAgentGateway(req, res) {
     // it takes to look the row up. Generic failure code throughout (mirrors
     // ceoLogin's principle): no hint about which specific check failed.
     const now = Date.now();
-    const authOk = !!task.agent_authorized_at && !task.agent_authorization_revoked_at
-      && _agentTokenMatches(agent_token, task.agent_authorization_token_hash);
+    let authOk;
+    if (worker_credential) {
+      // v16.51.0 — Decision #17 Step 2A: alternate authorization path for a
+      // registered Engineering Worker that already holds a genuine
+      // CEO-authorized claim on this exact task. Worker identity
+      // (_engineeringWorkerAuthenticate, unchanged — the same primitive the
+      // claim path already uses) is verified completely independently and is
+      // NEVER by itself sufficient: it only substitutes for proof-of-
+      // possession of the per-task agent_token. CEO task authorization
+      // (agent_authorized_at set, not revoked, a real non-empty
+      // authorization_boundary) and the fact that THIS worker is the one
+      // that actually won THIS task's claim (claimed_by_worker_id) are
+      // independently re-checked here exactly as strictly as the legacy
+      // branch re-checks its token. The legacy agent_token branch below is
+      // byte-for-byte unchanged from before this addition.
+      const worker = await _engineeringWorkerAuthenticate(worker_credential);
+      const boundary = task.packet?.origin_decision?.authorization_boundary;
+      const boundaryOk = !!boundary && typeof boundary === 'string' && !!boundary.trim();
+      authOk = !!worker
+        && !!task.agent_authorized_at
+        && !task.agent_authorization_revoked_at
+        && boundaryOk
+        && !!task.claimed_by_worker_id
+        && task.claimed_by_worker_id === worker.id;
+    } else {
+      authOk = !!task.agent_authorized_at && !task.agent_authorization_revoked_at
+        && _agentTokenMatches(agent_token, task.agent_authorization_token_hash);
+    }
     // Cross-task/cross-run isolation: the caller-supplied run_id must equal
     // the run_id that actually won this task's atomic claim. A run_id minted
     // for a different task will never equal this task's agent_run_id column,
     // and a stale run_id from a superseded/reclaimed lease no longer matches
-    // either — both fail closed here.
+    // either — both fail closed here. Unchanged, and shared by both paths:
+    // the worker-claim path already stamps agent_run_id via the exact same
+    // _engineeringTaskAtomicClaim primitive the legacy path uses.
     const claimOk = !!task.agent_claimed_at && task.agent_run_id === agent_run_id;
     const leaseOk = !!task.lease_expires_at && new Date(task.lease_expires_at).getTime() > now;
     if (!authOk || !claimOk || !leaseOk) {
