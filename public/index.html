@@ -24377,7 +24377,31 @@ async function _engReviewAuthorizeAgent(id){
   try{
     const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_ceo_authorize_agent',{id,capability_scope:{read_paths:[],write_paths:[],validation_ops:[]}});
     const j=await r.json();
-    if(!j.ok){alert('Authorize agent failed: '+j.error);return;}
+    if(!j.ok){
+      // v16.48.0 — CEO Session Auth Handoff Fix. Root cause: this action already used
+      // the exact same requireCeoSession gate, the exact same _ceoAuthedFetch call
+      // pattern, and the exact same token storage as engineering_task_ceo_approve
+      // (which works) — byte-for-byte identical, verified against the deployed
+      // source. Nothing in the handoff itself was broken. What was missing: the
+      // ONLY place the frontend ever re-validates the held ceo_session_token is once,
+      // at page-load session restore (v16.46.0, init()) — never again before a
+      // protected click. A CEO whose 12h-TTL token elapses (or who never re-triggers
+      // the restore check) still sees a fully authenticated-looking screen and only
+      // discovers the stale token here, when the server correctly fails closed with
+      // ceo_authorization_required. Fix: react to that specific, unambiguous error
+      // code by treating it as "session went stale" instead of a generic failure —
+      // clear the stale token and fall back to the same PIN re-login screen logout()
+      // already uses, so the CEO re-authenticates through the one real login path
+      // and can immediately retry. No new session mechanism, no bypass, no automatic
+      // retry with elevated privilege, no change to requireCeoSession/ceoLogin/PIN
+      // verification, no change to any other CEO-gated action.
+      if(j.error==='ceo_authorization_required'){
+        alert('Your CEO session has expired. Please log in again, then retry Authorize Agent.');
+        try{ logout(); }catch(e){}
+        return;
+      }
+      alert('Authorize agent failed: '+j.error);return;
+    }
     prompt('Agent token (copy now — shown once only):',j.agent_token);
     _ebV2Cache['b2_engreview']=null;
     _ebV2Load('b2_engreview');
