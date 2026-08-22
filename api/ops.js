@@ -644,6 +644,73 @@ async function engineeringWorkerClaimTask(req, res) {
   }
 }
 
+// ── Engineering Worker: Submit Task (v16.50.0 — Step 2E) ───────────────────────
+// Root cause fixed: the standalone mmm-engineering-brain MCP tool (eb_create_task)
+// wrote directly to Supabase REST with a low-privilege key, correctly rejected by
+// engineering_tasks' RLS (anon_read_engineering_tasks is SELECT-only for
+// anon/authenticated — no INSERT policy exists for any non-service-role caller;
+// this is RLS working as designed, not a defect). That MCP path also bypassed
+// _buildEngineeringPacketWithKnowledge and the created_via='task_generator' stamp
+// Engineering Review depends on to surface a task at all — a second, weaker,
+// undiscoverable copy of task creation (rule_15 SSOT violation).
+//
+// Fix: a governed, worker-credential-gated HTTP action that calls the EXACT SAME
+// canonical insert path (_insertEngineeringTaskRow) the Task Generator UI itself
+// uses — same packet generation, same created_via stamp, same downstream
+// governance. Worker identity is independently re-verified via
+// _engineeringWorkerAuthenticate (the same primitive engineeringWorkerClaimTask /
+// engineeringWorkerListAuthorizedTasks already use — not reimplemented). This
+// grants ONLY the ability to create a task row, nothing more: it never sets
+// agent_authorized_at, never touches requireCeoSession, engineeringTaskCeoApprove,
+// engineeringTaskCeoAuthorizeAgent, or production_deployment_authorize. The
+// resulting row lands exactly where any Task-Generator-created task lands —
+// status='open', awaiting normal CEO Engineering Review. No service-role
+// credential is ever exposed to the caller; SUPABASE_SERVICE_KEY stays
+// server-side inside _insertEngineeringTaskRow exactly as it already does today.
+async function engineeringWorkerSubmitTask(req, res) {
+  try {
+    const body = req.body || {};
+    const worker = await _engineeringWorkerAuthenticate(body.worker_credential);
+    if (!worker) return res.status(401).json({ ok: false, error: 'worker_authentication_failed' });
+
+    const { problem, expected_result, affected_engine, priority, acceptance_criteria, submission_idempotency_key } = body;
+    if (!problem || !expected_result || !affected_engine) {
+      return res.status(400).json({ ok: false, error: 'problem, expected_result, affected_engine required' });
+    }
+
+    // Replay/duplicate protection: a prior submission carrying the same
+    // idempotency key is returned as-is instead of inserting a second row.
+    // Same idea as the existing origin_decision_id + origin_decision_child_key
+    // dedup already used by the CDP->Engineering bridge — new field, no new
+    // mechanism invented.
+    if (submission_idempotency_key) {
+      const dup = await sbGetSafe(
+        `engineering_tasks?packet->>submission_idempotency_key=eq.${encodeURIComponent(String(submission_idempotency_key))}&select=*&limit=1`
+      );
+      if (dup && dup[0]) {
+        return res.status(200).json({ ok: true, task: dup[0], deduped: true });
+      }
+    }
+
+    const task = await _insertEngineeringTaskRow({
+      problem, expected_result, affected_engine, priority, acceptance_criteria,
+      packetExtra: {
+        created_via: 'task_generator',
+        derived_from: 'engineering_worker_submission',
+        submitted_by_worker_id: worker.id,
+        submitted_by_worker_label: worker.label,
+        submission_idempotency_key: submission_idempotency_key || null,
+      },
+    });
+
+    try { await sbPatch('engineering_workers', `id=eq.${encodeURIComponent(worker.id)}`, { last_seen_at: new Date().toISOString() }); } catch (_) {}
+
+    return res.status(200).json({ ok: true, task, deduped: false });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
 // ── Engineering Agent Gateway (v16.36.0 — Phase 4D, CEO-approved 2026-08-16) ──
 // The ONLY trusted entry point through which a future bounded Engineering Agent
 // may act. Reuses Phase 4B authorization/claim/lease verification VERBATIM — no
@@ -10299,6 +10366,7 @@ export default async function handler(req, res) {
     if (action === 'engineering_worker_list')                         return await engineeringWorkerList(req, res);                  // v16.49.0 — Step 2C
     if (action === 'engineering_worker_list_authorized_tasks')        return await engineeringWorkerListAuthorizedTasks(req, res);   // v16.49.0 — Step 2C
     if (action === 'engineering_worker_claim_task')                   return await engineeringWorkerClaimTask(req, res);             // v16.49.0 — Step 2C
+    if (action === 'engineering_worker_submit_task')                    return await engineeringWorkerSubmitTask(req, res);            // v16.50.0 — Step 2E
     if (action === 'engineering_agent_gateway')                       return await engineeringAgentGateway(req, res); // v16.36.0 — Phase 4D
     // v13.91.0 — MMMOS Stabilization Roadmap
     if (action === 'roadmap_load')               return await roadmapLoad(req, res);
