@@ -889,6 +889,13 @@ const AGENT_GATEWAY_ALLOWED_OPS = new Set([
   'read_authorized_file',
   'write_authorized_file',
   'validate_javascript_syntax',
+  // v16.56.0 — CEO Decision #17 Automatic Git Commit Capture Fix. The ONLY
+  // path by which engineering_tasks.git_commit_sha is ever written for a
+  // 'new_development' task (see the op's own comment below for the full
+  // verification/immutability chain). Deliberately still just one more
+  // entry in this same fixed whitelist — no new authorization concept, no
+  // new credential, no new claim/lease mechanism.
+  'submit_commit_sha',
 ]);
 
 // v16.37.0 — Phase 4E: manifest is now DERIVED PER-TASK from that task's own
@@ -974,7 +981,7 @@ async function engineeringAgentGateway(req, res) {
       return res.status(400).json({ ok: false, error: 'task_id, agent_run_id, op, and either agent_token or worker_credential are required' });
     }
 
-    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_run_id,claimed_by_worker_id,lease_expires_at,agent_capability_scope&limit=1`);
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_run_id,claimed_by_worker_id,lease_expires_at,agent_capability_scope,status,ceo_decision,git_commit_sha,release_kind&limit=1`);
     const task = rows?.[0];
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
 
@@ -1144,6 +1151,103 @@ async function engineeringAgentGateway(req, res) {
       // on the task row — submitting evidence cannot complete or approve a
       // task. Only engineeringTaskCeoApprove (CEO-session-gated) can do that.
       result = { accepted: true, note: 'Evidence recorded. Non-authoritative — does not complete or approve the task.' };
+    } else if (op === 'submit_commit_sha') {
+      // v16.56.0 — CEO Decision #17 Automatic Git Commit Capture Fix. Root
+      // cause: no automatic mechanism anywhere populated
+      // engineering_tasks.git_commit_sha for an ordinary 'new_development'
+      // task's normal completion flow — only retroactive_release creation
+      // and the (now-locked-down, see engineeringTaskUpdate) generic update
+      // passthrough ever wrote it, which is exactly why the CEO Production
+      // Release panel fell back to a fail-closed "Engineering Approved, no
+      // button" state for every ordinary approved task. This op closes that
+      // gap using the narrowest existing action available: it is layered
+      // onto engineeringAgentGateway rather than inventing a new endpoint,
+      // so it inherits — unmodified, unduplicated — the exact same
+      // authOk/claimOk/leaseOk chain already independently re-verified
+      // above, before this switch, for every other Gateway op. That chain
+      // is what proves task/run ownership and worker legitimacy here: an
+      // unrelated worker/run has no agent_run_id that matches this task's
+      // current claim, and a revoked worker fails
+      // _engineeringWorkerAuthenticate's active=eq.true filter outright —
+      // neither reaches this branch at all.
+      //
+      // Explicitly out of scope: retroactive_release tasks carry their SHA
+      // through the separate, already-reviewed release-record creation path
+      // (CEO Decision #17 Release Record Fix) — untouched by this change.
+      if (task.release_kind === 'retroactive_release') {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'not_applicable_to_retroactive_release' });
+        return res.status(409).json({ ok: false, error: 'not_applicable_to_retroactive_release' });
+      }
+      // Fail closed once the task has reached a terminal CEO outcome — a
+      // SHA can never be attached (or reattached) to already-approved or
+      // already-rejected work through this op.
+      if (task.status === 'done' || task.ceo_decision === 'approved' || task.ceo_decision === 'rejected') {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'task_already_in_terminal_ceo_state' });
+        return res.status(409).json({ ok: false, error: 'task_already_in_terminal_ceo_state' });
+      }
+      const rawSha = typeof body.commit_sha === 'string' ? body.commit_sha.trim().toLowerCase() : '';
+      if (!/^[0-9a-f]{40}$/i.test(rawSha)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'malformed_commit_sha' });
+        return res.status(400).json({ ok: false, error: 'commit_sha must be a 40-character hex commit SHA' });
+      }
+      if (task.git_commit_sha) {
+        if (task.git_commit_sha === rawSha) {
+          // Idempotent retry of the exact value already recorded (e.g. a
+          // lost-response retry from the same run) — accepted without a
+          // second GitHub call or a second write. Anything ELSE already
+          // recorded is a hard conflict: this column is immutable once set,
+          // for every run/worker, including the one that set it — a
+          // mistaken SHA gets fixed by a new task, never a silent rewrite
+          // of this one's release record.
+          result = { accepted: true, commit_sha: rawSha, already_recorded: true, note: 'Already recorded — no change made.' };
+        } else {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'git_commit_sha_already_set' });
+          return res.status(409).json({ ok: false, error: 'git_commit_sha_already_set', existing_commit_sha: task.git_commit_sha });
+        }
+      } else {
+        // Independent GitHub verification — never trust the bare claim.
+        // Confirms: (a) the commit really exists, in THIS canonical
+        // repository (process.env.GITHUB_REPO — never client-supplied, so
+        // "wrong repository" is structurally impossible to satisfy), and
+        // (b) it is reachable from the expected release branch (at or
+        // behind its current head) rather than some unmerged or unrelated
+        // commit — the strongest safe invariant available at completion
+        // time, short of requiring exact branch-head equality (which would
+        // wrongly reject legitimate work completed slightly before another
+        // change lands on main). Exact branch-head equality is still
+        // independently re-verified later, at Production Release
+        // authorization/execution time — this capture step does not weaken
+        // that later check in any way.
+        const verify = await _verifyCommitReachableFromBranch(rawSha, 'main');
+        if (!verify.ok) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: verify.error });
+          const infraError = /not_configured|api_error|unreachable/.test(verify.error);
+          return res.status(infraError ? 502 : 409).json({ ok: false, error: verify.error });
+        }
+        // Conditional write — matches only if still unset. Closes the
+        // narrow race between the read above and this write (e.g. two
+        // near-simultaneous submit_commit_sha calls for the same task,
+        // same run): the loser gets the same 409 as any other
+        // already-set case, never a silent second write.
+        const patched = await sbPatch(
+          'engineering_tasks',
+          `id=eq.${encodeURIComponent(task_id)}&git_commit_sha=is.null`,
+          { git_commit_sha: rawSha, updated_at: new Date().toISOString() }
+        );
+        if (!patched) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'git_commit_sha_already_set_race' });
+          return res.status(409).json({ ok: false, error: 'git_commit_sha_already_set' });
+        }
+        try {
+          await sbInsert('brain_evidence', {
+            task_id: String(task_id), run_id: agent_run_id, evidence_type: 'commit_sha',
+            title: 'Authoritative commit SHA captured', content: rawSha,
+            metadata: { submitted_at: new Date().toISOString(), verified_against_branch: 'main', github_verification: verify.detail, non_authoritative: false },
+            engine: task.affected_engine,
+          });
+        } catch (e) { console.error('[engineeringAgentGateway] commit_sha evidence insert failed:', e.message); }
+        result = { accepted: true, commit_sha: rawSha, already_recorded: false, note: 'Commit SHA verified against GitHub and recorded. Immutable from this point forward.' };
+      }
     }
 
     await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { result_summary: op });
@@ -11495,21 +11599,38 @@ async function engineeringTaskUpdate(req, res) {
     if (body.release_kind !== undefined) {
       return res.status(400).json({ ok: false, error: 'release_kind cannot be changed after task creation' });
     }
-    // Any git_commit_sha this endpoint is asked to store must be a real commit
-    // SHA, not arbitrary text — closes the gap where a retroactive_release task
-    // could otherwise carry the target commit only in free-text problem/
-    // acceptance_criteria fields.
-    if (git_commit_sha !== undefined && git_commit_sha !== null && String(git_commit_sha).trim() !== '') {
-      if (!/^[0-9a-f]{40}$/i.test(String(git_commit_sha).trim())) {
-        return res.status(400).json({ ok: false, error: 'git_commit_sha must be a 40-character hex commit SHA' });
-      }
-    }
-    // A retroactive_release task must never lose its target commit — block
-    // clearing git_commit_sha to empty/null once the task is that kind, so it
-    // can never silently drift back into "missing SHA" after creation.
-    if (git_commit_sha !== undefined && (git_commit_sha === null || String(git_commit_sha).trim() === '')) {
+    // v16.56.0 — CEO Decision #17 Automatic Git Commit Capture Fix. This
+    // endpoint has NO worker/CEO authentication and NO task-ownership check
+    // at all (unlike every gated action in this file) — it is reachable by
+    // any caller who can POST to this action. That makes it far too
+    // permissive to trust for a 'new_development' task's authoritative
+    // release commit: git_commit_sha for those tasks is now written
+    // EXCLUSIVELY through the governed, ownership-verified
+    // engineeringAgentGateway 'submit_commit_sha' op (independent GitHub
+    // verification, immutable once set, fails closed on a terminal CEO
+    // state). retroactive_release tasks are a separate, already-reviewed
+    // workflow (CEO Decision #17 Release Record Fix) and this branch leaves
+    // their exact prior behavior on this endpoint completely unchanged —
+    // format validation on set, blocked clearing — nothing below this
+    // comment is new for that release_kind.
+    if (git_commit_sha !== undefined) {
       const existing = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(id)}&select=release_kind`);
-      if (existing?.[0]?.release_kind === 'retroactive_release') {
+      const kind = existing?.[0]?.release_kind;
+      if (kind !== 'retroactive_release') {
+        return res.status(403).json({ ok: false, error: 'git_commit_sha_for_new_development_tasks_must_use_submit_commit_sha' });
+      }
+      // Any git_commit_sha this endpoint is asked to store must be a real
+      // commit SHA, not arbitrary text — closes the gap where a
+      // retroactive_release task could otherwise carry the target commit
+      // only in free-text problem/acceptance_criteria fields.
+      if (git_commit_sha !== null && String(git_commit_sha).trim() !== '') {
+        if (!/^[0-9a-f]{40}$/i.test(String(git_commit_sha).trim())) {
+          return res.status(400).json({ ok: false, error: 'git_commit_sha must be a 40-character hex commit SHA' });
+        }
+      } else {
+        // A retroactive_release task must never lose its target commit —
+        // block clearing git_commit_sha to empty/null, so it can never
+        // silently drift back into "missing SHA" after creation.
         return res.status(409).json({ ok: false, error: 'cannot clear git_commit_sha on a retroactive_release task' });
       }
     }
@@ -11753,6 +11874,56 @@ async function _prodDeployBranchHeadSha(branch) {
     return { ok: true, sha: j.sha };
   } catch (e) {
     return { ok: false, error: 'github_api_unreachable: ' + e.message };
+  }
+}
+
+// v16.56.0 — CEO Decision #17 Automatic Git Commit Capture Fix. Independent,
+// server-derived verification that a worker-submitted commit SHA (a) really
+// exists as a real commit in the canonical repository — not merely
+// well-formed hex — and (b) is reachable from the expected release branch
+// (the branch head itself, or an ancestor of it), so an unmerged, unrelated,
+// or force-pushed-away commit can never be captured as a task's authoritative
+// SHA. Reuses the exact same read-only GITHUB_TOKEN/GITHUB_REPO credential
+// and the exact same GitHub compare-API ancestry technique
+// productionDeploymentReconcile already uses below (see its "Check 1 —
+// GitHub ancestry" comment) — no new credential, no new verification
+// concept, just applied one step earlier in the lifecycle. Never trusts a
+// repository name from the caller: `repo` always comes from
+// process.env.GITHUB_REPO, so "commit belongs to a different repository"
+// is structurally impossible to satisfy, not just checked for.
+async function _verifyCommitReachableFromBranch(sha, branch) {
+  const repo = process.env.GITHUB_REPO;
+  const token = process.env.GITHUB_TOKEN;
+  if (!repo || !token) return { ok: false, error: 'github_integrity_check_not_configured' };
+  try {
+    const cr = await fetch(`https://api.github.com/repos/${repo}/commits/${encodeURIComponent(sha)}`, {
+      headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json' },
+    });
+    if (cr.status === 404 || cr.status === 422) return { ok: false, error: 'commit_not_found_in_repository' };
+    if (!cr.ok) return { ok: false, error: `github_api_error_${cr.status}` };
+  } catch (e) {
+    return { ok: false, error: 'github_api_unreachable: ' + e.message };
+  }
+  const head = await _prodDeployBranchHeadSha(branch);
+  if (!head.ok) return { ok: false, error: head.error };
+  if (head.sha === sha) return { ok: true, detail: { relation: 'identical', branch_head: head.sha } };
+  try {
+    const cmp = await fetch(`https://api.github.com/repos/${repo}/compare/${encodeURIComponent(sha)}...${encodeURIComponent(head.sha)}`, {
+      headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json' },
+    });
+    if (!cmp.ok) return { ok: false, error: `github_compare_api_error_${cmp.status}` };
+    const cj = await cmp.json();
+    // 'identical' — same commit (already handled above). 'ahead' — the
+    // branch head is ahead of the candidate, i.e. the candidate IS an
+    // ancestor of the branch — reachable, accepted. 'behind' (candidate is
+    // ahead of the branch — unmerged) and 'diverged' (not part of the
+    // branch's history at all) are both rejected.
+    if (cj.status === 'identical' || cj.status === 'ahead') {
+      return { ok: true, detail: { relation: cj.status, branch_head: head.sha } };
+    }
+    return { ok: false, error: 'commit_not_reachable_from_branch' };
+  } catch (e) {
+    return { ok: false, error: 'github_compare_unreachable: ' + e.message };
   }
 }
 
