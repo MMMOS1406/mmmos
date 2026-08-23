@@ -22847,7 +22847,16 @@ async function _ebV2Load(action,params=''){
       // Phase 4B — previously had no CEO-clickable control anywhere). Narrowly
       // filtered to origin_decision_id-bearing tasks only, so this never surfaces
       // the general manually-authored backlog.
-      const pendingAuth=(orj.tasks||[]).filter(t=>(t.origin_decision_id || t.packet?.created_via==='task_generator' || t.packet?.derived_from==='ceo_decision_paste') && !t.agent_authorized_at);
+      const pendingAuth=(orj.tasks||[]).filter(t=>(t.origin_decision_id || t.packet?.created_via==='task_generator' || t.packet?.derived_from==='ceo_decision_paste') && !t.agent_authorized_at && t.release_kind!=='retroactive_release');
+      // v16.53.0 — CEO Decision #17 Release Record Fix: retroactive_release
+      // tasks (already-completed, already-tested work being registered for
+      // governed release) skip Authorize Agent entirely and go straight to
+      // CEO Approve/Reject — no agent authorization or execution history is
+      // fabricated for them. release_kind is set only at creation and is
+      // immutable afterward (engineering_task_update rejects changing it), so
+      // an ordinary in-flight task can never relabel itself to bypass Agent
+      // Authorization/execution.
+      const retroactiveReleases=(orj.tasks||[]).filter(t=>t.release_kind==='retroactive_release' && t.status==='open');
       // v16.42.0 — Decision #9B: recovery path for a minted-but-lost token (the
       // one-time token was shown once and closed before the Agent could claim
       // it). Distinct from pendingAuth above — these tasks WERE authorized, just
@@ -22861,7 +22870,7 @@ async function _ebV2Load(action,params=''){
         Promise.all(doneTasks.map(t=>fetch('/api/ops?action=engineering_task_review_packet&id='+encodeURIComponent(t.id)).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
       ]);
       const pendingRelease=donePackets.filter(p=>p.ok && !(p.production_deployments||[]).some(d=>d.status==='deployed'));
-      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth,needsReauth};
+      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth,needsReauth,retroactiveReleases};
     } else if(action==='b2_workers'){
       // v16.50.0 — CEO Decision #16 Step 2D: read-only list of registered
       // Engineering Worker identities. Wired to the existing, unmodified
@@ -24115,6 +24124,7 @@ function renderEngineeringBrain(){
       const packets=(_ebV2Cache[ck]?.packets)||[];
       const pendingAuth=(_ebV2Cache[ck]?.pendingAuth)||[];
       const needsReauth=(_ebV2Cache[ck]?.needsReauth)||[];
+      const retroactiveReleases=(_ebV2Cache[ck]?.retroactiveReleases)||[];
       body=`
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div>
@@ -24139,7 +24149,18 @@ function renderEngineeringBrain(){
           <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(245,158,11,0.5);background:rgba(245,158,11,0.15);color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer">🔁 Re-authorize Agent</button>
         </div>`).join('')}
       </div>`:''}
-      ${packets.length===0?'<div style="font-size:12px;color:var(--dim);padding:10px 0">No Engineering Agent work is currently awaiting CEO review.</div>':''}
+      ${retroactiveReleases.length?`<div style="margin-bottom:18px">
+        <div style="font-size:10px;font-weight:700;color:#22c55e;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">📋 Retroactive Release Records — Awaiting CEO Approval (${retroactiveReleases.length})</div>
+        ${retroactiveReleases.map(t=>`<div style="background:rgba(34,197,94,0.04);border:1px solid rgba(34,197,94,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · already-completed work, no agent execution required · target commit ${t.git_commit_sha?t.git_commit_sha.slice(0,12)+'…':'⚠ NOT SET'}</div>
+          <div style="display:flex;gap:8px">
+            <button onclick="_engReviewApprove('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve</button>
+            <button onclick="_engReviewReject('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">❌ Reject</button>
+          </div>
+        </div>`).join('')}
+      </div>`:''}
+      ${packets.length===0&&retroactiveReleases.length===0?'<div style="font-size:12px;color:var(--dim);padding:10px 0">No Engineering Agent work is currently awaiting CEO review.</div>':''}
       ${packets.map(p=>{
         const t=p.task||{};
         const od=p.origin_decision||{};

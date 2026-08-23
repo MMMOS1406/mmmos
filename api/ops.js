@@ -11255,8 +11255,24 @@ async function _buildEngineeringPacketWithKnowledge(task) {
 // packet generation + insert path — one canonical task-creation path, not two
 // diverging copies (rule_15 SSOT). Behavior-preserving extraction, same pattern
 // already used for _buildEngineeringPacketWithKnowledge (v16.33.0).
-async function _insertEngineeringTaskRow({ problem, expected_result, affected_engine, priority, acceptance_criteria, packetExtra }) {
-  const task = { problem, expected_result, affected_engine, priority: priority || 'medium', acceptance_criteria: acceptance_criteria || '', status: 'open', packet: {} };
+// v16.53.0 — CEO Decision #17 Release Record Fix. `release_kind` classifies a
+// task at creation time ONLY — it is never accepted by engineering_task_update,
+// so a task can never relabel itself retroactive after the fact to skip agent
+// authorization/execution. Default 'new_development' preserves every existing
+// behavior for ordinary tasks unchanged. A 'retroactive_release' task must
+// carry a real, validly-formatted git_commit_sha from the moment it's created
+// — never merely mentioned in free text — so it can never silently become
+// release-ready with a missing/invalid target commit.
+function _validateRetroactiveReleaseShaOrThrow(git_commit_sha) {
+  if (!git_commit_sha || !/^[0-9a-f]{40}$/i.test(String(git_commit_sha).trim())) {
+    throw Object.assign(new Error('retroactive_release tasks require a valid 40-character git_commit_sha'), { code: 'invalid_git_commit_sha' });
+  }
+}
+async function _insertEngineeringTaskRow({ problem, expected_result, affected_engine, priority, acceptance_criteria, packetExtra, release_kind, git_commit_sha }) {
+  const kind = release_kind === 'retroactive_release' ? 'retroactive_release' : 'new_development';
+  if (kind === 'retroactive_release') _validateRetroactiveReleaseShaOrThrow(git_commit_sha);
+  const task = { problem, expected_result, affected_engine, priority: priority || 'medium', acceptance_criteria: acceptance_criteria || '', status: 'open', packet: {}, release_kind: kind };
+  if (kind === 'retroactive_release') task.git_commit_sha = String(git_commit_sha).trim().toLowerCase();
   task.packet = await _buildEngineeringPacketWithKnowledge(task);
   // v16.45.0 — CEO Decision #14A: every task created through this shared
   // Task Generator insert path (both the manual 4-field form and the
@@ -11288,13 +11304,14 @@ async function _insertEngineeringTaskRow({ problem, expected_result, affected_en
 async function engineeringTaskCreate(req, res) {
   try {
     const body = req.body || {};
-    const { problem, expected_result, affected_engine, priority, acceptance_criteria } = body;
+    const { problem, expected_result, affected_engine, priority, acceptance_criteria, release_kind, git_commit_sha } = body;
     if (!problem || !expected_result || !affected_engine) {
       return res.status(400).json({ ok: false, error: 'problem, expected_result, affected_engine required' });
     }
-    const task = await _insertEngineeringTaskRow({ problem, expected_result, affected_engine, priority, acceptance_criteria });
+    const task = await _insertEngineeringTaskRow({ problem, expected_result, affected_engine, priority, acceptance_criteria, release_kind, git_commit_sha });
     return res.status(200).json({ ok: true, task });
   } catch (e) {
+    if (e.code === 'invalid_git_commit_sha') return res.status(400).json({ ok: false, error: e.message });
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
@@ -11314,6 +11331,15 @@ async function engineeringTaskCreateFromDecision(req, res) {
     const decisionText = String(body.decision_text || '').trim();
     if (!decisionText) return res.status(400).json({ ok: false, error: 'decision_text is required' });
     if (decisionText.length > 20000) return res.status(400).json({ ok: false, error: 'decision_text too long (20000 char max) — paste the decision text, not an entire chat log' });
+    // v16.53.0 — CEO Decision #17 Release Record Fix: release_kind/git_commit_sha
+    // are read ONLY from explicit request fields, never derived by the LLM from
+    // decisionText — the pasted text can say anything; classification and the
+    // release SHA must come from an explicit, structured field the CEO/caller
+    // set deliberately, exactly like every other protected-action input in this
+    // program. Defaults to 'new_development' — every existing call site that
+    // doesn't pass this is completely unaffected.
+    const release_kind = body.release_kind === 'retroactive_release' ? 'retroactive_release' : 'new_development';
+    const git_commit_sha = body.git_commit_sha;
 
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     const KNOWN_COMPONENTS = [
@@ -11409,6 +11435,8 @@ ${decisionText}
       affected_engine: derived.affected_engine,
       priority: derived.priority,
       acceptance_criteria: derived.acceptance_criteria,
+      release_kind,
+      git_commit_sha,
       packetExtra: {
         derived_from: 'ceo_decision_paste',
         origin_decision_text: decisionText.slice(0, 8000),
@@ -11423,6 +11451,7 @@ ${decisionText}
     });
     return res.status(200).json({ ok: true, task, derived });
   } catch (e) {
+    if (e.code === 'invalid_git_commit_sha') return res.status(400).json({ ok: false, error: e.message });
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
@@ -11452,6 +11481,30 @@ async function engineeringTaskUpdate(req, res) {
     if (!id) return res.status(400).json({ ok: false, error: 'id required' });
     // v15.0.0 — Gate: 'done' is only reachable via engineering_task_ceo_approve. Agents must stop at ready_for_ceo.
     if (status === 'done') return res.status(403).json({ ok: false, error: 'CEO approval required. Use engineering_task_ceo_approve to mark tasks done.' });
+    // v16.53.0 — CEO Decision #17 Release Record Fix: release_kind is set ONCE,
+    // at creation, and never accepted here — so no task can relabel itself
+    // retroactive_release after the fact to bypass Authorize Agent/execution.
+    if (body.release_kind !== undefined) {
+      return res.status(400).json({ ok: false, error: 'release_kind cannot be changed after task creation' });
+    }
+    // Any git_commit_sha this endpoint is asked to store must be a real commit
+    // SHA, not arbitrary text — closes the gap where a retroactive_release task
+    // could otherwise carry the target commit only in free-text problem/
+    // acceptance_criteria fields.
+    if (git_commit_sha !== undefined && git_commit_sha !== null && String(git_commit_sha).trim() !== '') {
+      if (!/^[0-9a-f]{40}$/i.test(String(git_commit_sha).trim())) {
+        return res.status(400).json({ ok: false, error: 'git_commit_sha must be a 40-character hex commit SHA' });
+      }
+    }
+    // A retroactive_release task must never lose its target commit — block
+    // clearing git_commit_sha to empty/null once the task is that kind, so it
+    // can never silently drift back into "missing SHA" after creation.
+    if (git_commit_sha !== undefined && (git_commit_sha === null || String(git_commit_sha).trim() === '')) {
+      const existing = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(id)}&select=release_kind`);
+      if (existing?.[0]?.release_kind === 'retroactive_release') {
+        return res.status(409).json({ ok: false, error: 'cannot clear git_commit_sha on a retroactive_release task' });
+      }
+    }
     const patch = {};
     if (status !== undefined) patch.status = status;
     if (problem !== undefined) patch.problem = problem;
