@@ -24219,40 +24219,99 @@ function renderEngineeringBrain(){
         </div>`;
       }).join('')}
       ${(()=>{
-        // v16.40.0 — MMMOS Production Deployment Control: a SEPARATE gate from
-        // task approval above. Approving a task only means the work is
-        // correct; nothing here deploys anything until the CEO explicitly
-        // authorizes a release, and that authorization is verified and
-        // executed entirely server-side (production_deployment_authorize) —
-        // this button only ever calls that one CEO-session-gated action.
+        // v16.55.0 — CEO Decision #17 CEO Production Release UI Fix. Replaces
+        // the single direct "Authorize Production Release -> deploy now"
+        // button with the governed split flow: this button now calls ONLY
+        // production_release_authorization_create (CEO-session-gated, durable
+        // record, NO infrastructure call) — never production_deployment_authorize
+        // directly. Execution is a separate, later step owned entirely by an
+        // authenticated Engineering Worker (engineering_worker_execute_production_release);
+        // nothing here ever triggers the Deploy Hook, and neither the hook URL
+        // nor any worker credential ever reaches this page. The CEO is shown
+        // only business-facing states, never a raw status code, and is never
+        // asked to type or confirm a commit SHA — the SHA shown here is read
+        // verbatim from the already-approved task's own git_commit_sha field
+        // (populated exclusively by already-existing, already-gated backend
+        // paths — never inferred, never guessed, never entered by the CEO).
+        // The pre-existing productionDeploymentAuthorize function and its
+        // _engReviewAuthorizeRelease() call site are left completely
+        // untouched elsewhere in this file — this button simply no longer
+        // calls them.
         const releasePackets=(_ebV2Cache[ck]?.releasePackets)||[];
         if(!releasePackets.length) return '';
+        const SHA_RE=/^[0-9a-f]{40}$/i;
+        const FAILURE_TEXT={
+          deploy_hook_not_configured:'The deployment service is not configured yet.',
+          deploy_hook_rejected:'The deployment service rejected the release request.',
+        };
         return `<div style="margin-top:18px">
           <div style="font-size:10px;font-weight:700;color:#a855f7;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">🚀 Approved — Pending Production Release (${releasePackets.length})</div>
           ${releasePackets.map(p=>{
             const t=p.task||{};
             const sha=t.git_commit_sha;
+            const validSha=sha&&SHA_RE.test(sha);
             const deploys=p.production_deployments||[];
             const lastAttempt=deploys[0];
             // v16.43.0 — CEO Decision #10 (deployment reconciliation): a task
             // whose implementation commit is already an ancestor of what's
-            // actually live in production (verified server-side; see
-            // productionDeploymentReconcile) is a terminal, satisfied state —
-            // never another deployment path. The real "Authorize Production
-            // Release" button is replaced here, not just relabeled: that
-            // button would only ever fail (exact-match integrity check
-            // against a branch head that has legitimately moved on).
+            // actually live in production is a terminal, satisfied state —
+            // never another deployment path, and takes priority over the
+            // authorization flow below.
             const reconciled=lastAttempt&&lastAttempt.status==='reconciled_already_deployed';
-            return `<div style="background:${reconciled?'rgba(34,197,94,0.05)':'rgba(168,85,247,0.04)'};border:1px solid ${reconciled?'rgba(34,197,94,0.3)':'rgba(168,85,247,0.25)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+            const shaLine=validSha
+              ?`<div style="font-size:10px;color:#8b9cc4;font-family:'JetBrains Mono',monospace;margin-bottom:8px">commit ${sha.slice(0,12)}…</div>`
+              :'';
+            if(reconciled){
+              return `<div style="background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.3);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+                <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
+                ${shaLine}
+                <div style="font-size:11px;font-weight:700;margin-bottom:8px;color:#22c55e">✅ Production Satisfied — Already Deployed</div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:8px;line-height:1.5">This commit is already contained in the currently deployed production release (verified via GitHub ancestry + current branch head, deployment ${lastAttempt.vercel_deployment_id||'—'}). No release action needed — nothing was deployed by this check.</div>
+                <button disabled style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.08);color:#22c55e;font-size:11px;font-weight:700;cursor:not-allowed">✅ Already Live — No Release Needed</button>
+              </div>`;
+            }
+            if(!validSha){
+              return `<div style="background:rgba(168,85,247,0.04);border:1px solid rgba(168,85,247,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+                <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
+                <div style="font-size:11px;font-weight:700;margin-bottom:6px;color:#a855f7">Engineering Approved</div>
+                <div style="font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.5">Awaiting Engineering to record the completed commit — nothing to release yet. MMMOS will not ask you to supply a technical identifier; this will become available automatically once Engineering records it.</div>
+              </div>`;
+            }
+            // Most-recent production_release_authorization row for this task —
+            // the server independently guards against two active rows for the
+            // same task existing at once (see productionReleaseAuthorizationCreate),
+            // so the newest row is always the single authoritative current one.
+            const auths=p.production_release_authorizations||[];
+            const latest=auths[0]||null;
+            const STATE_MAP={
+              authorized:{label:'Production Release Authorized',color:'#a855f7',bg:'rgba(168,85,247,0.05)',border:'rgba(168,85,247,0.3)',note:'Cowork will execute this release; MMMOS will verify the result and report back. No further action is needed from you right now.'},
+              executing:{label:'Deploying',color:'#f59e0b',bg:'rgba(245,158,11,0.05)',border:'rgba(245,158,11,0.3)',note:'Cowork is executing this release now.'},
+              triggered:{label:'Production Triggered',color:'#22c55e',bg:'rgba(34,197,94,0.05)',border:'rgba(34,197,94,0.3)',note:'The release was triggered successfully.'+(latest&&latest.triggered_at?(' '+new Date(latest.triggered_at).toLocaleString()):'')},
+              failed:{label:'Deployment Failed',color:'#ef4444',bg:'rgba(239,68,68,0.05)',border:'rgba(239,68,68,0.3)',note:(latest&&FAILURE_TEXT[latest.failure_reason])||'The deployment did not complete.'},
+              ambiguous:{label:'Needs Reconciliation',color:'#f59e0b',bg:'rgba(245,158,11,0.05)',border:'rgba(245,158,11,0.3)',note:'MMMOS could not confirm whether this release reached the deployment service. Check the Vercel deployment history for this commit before authorizing a new attempt.'},
+              revoked:{label:'Authorization Revoked',color:'#6b7280',bg:'rgba(107,114,128,0.05)',border:'rgba(107,114,128,0.3)',note:'This authorization was revoked before execution.'},
+            };
+            // No authorization yet -> ready for the CEO's separate Production
+            // Release decision. An ACTIVE existing authorization (authorized/
+            // executing/triggered) hides the button entirely — never a second,
+            // conflicting decision on the same task. failed/ambiguous/revoked
+            // are terminal and re-show the button as an explicit, separate
+            // NEW decision (never an automatic retry).
+            const isActive=latest&&['authorized','executing','triggered'].includes(latest.status);
+            const showButton=!isActive;
+            const state=!latest?{label:'Awaiting Production Release Authorization',color:'#a855f7',bg:'rgba(168,85,247,0.04)',border:'rgba(168,85,247,0.25)',note:'Engineering approval is complete. Authorizing production release is a separate decision — it records your approval only; it does not deploy anything by itself.'}
+              :(STATE_MAP[latest.status]||{label:'Needs Review',color:'#6b7280',bg:'rgba(107,114,128,0.05)',border:'rgba(107,114,128,0.3)',note:''});
+            const retryNote=(latest&&['failed','ambiguous','revoked'].includes(latest.status))?`<div style="font-size:10px;color:var(--dim);margin-bottom:8px;font-style:italic">Authorizing again creates a brand-new, separate release decision.</div>`:'';
+            return `<div style="background:${state.bg};border:1px solid ${state.border};border-radius:12px;padding:14px 16px;margin-bottom:10px">
               <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
               <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
-              ${sha?`<div style="font-size:10px;color:#8b9cc4;font-family:'JetBrains Mono',monospace;margin-bottom:8px">commit ${sha.slice(0,12)}…</div>`
-                :`<div style="font-size:11px;color:var(--dim);margin-bottom:8px">Awaiting Engineering to push the approved commit — nothing to release yet.</div>`}
-              ${reconciled?`<div style="font-size:11px;font-weight:700;margin-bottom:8px;color:#22c55e">✅ Production Satisfied — Already Deployed</div>
-                <div style="font-size:10px;color:var(--dim);margin-bottom:8px;line-height:1.5">This commit is already contained in the currently deployed production release (verified via GitHub ancestry + current branch head, deployment ${lastAttempt.vercel_deployment_id||'—'}). No release action needed — nothing was deployed by this check.</div>
-                <button disabled style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.08);color:#22c55e;font-size:11px;font-weight:700;cursor:not-allowed">✅ Already Live — No Release Needed</button>`
-                :`${lastAttempt?`<div style="font-size:10px;margin-bottom:8px;color:${lastAttempt.status==='deployed'?'#22c55e':lastAttempt.status==='integrity_check_failed'||lastAttempt.status==='failed'?'#ef4444':'#f59e0b'}">Last attempt: ${lastAttempt.status} ${lastAttempt.vercel_deployment_id?('· '+lastAttempt.vercel_deployment_id):''}</div>`:''}
-                <button ${sha?'':'disabled'} onclick="_engReviewAuthorizeRelease('${t.id}','${sha||''}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(168,85,247,0.5);background:${sha?'rgba(168,85,247,0.15)':'rgba(255,255,255,0.03)'};color:${sha?'#a855f7':'var(--dim)'};font-size:11px;font-weight:700;cursor:${sha?'pointer':'not-allowed'}">🚀 Authorize Production Release</button>`}
+              ${shaLine}
+              <div style="font-size:11px;font-weight:700;margin-bottom:6px;color:${state.color}">${state.label}</div>
+              ${state.note?`<div style="font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.5">${state.note}</div>`:''}
+              ${retryNote}
+              ${showButton?`<button onclick="_engReviewAuthorizeProductionRelease('${t.id}','${sha}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(168,85,247,0.5);background:rgba(168,85,247,0.15);color:#a855f7;font-size:11px;font-weight:700;cursor:pointer">🚀 Authorize Production Release</button>`:''}
             </div>`;
           }).join('')}
         </div>`;
@@ -24497,6 +24556,40 @@ async function _engReviewAuthorizeRelease(engineeringTaskId,commitSha){
     const j=await r.json();
     if(!j.ok){alert('Release authorization failed: '+j.error+(j.branch_head?('\nbranch head: '+j.branch_head):''));_ebV2Cache['b2_engreview']=null;_ebV2Load('b2_engreview');return;}
     alert('Production release triggered. Deployment row: '+j.deployment_row+(j.vercel_deployment_id?('\nVercel deployment: '+j.vercel_deployment_id):''));
+    _ebV2Cache['b2_engreview']=null;
+    _ebV2Load('b2_engreview');
+  }catch(e){alert('Error: '+e.message);}
+}
+
+// v16.55.0 — CEO Decision #17 CEO Production Release UI Fix. This is the
+// governed replacement action wired to the new split-authorization button in
+// the "Approved — Pending Production Release" panel. It calls ONLY
+// production_release_authorization_create — a CEO-session-gated action that
+// records a durable authorization row and does NOT itself touch Vercel, the
+// Deploy Hook, or any worker credential. Execution of an already-authorized
+// release is a separate, later step owned entirely by an authenticated
+// Engineering Worker (engineering_worker_execute_production_release) — this
+// function has no path to that credential and never will. The pre-existing
+// _engReviewAuthorizeRelease() function above (direct CEO deploy) is left
+// completely untouched; this is a new, additional action, not a replacement
+// of that one.
+async function _engReviewAuthorizeProductionRelease(engineeringTaskId,commitSha){
+  if(!commitSha){alert('No commit recorded for this task yet.');return;}
+  if(!confirm('Authorize production release of commit '+commitSha.slice(0,12)+'…?\n\nThis records your approval to release this commit to production. It does not deploy anything itself — Cowork will execute the release afterward, and MMMOS will verify and report back here.'))return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=production_release_authorization_create',{engineering_task_id:engineeringTaskId,commit_sha:commitSha,deploy_branch:'main'});
+    const j=await r.json();
+    if(!j.ok){
+      if(j.error==='production_release_authorization_already_active'){
+        alert('This task already has an active production release authorization (status: '+(j.existing_status||'—')+'). A new authorization cannot be created until that one reaches a final state.');
+      }else{
+        alert('Authorization failed: '+j.error);
+      }
+      _ebV2Cache['b2_engreview']=null;
+      _ebV2Load('b2_engreview');
+      return;
+    }
+    alert('Production release authorized. Cowork will execute this release and MMMOS will verify the result.');
     _ebV2Cache['b2_engreview']=null;
     _ebV2Load('b2_engreview');
   }catch(e){alert('Error: '+e.message);}

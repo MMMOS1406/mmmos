@@ -11708,6 +11708,12 @@ async function engineeringTaskReviewPacket(req, res) {
       test_runs: testRows,
       evidence: evidenceRows,
       production_deployments: (await sbGetSafe(`production_deployments?engineering_task_id=eq.${encodeURIComponent(id)}&order=created_at.desc&limit=10`)),
+      // v16.55.0 — CEO Production Release UI Fix: read-only, additive. Lets the
+      // CEO Engineering Review panel render the split-authorization lifecycle
+      // (authorized/executing/triggered/failed/ambiguous/revoked) without a new
+      // dispatcher action — this function already aggregates everything else
+      // the panel needs for this task, and this is one more read alongside it.
+      production_release_authorizations: (await sbGetSafe(`production_release_authorizations?engineering_task_id=eq.${encodeURIComponent(id)}&order=created_at.desc&limit=10`)),
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -11869,6 +11875,23 @@ async function productionReleaseAuthorizationCreate(req, res) {
     if (!task) return res.status(404).json({ ok: false, error: 'engineering_task_not_found' });
     if (task.status !== 'done' || task.ceo_decision !== 'approved') {
       return res.status(409).json({ ok: false, error: 'engineering_task_not_yet_ceo_approved' });
+    }
+
+    // v16.55.0 — CEO Production Release UI Fix: duplicate-click guard. A
+    // second "Authorize Production Release" click (double-click, two tabs, a
+    // retry after the first request's response was lost) must never produce
+    // two simultaneously-active authorizations for the same task — the CEO
+    // clicking twice should never become two independent production release
+    // decisions. An authorization already in 'authorized', 'executing', or
+    // 'triggered' for this task blocks a new one outright; 'failed',
+    // 'ambiguous', and 'revoked' are terminal and do NOT block — a fresh CEO
+    // click after one of those is exactly the explicit, governed retry this
+    // program requires, not a duplicate.
+    const activeAuthRows = await sbGetSafe(
+      `production_release_authorizations?engineering_task_id=eq.${encodeURIComponent(engineering_task_id)}&status=in.(authorized,executing,triggered)&select=id,status&limit=1`
+    );
+    if (activeAuthRows.length) {
+      return res.status(409).json({ ok: false, error: 'production_release_authorization_already_active', existing_authorization_id: activeAuthRows[0].id, existing_status: activeAuthRows[0].status });
     }
 
     // This insert IS the separate, explicit "CEO clicks Authorize Production
