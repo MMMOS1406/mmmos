@@ -10541,6 +10541,14 @@ export default async function handler(req, res) {
     if (action === 'engineering_task_review_packet') return await engineeringTaskReviewPacket(req, res); // v16.39.0
     if (action === 'production_deployment_authorize') return await productionDeploymentAuthorize(req, res); // v16.40.0 — CEO-only, see function comment
     if (action === 'production_deployment_reconcile') return await productionDeploymentReconcile(req, res); // v16.43.0 — CEO Decision #10 (deployment reconciliation), see function comment
+    // v16.53.0 — CEO Decision #17 Governed Production Execution Fix: split CEO
+    // authorization (durable record, no infrastructure call) from Engineering
+    // Worker execution (holds no CEO session, holds no Deploy Hook secret).
+    // Deliberately NOT added to AGENT_GATEWAY_ALLOWED_OPS / engineeringAgentGateway
+    // — production release stays its own top-level, independently-gated action,
+    // never a generic Agent Gateway capability. See function comments below.
+    if (action === 'production_release_authorization_create')     return await productionReleaseAuthorizationCreate(req, res);
+    if (action === 'engineering_worker_execute_production_release') return await engineeringWorkerExecuteProductionRelease(req, res);
     // v16.35.0 — Phase 4B: Engineering Agent authorization/claim boundary (CEO-approved 2026-08-16)
     if (action === 'engineering_task_ceo_authorize_agent')            return await engineeringTaskCeoAuthorizeAgent(req, res);
     if (action === 'engineering_task_ceo_revoke_agent_authorization') return await engineeringTaskCeoRevokeAgentAuthorization(req, res);
@@ -11814,6 +11822,268 @@ async function productionDeploymentAuthorize(req, res) {
     const vercelDeploymentId = hookResp?.job?.id || hookResp?.id || null;
     await sbPatch('production_deployments', `id=eq.${row.id}`, { vercel_deployment_id: vercelDeploymentId, result: hookResp });
     return res.status(200).json({ ok: true, deployment_row: row.id, vercel_deployment_id: vercelDeploymentId, status: 'triggered' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── CEO Decision #17: Governed Production Execution Fix (v16.53.0) ─────────
+// ────────────────────────────────────────────────────────────────────────────
+// productionDeploymentAuthorize above is UNCHANGED and remains available: a
+// live CEO session can still authorize-and-deploy in one call, exactly as it
+// always has. This section ADDS a second, split path for the case this CEO
+// decision is about: an already-CEO-approved release that Cowork should be
+// able to execute without the CEO handling the Deploy Hook, Terminal, curl,
+// or any deployment credential themselves.
+//
+// Critical governance rule (explicit CEO requirement): engineering_tasks
+// being status='done' AND ceo_decision='approved' is NEVER, by itself,
+// sufficient authority to deploy — that is the Engineering approval decision,
+// not the Production Release decision. The only thing that can ever
+// authorize a real deployment via this split path is a row in
+// production_release_authorizations, created exclusively by the
+// CEO-session-gated action immediately below, exactly like every other
+// CEO-only action in this file.
+//
+// CEO action — durable record only, NO infrastructure call, NO Deploy Hook
+// URL is ever read or used here.
+async function productionReleaseAuthorizationCreate(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const body = req.body || {};
+    const { engineering_task_id, commit_sha, deploy_branch } = body;
+    if (!engineering_task_id || !commit_sha) return res.status(400).json({ ok: false, error: 'engineering_task_id and commit_sha required' });
+    if (!/^[0-9a-f]{40}$/i.test(String(commit_sha).trim())) {
+      return res.status(400).json({ ok: false, error: 'commit_sha must be a 40-character hex commit SHA' });
+    }
+    const normalizedSha = String(commit_sha).trim().toLowerCase();
+    const branch = deploy_branch || 'main';
+
+    // Gate: Engineering approval is a PRECONDITION for a Production Release
+    // decision to even be created — never a substitute for it. This is the
+    // same task-approval check productionDeploymentAuthorize's Gate 1 already
+    // performs; duplicated here (not shared/refactored) so neither function's
+    // behavior can ever change as a side effect of editing the other.
+    const taskRows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(engineering_task_id)}&select=id,status,ceo_decision`);
+    const task = taskRows[0];
+    if (!task) return res.status(404).json({ ok: false, error: 'engineering_task_not_found' });
+    if (task.status !== 'done' || task.ceo_decision !== 'approved') {
+      return res.status(409).json({ ok: false, error: 'engineering_task_not_yet_ceo_approved' });
+    }
+
+    // This insert IS the separate, explicit "CEO clicks Authorize Production
+    // Release" decision — distinct from, and layered on top of, the task
+    // approval checked above. No infrastructure call is made here; branch-head
+    // integrity is deliberately re-checked fresh at execution time instead
+    // (below), not baked in at authorization time, since the branch head can
+    // legitimately move between authorization and execution.
+    const row = await sbInsert('production_release_authorizations', {
+      engineering_task_id,
+      commit_sha: normalizedSha,
+      deploy_branch: branch,
+      status: 'authorized',
+      ceo_authorized_at: new Date().toISOString(),
+      ceo_authorized_by: 'CEO',
+    });
+    if (!row) return res.status(500).json({ ok: false, error: 'authorization_create_failed' });
+    return res.status(200).json({ ok: true, authorization: row });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// Worker action — NOT CEO-session-gated. Authenticates as a registered
+// Engineering Worker (the same _engineeringWorkerAuthenticate primitive the
+// Step 2A Gateway already uses), then accepts only a REFERENCE to an
+// existing CEO-created authorization row — it can never supply its own
+// task/commit/branch and have that trusted. Every fact needed to decide
+// whether to deploy is re-derived server-side from the database and from a
+// live GitHub call; nothing about the caller's own claims (other than which
+// authorization it's asking to execute, and which commit it believes that
+// is) is ever trusted. The Deploy Hook URL is read here, used here, and — as
+// with productionDeploymentAuthorize above — never appears in any response,
+// log line, or client-reachable surface.
+//
+// v16.54.0 — CEO Decision #17 Production Execution Failure-Safety Fix.
+// Lifecycle: authorized -> executing -> triggered | failed | ambiguous.
+// The row is atomically ACQUIRED (authorized -> executing) immediately
+// before the hook call — not before, so Gates C/D/E stay cheap read-only
+// checks — and every subsequent branch is a further atomic, conditional
+// transition FROM 'executing' specifically, so no two concurrent/replayed
+// requests can ever both act on the same row. 'failed' and 'ambiguous' are
+// both terminal for this row: nothing in this function (or anywhere else)
+// ever moves a row backward to 'authorized'. The only way to retry is the
+// existing, unmodified, CEO-session-gated productionReleaseAuthorizationCreate
+// — a brand-new row, a brand-new explicit CEO decision — never a worker-
+// initiated reset of this one. This intentionally reuses the existing
+// authorization model rather than inventing new worker authority.
+const PRODUCTION_DEPLOY_HOOK_TIMEOUT_MS = 15000;
+
+async function engineeringWorkerExecuteProductionRelease(req, res) {
+  try {
+    const body = req.body || {};
+    const { worker_credential, production_release_authorization_id, expected_commit_sha } = body;
+    if (!production_release_authorization_id) return res.status(400).json({ ok: false, error: 'production_release_authorization_id required' });
+
+    // Gate A — WHO: a valid, non-revoked registered Engineering Worker.
+    // Reused verbatim from the Step 2A Gateway auth check; a worker credential
+    // alone grants no deploy authority by itself — it only identifies the
+    // caller for Gates B–E below, every one of which is independently
+    // required.
+    const worker = await _engineeringWorkerAuthenticate(worker_credential);
+    if (!worker) return res.status(401).json({ ok: false, error: 'invalid_or_revoked_worker_credential' });
+
+    // Gate B — WHETHER a Production Release decision for this exact reference
+    // exists at all, and is still in the 'authorized' state. Every other
+    // state is a terminal or in-progress state and is always denied here —
+    // in particular 'failed' and 'ambiguous' are NEVER silently reset by
+    // this read; the only way past them is a brand-new authorization row
+    // from the CEO-session-gated create action.
+    const authRows = await sbGetSafe(`production_release_authorizations?id=eq.${encodeURIComponent(production_release_authorization_id)}&select=*`);
+    const auth = authRows[0];
+    if (!auth) return res.status(404).json({ ok: false, error: 'production_release_authorization_not_found' });
+    if (auth.status === 'executing') return res.status(409).json({ ok: false, error: 'production_release_authorization_execution_in_progress' });
+    if (auth.status === 'triggered') return res.status(409).json({ ok: false, error: 'production_release_authorization_already_triggered' });
+    if (auth.status === 'failed') return res.status(409).json({ ok: false, error: 'production_release_authorization_failed_requires_new_ceo_authorization', failure_reason: auth.failure_reason || null });
+    if (auth.status === 'ambiguous') return res.status(409).json({ ok: false, error: 'production_release_authorization_ambiguous_requires_reconciliation' });
+    if (auth.status === 'revoked') return res.status(409).json({ ok: false, error: 'production_release_authorization_revoked' });
+    if (auth.status !== 'authorized') return res.status(409).json({ ok: false, error: 'production_release_authorization_invalid_state' });
+
+    // Gate C — the underlying Engineering approval must STILL hold right now,
+    // independently re-checked (never assumed from the authorization row's
+    // mere existence). This is the direct enforcement of the CEO's rule that
+    // status='done'/ceo_decision='approved' and a Production Release
+    // authorization are two separate things that must BOTH be true at
+    // execution time.
+    const taskRows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(auth.engineering_task_id)}&select=id,status,ceo_decision,packet`);
+    const task = taskRows[0];
+    if (!task || task.status !== 'done' || task.ceo_decision !== 'approved') {
+      return res.status(409).json({ ok: false, error: 'engineering_task_not_ceo_approved' });
+    }
+
+    // Gate D — WHAT: the worker's own belief about what it's deploying must
+    // match the CEO-authorized commit exactly. This is a confused-deputy
+    // guard (a worker that references the wrong authorization id by mistake
+    // fails here instead of silently deploying an unintended commit), never a
+    // way for the worker to choose or override the authorized commit itself.
+    if (!expected_commit_sha || String(expected_commit_sha).trim().toLowerCase() !== auth.commit_sha) {
+      return res.status(409).json({ ok: false, error: 'commit_sha_mismatch_with_authorization', authorized_commit: auth.commit_sha });
+    }
+
+    // Gate E — live GitHub branch-head integrity check, fresh, right now —
+    // reuses _prodDeployBranchHeadSha verbatim (same function
+    // productionDeploymentAuthorize already relies on; not duplicated). A
+    // branch head that moved since authorization is a deny, not an
+    // acquisition — the authorization stays 'authorized' so a legitimate
+    // retry (once the intended commit is actually at the tip again) remains
+    // possible without burning a CEO decision on an infrastructure fact that
+    // hadn't yet caught up.
+    const head = await _prodDeployBranchHeadSha(auth.deploy_branch);
+    if (!head.ok) return res.status(502).json({ ok: false, error: head.error });
+    if (head.sha !== auth.commit_sha) {
+      return res.status(409).json({ ok: false, error: 'branch_head_moved', authorized_commit: auth.commit_sha, branch_head: head.sha });
+    }
+
+    // ── Acquire — atomic, conditional on the row still being 'authorized'.
+    // PostgREST only matches/updates a row whose current status is exactly
+    // 'authorized'; if a concurrent request already acquired it between Gate
+    // B's read and this write, this PATCH matches zero rows and sbPatch
+    // returns undefined, which is treated as a lost race and denied. This is
+    // the actual concurrency/replay guard for double-DEPLOYMENT — nothing
+    // downstream of this line can ever run twice for the same row, because
+    // nothing downstream can ever observe the row back in 'authorized'.
+    const acquiredAt = new Date().toISOString();
+    const acquired = await sbPatch(
+      'production_release_authorizations',
+      `id=eq.${encodeURIComponent(production_release_authorization_id)}&status=eq.authorized`,
+      { status: 'executing', acquired_at: acquiredAt, acquired_by_worker_id: worker.id }
+    );
+    if (!acquired) return res.status(409).json({ ok: false, error: 'production_release_authorization_execution_in_progress' });
+
+    // Audit row created immediately after acquisition, before the hook call —
+    // exists even if the hook call itself subsequently fails or hangs, so an
+    // ambiguous attempt is never silently lost. Mirrors
+    // productionDeploymentAuthorize's own "record first" discipline.
+    const originDecisionId = task.packet?.origin_decision?.id || null;
+    const depRow = await sbInsert('production_deployments', {
+      origin_decision_id: originDecisionId,
+      engineering_task_id: auth.engineering_task_id,
+      commit_sha: auth.commit_sha,
+      deploy_branch: auth.deploy_branch,
+      ceo_authorized_at: auth.ceo_authorized_at,
+      ceo_authorized_by: auth.ceo_authorized_by,
+      status: 'executing',
+      integrity_check_passed: true,
+      branch_head_sha_at_check: head.sha,
+      production_release_authorization_id: auth.id,
+      executed_by_worker_id: worker.id,
+    });
+    await sbPatch('production_release_authorizations', `id=eq.${auth.id}`, { production_deployment_id: depRow?.id || null }).catch(() => {});
+
+    const hookUrl = process.env.PRODUCTION_DEPLOY_HOOK_URL;
+    if (!hookUrl) {
+      // Definitive, not ambiguous — we know for certain no call was ever
+      // attempted. Still moves executing -> failed, never back to authorized.
+      await sbPatch('production_release_authorizations', `id=eq.${auth.id}&status=eq.executing`,
+        { status: 'failed', failed_at: new Date().toISOString(), failure_reason: 'deploy_hook_not_configured' });
+      await sbPatch('production_deployments', `id=eq.${depRow.id}`, { status: 'failed', result: { error: 'deploy_hook_not_configured' } });
+      return res.status(500).json({ ok: false, error: 'deploy_hook_not_configured', deployment_row: depRow.id });
+    }
+
+    // Bounded call: a hard timeout turns an indefinite hang into a definite,
+    // reconcilable 'ambiguous' outcome instead of leaving the row (and the
+    // caller) stuck waiting on Vercel forever.
+    let hookResp = {};
+    let httpStatus = null;
+    let outcome; // 'triggered' | 'failed' | 'ambiguous'
+    let outcomeDetail = null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PRODUCTION_DEPLOY_HOOK_TIMEOUT_MS);
+    try {
+      const hr = await fetch(hookUrl, { method: 'POST', signal: controller.signal });
+      httpStatus = hr.status;
+      hookResp = await hr.json().catch(() => ({}));
+      if (hr.ok) {
+        outcome = 'triggered';
+      } else {
+        // The request definitely reached Vercel and Vercel definitely
+        // rejected it — a confirmed, definitive failure, not ambiguous.
+        outcome = 'failed';
+        outcomeDetail = { http_status: httpStatus, body: hookResp };
+      }
+    } catch (e) {
+      // Network error, DNS failure, connection reset, or our own timeout
+      // abort — we do NOT know whether Vercel ever received/processed the
+      // request. Fail closed: 'ambiguous', never auto-retried, with enough
+      // detail (was it a timeout vs a network error, and when) for
+      // engineering/MMMOS to reconcile against Vercel's own deployment list.
+      outcome = 'ambiguous';
+      outcomeDetail = { error: e.message, was_timeout: e.name === 'AbortError', attempted_at: acquiredAt, timeout_ms: PRODUCTION_DEPLOY_HOOK_TIMEOUT_MS };
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Final, atomic, conditional transition FROM 'executing' only — the
+    // authorization is durably terminal (triggered/failed/ambiguous) the
+    // instant this resolves; nothing ever moves it back to 'authorized'.
+    if (outcome === 'triggered') {
+      const vercelDeploymentId = hookResp?.job?.id || hookResp?.id || null;
+      await sbPatch('production_release_authorizations', `id=eq.${auth.id}&status=eq.executing`,
+        { status: 'triggered' });
+      await sbPatch('production_deployments', `id=eq.${depRow.id}`, { status: 'triggered', triggered_at: new Date().toISOString(), vercel_deployment_id: vercelDeploymentId, result: hookResp });
+      return res.status(200).json({ ok: true, deployment_row: depRow.id, vercel_deployment_id: vercelDeploymentId, status: 'triggered', executed_by_worker: worker.label || worker.id });
+    }
+    if (outcome === 'failed') {
+      await sbPatch('production_release_authorizations', `id=eq.${auth.id}&status=eq.executing`,
+        { status: 'failed', failed_at: new Date().toISOString(), failure_reason: 'deploy_hook_rejected', failure_detail: outcomeDetail });
+      await sbPatch('production_deployments', `id=eq.${depRow.id}`, { status: 'failed', result: outcomeDetail });
+      return res.status(502).json({ ok: false, error: 'deploy_hook_rejected', http_status: httpStatus, deployment_row: depRow.id });
+    }
+    // outcome === 'ambiguous'
+    await sbPatch('production_release_authorizations', `id=eq.${auth.id}&status=eq.executing`,
+      { status: 'ambiguous', ambiguous_at: new Date().toISOString(), ambiguous_detail: outcomeDetail });
+    await sbPatch('production_deployments', `id=eq.${depRow.id}`, { status: 'ambiguous', result: outcomeDetail });
+    return res.status(502).json({ ok: false, error: 'deploy_hook_call_ambiguous', deployment_row: depRow.id, reconcile_hint: 'network/timeout failure after the request may have reached Vercel — check Vercel deployment history for this commit before issuing a new CEO authorization' });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
