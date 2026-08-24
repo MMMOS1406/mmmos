@@ -1,0 +1,28 @@
+name: Decision18 Materialize
+on:
+  push:
+    branches: [decision18-materialize]
+    paths: ['decision18.patch.b64']
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: decision18-materialize
+      - name: Materialize exact approved file
+        run: |
+          set -euo pipefail
+          base64 -d decision18.patch.b64 > /tmp/d18.patch
+          git checkout c36fa1bfcce267125fdec2de55aeb06269bddb6f -- public/index.html
+          git apply /tmp/d18.patch
+          test "$(git hash-object public/index.html)" = "296dfebd3db446270d94750e1079ee01adb5242b"
+          test "$(sha256sum public/index.html | awk '{print $1}')" = "602f6420fa0064297e687116846d767ecd365d9835e245dbb91344060d1de7ff"
+          test "$(wc -c < public/index.html | tr -d ' ')" = "1810970"
+          git config user.name 'MMM CEO Advisor'
+          git config user.email 'ceo-advisor@mmmos.local'
+          git add public/index.html
+          git commit -m 'CEO Decision #18: CEO review lifecycle completion handoff'
+          git push origin HEAD:decision18-materialize
