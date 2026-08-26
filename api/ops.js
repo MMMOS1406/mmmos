@@ -10390,82 +10390,101 @@ async function smVideoProductionPoll(req, res) {
         console.log('[smVideoProductionPoll] Submagic complete, entering compositing · productionId:', productionId, '· submagicStatus:', sub.status, '· downloadUrl:', sub.downloadUrl);
         production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, { status: 'compositing' });
 
-        // ── Stage 3: SMM Brand Composer — v16.35.0 Milestone 5A: asset-driven composition, ──
-        // ── not just a logo overlay. Uses storefront/product assets returned by ────────────
-        // ── smSelectBrandAssets plus verified website/phone/social-verification state. ─────
-        let task, offering, identity, hasVerifiedSocial, brand;
+        // v16.53.0 — CEO Decision #26 continuation: Stage 3 previously let any error inside this
+        // block (task/asset lookup, smBrandComposite, or the storage upload — e.g. a transient
+        // Cloudflare/Supabase 520) fall through to the function's outer catch, which returns an
+        // error response WITHOUT ever patching production.status away from 'compositing'. The
+        // next poll call then only matches the 'rendering'/'processing_captions' branches above,
+        // falls through to "any other status — return as-is" below, and the task is stuck at
+        // 'compositing' forever — no error shown, no retry possible. Fixed by giving Stage 3 its
+        // own try/catch that patches status:'failed' + error_message on any failure here, exactly
+        // matching the HeyGen-failure and Submagic-failure branches above — the existing frontend
+        // (renderVideoProductionSection) already treats status==='failed' as retryable via its
+        // "↻ Regenerate video" button, so no UI change is needed, only this backend fix.
         try {
-          const taskRows = await sbGet(`sm_va_tasks?id=eq.${encodeURIComponent(production.va_task_id)}&select=*&limit=1`);
-          task = taskRows && taskRows[0];
-          if (!task) throw new Error(`va_task ${production.va_task_id} not found`);
-          ({ offering, identity, hasVerifiedSocial } = await smLoadOfferingForTask(task));
-          brand = await smSelectBrandAssets(task.business_id);
-        } catch (e) {
-          throw new Error('compositing setup (task/offering/brand lookup) failed: ' + e.message);
-        }
-        const businessName = (identity && identity.businessName) || null;
-        const priceLabel = (typeof offering.price === 'number') ? `$${offering.price.toFixed(2)}` : null;
+          // ── Stage 3: SMM Brand Composer — v16.35.0 Milestone 5A: asset-driven composition, ──
+          // ── not just a logo overlay. Uses storefront/product assets returned by ────────────
+          // ── smSelectBrandAssets plus verified website/phone/social-verification state. ─────
+          let task, offering, identity, hasVerifiedSocial, brand;
+          try {
+            const taskRows = await sbGet(`sm_va_tasks?id=eq.${encodeURIComponent(production.va_task_id)}&select=*&limit=1`);
+            task = taskRows && taskRows[0];
+            if (!task) throw new Error(`va_task ${production.va_task_id} not found`);
+            ({ offering, identity, hasVerifiedSocial } = await smLoadOfferingForTask(task));
+            brand = await smSelectBrandAssets(task.business_id);
+          } catch (e) {
+            throw new Error('compositing setup (task/offering/brand lookup) failed: ' + e.message);
+          }
+          const businessName = (identity && identity.businessName) || null;
+          const priceLabel = (typeof offering.price === 'number') ? `$${offering.price.toFixed(2)}` : null;
 
-        let composited;
-        try {
-          composited = await smBrandComposite({
-            submagicVideoUrl: sub.downloadUrl,
-            businessName, itemName: offering.name, priceLabel,
-            website: (identity && identity.website) || null,
-            phoneNumber: (identity && identity.phoneNumber) || null,
-            cityOrAddress: (identity && identity.cityOrAddress) || null,
-            hasVerifiedSocial: !!hasVerifiedSocial,
-            assets: { logo: brand.logo, storefront: brand.storefront, products: brand.products },
-            id: production.id,
+          let composited;
+          try {
+            composited = await smBrandComposite({
+              submagicVideoUrl: sub.downloadUrl,
+              businessName, itemName: offering.name, priceLabel,
+              website: (identity && identity.website) || null,
+              phoneNumber: (identity && identity.phoneNumber) || null,
+              cityOrAddress: (identity && identity.cityOrAddress) || null,
+              hasVerifiedSocial: !!hasVerifiedSocial,
+              assets: { logo: brand.logo, storefront: brand.storefront, products: brand.products },
+              id: production.id,
+            });
+          } catch (e) {
+            throw new Error('smBrandComposite failed: ' + e.message);
+          }
+          console.log('[smVideoProductionPoll] smBrandComposite succeeded · durationSec:', composited.durationSec, '· logoUsed:', composited.logoUsed, '· openerAssetUsed:', composited.openerAssetUsed, '· productSegmentsUsed:', composited.productSegmentsUsed, '· bufferBytes:', composited.buffer && composited.buffer.length);
+
+          const finalPath = `social-media-manager/${task.business_id}/${production.va_task_id}/attempt-${production.attempt_number}-final.mp4`;
+          let finalUrl;
+          try {
+            finalUrl = await sbStorageUpload(finalPath, composited.buffer, 'video/mp4');
+          } catch (e) {
+            throw new Error('sbStorageUpload (final composited video) failed: ' + e.message);
+          }
+
+          // Record every real approved asset that was AVAILABLE for this attempt (not only the
+          // ones Brand Composer happened to use) — a faithful, auditable record of what was on
+          // hand, consistent with the pre-5A behavior of logging brand.logo/brand.productVisual.
+          let seq = 1;
+          if (brand.logo) {
+            await sbInsert('sm_video_production_assets', {
+              video_production_id: production.id, content_asset_id: brand.logo.id, role: 'overlay_graphic', sequence_order: seq++,
+            }).catch(() => {});
+          }
+          if (brand.storefront) {
+            await sbInsert('sm_video_production_assets', {
+              video_production_id: production.id, content_asset_id: brand.storefront.id, role: 'brand_reference', sequence_order: seq++,
+            }).catch(() => {});
+          }
+          for (const p of (brand.products || [])) {
+            await sbInsert('sm_video_production_assets', {
+              video_production_id: production.id, content_asset_id: p.id, role: 'brand_reference', sequence_order: seq++,
+            }).catch(() => {});
+          }
+
+          production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
+            final_video_url: finalUrl, duration_seconds: composited.durationSec || sub.duration || production.duration_seconds || null,
+            status: 'ready_for_review',
+          });
+          await sbPatch('sm_production_packages', `va_task_id=eq.${encodeURIComponent(production.va_task_id)}&status=eq.draft`, {
+            hook: production.hook, caption: production.caption, hashtags: production.hashtags,
+          }).catch(() => {});
+          return res.status(200).json({
+            ok: true, production,
+            visualSource: brand.productVisual ? 'client_provided' : 'none_available_yet',
+            logoUsed: composited.logoUsed,
+            openerAssetUsed: composited.openerAssetUsed,
+            productSegmentsUsed: composited.productSegmentsUsed,
+            missingAssets: brand.missingAssets,
           });
         } catch (e) {
-          throw new Error('smBrandComposite failed: ' + e.message);
+          console.error('[smVideoProductionPoll] compositing stage failed · productionId:', productionId, '·', e && e.stack || e);
+          production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
+            status: 'failed', error_message: 'Compositing failed: ' + e.message,
+          }).catch(() => production);
+          return res.status(200).json({ ok: true, production });
         }
-        console.log('[smVideoProductionPoll] smBrandComposite succeeded · durationSec:', composited.durationSec, '· logoUsed:', composited.logoUsed, '· openerAssetUsed:', composited.openerAssetUsed, '· productSegmentsUsed:', composited.productSegmentsUsed, '· bufferBytes:', composited.buffer && composited.buffer.length);
-
-        const finalPath = `social-media-manager/${task.business_id}/${production.va_task_id}/attempt-${production.attempt_number}-final.mp4`;
-        let finalUrl;
-        try {
-          finalUrl = await sbStorageUpload(finalPath, composited.buffer, 'video/mp4');
-        } catch (e) {
-          throw new Error('sbStorageUpload (final composited video) failed: ' + e.message);
-        }
-
-        // Record every real approved asset that was AVAILABLE for this attempt (not only the
-        // ones Brand Composer happened to use) — a faithful, auditable record of what was on
-        // hand, consistent with the pre-5A behavior of logging brand.logo/brand.productVisual.
-        let seq = 1;
-        if (brand.logo) {
-          await sbInsert('sm_video_production_assets', {
-            video_production_id: production.id, content_asset_id: brand.logo.id, role: 'overlay_graphic', sequence_order: seq++,
-          }).catch(() => {});
-        }
-        if (brand.storefront) {
-          await sbInsert('sm_video_production_assets', {
-            video_production_id: production.id, content_asset_id: brand.storefront.id, role: 'brand_reference', sequence_order: seq++,
-          }).catch(() => {});
-        }
-        for (const p of (brand.products || [])) {
-          await sbInsert('sm_video_production_assets', {
-            video_production_id: production.id, content_asset_id: p.id, role: 'brand_reference', sequence_order: seq++,
-          }).catch(() => {});
-        }
-
-        production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
-          final_video_url: finalUrl, duration_seconds: composited.durationSec || sub.duration || production.duration_seconds || null,
-          status: 'ready_for_review',
-        });
-        await sbPatch('sm_production_packages', `va_task_id=eq.${encodeURIComponent(production.va_task_id)}&status=eq.draft`, {
-          hook: production.hook, caption: production.caption, hashtags: production.hashtags,
-        }).catch(() => {});
-        return res.status(200).json({
-          ok: true, production,
-          visualSource: brand.productVisual ? 'client_provided' : 'none_available_yet',
-          logoUsed: composited.logoUsed,
-          openerAssetUsed: composited.openerAssetUsed,
-          productSegmentsUsed: composited.productSegmentsUsed,
-          missingAssets: brand.missingAssets,
-        });
       }
       if (failStatuses.includes(statusLc)) {
         production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
