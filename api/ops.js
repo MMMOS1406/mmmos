@@ -10379,7 +10379,17 @@ async function smVideoProductionPoll(req, res) {
     }
 
     // ── Stage 2: Submagic captions/polish in flight ───────────────────────────────────────
-    if (production.status === 'processing_captions' && production.submagic_project_id) {
+    // v16.56.0 — CEO Decision #26 continuation: also re-enter here when status is already
+    // 'compositing'. Stage 3 (below) runs synchronously inside this same HTTP request after the
+    // 'compositing' patch — asset lookup + smBrandComposite (ffmpeg) + storage upload can
+    // occasionally exceed api/ops.js's 60s maxDuration (vercel.json) on a slow render, which
+    // kills the function via a platform timeout, not a thrown JS error, so the v16.53.0
+    // try/catch (which only catches real exceptions) never runs and the row is left stuck at
+    // 'compositing' with no error — reproduced live twice against a real fresh production.
+    // Treating 'compositing' as a valid re-entry point makes every subsequent poll retry Stage 3
+    // from scratch (re-fetches the already-finished Submagic result, safe and idempotent) instead
+    // of falling through to "any other status — return as-is" forever.
+    if ((production.status === 'processing_captions' || production.status === 'compositing') && production.submagic_project_id) {
       const sub = await smSubmagicGetProjectInternal(production.submagic_project_id);
       console.log('[smVideoProductionPoll] submagic poll · productionId:', productionId, '· projectId:', production.submagic_project_id, '· sub.ok:', sub.ok, '· sub.status:', sub.status, '· sub.downloadUrl:', sub.downloadUrl, '· raw:', JSON.stringify(sub.raw).slice(0, 400));
       const doneStatuses = ['completed', 'done', 'ready', 'success', 'finished']; // v16.34.1 — added 'finished' to match the value the existing client-side _pollSubmagicProjects() already checks for (index.html) — this SMM poller had drifted from that proven list
