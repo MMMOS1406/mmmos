@@ -3,8 +3,9 @@
   "git": {
     "deploymentEnabled": false
   },
+  "fluid": true,
   "functions": {
-    "api/ops.js": { "maxDuration": 60 }
+    "api/ops.js": { "maxDuration": 180 }
   },
   "headers": [
     {
