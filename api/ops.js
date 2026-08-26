@@ -9454,6 +9454,48 @@ async function vaTaskGet(req, res) {
   }
 }
 
+// v16.57.0 — CEO Decision #26 continuation: real, per-task Generate action. Every existing SMM
+// task's package was created in bulk by smGenerateVaQueueForPlan the moment its content plan
+// was approved, so no task was ever individually reachable "at Generate" through the VA UI —
+// the CEO could never test that step. This gives an individual sm_va_tasks row (created with no
+// package — see the CEO Decision #26 checkpoint prep) a real, on-demand Generate action, reusing
+// the exact same content-generation helper (smBuildProductionPackageContent) the bulk path
+// already uses — no new creative logic, no fabricated fields, same verified-Business-Brain-only
+// grounding. Refuses to run if a package already exists (idempotent-safe, mirrors the bulk
+// path's own existing-package check).
+async function smVaTaskGeneratePackage(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { vaTaskId } = req.body || {};
+  if (!vaTaskId) return res.status(400).json({ ok: false, error: 'vaTaskId is required' });
+  try {
+    const taskRows = await sbGet(`sm_va_tasks?id=eq.${encodeURIComponent(vaTaskId)}&select=*&limit=1`);
+    const task = taskRows && taskRows[0];
+    if (!task) return res.status(404).json({ ok: false, error: 'va task not found' });
+    if (task.mode !== 'demo') return res.status(400).json({ ok: false, error: 'only demo-mode tasks may generate a package' });
+
+    const existingPkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(vaTaskId)}&select=id&limit=1`);
+    if (existingPkgRows && existingPkgRows[0]) {
+      return res.status(400).json({ ok: false, error: 'a package already exists for this task' });
+    }
+
+    const brainRows = await sbGet(`business_brain?business_id=eq.${encodeURIComponent(task.business_id)}&select=identity,offerings&limit=1`);
+    const brain = brainRows && brainRows[0];
+    if (!brain) return res.status(404).json({ ok: false, error: 'Business Brain not found for this task' });
+    const offerings = Array.isArray(brain.offerings) ? brain.offerings : [];
+    const offering = offerings.find((o) => o.id === task.item_ref);
+    if (!offering) return res.status(404).json({ ok: false, error: `offering ${task.item_ref} not found in Business Brain` });
+
+    const content = smBuildProductionPackageContent(offering, brain.identity || {});
+    const pkg = await sbInsert('sm_production_packages', {
+      va_task_id: task.id, caption: content.caption, hook: content.hook, hashtags: content.hashtags, checklist: content.checklist,
+    });
+    const updatedTask = await sbPatch('sm_va_tasks', `id=eq.${encodeURIComponent(task.id)}`, { status: 'package_ready' });
+    return res.status(200).json({ ok: true, task: updatedTask, package: pkg });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
+  }
+}
+
 async function productionPackageReview(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { packageId, decision } = req.body || {};
@@ -10596,6 +10638,7 @@ export default async function handler(req, res) {
     if (action === 'va_task_queue_generate')         return await vaTaskQueueGenerate(req, res);           // v16.31.0
     if (action === 'va_task_list')                   return await vaTaskList(req, res);                    // v16.31.0
     if (action === 'va_task_get')                    return await vaTaskGet(req, res);                     // v16.31.0
+    if (action === 'sm_va_task_generate_package')    return await smVaTaskGeneratePackage(req, res);        // v16.57.0
     if (action === 'production_package_review')      return await productionPackageReview(req, res);       // v16.31.0
     if (action === 'ceo_review_queue_list')          return await ceoReviewQueueList(req, res);            // v16.31.0
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
