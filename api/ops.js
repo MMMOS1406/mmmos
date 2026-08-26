@@ -9475,6 +9475,42 @@ async function productionPackageReview(req, res) {
   }
 }
 
+// v16.52.0 — CEO Decision #26: SMM → VA Portal lifecycle integration, Publish stage.
+// The shared operator lifecycle (Generate→Review→Build→Approve→Publish→Done, same bar used
+// by SRV Farsi/English/AI Studio/NextWave) needs an explicit terminal action for SMM once a
+// package is ceo_approved AND its video is ready_for_review. SMM has no real social
+// integration and publish_locked is permanently database-enforced true (never touched here) —
+// this action performs NO external call. It only records that the task was carried through
+// the safe/test Publish step, so the lifecycle bar can reach Done. Requires the new
+// 'published' value on sm_va_tasks_status_check (see accompanying migration).
+async function smVaTaskMarkPublished(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { vaTaskId } = req.body || {};
+  if (!vaTaskId) return res.status(400).json({ ok: false, error: 'vaTaskId is required' });
+  try {
+    const taskRows = await sbGet(`sm_va_tasks?id=eq.${encodeURIComponent(vaTaskId)}&select=*&limit=1`);
+    const task = taskRows && taskRows[0];
+    if (!task) return res.status(404).json({ ok: false, error: 'va task not found' });
+    if (task.mode !== 'demo') return res.status(400).json({ ok: false, error: 'only demo-mode tasks may be marked published' });
+    if (task.status === 'published') return res.status(200).json({ ok: true, task });
+
+    const pkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(vaTaskId)}&select=*&order=created_at.desc&limit=1`);
+    const pkg = pkgRows && pkgRows[0];
+    if (!pkg || pkg.status !== 'ceo_approved') {
+      return res.status(400).json({ ok: false, error: 'package must be ceo_approved before this task can be published' });
+    }
+    const vidRows = await sbGet(`sm_video_productions?va_task_id=eq.${encodeURIComponent(vaTaskId)}&select=*&order=attempt_number.desc&limit=1`);
+    const vid = vidRows && vidRows[0];
+    if (!vid || vid.status !== 'ready_for_review' || !vid.final_video_url) {
+      return res.status(400).json({ ok: false, error: 'no finished video ready to publish for this task' });
+    }
+    const updated = await sbPatch('sm_va_tasks', `id=eq.${encodeURIComponent(vaTaskId)}`, { status: 'published' });
+    return res.status(200).json({ ok: true, task: updated });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
+  }
+}
+
 async function ceoReviewQueueList(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const { businessId } = req.query || {};
@@ -10539,6 +10575,7 @@ export default async function handler(req, res) {
     if (action === 'sm_content_asset_create')        return await smContentAssetCreate(req, res);           // v16.32.0
     if (action === 'sm_content_asset_list')          return await smContentAssetList(req, res);             // v16.32.0
     if (action === 'sm_content_asset_review')        return await smContentAssetReview(req, res);           // v16.32.0
+    if (action === 'sm_va_task_mark_published')      return await smVaTaskMarkPublished(req, res);          // v16.52.0
     if (action === 'list_pipeline')        return await listPipeline(req, res);
     if (action === 'create_pipeline_item') return await createPipelineItem(req, res);
     if (action === 'update_pipeline_stage') return await updatePipelineStage(req, res);
