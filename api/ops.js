@@ -9426,8 +9426,11 @@ async function vaTaskList(req, res) {
     const tasks = await sbGet(`sm_va_tasks?business_id=eq.${encodeURIComponent(businessId)}&select=*&order=created_at.asc`);
     const ids = (tasks || []).map((t) => t.id);
     let packages = [];
+    // v16.58.0 — CEO Decision #26 continuation: sm_production_packages now supports multiple
+    // attempts per task (Reject → Regenerate, same attempt_number/is_current pattern as
+    // sm_video_productions) — only the current attempt is ever relevant here.
     if (ids.length) {
-      packages = await sbGet(`sm_production_packages?va_task_id=in.(${ids.map(encodeURIComponent).join(',')})&select=*`);
+      packages = await sbGet(`sm_production_packages?va_task_id=in.(${ids.map(encodeURIComponent).join(',')})&is_current=eq.true&select=*`);
     }
     const byTaskId = {};
     (packages || []).forEach((p) => { byTaskId[p.va_task_id] = p; });
@@ -9446,7 +9449,8 @@ async function vaTaskGet(req, res) {
     const taskRows = await sbGet(`sm_va_tasks?id=eq.${encodeURIComponent(taskId)}&select=*&limit=1`);
     const task = taskRows && taskRows[0] ? taskRows[0] : null;
     if (!task) return res.status(404).json({ ok: false, error: 'task not found' });
-    const pkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(taskId)}&select=*&limit=1`);
+    // v16.58.0 — CEO Decision #26 continuation: current attempt only (see vaTaskList comment).
+    const pkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(taskId)}&is_current=eq.true&select=*&limit=1`);
     const pkg = pkgRows && pkgRows[0] ? pkgRows[0] : null;
     return res.status(200).json({ ok: true, task, package: pkg });
   } catch (e) {
@@ -9461,8 +9465,14 @@ async function vaTaskGet(req, res) {
 // package — see the CEO Decision #26 checkpoint prep) a real, on-demand Generate action, reusing
 // the exact same content-generation helper (smBuildProductionPackageContent) the bulk path
 // already uses — no new creative logic, no fabricated fields, same verified-Business-Brain-only
-// grounding. Refuses to run if a package already exists (idempotent-safe, mirrors the bulk
-// path's own existing-package check).
+// grounding.
+// v16.58.0 — CEO Decision #26 continuation: also serves as the Review stage's "Regenerate"
+// action once a package has been rejected. Refuses to run only while the current package is
+// still 'draft' (an undecided attempt — approve or reject it first) or 'ceo_approved' (already
+// moving through Build/Approve/Publish); a 'rejected' current package always allows a fresh
+// attempt. The sm_production_packages_manage_attempts trigger (same pattern as
+// sm_video_productions) assigns the new attempt_number and marks it is_current, preserving the
+// rejected attempt as permanent history — never overwritten or deleted.
 async function smVaTaskGeneratePackage(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { vaTaskId } = req.body || {};
@@ -9473,9 +9483,10 @@ async function smVaTaskGeneratePackage(req, res) {
     if (!task) return res.status(404).json({ ok: false, error: 'va task not found' });
     if (task.mode !== 'demo') return res.status(400).json({ ok: false, error: 'only demo-mode tasks may generate a package' });
 
-    const existingPkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(vaTaskId)}&select=id&limit=1`);
-    if (existingPkgRows && existingPkgRows[0]) {
-      return res.status(400).json({ ok: false, error: 'a package already exists for this task' });
+    const existingPkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(vaTaskId)}&is_current=eq.true&select=id,status&limit=1`);
+    const existingPkg = existingPkgRows && existingPkgRows[0];
+    if (existingPkg && existingPkg.status !== 'rejected') {
+      return res.status(400).json({ ok: false, error: `a ${existingPkg.status} package already exists for this task` });
     }
 
     const brainRows = await sbGet(`business_brain?business_id=eq.${encodeURIComponent(task.business_id)}&select=identity,offerings&limit=1`);
@@ -10279,7 +10290,7 @@ async function smSubmagicGetProjectInternal(projectId) {
 async function smLoadOfferingForTask(task) {
   const [planRows, brainRows] = await Promise.all([
     sbGet(`content_plans?id=eq.${encodeURIComponent(task.content_plan_id)}&select=plan_body&limit=1`),
-    sbGet(`business_brain?business_id=eq.${encodeURIComponent(task.business_id)}&select=identity,social_accounts&limit=1`),
+    sbGet(`business_brain?business_id=eq.${encodeURIComponent(task.business_id)}&select=identity,social_accounts,offerings&limit=1`),
   ]);
   const plan = planRows && planRows[0];
   const brain = (brainRows && brainRows[0]) || {};
@@ -10288,7 +10299,20 @@ async function smLoadOfferingForTask(task) {
   const hasVerifiedSocial = socialAccounts.some((a) => a && a.status === 'verified');
   const items = (plan && plan.plan_body && Array.isArray(plan.plan_body.items)) ? plan.plan_body.items : [];
   const item = items.find((it) => it.source && it.source.id === task.item_ref);
-  const offering = (item && item.source) || null;
+  let offering = (item && item.source) || null;
+  // v16.58.0 — CEO Decision #26 continuation: root cause of a real Build-stage failure. This
+  // lookup previously found the offering ONLY inside the task's content plan's own item
+  // snapshot — any task whose item_ref wasn't literally embedded there (e.g. an
+  // engineering-prepared CEO acceptance task, or any future per-task Generate flow) threw here,
+  // BEFORE any sm_video_productions row was ever created, so Build failed with no visible
+  // production, no error surfaced in the UI, and no way to tell it had failed at all — it just
+  // looked frozen. Fixed with the same fallback smVaTaskGeneratePackage already uses: read the
+  // offering directly from Business Brain's own verified offerings array (the authoritative
+  // source either way — the content plan is only ever a snapshot of it).
+  if (!offering) {
+    const offerings = Array.isArray(brain.offerings) ? brain.offerings : [];
+    offering = offerings.find((o) => o.id === task.item_ref) || null;
+  }
   if (!offering) throw new Error(`verified offering not found for item_ref=${task.item_ref}`);
   return { offering, identity, hasVerifiedSocial };
 }
@@ -10567,6 +10591,34 @@ async function smVideoProductionList(req, res) {
   }
 }
 
+// v16.58.0 — CEO Decision #26 continuation: the Approve stage's "Reject Video → Rebuild" action.
+// A VA who watches the finished clip and decides it isn't good enough needs a real way to send
+// it back for a fresh Build attempt — this is the quality-control gate CEO Decision #26
+// explicitly requires. Marks the CURRENT attempt 'rejected' (a real status — see the
+// accompanying migration — never deleted or overwritten, permanently preserved as history) and
+// nothing else; the operator's next "Produce Video Automatically" click creates a brand new
+// attempt via the unmodified sm_video_production_generate path and the existing
+// sm_video_productions_manage_attempts trigger, exactly like a retry after a technical failure.
+async function smVideoProductionReject(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { productionId, reason } = req.body || {};
+  if (!productionId) return res.status(400).json({ ok: false, error: 'productionId is required' });
+  try {
+    const rows = await sbGet(`sm_video_productions?id=eq.${encodeURIComponent(productionId)}&select=*&limit=1`);
+    const production = rows && rows[0];
+    if (!production) return res.status(404).json({ ok: false, error: 'production not found' });
+    if (production.status !== 'ready_for_review') {
+      return res.status(400).json({ ok: false, error: `only a ready_for_review attempt can be rejected (current status: ${production.status})` });
+    }
+    const updated = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
+      status: 'rejected', error_message: reason ? `Rejected by VA: ${reason}` : 'Rejected by VA — quality did not meet approval.',
+    });
+    return res.status(200).json({ ok: true, production: updated });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
+  }
+}
+
 // ── Optional supporting subsystem: client-provided assets (logo, brand, product photos, etc.) ──
 async function smContentAssetCreate(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -10644,6 +10696,7 @@ export default async function handler(req, res) {
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
+    if (action === 'sm_video_production_reject')     return await smVideoProductionReject(req, res);        // v16.58.0
     if (action === 'sm_content_asset_create')        return await smContentAssetCreate(req, res);           // v16.32.0
     if (action === 'sm_content_asset_list')          return await smContentAssetList(req, res);             // v16.32.0
     if (action === 'sm_content_asset_review')        return await smContentAssetReview(req, res);           // v16.32.0

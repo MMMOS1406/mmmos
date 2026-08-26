@@ -1,9 +1,0 @@
-Paused by Engineering Agent 2026-08-17 (Operating Loop production rollout attempt) —
-lifted for ~15 min (two windows, ~2.5 min + ~12 min) to allow the local auto-deploy
-watcher to pick up the CEO-approved api/ops.js (Phase 4B/4D/4E/4F Operating Loop) +
-public/index.html (CEO Engineering Review panel) changes. No new production
-deployment was observed via the Vercel API in either window, so this flag was
-restored rather than left open indefinitely. The local watcher (launchd + this
-machine being awake/logged-in) is outside what this session can observe or trigger
-directly. See CEO checkpoint for the blocker and requested next step. Clear this
-file only for a deliberate, CEO-approved production deploy step.
