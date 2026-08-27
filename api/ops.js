@@ -10,7 +10,7 @@
 // intermediate files.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { writeFile, readFile, unlink } from 'node:fs/promises';
+import { writeFile, readFile, unlink, stat as fsStat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
@@ -9834,10 +9834,58 @@ async function smHeygenRenderStatusInternal(videoId) {
 // Submagic output) is mandatory, matching the pre-existing failure behavior. Composition
 // order is asset-driven, not a rigid fixed template: whichever real assets are approved
 // determine which segments exist.
+// v16.60.0 — CEO Decision #26 continuation (Build reliability / "moov atom not found"). This
+// used to write whatever bytes `fetch` returned straight to disk on any 2xx status, with no
+// check that the body was actually a usable media file — an expired signed URL, a CDN error
+// page, or a connection that closed early can all come back with res.ok:true and a small
+// text/html or truncated body, which ffmpeg then fails to open downstream with an opaque
+// "moov atom not found" / "Invalid data found when processing input" deep inside a later
+// concat step, far from the real cause. Now rejects a response whose Content-Type is clearly
+// not media (an HTML/JSON error page mislabeled as a download) and any body under 4KB (real
+// video/image assets are always larger; a stub this small is never a legitimate download) —
+// both checked BEFORE the file reaches ffmpeg at all, per the CEO's explicit instruction. The
+// size floor is deliberately low (512B) — real media is essentially always larger, but a tiny
+// legitimate logo PNG shouldn't be false-rejected here; genuine truncation/corruption (which can
+// happen at any file size, since MP4's moov atom often sits at the END of the file) is caught
+// downstream by smAssertValidMediaFile's actual ffmpeg decode check, not by size alone.
 async function smDownloadToFile(url, path) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`download failed (${res.status}): ${String(url).slice(0, 140)}`);
-  await writeFile(path, Buffer.from(await res.arrayBuffer()));
+  const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+  if (contentType && (contentType.includes('text/html') || contentType.includes('application/json'))) {
+    throw new Error(`download returned a non-media response (content-type: ${contentType}): ${String(url).slice(0, 140)}`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 512) {
+    throw new Error(`download is too small to be a real media file (${buf.length} bytes): ${String(url).slice(0, 140)}`);
+  }
+  await writeFile(path, buf);
+}
+
+// v16.60.0 — CEO Decision #26 continuation. Confirms ffmpeg can actually decode a file (full
+// stream, not just headers) before it is trusted as input to a later ffmpeg step — this is what
+// catches a truncated/corrupt file (e.g. one left behind by a killed process, or a download that
+// passed smDownloadToFile's checks but is still subtly broken) BEFORE it reaches the final
+// concat/branding pass, where the same corruption would otherwise surface as an opaque failure
+// far from its real origin. No ffprobe dependency needed — a null-output decode with
+// `-v error` makes ffmpeg itself report real stream errors (including "moov atom not found")
+// and exit non-zero on a genuinely unreadable file.
+async function smAssertValidMediaFile(path, label) {
+  let size;
+  try {
+    size = (await fsStat(path)).size;
+  } catch (e) {
+    throw new Error(`${label}: file missing after write (${e.message})`);
+  }
+  if (!size || size < 512) throw new Error(`${label}: file is empty or too small (${size || 0} bytes)`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, ['-v', 'error', '-i', path, '-t', '0.5', '-f', 'null', '-'], {
+      timeout: 15000, maxBuffer: 1024 * 1024 * 5,
+    });
+  } catch (e) {
+    const detail = (e && e.stderr ? String(e.stderr) : (e && e.message) || '').slice(0, 300);
+    throw new Error(`${label}: ffmpeg could not decode this file (${detail})`);
+  }
 }
 
 // Re-encodes the Submagic (HeyGen + captions) output to a fixed, known format (1080x1920,
@@ -9846,6 +9894,10 @@ async function smDownloadToFile(url, path) {
 // re-encodes every input, which tolerates the minor codec/param differences real uploaded
 // assets and Submagic's own output are likely to have, at the cost of one extra encode pass.
 async function smSegNormalizePresenter({ srcPath, id }) {
+  // v16.60.0 — validate the raw HeyGen/Submagic download itself is decodable before spending a
+  // full encode pass on it — this is the mandatory segment, so a bad download here should fail
+  // the whole attempt clearly rather than produce a corrupt presenter clip.
+  await smAssertValidMediaFile(srcPath, 'downloaded presenter video (from Submagic)');
   const outPath = join(tmpdir(), `smm-seg-presenter-${id}.mp4`);
   await execFileAsync(ffmpegInstaller.path, [
     '-y', '-i', srcPath,
@@ -9854,6 +9906,7 @@ async function smSegNormalizePresenter({ srcPath, id }) {
     '-c:a', 'aac', '-ar', '44100', '-ac', '2',
     outPath,
   ], { timeout: 45000, maxBuffer: 1024 * 1024 * 30 });
+  await smAssertValidMediaFile(outPath, 'normalized presenter segment');
   return outPath;
 }
 
@@ -9867,6 +9920,7 @@ async function smSegFromImage({ url, id, tag, durationSec }) {
   const outPath = join(tmpdir(), `smm-seg-${tag}-${id}.mp4`);
   try {
     await smDownloadToFile(url, imgPath);
+    await smAssertValidMediaFile(imgPath, `downloaded ${tag} image asset`); // v16.60.0
     const frames = Math.round(durationSec * 25);
     await execFileAsync(ffmpegInstaller.path, [
       '-y', '-loop', '1', '-i', imgPath,
@@ -9877,6 +9931,7 @@ async function smSegFromImage({ url, id, tag, durationSec }) {
       '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest',
       outPath,
     ], { timeout: 25000, maxBuffer: 1024 * 1024 * 20 });
+    await smAssertValidMediaFile(outPath, `${tag} image segment`); // v16.60.0
     return outPath;
   } finally {
     await unlink(imgPath).catch(() => {});
@@ -9893,6 +9948,7 @@ async function smSegFromVideoAsset({ url, id, tag, durationSec }) {
   const outPath = join(tmpdir(), `smm-seg-${tag}-${id}.mp4`);
   try {
     await smDownloadToFile(url, vidPath);
+    await smAssertValidMediaFile(vidPath, `downloaded ${tag} video asset`); // v16.60.0
     await execFileAsync(ffmpegInstaller.path, [
       '-y', '-i', vidPath,
       '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
@@ -9903,6 +9959,7 @@ async function smSegFromVideoAsset({ url, id, tag, durationSec }) {
       '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest',
       outPath,
     ], { timeout: 30000, maxBuffer: 1024 * 1024 * 20 });
+    await smAssertValidMediaFile(outPath, `${tag} video segment`); // v16.60.0
     return outPath;
   } finally {
     await unlink(vidPath).catch(() => {});
@@ -9934,6 +9991,7 @@ async function smSegEndCard({ id, durationSec, lines }) {
     '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest',
     outPath,
   ], { timeout: 20000, maxBuffer: 1024 * 1024 * 15 });
+  await smAssertValidMediaFile(outPath, 'end card segment'); // v16.60.0
   return outPath;
 }
 
@@ -9941,6 +9999,14 @@ async function smSegEndCard({ id, durationSec, lines }) {
 // (decode+re-encode every input, not the risky stream-copy concat demuxer), producing one
 // continuous video+audio stream.
 async function smConcatSegments({ paths, id }) {
+  // v16.60.0 — CEO Decision #26 continuation (Build reliability / "moov atom not found"). Every
+  // individual segment builder already validates its own output before returning, but this is
+  // the last checkpoint before the segments are combined into the final master — a defense-in-
+  // depth re-check here means a corrupt segment is caught with a clear, per-file error pointing
+  // at exactly which segment is bad, instead of ffmpeg's own opaque concat-time failure.
+  for (let i = 0; i < paths.length; i++) {
+    await smAssertValidMediaFile(paths[i], `segment ${i + 1}/${paths.length} before concat`);
+  }
   const outPath = join(tmpdir(), `smm-concat-${id}.mp4`);
   const inputArgs = [];
   paths.forEach((p) => { inputArgs.push('-i', p); });
@@ -9954,6 +10020,7 @@ async function smConcatSegments({ paths, id }) {
     '-c:a', 'aac',
     outPath,
   ], { timeout: 45000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'concatenated master');
   return outPath;
 }
 
@@ -9968,8 +10035,11 @@ async function smApplyBranding({ inputPath, logoUrl, businessName, id }) {
   let haveLogo = false;
   try {
     if (logoUrl) {
-      try { await smDownloadToFile(logoUrl, logoPath); haveLogo = true; }
-      catch (e) { console.warn('[smBrandComposite] logo download failed, continuing without it:', e.message); }
+      try {
+        await smDownloadToFile(logoUrl, logoPath);
+        await smAssertValidMediaFile(logoPath, 'downloaded logo asset'); // v16.60.0
+        haveLogo = true;
+      } catch (e) { console.warn('[smBrandComposite] logo download failed, continuing without it:', e.message); }
     }
     const watermarkTxt = businessName ? smSanitizeForDrawtext(businessName.toUpperCase()) : '';
     const watermarkFilter = watermarkTxt
@@ -9986,6 +10056,7 @@ async function smApplyBranding({ inputPath, logoUrl, businessName, id }) {
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-c:a', 'copy',
         outPath,
       ], { timeout: 30000, maxBuffer: 1024 * 1024 * 30 });
+      await smAssertValidMediaFile(outPath, 'branded master (with logo)'); // v16.60.0
       return { path: outPath, logoUsed: true };
     }
     if (watermarkFilter) {
@@ -9995,6 +10066,7 @@ async function smApplyBranding({ inputPath, logoUrl, businessName, id }) {
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-c:a', 'copy',
         outPath,
       ], { timeout: 30000, maxBuffer: 1024 * 1024 * 30 });
+      await smAssertValidMediaFile(outPath, 'branded master (watermark only)'); // v16.60.0
       return { path: outPath, logoUsed: false };
     }
     return { path: inputPath, logoUsed: false };
