@@ -10075,10 +10075,28 @@ async function smApplyBranding({ inputPath, logoUrl, businessName, id }) {
   }
 }
 
-async function smBrandComposite({ submagicVideoUrl, businessName, itemName, priceLabel, website, phoneNumber, cityOrAddress, hasVerifiedSocial, assets, id }) {
+async function smBrandComposite({ submagicVideoUrl, businessName, itemName, priceLabel, website, phoneNumber, cityOrAddress, hasVerifiedSocial, assets, id: productionId }) {
   assets = assets || {};
   const tempPaths = [];
   const track = (p) => { tempPaths.push(p); return p; };
+
+  // v16.61.0 — CEO Decision #26 continuation (Build reliability, part 2). Every temp file below
+  // was named from the bare production id alone (smm-seg-opener-<id>.mp4 etc.), shared across
+  // ANY invocation touching the same production. Nothing serializes poll calls for the same
+  // in-flight production — the frontend's poll loop fires on a fixed interval that does not
+  // wait for the previous request to finish (fixed separately in public/index.html), so once
+  // compositing takes longer than that interval (it always does, ~60-70s), overlapping poll
+  // requests both re-enter Stage 3 for the SAME production id. If both land on the same warm
+  // Vercel instance, they race on these exact temp file paths — one process's read colliding
+  // with the other's write/cleanup — which reproduces precisely as an ffmpeg "moov atom not
+  // found" on a file that a moment earlier looked completely valid. Reproduced live: two
+  // concurrent poll calls against the same productionId, one completed to ready_for_review, a
+  // second one immediately after failed reading a segment file the first had already
+  // written/cleaned up. Fixed by making every temp path unique PER INVOCATION, not just per
+  // production — `id` from here down is this call's own nonce, never shared with a concurrent
+  // invocation even for the same production, so two overlapping calls can no longer collide on
+  // the filesystem regardless of what triggered the overlap.
+  const id = `${productionId}-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
 
   const rawPath = track(join(tmpdir(), `smm-sub-raw-${id}.mp4`));
   try {
