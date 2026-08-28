@@ -10436,8 +10436,20 @@ async function smLoadOfferingForTask(task) {
 // purely for backward compatibility with the existing `visualSource` flag logic in
 // smVideoProductionGenerate. Selection logic itself (client_provided + ceo_approved only)
 // is unchanged — still zero tolerance for stock/auto_sourced assets here.
+// SMM V1 Phase 2 — Asset Onboarding. origin widened from client_provided-only to also include
+// verified_public (imported from the business's own official public menu/website source) and
+// ai_enhanced (a real business photo AI-motion-enhanced, e.g. via Runway) — both are real,
+// provenance-tracked, human-approvable business imagery, not fabricated content, and without
+// this the Phase 2 Asset Library onboarding work would be permanently invisible to actual video
+// production even after CEO approval. The SELECTION LOGIC below is completely unchanged (same
+// category match, same slice(0,3), same recency order) — this only widens which already-
+// approved rows are eligible to be selected from; still not product_ref-aware, still no
+// ranking/rotation — that remains explicitly out of scope until a future phase. auto_sourced
+// (retired legacy stock) and ai_generated (no real assets exist yet, and CEO approval of a
+// purely-invented visual as brand-representative imagery is a bigger call than this phase
+// covers) are deliberately not included here.
 async function smSelectBrandAssets(businessId) {
-  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=eq.client_provided&status=eq.ceo_approved&select=*&order=created_at.desc`);
+  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&select=*&order=created_at.desc`);
   const assets = rows || [];
   const logo = assets.find((a) => a.category === 'logo') || null;
   const storefront = assets.find((a) => a.category === 'storefront_photo') || null;
@@ -10768,14 +10780,24 @@ async function smContentAssetList(req, res) {
   }
 }
 
+// SMM V1 Phase 2 — Asset Onboarding: this used to only ever approve/reject origin='client_provided'
+// rows, a restriction that made sense when that was the only origin a human ever needed to review.
+// Phase 2 introduced real candidate assets with origin='verified_public' (imported from the
+// business's own official public menu source) and 'ai_enhanced' — both need the exact same
+// human review/approval path, or they'd sit in 'draft' forever with no way to ever become usable.
+// The origin restriction is dropped entirely; the deliberate human Approve/Reject click is itself
+// the safeguard ("Collected != approved"), not a hardcoded allowlist of which origin may be
+// reviewed. auto_sourced (retired legacy stock footage) can still technically be reviewed here,
+// but nothing in the current pipeline selects it regardless of status (smSelectBrandAssets only
+// ever reads origin='client_provided' — see that function's own comment on this).
 async function smContentAssetReview(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { assetId, decision } = req.body || {};
   if (!assetId) return res.status(400).json({ ok: false, error: 'assetId is required' });
   if (decision !== 'ceo_approved' && decision !== 'rejected') return res.status(400).json({ ok: false, error: "decision must be 'ceo_approved' or 'rejected'" });
   try {
-    const updated = await sbPatch('sm_content_assets', `id=eq.${encodeURIComponent(assetId)}&origin=eq.client_provided`, { status: decision });
-    if (!updated) return res.status(409).json({ ok: false, error: 'no matching client-provided asset found' });
+    const updated = await sbPatch('sm_content_assets', `id=eq.${encodeURIComponent(assetId)}`, { status: decision });
+    if (!updated) return res.status(409).json({ ok: false, error: 'asset not found' });
     return res.status(200).json({ ok: true, record: updated });
   } catch (e) {
     return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
