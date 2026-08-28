@@ -6326,6 +6326,15 @@ const HEYGEN_BASE = 'https://api.heygen.com';
 const SUBMAGIC_API_KEY = process.env.SUBMAGIC_API_KEY || '';
 const SUBMAGIC_BASE = 'https://api.submagic.co';
 
+// v16.65.0 — SMM V1 Phase 4: Quality Production Pipeline. ElevenLabs is the preferred V1
+// narration provider (natural commercial voice, no on-screen avatar required). RUNWAY_API_KEY
+// is read only so smRunwayEnhanceSegmentStub can report accurate configuration status — it is
+// NOT invoked anywhere in the default V1 build path (see that function for why).
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM'; // "Rachel" — standard ElevenLabs premade voice, used only until the CEO sets a business-specific one
+const ELEVENLABS_BASE = 'https://api.elevenlabs.io';
+const RUNWAY_API_KEY = process.env.RUNWAY_API_KEY || '';
+
 async function _heygenFetch(path, opts) {
   opts = opts || {};
   const headers = Object.assign({ 'X-Api-Key': HEYGEN_API_KEY }, opts.headers || {});
@@ -10791,17 +10800,472 @@ async function smSelectBrandAssets(businessId) {
   return { logo, storefront, products, productVisual, missingAssets };
 }
 
-// ── Orchestrator (v16.34.0 — CEO-approved HeyGen pipeline revision): Verified Business Brain
-// ── → AI Creative (spoken script) → HeyGen (presenter avatar speaks it) → Submagic (captions/
-// ── polish, conservative B-roll) → smBrandComposite (verified logo/business identity/CTA) →
-// ── ready_for_review. Async multi-step, matching the real pattern already proven in AI Studio/
-// ── NextWave (start render → poll → chain to finishing → poll → done) rather than the prior
-// ── synchronous ffmpeg-only build. This action only starts the HeyGen render and returns
-// ── immediately with status='rendering'; smVideoProductionPoll below advances the state
-// ── machine through Submagic and the Brand Composer on subsequent calls. Each attempt is a
-// ── fresh sm_video_productions row (DB trigger assigns attempt_number/is_current and blocks a
-// ── new attempt while a prior one for this task is still in progress).
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// SMM V1 Phase 4 — Quality Production Pipeline. Replaces the on-screen HeyGen avatar as the
+// PRIMARY visual with real approved business assets (Ken Burns motion) + professional
+// narration + captions + music + branding. HeyGen is retained ONLY as an internal audio-only
+// narration fallback when ElevenLabs isn't connected — its video track is discarded, never
+// shown. Nothing here invents assets, prices, or business facts; every visual comes from
+// sm_content_assets rows that are already ceo_approved, re-verified at Build time.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+// ── Narration ────────────────────────────────────────────────────────────────────────────
+async function smSynthesizeNarrationElevenLabs(text) {
+  if (!ELEVENLABS_API_KEY) return { ok: false, error: 'elevenlabs_not_configured' };
+  try {
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(ELEVENLABS_VOICE_ID)}`, {
+      method: 'POST',
+      headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.15, use_speaker_boost: true },
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return { ok: false, error: `elevenlabs_error_${r.status}: ${t.slice(0, 200)}` };
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf || buf.length < 512) return { ok: false, error: 'elevenlabs_returned_empty_audio' };
+    return { ok: true, buffer: buf, provider: 'elevenlabs' };
+  } catch (e) {
+    return { ok: false, error: `elevenlabs_request_failed: ${e.message}` };
+  }
+}
+
+// Fallback ONLY, used when ElevenLabs is not connected. Reuses the exact proven HeyGen render
+// pipeline purely as a text-to-speech engine — HeyGen has no audio-only endpoint, so an avatar
+// video is still generated, but only its audio track is ever extracted; the video itself is
+// discarded and never appears anywhere in the final composite. Polls synchronously inside this
+// one call (bounded) so the rest of the pipeline can treat narration synthesis as a single
+// awaited step regardless of which provider actually produced it.
+async function smSynthesizeNarrationHeygenFallback(text) {
+  if (!HEYGEN_API_KEY) return { ok: false, error: 'no_narration_provider_configured (neither ELEVENLABS_API_KEY nor HEYGEN_API_KEY set)' };
+  const start = await smHeygenStartRenderInternal(text);
+  if (!start.ok || !start.videoId) return { ok: false, error: 'heygen_fallback_start_failed: ' + (start.error || JSON.stringify(start.raw || {}).slice(0, 200)) };
+
+  const deadline = Date.now() + 110000; // bounded — leaves headroom inside the 180s function budget
+  let videoUrl = null;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 4000));
+    const st = await smHeygenRenderStatusInternal(start.videoId);
+    if (st.status === 'completed' && st.videoUrl) { videoUrl = st.videoUrl; break; }
+    if (st.status === 'failed') return { ok: false, error: 'heygen_fallback_render_failed: ' + JSON.stringify(st.raw || {}).slice(0, 200) };
+  }
+  if (!videoUrl) return { ok: false, error: 'heygen_fallback_timed_out_waiting_for_render' };
+
+  const id = `narr-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+  const vidPath = join(tmpdir(), `smm-narr-src-${id}.mp4`);
+  const audioPath = join(tmpdir(), `smm-narr-audio-${id}.m4a`);
+  try {
+    await smDownloadToFile(videoUrl, vidPath);
+    await smAssertValidMediaFile(vidPath, 'heygen fallback narration source');
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', vidPath, '-vn', '-c:a', 'aac', '-ar', '44100', '-ac', '2', audioPath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 20 });
+    const buf = await readFile(audioPath);
+    if (!buf || buf.length < 512) return { ok: false, error: 'heygen_fallback_audio_extraction_empty' };
+    return { ok: true, buffer: buf, provider: 'heygen_audio_fallback' };
+  } catch (e) {
+    return { ok: false, error: `heygen_fallback_audio_extraction_failed: ${e.message}` };
+  } finally {
+    await unlink(vidPath).catch(() => {});
+    await unlink(audioPath).catch(() => {});
+  }
+}
+
+// Provider-independent adapter: ElevenLabs preferred, HeyGen-audio-only as the internal
+// fallback so Build never depends on an on-screen avatar. Throws only if BOTH fail — caller
+// marks the production failed/retryable, identical to any other stage's failure handling.
+async function smSynthesizeNarration(text) {
+  const primary = await smSynthesizeNarrationElevenLabs(text);
+  if (primary.ok) return primary;
+  console.warn('[smSynthesizeNarration] ElevenLabs unavailable, falling back to HeyGen audio-only:', primary.error);
+  const fallback = await smSynthesizeNarrationHeygenFallback(text);
+  if (fallback.ok) return fallback;
+  throw new Error(`narration synthesis failed — elevenlabs: ${primary.error} · heygen_fallback: ${fallback.error}`);
+}
+
+// ── Runway — optional AI motion/enhancement, adapter boundary only ─────────────────────────
+// Deliberately NOT invoked anywhere in the V1 default build path: local Ken Burns motion on
+// real approved photos already meets this pilot's quality bar, and CEO cost discipline
+// prohibits routing every production through a paid provider "because the account exists."
+// This function exists purely so a future concept/asset-quality signal can call it without an
+// architecture change.
+async function smRunwayEnhanceSegmentStub(asset) {
+  if (!RUNWAY_API_KEY) return { ok: false, error: 'runway_not_configured', invoked: false };
+  return { ok: false, error: 'runway_available_but_not_invoked_in_v1_default_path', invoked: false };
+}
+
+// ── Visual motion (real assets, no avatar) ──────────────────────────────────────────────────
+async function smProbeDurationSec(path) {
+  const probe = await execFileAsync(ffmpegInstaller.path, ['-i', path], { timeout: 15000, maxBuffer: 1024 * 1024 * 10 }).catch((e) => e);
+  const out = (probe && (probe.stderr || probe.message || '')) || '';
+  const m = String(out).match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+  return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : null;
+}
+
+// Ken Burns segments for the plan's approved assets, sized to fill the narration's real
+// duration — no dead air, no artificial padding. Reuses the exact zoompan technique already
+// proven in smSegFromImage/smSegFromVideoAsset (via smSegFromAsset); this only decides HOW
+// MANY segments and HOW LONG each runs. Cycles through the real approved assets if fewer exist
+// than segments needed — never fabricates or substitutes a new one.
+async function smBuildTimedAssetSegments(assets, targetDurationSec, id) {
+  const usable = (assets || []).filter((a) => a && a.source_url);
+  if (!usable.length) throw new Error('no usable approved assets for the visual sequence');
+  const minSeg = 2.0, maxSeg = 4.0;
+  const count = Math.max(1, Math.min(5, Math.round(targetDurationSec / 2.8)));
+  const perSeg = Math.min(maxSeg, Math.max(minSeg, targetDurationSec / count));
+  const paths = [];
+  let usedSec = 0;
+  for (let i = 0; i < count; i++) {
+    const asset = usable[i % usable.length];
+    const isLast = i === count - 1;
+    const dur = isLast ? Math.max(minSeg, targetDurationSec - usedSec) : perSeg;
+    const seg = await smSegFromAsset(asset, { id, tag: `vis${i}`, durationSec: Math.round(dur * 10) / 10 });
+    paths.push(seg);
+    usedSec += dur;
+  }
+  return paths;
+}
+
+// Deterministic 3-beat drawtext pass (hook → item/price → CTA) applied to the concatenated
+// silent asset sequence — same visual language already CEO-approved in the retired
+// smAssembleRawVideo, just applied to real Ken-Burns footage instead of a single static bg.
+async function smApplyNarrationTextOverlay({ inputPath, durationSec, hookText, itemText, ctaText, id }) {
+  const outPath = join(tmpdir(), `smm-texted-${id}.mp4`);
+  const seg = durationSec / 3;
+  const hookTxt = smSanitizeForDrawtext(hookText);
+  const itemTxt = smSanitizeForDrawtext(itemText);
+  const ctaTxt = smSanitizeForDrawtext(ctaText);
+  const filters = [];
+  if (hookTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${hookTxt}':fontcolor=white:fontsize=60:box=1:boxcolor=black@0.5:boxborderw=20:x=(w-text_w)/2:y=220:enable='between(t\\,0\\,${seg.toFixed(2)})'`);
+  if (itemTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${itemTxt}':fontcolor=white:fontsize=50:box=1:boxcolor=black@0.5:boxborderw=18:x=(w-text_w)/2:y=1500:enable='between(t\\,${seg.toFixed(2)}\\,${(seg * 2).toFixed(2)})'`);
+  if (ctaTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${ctaTxt}':fontcolor=white:fontsize=44:box=1:boxcolor=black@0.5:boxborderw=16:x=(w-text_w)/2:y=1500:enable='between(t\\,${(seg * 2).toFixed(2)}\\,${durationSec})'`);
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-i', inputPath,
+    '-vf', filters.length ? filters.join(',') : 'null',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-c:a', 'copy',
+    outPath,
+  ], { timeout: 45000, maxBuffer: 1024 * 1024 * 30 });
+  await smAssertValidMediaFile(outPath, 'text-overlaid asset sequence');
+  return outPath;
+}
+
+async function smMuxNarrationAudio({ videoPath, audioBuffer, id }) {
+  const audioPath = join(tmpdir(), `smm-narr-in-${id}.mp3`);
+  const outPath = join(tmpdir(), `smm-narrated-${id}.mp4`);
+  await writeFile(audioPath, audioBuffer);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', videoPath, '-i', audioPath,
+      '-map', '0:v:0', '-map', '1:a:0',
+      '-c:v', 'copy', '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest',
+      outPath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 30 });
+    await smAssertValidMediaFile(outPath, 'narrated visual sequence');
+    return outPath;
+  } finally {
+    await unlink(audioPath).catch(() => {});
+  }
+}
+
+// ── Background music — reusable, commercial-safe, zero-cost library ────────────────────────
+// V1 deliberately does NOT introduce a paid music service (CEO directive) — every track is
+// synthesized locally via ffmpeg from a named chord progression, so it is 100% original,
+// royalty-free, and free to produce. Each mood is deterministic (same progression every time
+// it's picked), so it behaves as a real reusable library entry, not a one-off track — the mood
+// name is persisted in tool_usage.music_track so Phase 3's repetition intelligence can
+// eventually vary the pick over time without any redesign here.
+const SMM_MUSIC_LIBRARY = {
+  warm_upbeat:   { name: 'Warm Upbeat',   bpm: 100, chords: [[261.63, 329.63, 392.00], [293.66, 349.23, 440.00], [261.63, 329.63, 392.00], [196.00, 246.94, 349.23]] }, // C–D–C–G
+  confident:     { name: 'Confident',     bpm: 96,  chords: [[220.00, 261.63, 329.63], [196.00, 246.94, 293.66], [174.61, 220.00, 261.63], [196.00, 246.94, 293.66]] }, // Am–G–F–G
+  energetic:     { name: 'Energetic',     bpm: 112, chords: [[329.63, 392.00, 493.88], [293.66, 349.23, 440.00], [261.63, 329.63, 392.00], [293.66, 349.23, 440.00]] }, // E–D–C–D, bright
+  chill_craving: { name: 'Chill Craving', bpm: 88,  chords: [[220.00, 261.63, 329.63], [196.00, 233.08, 293.66], [174.61, 207.65, 261.63], [196.00, 233.08, 293.66]] }, // Am–Gm–Fm–Gm
+};
+
+function smPickMusicMood(formatId) {
+  const map = {
+    narrated_showcase: 'warm_upbeat', food_hero: 'warm_upbeat', menu_spotlight: 'warm_upbeat',
+    food_combination: 'energetic', menu_discovery: 'energetic', offer_promotion: 'energetic',
+    business_spotlight: 'confident', customer_proof: 'confident', behind_the_scenes: 'confident',
+    craving_emotion: 'chill_craving',
+  };
+  return map[formatId] || 'warm_upbeat';
+}
+
+async function smSynthesizeMusicBed(mood, durationSec, id) {
+  const track = SMM_MUSIC_LIBRARY[mood] || SMM_MUSIC_LIBRARY.warm_upbeat;
+  const chords = track.chords;
+  const segDur = (60 / track.bpm) * 4; // 4 beats per chord
+  const cyclesNeeded = Math.max(1, Math.ceil(durationSec / (segDur * chords.length)));
+  const segPaths = [];
+  const listPath = join(tmpdir(), `smm-music-list-${id}.txt`);
+  const outPath = join(tmpdir(), `smm-music-${id}.m4a`);
+  try {
+    let idx = 0;
+    for (let c = 0; c < cyclesNeeded; c++) {
+      for (const [f1, f2, f3] of chords) {
+        const p = join(tmpdir(), `smm-music-seg-${id}-${idx}.m4a`);
+        await execFileAsync(ffmpegInstaller.path, [
+          '-y',
+          '-f', 'lavfi', '-i', `sine=frequency=${f1}:duration=${segDur}`,
+          '-f', 'lavfi', '-i', `sine=frequency=${f2}:duration=${segDur}`,
+          '-f', 'lavfi', '-i', `sine=frequency=${f3}:duration=${segDur}`,
+          '-filter_complex', `[0:a][1:a][2:a]amix=inputs=3:duration=longest,volume=1.4,alimiter=limit=0.8`,
+          '-c:a', 'aac', '-b:a', '128k', p,
+        ], { timeout: 15000, maxBuffer: 1024 * 1024 * 10 });
+        segPaths.push(p);
+        idx++;
+      }
+    }
+    await writeFile(listPath, segPaths.map((p) => `file '${p}'`).join('\n'));
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-f', 'concat', '-safe', '0', '-i', listPath,
+      '-t', String(durationSec),
+      '-filter:a', `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, durationSec - 1.2).toFixed(2)}:d=1.2`,
+      '-c:a', 'aac', '-b:a', '128k',
+      outPath,
+    ], { timeout: 25000, maxBuffer: 1024 * 1024 * 10 });
+    return outPath;
+  } finally {
+    await unlink(listPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// Mixes the music bed UNDER the existing narration+captions track (reduced volume so the
+// voice stays clearly intelligible, per CEO requirement) rather than replacing it.
+async function smMixMusicUnderNarration({ videoWithNarrationPath, mood, id }) {
+  const durationSec = await smProbeDurationSec(videoWithNarrationPath);
+  if (!durationSec) throw new Error('could not determine duration for music mixing');
+  const musicPath = await smSynthesizeMusicBed(mood, durationSec, id);
+  const outPath = join(tmpdir(), `smm-withmusic-${id}.mp4`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', videoWithNarrationPath, '-i', musicPath,
+      '-filter_complex', '[1:a]volume=0.16[music];[0:a][music]amix=inputs=2:duration=first:dropout_transition=0[outa]',
+      '-map', '0:v:0', '-map', '[outa]',
+      '-c:v', 'copy', '-c:a', 'aac', '-ar', '44100', '-ac', '2',
+      outPath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 30 });
+    await smAssertValidMediaFile(outPath, 'video with background music');
+    return outPath;
+  } finally {
+    await unlink(musicPath).catch(() => {});
+  }
+}
+
+// Stage 3 (post-captions) for the Phase 4 asset-driven pipeline: mix in background music,
+// apply logo/watermark branding, upload the final master, mark ready_for_review. Shared by
+// both the no-captions-needed synchronous path (smVideoProductionGenerateAssetDriven, for a
+// future music-only format) and the normal Submagic-polled async path (smVideoProductionPoll).
+async function smFinishAssetDrivenComposite({ productionId, attemptNumber, businessId, taskId, sourcePath, sourceUrl, identity, mood }) {
+  const tempPaths = [];
+  const track = (p) => { tempPaths.push(p); return p; };
+  try {
+    const id = `finish-${productionId}-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+    let localSourcePath = sourcePath;
+    if (!localSourcePath) {
+      localSourcePath = track(join(tmpdir(), `smm-finish-src-${id}.mp4`));
+      await smDownloadToFile(sourceUrl, localSourcePath);
+      await smAssertValidMediaFile(localSourcePath, 'downloaded captioned video (from Submagic)');
+    }
+
+    mood = mood || 'warm_upbeat';
+    const withMusic = track(await smMixMusicUnderNarration({ videoWithNarrationPath: localSourcePath, mood, id }));
+
+    const brand = await smSelectBrandAssets(businessId);
+    let finalPath = withMusic;
+    let logoUsed = false;
+    try {
+      const branded = await smApplyBranding({ inputPath: withMusic, logoUrl: brand.logo ? brand.logo.source_url : null, businessName: identity.businessName, id });
+      finalPath = track(branded.path);
+      logoUsed = branded.logoUsed;
+    } catch (e) { console.warn('[smFinishAssetDrivenComposite] branding pass failed, using unbranded composite:', e.message); }
+
+    const durationSec = await smProbeDurationSec(finalPath);
+    const outBuf = await readFile(finalPath);
+    if (!outBuf || !outBuf.length) throw new Error('final composite is empty');
+
+    const finalStoragePath = `social-media-manager/${businessId}/${taskId}/attempt-${attemptNumber}-final.mp4`;
+    const finalUrl = await sbStorageUpload(finalStoragePath, outBuf, 'video/mp4');
+
+    const production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
+      final_video_url: finalUrl, duration_seconds: durationSec || null, status: 'ready_for_review',
+    });
+    await sbPatch('sm_production_packages', `va_task_id=eq.${encodeURIComponent(taskId)}&status=eq.draft`, {
+      hook: production.hook, caption: production.caption, hashtags: production.hashtags,
+    }).catch(() => {});
+    return { production, logoUsed, musicMood: mood };
+  } finally {
+    for (const p of tempPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// ── Entry point (routed by ?action=sm_video_production_generate) ───────────────────────────
+// Dispatches to the new Phase 4 asset-driven pipeline when the task's current approved
+// package carries a real Production Plan (spoken_script present — set by every Phase 3+
+// Generate call); falls back to the untouched legacy HeyGen pipeline for any package that
+// predates Phase 3 (e.g. the pre-existing Wings task), so nothing historical breaks.
 async function smVideoProductionGenerate(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { vaTaskId } = req.body || {};
+  if (!vaTaskId) return res.status(400).json({ ok: false, error: 'vaTaskId is required' });
+  try {
+    const taskRows = await sbGet(`sm_va_tasks?id=eq.${encodeURIComponent(vaTaskId)}&select=*&limit=1`);
+    const task = taskRows && taskRows[0];
+    if (!task) return res.status(404).json({ ok: false, error: 'va task not found' });
+    const pkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(vaTaskId)}&is_current=eq.true&select=*&limit=1`);
+    const approvedPkg = pkgRows && pkgRows[0];
+    if (approvedPkg && approvedPkg.spoken_script) {
+      return await smVideoProductionGenerateAssetDriven(req, res, task, approvedPkg);
+    }
+    return await smVideoProductionGenerateLegacy(req, res);
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: e.message });
+  }
+}
+
+// ── New pipeline orchestrator (v16.65.0 — SMM V1 Phase 4) ──────────────────────────────────
+// Verified Business Brain + approved Phase 3 Production Plan → narration (ElevenLabs/HeyGen-
+// audio-fallback) → real-asset Ken Burns visual sequence → text overlay → end card → Submagic
+// captions → music + branding → ready_for_review. The approved plan's own selected_asset_ids,
+// spoken_script, on_screen_text, format and CTA are consumed verbatim — Build never
+// independently selects different assets or regenerates a different concept.
+async function smVideoProductionGenerateAssetDriven(req, res, task, pkg) {
+  if (task.mode !== 'demo') return res.status(400).json({ ok: false, error: 'only demo-mode tasks may produce video' });
+
+  let production = null;
+  try {
+    const businessId = task.business_id;
+    const { offering, identity, hasVerifiedSocial } = await smLoadOfferingForTask(task);
+
+    // Mandatory per Phase 4 CEO order: Build consumes the approved plan's own selected assets,
+    // never a fresh independent selection. Re-verified at Build time (an asset could
+    // theoretically have been un-approved since Review) — never trusts the plan's snapshot blindly.
+    const planAssetIds = Array.isArray(pkg.selected_asset_ids) ? pkg.selected_asset_ids : [];
+    let planAssets = [];
+    if (planAssetIds.length) {
+      const rows = await sbGet(`sm_content_assets?id=in.(${planAssetIds.map(encodeURIComponent).join(',')})&status=eq.ceo_approved&origin=in.(client_provided,verified_public,ai_enhanced)&select=*`);
+      const byId = {}; (rows || []).forEach((a) => { byId[a.id] = a; });
+      planAssets = planAssetIds.map((aid) => byId[aid]).filter(Boolean);
+    }
+    if (!planAssets.length) {
+      // Honest asset-gap state — never substitutes stock imagery implying it's this business's
+      // real product (CEO directive #4). The VA sees a clear failure, not misleading content.
+      production = await sbInsert('sm_video_productions', {
+        va_task_id: task.id, status: 'failed',
+        error_message: 'asset_gap: the approved plan\'s selected assets are no longer available/approved — no eligible real business imagery to build with',
+      });
+      return res.status(200).json({ ok: true, production, assetGap: true });
+    }
+
+    production = await sbInsert('sm_video_productions', {
+      va_task_id: task.id, status: 'sourcing_visuals',
+      concept: pkg.concept, hook: pkg.hook, script_text: pkg.spoken_script,
+      on_screen_text: pkg.on_screen_text, caption: pkg.caption, hashtags: pkg.hashtags,
+      visual_direction: pkg.visual_direction,
+      content_fingerprint: pkg.content_fingerprint,
+    });
+
+    const id = `${production.id}-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+    const tempPaths = [];
+    const track = (p) => { tempPaths.push(p); return p; };
+    try {
+      production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(production.id)}`, { status: 'rendering' });
+      const narration = await smSynthesizeNarration(pkg.spoken_script);
+      const narrAudioPath = track(join(tmpdir(), `smm-narrsrc-${id}.mp3`));
+      await writeFile(narrAudioPath, narration.buffer);
+      const narrationDurationSec = await smProbeDurationSec(narrAudioPath);
+      if (!narrationDurationSec || narrationDurationSec < 2) throw new Error('narration audio duration could not be determined or is implausibly short');
+
+      const segPaths = (await smBuildTimedAssetSegments(planAssets, narrationDurationSec, id)).map(track);
+      const silentSeq = track(segPaths.length > 1 ? await smConcatSegments({ paths: segPaths, id }) : segPaths[0]);
+
+      const onScreen = Array.isArray(pkg.on_screen_text) ? pkg.on_screen_text : [];
+      const itemLabel = (typeof offering.price === 'number') ? `${offering.name} · $${offering.price.toFixed(2)}` : offering.name;
+      const texted = track(await smApplyNarrationTextOverlay({
+        inputPath: silentSeq, durationSec: narrationDurationSec,
+        hookText: onScreen[0] || pkg.hook, itemText: onScreen[1] || itemLabel, ctaText: onScreen[2] || pkg.cta_text,
+        id,
+      }));
+      const narratedMain = track(await smMuxNarrationAudio({ videoPath: texted, audioBuffer: narration.buffer, id }));
+
+      const lines = [];
+      const priceLabel = (typeof offering.price === 'number') ? `$${offering.price.toFixed(2)}` : null;
+      const itemTxt = smSanitizeForDrawtext(priceLabel ? `${offering.name} · ${priceLabel}` : offering.name);
+      if (itemTxt) lines.push({ text: itemTxt, fontsize: 50, y: 1420 });
+      if (identity.businessName) lines.push({ text: smSanitizeForDrawtext(`Order from ${identity.businessName}`), fontsize: 42, y: 1520 });
+      let ctaExtra = null;
+      if (identity.website) { try { ctaExtra = new URL(identity.website).hostname; } catch (e) { ctaExtra = String(identity.website).replace(/^https?:\/\//, '').split('/')[0]; } }
+      else if (identity.phoneNumber) { ctaExtra = identity.phoneNumber; }
+      if (ctaExtra) lines.push({ text: smSanitizeForDrawtext(ctaExtra), fontsize: 34, y: 1610 });
+      if (hasVerifiedSocial) lines.push({ text: smSanitizeForDrawtext(`Follow ${identity.businessName || 'us'}`), fontsize: 34, y: 1680 });
+      const endCard = track(await smSegEndCard({ id, durationSec: 3.0, lines }));
+
+      const fullSilentEnded = track(await smConcatSegments({ paths: [narratedMain, endCard], id }));
+
+      const preCaptionsPath = `social-media-manager/${businessId}/${task.id}/attempt-${production.attempt_number}-precaptions.mp4`;
+      const preCaptionsBuf = await readFile(fullSilentEnded);
+      const preCaptionsUrl = await sbStorageUpload(preCaptionsPath, preCaptionsBuf, 'video/mp4');
+
+      production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(production.id)}`, {
+        tool_usage: {
+          pipeline: 'phase4_asset_driven',
+          creative_provider: (pkg.tool_usage && pkg.tool_usage.creative_provider) || 'approved_plan',
+          narration_provider: narration.provider,
+          motion_provider: 'local_ffmpeg_kenburns',
+          music_track: smPickMusicMood(pkg.format_id),
+          captions_provider: 'submagic',
+          compositor_provider: 'ffmpeg_local',
+        },
+        duration_seconds: Math.round((narrationDurationSec + 3.0) * 10) / 10,
+      });
+
+      const needsCaptions = !pkg.required_capabilities || pkg.required_capabilities.captions !== false;
+      if (needsCaptions) {
+        const sub = await smSubmagicCreateProjectInternal(preCaptionsUrl, `SMM ${businessId} ${production.id}`);
+        if (!sub.ok || !sub.projectId) {
+          production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(production.id)}`, {
+            status: 'failed', error_message: 'Submagic create failed: ' + (sub.error || JSON.stringify(sub.raw).slice(0, 200)),
+          });
+          return res.status(200).json({ ok: true, production });
+        }
+        production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(production.id)}`, {
+          submagic_project_id: sub.projectId, status: 'processing_captions',
+        });
+        return res.status(200).json({ ok: true, production, stage: 'submagic_started' });
+      }
+
+      // No captions needed (music-only formats — not buildable_now yet, kept for completeness).
+      production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(production.id)}`, { status: 'compositing' });
+      const finishRes = await smFinishAssetDrivenComposite({
+        productionId: production.id, attemptNumber: production.attempt_number,
+        businessId, taskId: task.id, sourcePath: fullSilentEnded, identity, mood: smPickMusicMood(pkg.format_id),
+      });
+      return res.status(200).json({ ok: true, production: finishRes.production, logoUsed: finishRes.logoUsed, musicMood: finishRes.musicMood });
+    } finally {
+      for (const p of tempPaths) await unlink(p).catch(() => {});
+    }
+  } catch (e) {
+    if (production && production.id) {
+      await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(production.id)}`, { status: 'failed', error_message: e.message }).catch(() => {});
+    }
+    return res.status(502).json({ ok: false, error: e.message, productionId: production && production.id });
+  }
+}
+
+// ── Legacy orchestrator (v16.34.0 — CEO-approved HeyGen pipeline revision): kept UNCHANGED,
+// ── used only as a fallback for packages that predate Phase 3/4 (no spoken_script ever
+// ── persisted at Review time, so there is no plan for the new pipeline to consume). Verified
+// ── Business Brain → AI Creative (spoken script) → HeyGen (presenter avatar speaks it) →
+// ── Submagic (captions/polish) → smBrandComposite (verified logo/business identity/CTA) →
+// ── ready_for_review. Async multi-step (start render → poll → chain to finishing → poll →
+// ── done). Each attempt is a fresh sm_video_productions row (DB trigger assigns
+// ── attempt_number/is_current and blocks a new attempt while a prior one is still in progress).
+async function smVideoProductionGenerateLegacy(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { vaTaskId } = req.body || {};
   if (!vaTaskId) return res.status(400).json({ ok: false, error: 'vaTaskId is required' });
@@ -10959,6 +11423,33 @@ async function smVideoProductionPoll(req, res) {
         // matching the HeyGen-failure and Submagic-failure branches above — the existing frontend
         // (renderVideoProductionSection) already treats status==='failed' as retryable via its
         // "↻ Regenerate video" button, so no UI change is needed, only this backend fix.
+        // v16.65.0 — SMM V1 Phase 4: productions built by the new asset-driven pipeline already
+        // carry their full visual sequence + narration + end card baked into the pre-Submagic
+        // upload (sub.downloadUrl here is Submagic's captioned version of that same sequence,
+        // not a bare HeyGen clip) — Stage 3 for them is only music + branding, handled by the
+        // shared smFinishAssetDrivenComposite helper. Everything below this branch is the
+        // untouched legacy Stage 3 for pre-Phase-4 productions.
+        if (production.tool_usage && production.tool_usage.pipeline === 'phase4_asset_driven') {
+          try {
+            const taskRows = await sbGet(`sm_va_tasks?id=eq.${encodeURIComponent(production.va_task_id)}&select=*&limit=1`);
+            const task = taskRows && taskRows[0];
+            if (!task) throw new Error(`va_task ${production.va_task_id} not found`);
+            const { identity } = await smLoadOfferingForTask(task);
+            const finishRes = await smFinishAssetDrivenComposite({
+              productionId: production.id, attemptNumber: production.attempt_number,
+              businessId: task.business_id, taskId: task.id,
+              sourceUrl: sub.downloadUrl, identity, mood: production.tool_usage.music_track,
+            });
+            return res.status(200).json({ ok: true, production: finishRes.production, logoUsed: finishRes.logoUsed, musicMood: finishRes.musicMood });
+          } catch (e) {
+            console.error('[smVideoProductionPoll] phase4 finishing stage failed · productionId:', productionId, '·', e && e.stack || e);
+            production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
+              status: 'failed', error_message: 'Finishing (music/branding) failed: ' + e.message,
+            }).catch(() => production);
+            return res.status(200).json({ ok: true, production });
+          }
+        }
+
         try {
           // ── Stage 3: SMM Brand Composer — v16.35.0 Milestone 5A: asset-driven composition, ──
           // ── not just a logo overlay. Uses storefront/product assets returned by ────────────
