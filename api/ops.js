@@ -9302,6 +9302,15 @@ async function contentPlanningReview(req, res) {
 // "follow us" at all. hasVerifiedSocial-gated "follow us" language lives only in the
 // video creative path (smBuildVideoCreativePrompt/smGenerateVideoCreative) which does
 // receive that flag.
+// SMM V1 Phase 1 — Brain + Data Foundation. Short deterministic fingerprint of a production's
+// core content (item + hook + concept/caption), stored on the row at creation time. Foundation
+// only: no dedup/repetition logic reads this yet (that is explicitly Phase 3) — it exists so a
+// future phase can detect near-duplicate productions without re-deriving history from scratch.
+function smComputeContentFingerprint(parts) {
+  const normalized = (parts || []).map((p) => String(p || '').trim().toLowerCase()).join('|');
+  return createHash('sha256').update(normalized).digest('hex').slice(0, 24);
+}
+
 function smBuildProductionPackageContent(offering, identity) {
   const name = (offering && offering.name) || 'Menu Item';
   const desc = (offering && offering.description) || '';
@@ -9385,6 +9394,8 @@ async function smGenerateVaQueueForPlan(plan, businessId) {
         hook: content.hook,
         hashtags: content.hashtags,
         checklist: content.checklist,
+        content_fingerprint: smComputeContentFingerprint([itemRef, content.hook, content.caption]),
+        tool_usage: { creative_provider: 'deterministic_template' },
       });
       if (task.status === 'queued') {
         task = await sbPatch('sm_va_tasks', `id=eq.${encodeURIComponent(task.id)}`, { status: 'package_ready' });
@@ -9423,7 +9434,12 @@ async function vaTaskList(req, res) {
   const { businessId } = req.query || {};
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
   try {
-    const tasks = await sbGet(`sm_va_tasks?business_id=eq.${encodeURIComponent(businessId)}&select=*&order=created_at.asc`);
+    // SMM V1 Phase 1 — Brain + Data Foundation: engineering-test rows (data_tier='engineering_test')
+    // are excluded from the VA/CEO-facing queue by default, so throwaway engineering verification
+    // runs no longer need to be manually deleted to keep Operator Mode clean — they stay in the
+    // database for audit, just filtered out of this view. Every existing/real production row
+    // defaults to data_tier='pilot' and is unaffected.
+    const tasks = await sbGet(`sm_va_tasks?business_id=eq.${encodeURIComponent(businessId)}&data_tier=neq.engineering_test&select=*&order=created_at.asc`);
     const ids = (tasks || []).map((t) => t.id);
     let packages = [];
     // v16.58.0 — CEO Decision #26 continuation: sm_production_packages now supports multiple
@@ -9499,6 +9515,8 @@ async function smVaTaskGeneratePackage(req, res) {
     const content = smBuildProductionPackageContent(offering, brain.identity || {});
     const pkg = await sbInsert('sm_production_packages', {
       va_task_id: task.id, caption: content.caption, hook: content.hook, hashtags: content.hashtags, checklist: content.checklist,
+      content_fingerprint: smComputeContentFingerprint([task.item_ref, content.hook, content.caption]),
+      tool_usage: { creative_provider: 'deterministic_template' },
     });
     const updatedTask = await sbPatch('sm_va_tasks', `id=eq.${encodeURIComponent(task.id)}`, { status: 'package_ready' });
     return res.status(200).json({ ok: true, task: updatedTask, package: pkg });
@@ -9569,7 +9587,8 @@ async function ceoReviewQueueList(req, res) {
   const { businessId } = req.query || {};
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
   try {
-    const tasks = await sbGet(`sm_va_tasks?business_id=eq.${encodeURIComponent(businessId)}&select=*&order=created_at.asc`);
+    // SMM V1 Phase 1 — Brain + Data Foundation: same engineering-test exclusion as vaTaskList.
+    const tasks = await sbGet(`sm_va_tasks?business_id=eq.${encodeURIComponent(businessId)}&data_tier=neq.engineering_test&select=*&order=created_at.asc`);
     const ids = (tasks || []).map((t) => t.id);
     if (!ids.length) return res.status(200).json({ ok: true, records: [] });
     const packages = await sbGet(`sm_production_packages?va_task_id=in.(${ids.map(encodeURIComponent).join(',')})&status=eq.draft&select=*`);
@@ -10459,10 +10478,21 @@ async function smVideoProductionGenerate(req, res) {
     production = await sbInsert('sm_video_productions', { va_task_id: vaTaskId, status: 'sourcing_visuals' });
 
     const creative = await smGenerateVideoCreative(offering, identity, hasVerifiedSocial);
+    // SMM V1 Phase 1 — Brain + Data Foundation: persist the fingerprint + tool/provider usage
+    // this call already knows (creative.source was previously computed then discarded). No new
+    // logic reads these yet — foundation only, for a future repetition-prevention/quality phase.
     production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(production.id)}`, {
       concept: creative.concept, hook: creative.hook, script_text: creative.spoken_script,
       on_screen_text: creative.on_screen_text, caption: creative.caption, hashtags: creative.hashtags,
       visual_direction: creative.visual_direction,
+      content_fingerprint: smComputeContentFingerprint([task.item_ref, creative.hook, creative.concept]),
+      tool_usage: {
+        creative_provider: creative.source || 'deterministic_fallback',
+        creative_model: creative.source === 'ai_generated' ? 'claude-sonnet-4-5' : null,
+        presenter_provider: 'heygen',
+        captions_provider: 'submagic',
+        compositor_provider: 'ffmpeg_local',
+      },
     });
 
     // Record which supporting visual WOULD be used for Submagic's light B-roll punctuation and
