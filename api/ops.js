@@ -9870,7 +9870,7 @@ async function smSelectPlanAssets(businessId, productRefs) {
   // v16.66.0 — Music Library tracks now live in this same table (asset_type='audio',
   // category='music_track') — explicitly excluded here since this function selects VISUAL
   // segments only. Music selection is a separate, dedicated path (smSelectMusicTrack).
-  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&asset_type=neq.audio&select=*&order=created_at.desc`);
+  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&asset_type=neq.audio&data_tier=neq.engineering_test&select=*&order=created_at.desc`);
   const assets = rows || [];
   const originRank = { client_provided: 0, verified_public: 1, ai_enhanced: 2 };
   const tagged = assets.filter((a) => a.product_ref && productRefs.includes(a.product_ref));
@@ -10016,7 +10016,7 @@ async function smBuildCreativePlan(task) {
   // Library V1) — 'owner_video' still counts too, since real owner-recorded footage is exactly
   // the same kind of behind-the-scenes material. None exist for Urban Halal Shack today, so
   // Behind the Scenes is correctly still ineligible.
-  const approvedAssetsAll = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(task.business_id)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&select=id,category,product_ref`);
+  const approvedAssetsAll = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(task.business_id)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&data_tier=neq.engineering_test&select=id,category,product_ref`);
   const hasPrepOrBtsAssets = (approvedAssetsAll || []).some((a) => a.category === 'owner_video' || a.category === 'preparation');
 
   let plan = null;
@@ -10813,7 +10813,7 @@ async function smLoadOfferingForTask(task) {
 // purely-invented visual as brand-representative imagery is a bigger call than this phase
 // covers) are deliberately not included here.
 async function smSelectBrandAssets(businessId) {
-  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&select=*&order=created_at.desc`);
+  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&data_tier=neq.engineering_test&select=*&order=created_at.desc`);
   const assets = rows || [];
   const logo = assets.find((a) => a.category === 'logo') || null;
   const storefront = assets.find((a) => a.category === 'storefront_photo') || null;
@@ -11087,7 +11087,7 @@ async function smSynthesizeMusicBed(mood, durationSec, id) {
 // pilot has no real music uploaded, per the CEO's own correction order.
 async function smSelectMusicTrack(mood, businessId) {
   try {
-    const rows = await sbGet(`sm_content_assets?asset_type=eq.audio&category=eq.music_track&mood=eq.${encodeURIComponent(mood)}&status=eq.ceo_approved&or=(business_id.eq.${encodeURIComponent(businessId)},business_id.is.null)&select=*&order=last_used_at.asc.nullsfirst&limit=1`);
+    const rows = await sbGet(`sm_content_assets?asset_type=eq.audio&category=eq.music_track&mood=eq.${encodeURIComponent(mood)}&status=eq.ceo_approved&data_tier=neq.engineering_test&or=(business_id.eq.${encodeURIComponent(businessId)},business_id.is.null)&select=*&order=last_used_at.asc.nullsfirst&limit=1`);
     return (rows && rows[0]) || null;
   } catch (e) {
     console.warn('[smSelectMusicTrack] lookup failed, falling back to synthesis:', e.message);
@@ -11239,7 +11239,7 @@ async function smVideoProductionGenerateAssetDriven(req, res, task, pkg) {
     const planAssetIds = Array.isArray(pkg.selected_asset_ids) ? pkg.selected_asset_ids : [];
     let planAssets = [];
     if (planAssetIds.length) {
-      const rows = await sbGet(`sm_content_assets?id=in.(${planAssetIds.map(encodeURIComponent).join(',')})&status=eq.ceo_approved&origin=in.(client_provided,verified_public,ai_enhanced)&select=*`);
+      const rows = await sbGet(`sm_content_assets?id=in.(${planAssetIds.map(encodeURIComponent).join(',')})&status=eq.ceo_approved&origin=in.(client_provided,verified_public,ai_enhanced)&data_tier=neq.engineering_test&select=*`);
       const byId = {}; (rows || []).forEach((a) => { byId[a.id] = a; });
       planAssets = planAssetIds.map((aid) => byId[aid]).filter(Boolean);
     }
@@ -11717,7 +11717,11 @@ async function smContentAssetList(req, res) {
   const { businessId } = req.query || {};
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
   try {
-    const records = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&select=*&order=created_at.desc`);
+    // v16.66.0 — SMM V1 Phase 4 CORRECTION: this VA/CEO-facing list never excluded
+    // data_tier='engineering_test' (unlike vaTaskList/ceoReviewQueueList, which have since
+    // Phase 1) — a real gap the new upload/auto-trim testing this phase would otherwise have
+    // leaked directly into the live Business Assets panel. Rows stay in the database for audit.
+    const records = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&data_tier=neq.engineering_test&select=*&order=created_at.desc`);
     return res.status(200).json({ ok: true, records: records || [] });
   } catch (e) {
     return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
@@ -11921,7 +11925,7 @@ async function smAssetGapReport(req, res) {
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
   try {
     const [assetRows, coverageRows, brainRows] = await Promise.all([
-      sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&status=eq.ceo_approved&select=category,product_ref`),
+      sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&status=eq.ceo_approved&data_tier=neq.engineering_test&select=category,product_ref`),
       sbGet(`sm_asset_coverage?business_id=eq.${encodeURIComponent(businessId)}&select=*`),
       sbGet(`business_brain?business_id=eq.${encodeURIComponent(businessId)}&select=identity&limit=1`),
     ]);
