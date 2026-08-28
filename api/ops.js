@@ -9387,16 +9387,10 @@ async function smGenerateVaQueueForPlan(plan, businessId) {
     const pkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(task.id)}&select=*&limit=1`);
     let pkg = pkgRows && pkgRows[0] ? pkgRows[0] : null;
     if (!pkg) {
-      const content = smBuildProductionPackageContent(offering, identity);
-      pkg = await sbInsert('sm_production_packages', {
-        va_task_id: task.id,
-        caption: content.caption,
-        hook: content.hook,
-        hashtags: content.hashtags,
-        checklist: content.checklist,
-        content_fingerprint: smComputeContentFingerprint([itemRef, content.hook, content.caption]),
-        tool_usage: { creative_provider: 'deterministic_template' },
-      });
+      // SMM V1 Phase 3 — Content Intelligence / Creative Planner (same orchestrator as the
+      // single-task Generate action — one canonical planning path, not two that could drift).
+      const generatedPlan = await smBuildCreativePlan(task);
+      pkg = await sbInsert('sm_production_packages', { va_task_id: task.id, ...generatedPlan });
       if (task.status === 'queued') {
         task = await sbPatch('sm_va_tasks', `id=eq.${encodeURIComponent(task.id)}`, { status: 'package_ready' });
       }
@@ -9468,7 +9462,27 @@ async function vaTaskGet(req, res) {
     // v16.58.0 — CEO Decision #26 continuation: current attempt only (see vaTaskList comment).
     const pkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(taskId)}&is_current=eq.true&select=*&limit=1`);
     const pkg = pkgRows && pkgRows[0] ? pkgRows[0] : null;
-    return res.status(200).json({ ok: true, task, package: pkg });
+    // SMM V1 Phase 3 — Content Intelligence / Creative Planner. Resolves the plan's raw ids
+    // (format_id, primary/secondary product_refs) into plain-language names for the VA Review
+    // screen — "which products, which format," never a raw internal id or provider name.
+    let planSummary = null;
+    if (pkg && pkg.format_id) {
+      const [formatRows, brainRows] = await Promise.all([
+        sbGet(`sm_creative_formats?id=eq.${encodeURIComponent(pkg.format_id)}&select=display_name,description&limit=1`),
+        sbGet(`business_brain?business_id=eq.${encodeURIComponent(task.business_id)}&select=offerings&limit=1`),
+      ]);
+      const format = formatRows && formatRows[0];
+      const offerings = (brainRows && brainRows[0] && Array.isArray(brainRows[0].offerings)) ? brainRows[0].offerings : [];
+      const nameFor = (ref) => (offerings.find((o) => o.id === ref) || {}).name || ref;
+      planSummary = {
+        formatName: (format && format.display_name) || null,
+        formatDescription: (format && format.description) || null,
+        primaryProductName: pkg.primary_product_ref ? nameFor(pkg.primary_product_ref) : null,
+        secondaryProductNames: (Array.isArray(pkg.secondary_product_refs) ? pkg.secondary_product_refs : []).map(nameFor),
+        assetCount: Array.isArray(pkg.selected_asset_ids) ? pkg.selected_asset_ids.length : 0,
+      };
+    }
+    return res.status(200).json({ ok: true, task, package: pkg, planSummary });
   } catch (e) {
     return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
   }
@@ -9505,19 +9519,11 @@ async function smVaTaskGeneratePackage(req, res) {
       return res.status(400).json({ ok: false, error: `a ${existingPkg.status} package already exists for this task` });
     }
 
-    const brainRows = await sbGet(`business_brain?business_id=eq.${encodeURIComponent(task.business_id)}&select=identity,offerings&limit=1`);
-    const brain = brainRows && brainRows[0];
-    if (!brain) return res.status(404).json({ ok: false, error: 'Business Brain not found for this task' });
-    const offerings = Array.isArray(brain.offerings) ? brain.offerings : [];
-    const offering = offerings.find((o) => o.id === task.item_ref);
-    if (!offering) return res.status(404).json({ ok: false, error: `offering ${task.item_ref} not found in Business Brain` });
-
-    const content = smBuildProductionPackageContent(offering, brain.identity || {});
-    const pkg = await sbInsert('sm_production_packages', {
-      va_task_id: task.id, caption: content.caption, hook: content.hook, hashtags: content.hashtags, checklist: content.checklist,
-      content_fingerprint: smComputeContentFingerprint([task.item_ref, content.hook, content.caption]),
-      tool_usage: { creative_provider: 'deterministic_template' },
-    });
+    // SMM V1 Phase 3 — Content Intelligence / Creative Planner. Generate now produces a real
+    // Production Plan (format, single/multi-product selection, asset selection, repetition/
+    // duplicate protection, factual grounding) instead of a single-product caption template.
+    const plan = await smBuildCreativePlan(task);
+    const pkg = await sbInsert('sm_production_packages', { va_task_id: task.id, ...plan });
     const updatedTask = await sbPatch('sm_va_tasks', `id=eq.${encodeURIComponent(task.id)}`, { status: 'package_ready' });
     return res.status(200).json({ ok: true, task: updatedTask, package: pkg });
   } catch (e) {
@@ -9768,6 +9774,329 @@ async function smGenerateVideoCreative(offering, identity, hasVerifiedSocial) {
     } catch (e) { /* try next attempt, then fall back */ }
   }
   return deterministicFallback();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// SMM V1 Phase 3 — Content Intelligence / Creative Planner. Upgrades Generate from a single-
+// product caption template into a real planner: format selection, single/multi-product
+// selection, asset selection (approved-only, provenance-ordered), repetition/duplicate
+// protection against real production history, and strict factual grounding — extending the
+// existing sm_production_packages record (Phase 1's attempt-tracking, content_fingerprint,
+// tool_usage) rather than building a parallel structure, per explicit CEO instruction.
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+// Recent production history for this business, excluding engineering-test data (joined through
+// sm_va_tasks.data_tier so throwaway engineering runs never influence real repetition-avoidance
+// for the pilot/live client) — the durable signal the planner reads to judge freshness. No
+// separate aggregation table: this queries the same history rows Phase 1/2 already made
+// durable, per "ready to incorporate real analytics later without redesign."
+async function smGetRecentPlanHistory(businessId, limit) {
+  const tasks = await sbGet(`sm_va_tasks?business_id=eq.${encodeURIComponent(businessId)}&data_tier=neq.engineering_test&select=id`);
+  const taskIds = (tasks || []).map((t) => t.id);
+  if (!taskIds.length) return [];
+  const rows = await sbGet(`sm_production_packages?va_task_id=in.(${taskIds.map(encodeURIComponent).join(',')})&select=id,va_task_id,format_id,primary_product_ref,secondary_product_refs,hook,content_fingerprint,selected_asset_ids,cta_text,status,created_at&order=created_at.desc&limit=${limit || 10}`);
+  return rows || [];
+}
+
+// Which formats are actually eligible RIGHT NOW for this business, computed purely from real
+// verified data (never hardcoded per-client): does the primary/combined product set have
+// approved photo/video coverage, does a verified review/promotion/prep-asset exist, and is the
+// format buildable with today's unchanged Build pipeline (HeyGen narration + Submagic + ffmpeg
+// — Music-Only Showcase is catalog-only until a future phase can actually render it).
+function smComputeFormatEligibility(formats, candidateProductCount, hasPhotoOrVideoCoverage, hasVerifiedReviews, hasVerifiedPromotion, hasPrepOrBtsAssets) {
+  return (formats || []).filter((f) => {
+    if (!f.buildable_now) return false;
+    if (candidateProductCount < f.min_products || candidateProductCount > f.max_products) return false;
+    if (f.needs_photo_or_video && !hasPhotoOrVideoCoverage) return false;
+    if (f.needs_verified_reviews && !hasVerifiedReviews) return false;
+    if (f.needs_verified_promotion && !hasVerifiedPromotion) return false;
+    if (f.needs_prep_or_bts_assets && !hasPrepOrBtsAssets) return false;
+    return true;
+  });
+}
+
+// Weighted pick among eligible formats, biased away from whichever format the last 1-2
+// productions used — recency intelligence, not a hard rule ("do not impose a rigid universal
+// rule"). Falls back to the full eligible set if everything eligible was just used (e.g. only
+// one format is viable for this business today).
+function smSelectFormat(eligibleFormats, recentHistory) {
+  const recentFormatIds = (recentHistory || []).slice(0, 2).map((h) => h.format_id).filter(Boolean);
+  const fresh = eligibleFormats.filter((f) => !recentFormatIds.includes(f.id));
+  const pool = fresh.length ? fresh : eligibleFormats;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Complementary products for a multi-product format. Menu-sense pairing only — same category
+// (a natural "more of this kind" grouping) or a cross-category pairing — never an invented
+// bundle, price, or discount. Prefers offerings with their own approved asset coverage and
+// deprioritizes whatever was already paired with this primary product recently (repetition
+// protection on COMBINATIONS, not just single products).
+function smSelectComplementaryProducts(primaryOffering, allOfferings, countNeeded, coverageByRef, recentHistory) {
+  const recentPairings = new Set();
+  (recentHistory || []).forEach((h) => {
+    if (h.primary_product_ref === primaryOffering.id) {
+      (Array.isArray(h.secondary_product_refs) ? h.secondary_product_refs : []).forEach((r) => recentPairings.add(r));
+    }
+  });
+  const candidates = allOfferings.filter((o) => o.id !== primaryOffering.id);
+  const scored = candidates.map((o) => {
+    const coverage = coverageByRef[o.id] || { approved_asset_count: 0 };
+    const sameCategory = o.category === primaryOffering.category;
+    const recentlyPaired = recentPairings.has(o.id);
+    let score = coverage.approved_asset_count > 0 ? 2 : 0;
+    if (sameCategory) score += 1;
+    if (recentlyPaired) score -= 3;
+    return { offering: o, score };
+  }).sort((a, b) => b.score - a.score);
+  return scored.slice(0, countNeeded).map((s) => s.offering);
+}
+
+// Eligible assets for this plan: approved-only (never a candidate — "candidate assets may
+// inform coverage/gap reporting but must not silently become production-approved"), preferring
+// assets tagged to one of this plan's products, then general business assets, ordered owner→
+// verified-public→AI-enhanced (the exact preference order CEO specified; ai_generated is
+// intentionally never auto-selected here — "do not invoke AI enhancement/generation merely
+// because it is available").
+async function smSelectPlanAssets(businessId, productRefs) {
+  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&select=*&order=created_at.desc`);
+  const assets = rows || [];
+  const originRank = { client_provided: 0, verified_public: 1, ai_enhanced: 2 };
+  const tagged = assets.filter((a) => a.product_ref && productRefs.includes(a.product_ref));
+  const general = assets.filter((a) => !a.product_ref);
+  const rankSort = (a, b) => (originRank[a.origin] ?? 9) - (originRank[b.origin] ?? 9);
+  tagged.sort(rankSort);
+  general.sort(rankSort);
+  return { productAssets: tagged, generalAssets: general };
+}
+
+// Multi-product/format-aware version of smBuildVideoCreativePrompt — same "verified facts only,
+// first-person business voice" discipline, generalized to 1-N offerings and told which creative
+// format to write toward.
+function smBuildPlanCreativePrompt(offerings, identity, hasVerifiedSocial, format) {
+  const bizName = (identity && identity.businessName) || '';
+  const cityRaw = (identity && identity.cityOrAddress) || '';
+  const cityMatch = cityRaw.match(/,\s*([A-Za-z]+),?\s*[A-Z]{2}\b/);
+  const city = cityMatch ? cityMatch[1] : '';
+  const website = (identity && identity.website) || '';
+  const phone = (identity && identity.phoneNumber) || '';
+
+  const itemLines = offerings.map((o, i) => {
+    const price = (typeof o.price === 'number') ? `$${o.price.toFixed(2)}` : '(not provided — do not state a price for this item)';
+    return `- Item ${i + 1}: ${o.name} — ${o.description || '(no description provided)'} — Price: ${price} — Category: ${o.category || '(none provided)'}`;
+  }).join('\n');
+
+  return `You are writing the spoken script for a short-form vertical ad that ${bizName || 'this business'} is publishing about itself, in the "${format.display_name}" style: ${format.description}. You must ONLY use the verified facts given below. NEVER invent, guess, or add any menu item, price, discount, promotion, rating, address, hours, social account, or claim that is not explicitly listed here.
+
+VERIFIED FACTS (the only facts you may reference):
+- Business name: ${bizName || '(not provided — do not invent one)'}
+- City: ${city || '(not provided — do not invent one)'}
+- Ordering link / website: ${website || '(not provided — do not mention or invent one)'}
+- Phone: ${phone || '(not provided — do not mention or invent one)'}
+${itemLines}
+
+MANDATORY VOICE — the most important rule: spoken AS the business, first person plural ("we", "our", "us"). Never third-person reviewer framing ("their [item]", "visit them").
+${hasVerifiedSocial ? 'A verified social account exists — you may include a brief "follow us" line if it fits naturally.' : 'No verified social account exists. Do NOT say "follow us" or reference any social platform — omit that idea entirely.'}
+${offerings.length > 1 ? `This ad features ${offerings.length} real items together because they make menu sense — do not imply they are a discounted bundle or combo deal unless a price for the combination was explicitly given above (it was not).` : ''}
+
+Write the spoken presenter segment — 22-34 words, ~9-14 seconds at natural speaking pace${offerings.length > 1 ? ', briefly mentioning each item by name' : ''}. Return STRICT JSON only, wrapped in <creative> tags, matching exactly this schema:
+<creative>{"concept":"one sentence describing the video's angle/idea","hook":"punchy 3-6 word opening line, first person","spoken_script":"exactly what the presenter says aloud, first person as the business, mentions item name(s) and price(s) only if given above, ends with a first-person CTA — NOT third-person reviewer language","on_screen_text":["hook text card","item name text card(s)","optional short text card"],"caption":"1-2 sentence social caption, first person, verified facts only, include the ordering link if given above","hashtags":"space-separated hashtags, 4-6 tags, never a social handle","visual_direction":"short phrase describing suitable supporting footage","cta":"one short first-person call to action phrase, e.g. 'Order from us today'"}</creative>
+
+Rules: never state a price not given above. Never invent specials, discounts, ratings, awards, social accounts, or quality claims. spoken_script must sound natural read aloud — no markdown, no emoji, no hashtags inside it. Keep on_screen_text entries short (under 6 words each).`;
+}
+
+function smValidatePlanCreative(c, offerings, hasVerifiedSocial) {
+  if (!c || typeof c !== 'object' || !c.spoken_script) return false;
+  const text = [c.concept, c.hook, c.spoken_script, c.caption, ...(Array.isArray(c.on_screen_text) ? c.on_screen_text : [])]
+    .filter(Boolean).join(' ');
+  const dollarMatches = text.match(/\$\s?\d+(\.\d{1,2})?/g) || [];
+  const verifiedPrices = offerings.filter((o) => typeof o.price === 'number').map((o) => o.price);
+  for (const m of dollarMatches) {
+    const num = parseFloat(m.replace(/[^\d.]/g, ''));
+    if (!verifiedPrices.some((p) => Math.abs(p - num) < 0.001)) return false;
+  }
+  const scriptLc = String(c.spoken_script || '').toLowerCase();
+  if (/\btheir\b|\bvisit them\b|\bthey (have|serve|offer)\b/.test(scriptLc)) return false;
+  if (!hasVerifiedSocial && /\bfollow us\b|\bfollow @|\binstagram\b|\bfacebook\b|\btiktok\b/.test(scriptLc)) return false;
+  return true;
+}
+
+// Claude-with-deterministic-fallback creative generation, generalized to N offerings + a
+// creative format — same reliability guarantee as the original single-product path (never
+// blocks Generate if ANTHROPIC_API_KEY is absent or every attempt fails validation).
+async function smGeneratePlanCreative(offerings, identity, hasVerifiedSocial, format) {
+  const bizName = (identity && identity.businessName) || 'our shop';
+  const primary = offerings[0];
+  const deterministicFallback = () => {
+    const names = offerings.map((o) => o.name).join(offerings.length > 1 ? ' and our ' : '');
+    const priceClause = (typeof primary.price === 'number') ? `, just $${primary.price.toFixed(2)}` : '';
+    const base = smBuildProductionPackageContent(primary, identity);
+    return {
+      concept: `Showcase our ${names}`,
+      hook: `Our ${primary.name}`,
+      spoken_script: `Come try our ${names}${priceClause}. Order from us — we'd love to see you at ${bizName}.`,
+      on_screen_text: offerings.slice(0, 3).map((o) => o.name),
+      caption: base.caption,
+      hashtags: base.hashtags,
+      visual_direction: `${primary.category || primary.name} food, close-up shot, appetizing`,
+      cta: 'Order from us today',
+      source: 'deterministic_fallback',
+    };
+  };
+
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return deterministicFallback();
+
+  const prompt = smBuildPlanCreativePrompt(offerings, identity, hasVerifiedSocial, format);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 900,
+          messages: [{
+            role: 'user',
+            content: attempt === 0 ? prompt : prompt + '\n\nIMPORTANT: your previous attempt either mentioned a price/fact not in the verified list, used third-person reviewer language, or mentioned following/social media without a verified account. Do not do that again — first person only, verified facts only.',
+          }],
+        }),
+      });
+      if (!claudeRes.ok) continue;
+      const d = await claudeRes.json();
+      const text = (d.content && d.content[0] && d.content[0].text) || '';
+      const m = text.match(/<creative>([\s\S]*?)<\/creative>/);
+      if (!m) continue;
+      let creative;
+      try { creative = JSON.parse(m[1]); } catch (e) { continue; }
+      if (smValidatePlanCreative(creative, offerings, hasVerifiedSocial)) return { ...creative, source: 'ai_generated' };
+    } catch (e) { /* try next attempt, then fall back */ }
+  }
+  return deterministicFallback();
+}
+
+// ── The orchestrator: SMM V1 Phase 3 Creative Planner ─────────────────────────────────────────
+// One Generate call → one real Production Plan, persisted as a new sm_production_packages
+// attempt (reusing Phase 1's attempt_number/is_current trigger — nothing here bypasses it).
+// Retries internally (bounded) on a hard content-fingerprint duplicate before ever returning a
+// plan identical to one already in recent history.
+async function smBuildCreativePlan(task) {
+  const [brainRows, formats, recentHistory, coverageRows] = await Promise.all([
+    sbGet(`business_brain?business_id=eq.${encodeURIComponent(task.business_id)}&select=identity,social_accounts,offerings,reviews&limit=1`),
+    sbGet(`sm_creative_formats?select=*&order=sort_order.asc`),
+    smGetRecentPlanHistory(task.business_id, 10),
+    sbGet(`sm_asset_coverage?business_id=eq.${encodeURIComponent(task.business_id)}&select=*`),
+  ]);
+  const brain = (brainRows && brainRows[0]) || {};
+  const identity = brain.identity || {};
+  const offerings = Array.isArray(brain.offerings) ? brain.offerings : [];
+  const socialAccounts = Array.isArray(brain.social_accounts) ? brain.social_accounts : [];
+  const hasVerifiedSocial = socialAccounts.some((a) => a && a.status === 'verified');
+  const hasVerifiedReviews = Array.isArray(brain.reviews) && brain.reviews.length > 0;
+  const hasVerifiedPromotion = false; // no promotions field exists anywhere in Business Brain today — never fabricated
+
+  const primaryOffering = offerings.find((o) => o.id === task.item_ref);
+  if (!primaryOffering) throw new Error(`verified offering not found for item_ref=${task.item_ref}`);
+
+  const coverageByRef = {};
+  (coverageRows || []).forEach((c) => { coverageByRef[c.product_ref] = c; });
+
+  // "prep/behind-the-scenes" assets: no dedicated category exists for this yet (Phase 2's
+  // taxonomy is logo/storefront/product/menu/owner_video/brand_colors_graphics/other) — treated
+  // conservatively as an approved owner_video asset, since that's the closest real match; none
+  // exist for Urban Halal Shack today, so Behind the Scenes is correctly ineligible.
+  const approvedAssetsAll = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(task.business_id)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&select=id,category,product_ref`);
+  const hasPrepOrBtsAssets = (approvedAssetsAll || []).some((a) => a.category === 'owner_video');
+
+  let plan = null;
+  let attemptsLeft = 3;
+  while (attemptsLeft > 0 && !plan) {
+    attemptsLeft -= 1;
+
+    const primaryCoverage = coverageByRef[primaryOffering.id];
+    const primaryHasAssets = !!(primaryCoverage && primaryCoverage.approved_asset_count > 0);
+
+    // Eligible formats change with product count, so we compute for both a single- and a
+    // multi-product candidate pool up front, then let the selected format decide which applies.
+    const singleEligible = smComputeFormatEligibility(formats, 1, primaryHasAssets, hasVerifiedReviews, hasVerifiedPromotion, hasPrepOrBtsAssets);
+    const multiCandidatePool = offerings.filter((o) => o.id !== primaryOffering.id).length;
+    const multiEligible = multiCandidatePool >= 1
+      ? smComputeFormatEligibility(formats, 2, primaryHasAssets, hasVerifiedReviews, hasVerifiedPromotion, hasPrepOrBtsAssets)
+      : [];
+    const eligible = singleEligible.concat(multiEligible);
+    if (!eligible.length) throw new Error('no eligible creative format for this business — this should not happen since Narrated Showcase has no asset requirement');
+
+    const format = smSelectFormat(eligible, recentHistory);
+    const wantsMultiple = format.min_products > 1;
+
+    let secondaryOfferings = [];
+    if (wantsMultiple) {
+      const countNeeded = Math.min(format.max_products, Math.max(format.min_products, 2)) - 1;
+      secondaryOfferings = smSelectComplementaryProducts(primaryOffering, offerings, countNeeded, coverageByRef, recentHistory);
+    }
+    const planOfferings = [primaryOffering, ...secondaryOfferings];
+    const productRefs = planOfferings.map((o) => o.id);
+
+    const { productAssets, generalAssets } = await smSelectPlanAssets(task.business_id, productRefs);
+    const selectedAssets = productAssets.concat(generalAssets).slice(0, 6);
+
+    const creative = await smGeneratePlanCreative(planOfferings, identity, hasVerifiedSocial, format);
+
+    const fingerprint = smComputeContentFingerprint([
+      productRefs.slice().sort().join('+'), format.id, creative.hook, creative.concept,
+    ]);
+    const isDuplicate = (recentHistory || []).some((h) => h.content_fingerprint === fingerprint);
+    if (isDuplicate && attemptsLeft > 0) continue; // hard duplicate protection — try a different format/angle
+
+    const lastEntry = (recentHistory || [])[0];
+    const differentiation_reason = lastEntry
+      ? `This plan uses the "${format.display_name}" format featuring ${planOfferings.map((o) => o.name).join(', ')} — different from the most recent production, which used ${lastEntry.format_id ? `the "${lastEntry.format_id}" format` : 'an earlier Generate step before formats were tracked'}${lastEntry.primary_product_ref ? ` on ${lastEntry.primary_product_ref}` : ''}.`
+      : `This is the first tracked production plan for this business — no prior history to differentiate from.`;
+
+    const assetCoverageSnapshot = {
+      primary: coverageByRef[primaryOffering.id] || { coverage_level: 'missing', approved_asset_count: 0 },
+      secondary: secondaryOfferings.map((o) => ({ product_ref: o.id, ...(coverageByRef[o.id] || { coverage_level: 'missing', approved_asset_count: 0 }) })),
+    };
+
+    const factualSources = [
+      { field: 'business_identity', value: identity.businessName || null },
+      ...planOfferings.map((o) => ({ field: 'offering', product_ref: o.id, name: o.name, price: o.price ?? null })),
+    ];
+
+    plan = {
+      caption: creative.caption,
+      hook: creative.hook,
+      hashtags: creative.hashtags,
+      checklist: [
+        { label: 'Confirm item details match the current menu', done: false },
+        { label: 'Review selected assets before Build', done: false },
+        { label: 'Proofread caption and hashtags before scheduling', done: false },
+      ],
+      concept: creative.concept,
+      spoken_script: creative.spoken_script,
+      on_screen_text: creative.on_screen_text || [],
+      visual_direction: creative.visual_direction || null,
+      cta_text: creative.cta || null,
+      format_id: format.id,
+      primary_product_ref: primaryOffering.id,
+      secondary_product_refs: secondaryOfferings.map((o) => o.id),
+      intended_duration_sec: 9 + planOfferings.length * 3,
+      selected_asset_ids: selectedAssets.map((a) => a.id),
+      narration_required: format.needs_narration,
+      music_direction: 'None — the current pipeline does not add a separate background-music track beyond Submagic\'s own caption/audio polish.',
+      required_capabilities: {
+        presenter_narration: format.needs_narration,
+        captions: true,
+        note: 'Recorded plan data only — Build always uses HeyGen + Submagic + ffmpeg in this phase regardless of this field.',
+      },
+      factual_sources: factualSources,
+      differentiation_reason,
+      asset_coverage_snapshot: assetCoverageSnapshot,
+      content_fingerprint: fingerprint,
+      tool_usage: { creative_provider: creative.source || 'deterministic_fallback', creative_model: creative.source === 'ai_generated' ? 'claude-sonnet-4-5' : null },
+    };
+  }
+  if (!plan) throw new Error('could not produce a sufficiently distinct production plan after multiple attempts');
+  return plan;
 }
 
 // ── Visual sourcing — NEW SMM-scoped Pexels query (photo + HD video) ──────────────────
@@ -10489,7 +10818,28 @@ async function smVideoProductionGenerate(req, res) {
 
     production = await sbInsert('sm_video_productions', { va_task_id: vaTaskId, status: 'sourcing_visuals' });
 
-    const creative = await smGenerateVideoCreative(offering, identity, hasVerifiedSocial);
+    // SMM V1 Phase 3 — Content Intelligence / Creative Planner. Before this phase, Build always
+    // called smGenerateVideoCreative fresh here, INDEPENDENTLY of whatever hook/caption the VA
+    // had just reviewed and approved at Review (sm_production_packages only ever held
+    // caption/hook/hashtags, never the actual spoken script) — so a VA's approval never actually
+    // governed what got built, and re-running Build could silently produce different spoken
+    // content than what was reviewed. The approved package now carries the full plan
+    // (spoken_script/concept/on_screen_text/visual_direction, plus format/product-selection
+    // metadata) — Build uses it verbatim when present. Older packages that predate this phase
+    // (no spoken_script ever persisted) fall back to the original regenerate-fresh behavior so
+    // nothing existing breaks. Build's own rendering mechanics (HeyGen/Submagic/ffmpeg, and the
+    // single-offering-anchored end-card in smBrandComposite) are completely unchanged — only
+    // where the input TEXT comes from changes.
+    const approvedPkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(vaTaskId)}&is_current=eq.true&select=*&limit=1`);
+    const approvedPkg = approvedPkgRows && approvedPkgRows[0];
+    const creative = (approvedPkg && approvedPkg.spoken_script)
+      ? {
+          concept: approvedPkg.concept, hook: approvedPkg.hook, spoken_script: approvedPkg.spoken_script,
+          on_screen_text: approvedPkg.on_screen_text, caption: approvedPkg.caption, hashtags: approvedPkg.hashtags,
+          visual_direction: approvedPkg.visual_direction,
+          source: (approvedPkg.tool_usage && approvedPkg.tool_usage.creative_provider) || 'approved_plan',
+        }
+      : await smGenerateVideoCreative(offering, identity, hasVerifiedSocial);
     // SMM V1 Phase 1 — Brain + Data Foundation: persist the fingerprint + tool/provider usage
     // this call already knows (creative.source was previously computed then discarded). No new
     // logic reads these yet — foundation only, for a future repetition-prevention/quality phase.
@@ -10497,7 +10847,7 @@ async function smVideoProductionGenerate(req, res) {
       concept: creative.concept, hook: creative.hook, script_text: creative.spoken_script,
       on_screen_text: creative.on_screen_text, caption: creative.caption, hashtags: creative.hashtags,
       visual_direction: creative.visual_direction,
-      content_fingerprint: smComputeContentFingerprint([task.item_ref, creative.hook, creative.concept]),
+      content_fingerprint: (approvedPkg && approvedPkg.content_fingerprint) || smComputeContentFingerprint([task.item_ref, creative.hook, creative.concept]),
       tool_usage: {
         creative_provider: creative.source || 'deterministic_fallback',
         creative_model: creative.source === 'ai_generated' ? 'claude-sonnet-4-5' : null,
