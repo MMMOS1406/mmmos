@@ -9867,7 +9867,10 @@ function smSelectComplementaryProducts(primaryOffering, allOfferings, countNeede
 // intentionally never auto-selected here — "do not invoke AI enhancement/generation merely
 // because it is available").
 async function smSelectPlanAssets(businessId, productRefs) {
-  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&select=*&order=created_at.desc`);
+  // v16.66.0 — Music Library tracks now live in this same table (asset_type='audio',
+  // category='music_track') — explicitly excluded here since this function selects VISUAL
+  // segments only. Music selection is a separate, dedicated path (smSelectMusicTrack).
+  const rows = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&asset_type=neq.audio&select=*&order=created_at.desc`);
   const assets = rows || [];
   const originRank = { client_provided: 0, verified_public: 1, ai_enhanced: 2 };
   const tagged = assets.filter((a) => a.product_ref && productRefs.includes(a.product_ref));
@@ -10009,12 +10012,12 @@ async function smBuildCreativePlan(task) {
   const coverageByRef = {};
   (coverageRows || []).forEach((c) => { coverageByRef[c.product_ref] = c; });
 
-  // "prep/behind-the-scenes" assets: no dedicated category exists for this yet (Phase 2's
-  // taxonomy is logo/storefront/product/menu/owner_video/brand_colors_graphics/other) — treated
-  // conservatively as an approved owner_video asset, since that's the closest real match; none
-  // exist for Urban Halal Shack today, so Behind the Scenes is correctly ineligible.
+  // "prep/behind-the-scenes" assets: v16.66.0 added a dedicated 'preparation' category (Asset
+  // Library V1) — 'owner_video' still counts too, since real owner-recorded footage is exactly
+  // the same kind of behind-the-scenes material. None exist for Urban Halal Shack today, so
+  // Behind the Scenes is correctly still ineligible.
   const approvedAssetsAll = await sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(task.business_id)}&origin=in.(client_provided,verified_public,ai_enhanced)&status=eq.ceo_approved&select=id,category,product_ref`);
-  const hasPrepOrBtsAssets = (approvedAssetsAll || []).some((a) => a.category === 'owner_video');
+  const hasPrepOrBtsAssets = (approvedAssetsAll || []).some((a) => a.category === 'owner_video' || a.category === 'preparation');
 
   let plan = null;
   let attemptsLeft = 3;
@@ -10814,7 +10817,7 @@ async function smSelectBrandAssets(businessId) {
   const assets = rows || [];
   const logo = assets.find((a) => a.category === 'logo') || null;
   const storefront = assets.find((a) => a.category === 'storefront_photo') || null;
-  const products = assets.filter((a) => a.category === 'product_photo' || a.category === 'menu_image').slice(0, 3);
+  const products = assets.filter((a) => ['product_photo', 'menu_image', 'finished_food'].includes(a.category)).slice(0, 3);
   const productVisual = products[0] || null;
   const missingAssets = [];
   if (!logo) missingAssets.push('Business logo');
@@ -11004,27 +11007,41 @@ async function smMuxNarrationAudio({ videoPath, audioBuffer, id }) {
 // it's picked), so it behaves as a real reusable library entry, not a one-off track — the mood
 // name is persisted in tool_usage.music_track so Phase 3's repetition intelligence can
 // eventually vary the pick over time without any redesign here.
+// v16.66.0 — SMM V1 Phase 4 CORRECTION: Music Library V1. CEO's exact 6-class classification
+// scheme (energetic/upbeat/modern/food_social/promotional/relaxed), replacing the earlier
+// internal 4-name vocabulary so there is one consistent naming system throughout the plan →
+// selection → storage → learning chain. Each mood's synthesized reference bed is now a real pad
+// (3-tone chord) + a tremolo-pulsed sub-bass layer locked to the tempo, instead of flat static
+// sine chords — a meaningfully fuller "produced" sound while remaining 100%-local, zero-cost,
+// zero-licensing-risk (per standing CEO cost-discipline directive: no new paid vendor). This is
+// the FALLBACK reference track only — smSelectMusicTrack below always prefers a real, human-
+// approved uploaded track from the new Music Library (sm_content_assets, category='music_track')
+// once one exists for a given mood; synthesis is what plays until the CEO/VA uploads real music.
 const SMM_MUSIC_LIBRARY = {
-  warm_upbeat:   { name: 'Warm Upbeat',   bpm: 100, chords: [[261.63, 329.63, 392.00], [293.66, 349.23, 440.00], [261.63, 329.63, 392.00], [196.00, 246.94, 349.23]] }, // C–D–C–G
-  confident:     { name: 'Confident',     bpm: 96,  chords: [[220.00, 261.63, 329.63], [196.00, 246.94, 293.66], [174.61, 220.00, 261.63], [196.00, 246.94, 293.66]] }, // Am–G–F–G
-  energetic:     { name: 'Energetic',     bpm: 112, chords: [[329.63, 392.00, 493.88], [293.66, 349.23, 440.00], [261.63, 329.63, 392.00], [293.66, 349.23, 440.00]] }, // E–D–C–D, bright
-  chill_craving: { name: 'Chill Craving', bpm: 88,  chords: [[220.00, 261.63, 329.63], [196.00, 233.08, 293.66], [174.61, 207.65, 261.63], [196.00, 233.08, 293.66]] }, // Am–Gm–Fm–Gm
+  energetic:   { name: 'Energetic',   bpm: 118, chords: [[329.63, 392.00, 493.88], [293.66, 349.23, 440.00], [261.63, 329.63, 392.00], [293.66, 349.23, 440.00]] }, // E–D–C–D, bright
+  upbeat:      { name: 'Upbeat',      bpm: 104, chords: [[261.63, 329.63, 392.00], [293.66, 349.23, 440.00], [261.63, 329.63, 392.00], [196.00, 246.94, 349.23]] }, // C–D–C–G
+  modern:      { name: 'Modern',      bpm: 100, chords: [[146.83, 174.61, 220.00], [110.00, 130.81, 164.81], [116.54, 146.83, 174.61], [130.81, 164.81, 196.00]] }, // Dm–Am–Bb–C
+  food_social: { name: 'Food/Social', bpm: 96,  chords: [[220.00, 261.63, 329.63], [196.00, 246.94, 293.66], [174.61, 220.00, 261.63], [196.00, 246.94, 293.66]] }, // Am–G–F–G, warm/inviting
+  promotional: { name: 'Promotional', bpm: 112, chords: [[196.00, 246.94, 293.66], [130.81, 164.81, 196.00], [146.83, 185.00, 220.00], [130.81, 164.81, 196.00]] }, // G–C–D–C, punchy
+  relaxed:     { name: 'Relaxed',     bpm: 84,  chords: [[220.00, 261.63, 329.63], [196.00, 233.08, 293.66], [174.61, 207.65, 261.63], [196.00, 233.08, 293.66]] }, // Am–Gm–Fm–Gm, mellow
 };
 
 function smPickMusicMood(formatId) {
   const map = {
-    narrated_showcase: 'warm_upbeat', food_hero: 'warm_upbeat', menu_spotlight: 'warm_upbeat',
-    food_combination: 'energetic', menu_discovery: 'energetic', offer_promotion: 'energetic',
-    business_spotlight: 'confident', customer_proof: 'confident', behind_the_scenes: 'confident',
-    craving_emotion: 'chill_craving',
+    food_combination: 'energetic', menu_discovery: 'energetic',
+    narrated_showcase: 'upbeat', food_hero: 'upbeat', menu_spotlight: 'upbeat',
+    business_spotlight: 'modern', craving_emotion: 'modern',
+    customer_proof: 'food_social', behind_the_scenes: 'food_social',
+    offer_promotion: 'promotional',
   };
-  return map[formatId] || 'warm_upbeat';
+  return map[formatId] || 'upbeat';
 }
 
 async function smSynthesizeMusicBed(mood, durationSec, id) {
-  const track = SMM_MUSIC_LIBRARY[mood] || SMM_MUSIC_LIBRARY.warm_upbeat;
+  const track = SMM_MUSIC_LIBRARY[mood] || SMM_MUSIC_LIBRARY.upbeat;
   const chords = track.chords;
   const segDur = (60 / track.bpm) * 4; // 4 beats per chord
+  const pulseHz = (track.bpm / 60) * 2; // eighth-note bass pulse — gives the bed an actual rhythmic feel instead of a static drone
   const cyclesNeeded = Math.max(1, Math.ceil(durationSec / (segDur * chords.length)));
   const segPaths = [];
   const listPath = join(tmpdir(), `smm-music-list-${id}.txt`);
@@ -11039,7 +11056,8 @@ async function smSynthesizeMusicBed(mood, durationSec, id) {
           '-f', 'lavfi', '-i', `sine=frequency=${f1}:duration=${segDur}`,
           '-f', 'lavfi', '-i', `sine=frequency=${f2}:duration=${segDur}`,
           '-f', 'lavfi', '-i', `sine=frequency=${f3}:duration=${segDur}`,
-          '-filter_complex', `[0:a][1:a][2:a]amix=inputs=3:duration=longest,volume=1.4,alimiter=limit=0.8`,
+          '-f', 'lavfi', '-i', `sine=frequency=${(f1 / 2).toFixed(2)}:duration=${segDur}`,
+          '-filter_complex', `[0:a][1:a][2:a]amix=inputs=3:duration=longest:weights=0.8 0.8 0.8[pad];[3:a]tremolo=f=${pulseHz.toFixed(2)}:d=0.6,volume=1.5[bass];[pad][bass]amix=inputs=2:duration=longest,alimiter=limit=0.82`,
           '-c:a', 'aac', '-b:a', '128k', p,
         ], { timeout: 15000, maxBuffer: 1024 * 1024 * 10 });
         segPaths.push(p);
@@ -11061,12 +11079,53 @@ async function smSynthesizeMusicBed(mood, durationSec, id) {
   }
 }
 
+// Least-recently-used selection among real, human-approved uploaded music tracks for this mood
+// (shared/global tracks — business_id IS NULL — are eligible for any business, alongside any
+// business-specific uploads) — this is the concrete "use accumulated history to reduce
+// repetition" mechanism the CEO asked for. Returns null (falls back to synthesis) if no real
+// track has been uploaded/approved for this mood yet — true for every mood today, since this
+// pilot has no real music uploaded, per the CEO's own correction order.
+async function smSelectMusicTrack(mood, businessId) {
+  try {
+    const rows = await sbGet(`sm_content_assets?asset_type=eq.audio&category=eq.music_track&mood=eq.${encodeURIComponent(mood)}&status=eq.ceo_approved&or=(business_id.eq.${encodeURIComponent(businessId)},business_id.is.null)&select=*&order=last_used_at.asc.nullsfirst&limit=1`);
+    return (rows && rows[0]) || null;
+  } catch (e) {
+    console.warn('[smSelectMusicTrack] lookup failed, falling back to synthesis:', e.message);
+    return null;
+  }
+}
+
+async function smPrepareRealMusicTrack(track, durationSec, id) {
+  const srcPath = join(tmpdir(), `smm-realmusic-src-${id}`);
+  const outPath = join(tmpdir(), `smm-realmusic-${id}.m4a`);
+  try {
+    await smDownloadToFile(track.source_url, srcPath);
+    await smAssertValidMediaFile(srcPath, 'uploaded music track');
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-stream_loop', '-1', '-i', srcPath, '-t', String(durationSec),
+      '-filter:a', `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, durationSec - 1.2).toFixed(2)}:d=1.2`,
+      '-c:a', 'aac', '-b:a', '128k', outPath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 20 });
+    await smAssertValidMediaFile(outPath, 'prepared music track');
+    return outPath;
+  } finally {
+    await unlink(srcPath).catch(() => {});
+  }
+}
+
 // Mixes the music bed UNDER the existing narration+captions track (reduced volume so the
-// voice stays clearly intelligible, per CEO requirement) rather than replacing it.
-async function smMixMusicUnderNarration({ videoWithNarrationPath, mood, id }) {
+// voice stays clearly intelligible, per CEO requirement) rather than replacing it. Prefers a
+// real uploaded/approved Music Library track over the synthesized reference bed whenever one
+// exists for this mood/business.
+async function smMixMusicUnderNarration({ videoWithNarrationPath, mood, id, businessId }) {
   const durationSec = await smProbeDurationSec(videoWithNarrationPath);
   if (!durationSec) throw new Error('could not determine duration for music mixing');
-  const musicPath = await smSynthesizeMusicBed(mood, durationSec, id);
+
+  const realTrack = businessId ? await smSelectMusicTrack(mood, businessId) : null;
+  const musicPath = realTrack
+    ? await smPrepareRealMusicTrack(realTrack, durationSec, id)
+    : await smSynthesizeMusicBed(mood, durationSec, id);
+
   const outPath = join(tmpdir(), `smm-withmusic-${id}.mp4`);
   try {
     await execFileAsync(ffmpegInstaller.path, [
@@ -11077,7 +11136,12 @@ async function smMixMusicUnderNarration({ videoWithNarrationPath, mood, id }) {
       outPath,
     ], { timeout: 30000, maxBuffer: 1024 * 1024 * 30 });
     await smAssertValidMediaFile(outPath, 'video with background music');
-    return outPath;
+    if (realTrack) {
+      sbPatch('sm_content_assets', `id=eq.${encodeURIComponent(realTrack.id)}`, {
+        usage_count: (realTrack.usage_count || 0) + 1, last_used_at: new Date().toISOString(),
+      }).catch(() => {});
+    }
+    return { path: outPath, musicSource: realTrack ? 'uploaded' : 'synthesized', musicTrackId: realTrack ? realTrack.id : null };
   } finally {
     await unlink(musicPath).catch(() => {});
   }
@@ -11099,8 +11163,9 @@ async function smFinishAssetDrivenComposite({ productionId, attemptNumber, busin
       await smAssertValidMediaFile(localSourcePath, 'downloaded captioned video (from Submagic)');
     }
 
-    mood = mood || 'warm_upbeat';
-    const withMusic = track(await smMixMusicUnderNarration({ videoWithNarrationPath: localSourcePath, mood, id }));
+    mood = mood || 'upbeat';
+    const musicResult = await smMixMusicUnderNarration({ videoWithNarrationPath: localSourcePath, mood, id, businessId });
+    const withMusic = track(musicResult.path);
 
     const brand = await smSelectBrandAssets(businessId);
     let finalPath = withMusic;
@@ -11124,7 +11189,7 @@ async function smFinishAssetDrivenComposite({ productionId, attemptNumber, busin
     await sbPatch('sm_production_packages', `va_task_id=eq.${encodeURIComponent(taskId)}&status=eq.draft`, {
       hook: production.hook, caption: production.caption, hashtags: production.hashtags,
     }).catch(() => {});
-    return { production, logoUsed, musicMood: mood };
+    return { production, logoUsed, musicMood: mood, musicSource: musicResult.musicSource, musicTrackId: musicResult.musicTrackId };
   } finally {
     for (const p of tempPaths) await unlink(p).catch(() => {});
   }
@@ -11683,6 +11748,201 @@ async function smContentAssetReview(req, res) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// v16.66.0 — SMM V1 Phase 4 CORRECTION: Asset Library V1. Direct file upload into MMMOS
+// (replacing URL-only intake as the primary path — URL/import remains available above via
+// smContentAssetCreate, unchanged). Two upload paths for two real, different constraints:
+//   (1) smContentAssetUploadDirect — small files (photos/logos/music) as base64 in the request
+//       body, capped conservatively under Vercel's request-body ceiling.
+//   (2) smContentAssetUploadUrlCreate + smContentAssetRegisterUploaded — large raw video
+//       footage, via a Supabase Storage signed-upload URL so the browser uploads the file bytes
+//       directly to storage (never through this function's body limit at all).
+// Every uploaded asset is permanently preserved (nothing here ever deletes or overwrites the
+// original bytes) and starts status='draft' — a human approval is still required before Build
+// can ever select it, identical to the existing review discipline.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+
+const SM_DIRECT_UPLOAD_MAX_BYTES = 3 * 1024 * 1024; // ~3MB raw stays safely under Vercel's request-body ceiling once base64-encoded
+
+function smSanitizeAssetFilename(name) {
+  return String(name || 'asset').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60);
+}
+
+async function smContentAssetUploadDirect(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { businessId, assetName, assetType, category, mood, productRef, notes, fileBase64, mimeType } = req.body || {};
+  if (!businessId || !assetName || !assetType || !category || !fileBase64) {
+    return res.status(400).json({ ok: false, error: 'businessId, assetName, assetType, category, fileBase64 are required' });
+  }
+  if (category === 'music_track' && assetType !== 'audio') {
+    return res.status(400).json({ ok: false, error: "category 'music_track' requires assetType 'audio'" });
+  }
+  if (category === 'music_track' && !mood) {
+    return res.status(400).json({ ok: false, error: 'mood is required for music_track uploads' });
+  }
+  try {
+    const buf = Buffer.from(fileBase64, 'base64');
+    if (!buf.length) return res.status(400).json({ ok: false, error: 'uploaded file is empty' });
+    if (buf.length > SM_DIRECT_UPLOAD_MAX_BYTES) {
+      return res.status(400).json({
+        ok: false,
+        error: `file too large for direct upload (${(buf.length / 1024 / 1024).toFixed(1)}MB, max ${(SM_DIRECT_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(1)}MB) — use the raw-video upload flow (sm_content_asset_upload_url) for larger files`,
+      });
+    }
+    const ext = (String(mimeType || '').split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 6) || 'bin';
+    const path = `social-media-manager/${businessId}/library/${category}/${Date.now()}-${smSanitizeAssetFilename(assetName)}.${ext}`;
+    const publicUrl = await sbStorageUpload(path, buf, mimeType || 'application/octet-stream');
+    // Objective, disclosed heuristic (file size only) — never a fabricated quality opinion. Real
+    // usability judgment still happens at human review, same as every other asset.
+    const usability = buf.length > 500 * 1024 ? 'high' : 'standard';
+    const record = await sbInsert('sm_content_assets', {
+      business_id: businessId, asset_name: assetName, asset_type: assetType, origin: 'client_provided',
+      category, source_provider: 'direct_upload', source_url: publicUrl, storage_path: path,
+      product_ref: productRef || null, mood: mood || null, notes: notes || null, usability,
+    });
+    let derivedClips = [];
+    if (assetType === 'video') {
+      try { derivedClips = await smAutoTrimVideoAsset(record); }
+      catch (e) { console.warn('[smContentAssetUploadDirect] auto-trim failed, raw upload still saved:', e.message); }
+    }
+    return res.status(200).json({ ok: true, record, derivedClips });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `upload failed: ${e.message}` });
+  }
+}
+
+// Step 1 of the large-file (raw video) upload flow — issues a Supabase Storage signed upload
+// URL so the browser can PUT the file bytes directly to storage, never through this serverless
+// function's request-body limit.
+async function smContentAssetUploadUrlCreate(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { businessId, assetName, mimeType } = req.body || {};
+  if (!businessId || !assetName) return res.status(400).json({ ok: false, error: 'businessId and assetName are required' });
+  try {
+    const ext = (String(mimeType || '').split('/')[1] || 'mp4').replace(/[^a-z0-9]/gi, '').slice(0, 6) || 'mp4';
+    const path = `social-media-manager/${businessId}/library/raw-video/${Date.now()}-${smSanitizeAssetFilename(assetName)}.${ext}`;
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/upload/sign/srv-assets/${path}`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data || !data.url) {
+      return res.status(502).json({ ok: false, error: `could not create signed upload url: ${r.status} ${JSON.stringify(data).slice(0, 200)}` });
+    }
+    return res.status(200).json({ ok: true, path, uploadUrl: `${SUPABASE_URL}/storage/v1${data.url}` });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: e.message });
+  }
+}
+
+// Step 2 — called once the browser's direct PUT to the signed URL succeeds. Registers the
+// permanent database row and triggers auto-trim (raw video only).
+async function smContentAssetRegisterUploaded(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { businessId, assetName, category, productRef, notes, path } = req.body || {};
+  if (!businessId || !assetName || !category || !path) return res.status(400).json({ ok: false, error: 'businessId, assetName, category, path are required' });
+  try {
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${path}`;
+    const record = await sbInsert('sm_content_assets', {
+      business_id: businessId, asset_name: assetName, asset_type: 'video', origin: 'client_provided',
+      category, source_provider: 'direct_upload', source_url: publicUrl, storage_path: path,
+      product_ref: productRef || null, notes: notes || null, usability: 'high',
+    });
+    let derivedClips = [];
+    try { derivedClips = await smAutoTrimVideoAsset(record); }
+    catch (e) { console.warn('[smContentAssetRegisterUploaded] auto-trim failed, raw upload still saved:', e.message); }
+    return res.status(200).json({ ok: true, record, derivedClips });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
+  }
+}
+
+// Raw owner footage needs no manual CEO/VA editing before it can be considered for production —
+// this automatically prepares up to 2 short (6s), vertically-cropped candidate segments from a
+// freshly uploaded raw video asset. The ORIGINAL upload is never modified, trimmed in place, or
+// deleted — it stays permanently on file exactly as uploaded. Derived segments are separate new
+// draft rows (linked via derived_from_asset_id) that a human still approves before Build can
+// ever select them — auto-trim removes manual editing work, not human review.
+async function smAutoTrimVideoAsset(parentAsset) {
+  const id = `trim-${parentAsset.id}-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+  const srcPath = join(tmpdir(), `smm-trim-src-${id}.mp4`);
+  const clips = [];
+  try {
+    await smDownloadToFile(parentAsset.source_url, srcPath);
+    await smAssertValidMediaFile(srcPath, 'uploaded raw video');
+    const durationSec = await smProbeDurationSec(srcPath);
+    if (!durationSec || durationSec < 1) return [];
+
+    const CLIP_LEN = 6;
+    const windows = [0];
+    if (durationSec > CLIP_LEN * 2.5) windows.push(Math.floor(durationSec / 2 - CLIP_LEN / 2));
+    const usedWindows = windows.filter((w) => w >= 0 && w + CLIP_LEN <= durationSec + 0.5).slice(0, 2);
+
+    for (let i = 0; i < usedWindows.length; i++) {
+      const start = usedWindows[i];
+      const clipLen = Math.min(CLIP_LEN, durationSec - start);
+      const outPath = join(tmpdir(), `smm-trimclip-${id}-${i}.mp4`);
+      await execFileAsync(ffmpegInstaller.path, [
+        '-y', '-ss', String(start), '-i', srcPath, '-t', String(clipLen),
+        '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=25',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+        '-c:a', 'aac', '-ar', '44100', '-ac', '2',
+        outPath,
+      ], { timeout: 45000, maxBuffer: 1024 * 1024 * 30 });
+      await smAssertValidMediaFile(outPath, `auto-trimmed clip ${i + 1}`);
+      const buf = await readFile(outPath);
+      await unlink(outPath).catch(() => {});
+      const clipPath = `social-media-manager/${parentAsset.business_id}/library/${parentAsset.category}/${Date.now()}-autotrim-${i}.mp4`;
+      const clipUrl = await sbStorageUpload(clipPath, buf, 'video/mp4');
+      const clipRecord = await sbInsert('sm_content_assets', {
+        business_id: parentAsset.business_id, asset_name: `${parentAsset.asset_name} (auto-trimmed ${i + 1})`,
+        asset_type: 'video', origin: 'client_provided', category: parentAsset.category,
+        source_provider: 'direct_upload', source_url: clipUrl, storage_path: clipPath,
+        product_ref: parentAsset.product_ref || null, derived_from_asset_id: parentAsset.id,
+        duration_seconds: clipLen, usability: 'high',
+        notes: `Auto-trimmed from raw footage starting at ${start}s — awaiting review, never auto-approved.`,
+      });
+      clips.push(clipRecord);
+    }
+    return clips;
+  } finally {
+    await unlink(srcPath).catch(() => {});
+  }
+}
+
+// Dynamic Owner Asset Request / Missing Assets — computed live from real approved-asset state,
+// never a generic checklist (matches the same bar Phase 2's owner checklist was held to). Two
+// layers: which asset CATEGORIES have zero approved assets at all, and which verified OFFERINGS
+// still have missing/weak photo coverage (reusing the existing sm_asset_coverage view).
+async function smAssetGapReport(req, res) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
+  const { businessId } = req.query || {};
+  if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
+  try {
+    const [assetRows, coverageRows, brainRows] = await Promise.all([
+      sbGet(`sm_content_assets?business_id=eq.${encodeURIComponent(businessId)}&status=eq.ceo_approved&select=category,product_ref`),
+      sbGet(`sm_asset_coverage?business_id=eq.${encodeURIComponent(businessId)}&select=*`),
+      sbGet(`business_brain?business_id=eq.${encodeURIComponent(businessId)}&select=identity&limit=1`),
+    ]);
+    const approved = assetRows || [];
+    const businessName = (brainRows && brainRows[0] && brainRows[0].identity && brainRows[0].identity.businessName) || 'This business';
+    const categoryLabels = {
+      logo: 'a logo', storefront_photo: 'a storefront/interior photo', staff: 'a staff photo',
+      preparation: 'food-preparation footage', packaging_service: 'a packaging/service photo',
+      owner_video: 'owner-recorded video', finished_food: 'a finished/plated food photo',
+    };
+    const missingCategories = Object.keys(categoryLabels).filter((cat) => !approved.some((a) => a.category === cat));
+    const weakProducts = (coverageRows || []).filter((c) => c.coverage_level === 'missing' || c.coverage_level === 'weak')
+      .map((c) => ({ product_ref: c.product_ref, product_name: c.product_name, coverage_level: c.coverage_level }));
+    const requestList = missingCategories.map((cat) => `${businessName} — please provide ${categoryLabels[cat]}.`)
+      .concat(weakProducts.map((p) => `${businessName} — a real photo/video of "${p.product_name}" would improve that item's productions (currently ${p.coverage_level}).`));
+    return res.status(200).json({ ok: true, missingCategories, weakProducts, requestList });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -11721,6 +11981,10 @@ export default async function handler(req, res) {
     if (action === 'sm_content_asset_create')        return await smContentAssetCreate(req, res);           // v16.32.0
     if (action === 'sm_content_asset_list')          return await smContentAssetList(req, res);             // v16.32.0
     if (action === 'sm_content_asset_review')        return await smContentAssetReview(req, res);           // v16.32.0
+    if (action === 'sm_content_asset_upload_direct') return await smContentAssetUploadDirect(req, res);      // v16.66.0
+    if (action === 'sm_content_asset_upload_url')    return await smContentAssetUploadUrlCreate(req, res);   // v16.66.0
+    if (action === 'sm_content_asset_register')      return await smContentAssetRegisterUploaded(req, res);  // v16.66.0
+    if (action === 'sm_asset_gap_report')            return await smAssetGapReport(req, res);                // v16.66.0
     if (action === 'sm_va_task_mark_published')      return await smVaTaskMarkPublished(req, res);          // v16.52.0
     if (action === 'list_pipeline')        return await listPipeline(req, res);
     if (action === 'create_pipeline_item') return await createPipelineItem(req, res);
