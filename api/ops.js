@@ -11196,6 +11196,15 @@ async function smVideoProductionGenerateAssetDriven(req, res, task, pkg) {
       content_fingerprint: pkg.content_fingerprint,
     });
 
+    // Auditable usage record — same purpose as the legacy pipeline's brand-asset logging, now
+    // for the plan's own selected_asset_ids (the assets that actually became this production's
+    // primary visual, not just business-general brand references).
+    planAssets.forEach((a, idx) => {
+      sbInsert('sm_video_production_assets', {
+        video_production_id: production.id, content_asset_id: a.id, role: 'primary_broll', sequence_order: idx + 1,
+      }).catch(() => {});
+    });
+
     const id = `${production.id}-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
     const tempPaths = [];
     const track = (p) => { tempPaths.push(p); return p; };
