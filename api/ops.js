@@ -10594,6 +10594,29 @@ function smSanitizeForDrawtext(s) {
   return String(s || '').replace(/['":\\\[\],;]/g, '').slice(0, 60);
 }
 
+// v16.65.1 — SMM V1 Phase 4 QA fix. drawtext with a fixed fontsize has no wrapping — a long
+// item-name+price string (e.g. "Mix Chicken and Lamb Over Rice · $10.99") at 50px can exceed
+// the 1080px-wide 9:16 canvas and get clipped at the right edge, which is not acceptable for a
+// paid-looking end card. No ffmpeg text-metrics API is available at this point in the
+// pipeline, so this uses a deliberately conservative per-character width estimate for this
+// bold font (~0.56x fontsize) and shrinks proportionally, never below a readable floor.
+function smFitFontSize(text, baseFontSize, maxWidthPx) {
+  maxWidthPx = maxWidthPx || 1000;
+  const estWidth = String(text || '').length * baseFontSize * 0.56;
+  if (estWidth <= maxWidthPx) return baseFontSize;
+  return Math.max(28, Math.floor(baseFontSize * (maxWidthPx / estWidth)));
+}
+
+// Vertically centers an end-card's lines as a block (instead of stacking them near the very
+// bottom of a 1920px-tall frame, which reads as unbalanced/amateurish) — works for any real
+// line count (1-4, depending on which verified identity fields exist for this business).
+function smCenterEndCardLines(rawLines, lineHeight) {
+  lineHeight = lineHeight || 130;
+  const totalHeight = rawLines.length * lineHeight;
+  const startY = Math.max(200, Math.round((1920 - totalHeight) / 2));
+  return rawLines.map((l, i) => Object.assign({}, l, { y: startY + i * lineHeight }));
+}
+
 // v16.33.0 — CEO Gate Review revision (Milestone 5 QA failures #2/#3). Text is now a
 // deterministic, server-controlled 3-beat sequence (hook → verified item+price → verified
 // business-name CTA) instead of a loose list including whatever the AI/Submagic produced, and
@@ -10939,10 +10962,13 @@ async function smApplyNarrationTextOverlay({ inputPath, durationSec, hookText, i
   const hookTxt = smSanitizeForDrawtext(hookText);
   const itemTxt = smSanitizeForDrawtext(itemText);
   const ctaTxt = smSanitizeForDrawtext(ctaText);
+  const hookSize = smFitFontSize(hookTxt, 60, 1000);
+  const itemSize = smFitFontSize(itemTxt, 50, 1000);
+  const ctaSize = smFitFontSize(ctaTxt, 44, 1000);
   const filters = [];
-  if (hookTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${hookTxt}':fontcolor=white:fontsize=60:box=1:boxcolor=black@0.5:boxborderw=20:x=(w-text_w)/2:y=220:enable='between(t\\,0\\,${seg.toFixed(2)})'`);
-  if (itemTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${itemTxt}':fontcolor=white:fontsize=50:box=1:boxcolor=black@0.5:boxborderw=18:x=(w-text_w)/2:y=1500:enable='between(t\\,${seg.toFixed(2)}\\,${(seg * 2).toFixed(2)})'`);
-  if (ctaTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${ctaTxt}':fontcolor=white:fontsize=44:box=1:boxcolor=black@0.5:boxborderw=16:x=(w-text_w)/2:y=1500:enable='between(t\\,${(seg * 2).toFixed(2)}\\,${durationSec})'`);
+  if (hookTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${hookTxt}':fontcolor=white:fontsize=${hookSize}:box=1:boxcolor=black@0.5:boxborderw=20:x=(w-text_w)/2:y=220:enable='between(t\\,0\\,${seg.toFixed(2)})'`);
+  if (itemTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${itemTxt}':fontcolor=white:fontsize=${itemSize}:box=1:boxcolor=black@0.5:boxborderw=18:x=(w-text_w)/2:y=1500:enable='between(t\\,${seg.toFixed(2)}\\,${(seg * 2).toFixed(2)})'`);
+  if (ctaTxt) filters.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${ctaTxt}':fontcolor=white:fontsize=${ctaSize}:box=1:boxcolor=black@0.5:boxborderw=16:x=(w-text_w)/2:y=1500:enable='between(t\\,${(seg * 2).toFixed(2)}\\,${durationSec})'`);
   await execFileAsync(ffmpegInstaller.path, [
     '-y', '-i', inputPath,
     '-vf', filters.length ? filters.join(',') : 'null',
@@ -11193,17 +11219,20 @@ async function smVideoProductionGenerateAssetDriven(req, res, task, pkg) {
       }));
       const narratedMain = track(await smMuxNarrationAudio({ videoPath: texted, audioBuffer: narration.buffer, id }));
 
-      const lines = [];
+      const rawLines = [];
       const priceLabel = (typeof offering.price === 'number') ? `$${offering.price.toFixed(2)}` : null;
       const itemTxt = smSanitizeForDrawtext(priceLabel ? `${offering.name} · ${priceLabel}` : offering.name);
-      if (itemTxt) lines.push({ text: itemTxt, fontsize: 50, y: 1420 });
-      if (identity.businessName) lines.push({ text: smSanitizeForDrawtext(`Order from ${identity.businessName}`), fontsize: 42, y: 1520 });
+      if (itemTxt) rawLines.push({ text: itemTxt, fontsize: smFitFontSize(itemTxt, 50, 980) });
+      if (identity.businessName) {
+        const orderTxt = smSanitizeForDrawtext(`Order from ${identity.businessName}`);
+        rawLines.push({ text: orderTxt, fontsize: smFitFontSize(orderTxt, 42, 980) });
+      }
       let ctaExtra = null;
       if (identity.website) { try { ctaExtra = new URL(identity.website).hostname; } catch (e) { ctaExtra = String(identity.website).replace(/^https?:\/\//, '').split('/')[0]; } }
       else if (identity.phoneNumber) { ctaExtra = identity.phoneNumber; }
-      if (ctaExtra) lines.push({ text: smSanitizeForDrawtext(ctaExtra), fontsize: 34, y: 1610 });
-      if (hasVerifiedSocial) lines.push({ text: smSanitizeForDrawtext(`Follow ${identity.businessName || 'us'}`), fontsize: 34, y: 1680 });
-      const endCard = track(await smSegEndCard({ id, durationSec: 3.0, lines }));
+      if (ctaExtra) rawLines.push({ text: smSanitizeForDrawtext(ctaExtra), fontsize: 34 });
+      if (hasVerifiedSocial) rawLines.push({ text: smSanitizeForDrawtext(`Follow ${identity.businessName || 'us'}`), fontsize: 34 });
+      const endCard = track(await smSegEndCard({ id, durationSec: 3.0, lines: smCenterEndCardLines(rawLines) }));
 
       const fullSilentEnded = track(await smConcatSegments({ paths: [narratedMain, endCard], id }));
 
