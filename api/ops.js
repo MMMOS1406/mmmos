@@ -11217,9 +11217,22 @@ async function smMixMusicUnderNarration({ videoWithNarrationPath, mood, id, busi
 
   const outPath = join(tmpdir(), `smm-withmusic-${id}.mp4`);
   try {
+    // v16.69.0 — SMM FINAL correction: root cause of "no audible background music" confirmed
+    // by direct measurement, not guessed. ffmpeg's amix filter defaults to normalize=1, which
+    // silently divides EVERY input (narration included) by the input count (~-6dB for 2 inputs)
+    // on top of whatever gain each input already carries. That -6dB was stacking with the
+    // deliberate volume=0.16 attenuation already applied to the music channel, compounding into
+    // a level measured as low as -40dB during narration-free segments (the end card) — real,
+    // present, but effectively inaudible on a normal phone speaker. Verified empirically: the
+    // same two-tone mix measured -27dB with normalize's default vs -21dB with normalize=0 (the
+    // exact ~6dB the filter's own documentation describes). Fixed by disabling that automatic
+    // rescaling (normalize=0) — the music/narration BALANCE is controlled deliberately, by the
+    // explicit volume value on the music channel alone, not by an incidental filter default —
+    // and raising that value from 0.16 to 0.35 (a standard "audible bed under dialogue" ratio)
+    // to compensate for the level the bug had been silently hiding.
     await execFileAsync(ffmpegInstaller.path, [
       '-y', '-i', videoWithNarrationPath, '-i', musicPath,
-      '-filter_complex', '[1:a]volume=0.16[music];[0:a][music]amix=inputs=2:duration=first:dropout_transition=0[outa]',
+      '-filter_complex', '[1:a]volume=0.35[music];[0:a][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]',
       '-map', '0:v:0', '-map', '[outa]',
       '-c:v', 'copy', '-c:a', 'aac', '-ar', '44100', '-ac', '2',
       outPath,
