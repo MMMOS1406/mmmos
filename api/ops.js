@@ -10943,10 +10943,38 @@ async function smBuildTimedAssetSegments(assets, targetDurationSec, id) {
   const minSeg = 2.0, maxSeg = 4.0;
   const count = Math.max(1, Math.min(5, Math.round(targetDurationSec / 2.8)));
   const perSeg = Math.min(maxSeg, Math.max(minSeg, targetDurationSec / count));
+
+  // v16.67.0 — SMM FINAL Music + Food-Visual Correction. CEO-observed failure: the featured
+  // food was not visually prominent — the previous simple round-robin gave a real product-
+  // specific photo (product_ref set) equal screen time to generic storefront/menu/brand shots
+  // (product_ref null), diluting the actual "hero" image the plan was built around. Real
+  // product-specific assets now get ~70% of segment slots and always open the sequence (and
+  // close it too, when there's more than one segment) — general assets still appear (never
+  // fully hidden) but are clearly secondary, not equal, whenever a real food photo exists.
+  // Falls back to the original even cycling when the plan has no product-tagged asset at all
+  // (the honest all-general/asset-gap case is unaffected — that decision belongs to product
+  // selection at Generate time, not to Build's visual weighting).
+  const hero = usable.filter((a) => a.product_ref);
+  const general = usable.filter((a) => !a.product_ref);
+  const slots = new Array(count).fill('general');
+  if (hero.length) {
+    const heroSlots = Math.max(1, Math.ceil(count * 0.7));
+    slots[0] = 'hero';
+    if (count > 1) slots[count - 1] = 'hero';
+    let placed = slots.filter((s) => s === 'hero').length;
+    let idx = 1;
+    while (placed < heroSlots && idx < count - 1) { slots[idx] = 'hero'; placed++; idx++; }
+  }
+  let hi = 0, gi = 0;
+  const order = slots.map((s) => {
+    if (s === 'hero' || !general.length) { const a = hero.length ? hero[hi % hero.length] : general[gi % general.length]; hi++; return a; }
+    const a = general[gi % general.length]; gi++; return a;
+  });
+
   const paths = [];
   let usedSec = 0;
   for (let i = 0; i < count; i++) {
-    const asset = usable[i % usable.length];
+    const asset = order[i];
     const isLast = i === count - 1;
     const dur = isLast ? Math.max(minSeg, targetDurationSec - usedSec) : perSeg;
     const seg = await smSegFromAsset(asset, { id, tag: `vis${i}`, durationSec: Math.round(dur * 10) / 10 });
@@ -11092,6 +11120,57 @@ async function smSelectMusicTrack(mood, businessId) {
   } catch (e) {
     console.warn('[smSelectMusicTrack] lookup failed, falling back to synthesis:', e.message);
     return null;
+  }
+}
+
+// v16.67.0 — SMM FINAL Music + Food-Visual Correction. Automatic acquisition into the
+// permanent MMMOS Music Library from a CEO-approved source (Mixkit/Pixabay direct free-license
+// download links — no scraping, no auth bypass; these are each source's own public,
+// no-attribution-required free-download mechanism). The file is downloaded and re-hosted in
+// MMMOS's own permanent storage (never a hotlink to the external CDN) with full provenance —
+// source, original URL, license terms — recorded in `notes`. Tracks from these CEO-named
+// sources are auto-approved (status='ceo_approved') rather than left in Draft: the CEO
+// pre-approved the SOURCES themselves by naming them in the correction order, and a human
+// approval gate on every individual track would recreate exactly the manual drudgery ("Do not
+// require the CEO to manually download, rename, categorize, edit, or upload music") this was
+// meant to remove. Still fully visible/reversible in the Music Library panel (Reject works
+// identically to any other asset).
+async function smMusicLibraryIngestExternal({ businessId, sourceUrl, mood, trackName, licenseSource, licenseNotes }) {
+  const id = `ingest-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+  const srcPath = join(tmpdir(), `smm-ingest-${id}.mp3`);
+  try {
+    await smDownloadToFile(sourceUrl, srcPath);
+    await smAssertValidMediaFile(srcPath, `${licenseSource} music download (${trackName})`);
+    const durationSec = await smProbeDurationSec(srcPath);
+    const buf = await readFile(srcPath);
+    const path = `social-media-manager/${businessId}/library/music_track/${Date.now()}-${smSanitizeAssetFilename(trackName)}.mp3`;
+    const publicUrl = await sbStorageUpload(path, buf, 'audio/mpeg');
+    const record = await sbInsert('sm_content_assets', {
+      business_id: businessId, asset_name: trackName, asset_type: 'audio', origin: 'verified_public',
+      category: 'music_track', source_provider: licenseSource, source_url: publicUrl, storage_path: path,
+      mood, duration_seconds: durationSec || null, status: 'ceo_approved',
+      notes: `${licenseNotes} — original source: ${sourceUrl}`,
+    });
+    return record;
+  } finally {
+    await unlink(srcPath).catch(() => {});
+  }
+}
+
+async function smMusicLibraryIngestExternalHandler(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { businessId, sourceUrl, mood, trackName, licenseSource, licenseNotes } = req.body || {};
+  if (!businessId || !sourceUrl || !mood || !trackName || !licenseSource) {
+    return res.status(400).json({ ok: false, error: 'businessId, sourceUrl, mood, trackName, licenseSource are required' });
+  }
+  if (!['mixkit', 'pixabay'].includes(licenseSource)) {
+    return res.status(400).json({ ok: false, error: "licenseSource must be 'mixkit' or 'pixabay'" });
+  }
+  try {
+    const record = await smMusicLibraryIngestExternal({ businessId, sourceUrl, mood, trackName, licenseSource, licenseNotes: licenseNotes || '' });
+    return res.status(200).json({ ok: true, record });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `ingest failed: ${e.message}` });
   }
 }
 
@@ -11989,6 +12068,7 @@ export default async function handler(req, res) {
     if (action === 'sm_content_asset_upload_url')    return await smContentAssetUploadUrlCreate(req, res);   // v16.66.0
     if (action === 'sm_content_asset_register')      return await smContentAssetRegisterUploaded(req, res);  // v16.66.0
     if (action === 'sm_asset_gap_report')            return await smAssetGapReport(req, res);                // v16.66.0
+    if (action === 'sm_music_library_ingest_external') return await smMusicLibraryIngestExternalHandler(req, res); // v16.67.0
     if (action === 'sm_va_task_mark_published')      return await smVaTaskMarkPublished(req, res);          // v16.52.0
     if (action === 'list_pipeline')        return await listPipeline(req, res);
     if (action === 'create_pipeline_item') return await createPipelineItem(req, res);
