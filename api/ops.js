@@ -9491,7 +9491,11 @@ async function vaTaskGet(req, res) {
         assetCount: Array.isArray(pkg.selected_asset_ids) ? pkg.selected_asset_ids.length : 0,
       };
     }
-    return res.status(200).json({ ok: true, task, package: pkg, planSummary });
+    // v16.68.0 — SMM FINAL correction: expose which production pipeline Build will actually
+    // use BEFORE the VA/CEO clicks it — the same explicit check smVideoProductionGenerate
+    // itself uses, so this can never drift from real Build behavior or be a silent surprise.
+    const buildPipeline = pkg ? (smPackageHasV1Plan(pkg) ? 'v1_asset_driven' : 'legacy_avatar') : null;
+    return res.status(200).json({ ok: true, task, package: pkg, planSummary, buildPipeline });
   } catch (e) {
     return res.status(502).json({ ok: false, error: `Supabase access failed: ${e.message}` });
   }
@@ -11113,10 +11117,16 @@ async function smSynthesizeMusicBed(mood, durationSec, id) {
 // repetition" mechanism the CEO asked for. Returns null (falls back to synthesis) if no real
 // track has been uploaded/approved for this mood yet — true for every mood today, since this
 // pilot has no real music uploaded, per the CEO's own correction order.
+// v16.68.0 — SMM FINAL correction. Also reports how many tracks were actually eligible for this
+// mood (`_poolSize`) so a genuine "only one track exists" state is recorded/reportable and never
+// silently indistinguishable from a real rotation failure, per explicit CEO requirement.
 async function smSelectMusicTrack(mood, businessId) {
   try {
-    const rows = await sbGet(`sm_content_assets?asset_type=eq.audio&category=eq.music_track&mood=eq.${encodeURIComponent(mood)}&status=eq.ceo_approved&data_tier=neq.engineering_test&or=(business_id.eq.${encodeURIComponent(businessId)},business_id.is.null)&select=*&order=last_used_at.asc.nullsfirst&limit=1`);
-    return (rows && rows[0]) || null;
+    const rows = await sbGet(`sm_content_assets?asset_type=eq.audio&category=eq.music_track&mood=eq.${encodeURIComponent(mood)}&status=eq.ceo_approved&data_tier=neq.engineering_test&or=(business_id.eq.${encodeURIComponent(businessId)},business_id.is.null)&select=*&order=last_used_at.asc.nullsfirst`);
+    if (!rows || !rows.length) return null;
+    const track = rows[0];
+    track._poolSize = rows.length;
+    return track;
   } catch (e) {
     console.warn('[smSelectMusicTrack] lookup failed, falling back to synthesis:', e.message);
     return null;
@@ -11216,11 +11226,22 @@ async function smMixMusicUnderNarration({ videoWithNarrationPath, mood, id, busi
     ], { timeout: 30000, maxBuffer: 1024 * 1024 * 30 });
     await smAssertValidMediaFile(outPath, 'video with background music');
     if (realTrack) {
-      sbPatch('sm_content_assets', `id=eq.${encodeURIComponent(realTrack.id)}`, {
+      // v16.68.0 — SMM FINAL rotation-reliability fix. This write was previously fire-and-
+      // forget (never awaited) — in a serverless invocation there is no guarantee an unawaited
+      // promise completes before the function's real work finishes and the container is
+      // frozen/recycled, so the usage-history update could silently be dropped. That is the
+      // actual root cause of "a subsequent production used the same track again": the
+      // least-recently-used SELECT logic was always correct, but the write that logic depends
+      // on wasn't reliably landing. Now awaited so Build cannot return until history is durably
+      // recorded.
+      await sbPatch('sm_content_assets', `id=eq.${encodeURIComponent(realTrack.id)}`, {
         usage_count: (realTrack.usage_count || 0) + 1, last_used_at: new Date().toISOString(),
-      }).catch(() => {});
+      }).catch((e) => { console.warn('[smMixMusicUnderNarration] usage-history write failed:', e.message); });
     }
-    return { path: outPath, musicSource: realTrack ? 'uploaded' : 'synthesized', musicTrackId: realTrack ? realTrack.id : null };
+    return {
+      path: outPath, musicSource: realTrack ? 'uploaded' : 'synthesized', musicTrackId: realTrack ? realTrack.id : null,
+      musicPoolSize: realTrack ? realTrack._poolSize : 0,
+    };
   } finally {
     await unlink(musicPath).catch(() => {});
   }
@@ -11262,8 +11283,19 @@ async function smFinishAssetDrivenComposite({ productionId, attemptNumber, busin
     const finalStoragePath = `social-media-manager/${businessId}/${taskId}/attempt-${attemptNumber}-final.mp4`;
     const finalUrl = await sbStorageUpload(finalStoragePath, outBuf, 'video/mp4');
 
+    // v16.68.0 — SMM FINAL correction: record the ACTUAL music outcome (not just the intended
+    // mood) on the production's own durable tool_usage, so which real track was used — or that
+    // only one track existed for this mood, or that it fell back to synthesis — is auditable
+    // per-production without needing to cross-reference the Music Library's own history.
+    const priorRows = await sbGet(`sm_video_productions?id=eq.${encodeURIComponent(productionId)}&select=tool_usage&limit=1`);
+    const priorToolUsage = (priorRows && priorRows[0] && priorRows[0].tool_usage) || {};
     const production = await sbPatch('sm_video_productions', `id=eq.${encodeURIComponent(productionId)}`, {
       final_video_url: finalUrl, duration_seconds: durationSec || null, status: 'ready_for_review',
+      tool_usage: {
+        ...priorToolUsage,
+        music_source: musicResult.musicSource, music_track_id: musicResult.musicTrackId,
+        music_pool_size: musicResult.musicPoolSize,
+      },
     });
     await sbPatch('sm_production_packages', `va_task_id=eq.${encodeURIComponent(taskId)}&status=eq.draft`, {
       hook: production.hook, caption: production.caption, hashtags: production.hashtags,
@@ -11274,11 +11306,24 @@ async function smFinishAssetDrivenComposite({ productionId, attemptNumber, busin
   }
 }
 
+// v16.68.0 — SMM FINAL correction. Single canonical, EXPLICIT definition of "this package
+// carries a real Phase 3+ Production Plan" — used identically by the Build dispatcher below AND
+// by vaTaskGet (so the VA/CEO can see which pipeline a task will use BEFORE clicking Build, not
+// discover it only after). Checks format_id (set unconditionally by every Phase 3+ Generate call,
+// including the deterministic-fallback creative path) rather than relying on spoken_script's
+// truthiness as an implicit signal — behaviorally identical today, but a real named check instead
+// of an incidental correlation.
+function smPackageHasV1Plan(pkg) {
+  return !!(pkg && pkg.format_id && pkg.spoken_script);
+}
+
 // ── Entry point (routed by ?action=sm_video_production_generate) ───────────────────────────
 // Dispatches to the new Phase 4 asset-driven pipeline when the task's current approved
-// package carries a real Production Plan (spoken_script present — set by every Phase 3+
-// Generate call); falls back to the untouched legacy HeyGen pipeline for any package that
-// predates Phase 3 (e.g. the pre-existing Wings task), so nothing historical breaks.
+// package carries a real Production Plan; falls back to the untouched legacy HeyGen pipeline
+// for any package that predates Phase 3 (e.g. the pre-existing Wings task), so nothing
+// historical breaks. Legacy routing is real, by-design backward compatibility — not a bug —
+// but it must never be a SILENT surprise: vaTaskGet exposes the same check up front so the VA/
+// CEO always knows which pipeline a Build will use before clicking it.
 async function smVideoProductionGenerate(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { vaTaskId } = req.body || {};
@@ -11289,7 +11334,7 @@ async function smVideoProductionGenerate(req, res) {
     if (!task) return res.status(404).json({ ok: false, error: 'va task not found' });
     const pkgRows = await sbGet(`sm_production_packages?va_task_id=eq.${encodeURIComponent(vaTaskId)}&is_current=eq.true&select=*&limit=1`);
     const approvedPkg = pkgRows && pkgRows[0];
-    if (approvedPkg && approvedPkg.spoken_script) {
+    if (smPackageHasV1Plan(approvedPkg)) {
       return await smVideoProductionGenerateAssetDriven(req, res, task, approvedPkg);
     }
     return await smVideoProductionGenerateLegacy(req, res);

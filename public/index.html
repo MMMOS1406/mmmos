@@ -11302,7 +11302,7 @@ function _renderAIStudioOperatorPanel(aiCurrent){
 var _smmOperatorState={loaded:false,loading:false,task:null,pkg:null,video:null,error:null};
 var SMM_OPERATOR_BUSINESS_ID='bb_75031d90511884facac4b86c'; // Urban Halal Shack — CEO Decision #25/#26 pilot
 var _smmExecActiveTaskId=null;
-var _smmExecState={loaded:false,loading:false,task:null,pkg:null,video:null,planSummary:null,error:null,busy:false,publishing:false,_pollTimer:null};
+var _smmExecState={loaded:false,loading:false,task:null,pkg:null,video:null,planSummary:null,buildPipeline:null,error:null,busy:false,publishing:false,_pollTimer:null};
 
 function _smmOperatorRerenderIfMounted(){
   if(_smmExecActiveTaskId)return; // the exec view owns #mainContent right now — don't clobber it
@@ -11409,7 +11409,7 @@ function _smmExecRerenderIfMounted(){
 async function openSmmExec(taskId){
   if(!taskId)return;
   _smmExecActiveTaskId=String(taskId);
-  _smmExecState={loaded:false,loading:false,task:null,pkg:null,video:null,planSummary:null,error:null,busy:false,publishing:false,_pollTimer:null};
+  _smmExecState={loaded:false,loading:false,task:null,pkg:null,video:null,planSummary:null,buildPipeline:null,error:null,busy:false,publishing:false,_pollTimer:null};
   const el=document.getElementById('mainContent');
   if(el){el.innerHTML=renderSmmExecMode(_smmExecActiveTaskId);attachEditors();}
   await _smmExecLoad();
@@ -11434,6 +11434,7 @@ async function _smmExecLoad(){
     _smmExecState.task=j.task;
     _smmExecState.pkg=j.package;
     _smmExecState.planSummary=j.planSummary||null;
+    _smmExecState.buildPipeline=j.buildPipeline||null;
     const vr=await fetch('/api/ops?action=sm_video_production_list&vaTaskId='+encodeURIComponent(_smmExecActiveTaskId));
     const vj=await vr.json().catch(function(){return{};});
     const records=(vr.ok&&vj.ok&&vj.records)?vj.records:[];
@@ -11654,6 +11655,14 @@ function renderSmmExecMode(taskId){
         h+='<div style="font-size:12px;color:'+(isRejected?'#f59e0b':'#ef4444')+';margin-bottom:12px;padding:8px 10px;background:'+(isRejected?'rgba(245,158,11,0.08)':'rgba(239,68,68,0.08)')+';border-radius:8px">'+(isRejected?'↻':'⚠')+' '+escHTML(isRejected?(v.error_message||'Rejected by VA.'):SMM_BUILD_FAILURE_MESSAGE)+'</div>';
         h+='<button '+(st.busy?'disabled':'')+' onclick="_smmExecGenerateVideo()" style="width:100%;padding:12px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.45);border-radius:10px;color:#8b5cf6;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif">↻ Retry — Produce Video</button>';
       }else{
+        // v16.68.0 — SMM FINAL correction: which pipeline Build will use is now shown BEFORE
+        // the VA/CEO clicks it, never discovered only after the fact. legacy_avatar only ever
+        // applies to a package that predates the current SMM V1 production system (an old plan
+        // was never regenerated) -- real, intentional backward compatibility, not a bug, but it
+        // must never be a silent surprise.
+        if(st.buildPipeline==='legacy_avatar'){
+          h+='<div style="font-size:12px;color:#f59e0b;margin-bottom:12px;padding:8px 10px;background:rgba(245,158,11,0.08);border-radius:8px;line-height:1.6">⚠ This task\'s plan predates the current SMM production system and has no current-style Production Plan. Building it now will use the older AI-presenter video style, not the current real-photo/food-focused style. This is expected for old tasks, not an error.</div>';
+        }
         h+='<div style="font-size:12px;color:var(--dim);margin-bottom:12px;line-height:1.6"><b style="color:var(--text)">What this is:</b> the package is approved and ready. Clicking below starts building the real short-form video — your real product photos/video with motion, a professional voiceover, captions, music, and branding. <b style="color:var(--text)">What to do:</b> click to start, or use Back to Review below if you want to double-check the caption first.</div>';
         h+='<button '+(st.busy?'disabled':'')+' onclick="_smmExecGenerateVideo()" style="width:100%;padding:12px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.45);border-radius:10px;color:#8b5cf6;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif">▶ Produce Video Automatically</button>';
         // Safe back-to-Review: only offered before any build attempt exists — nothing
