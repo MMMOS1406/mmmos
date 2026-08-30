@@ -11627,6 +11627,28 @@ function renderSmmExecMode(taskId){
         h+='<div style="font-size:11px;color:var(--dim)">'+(plan.assetCount?plan.assetCount+' real business photo/video asset(s) selected for this video.':'No approved photos/video yet for this — the video will rely on the presenter and text only.')+'</div>';
         h+='</div>';
       }
+      // SMM Professional Ad Creative Engine STEP 1 — Scene Intelligence Foundation. Shows the
+      // real Scene Plan + honest asset-sufficiency read BEFORE Build, so the creative decision
+      // is inspectable before production cost is incurred. Absent entirely on pre-Step-1
+      // packages (scenePlan empty) — never shown as a broken/empty block.
+      if(plan&&plan.scenePlan&&plan.scenePlan.length){
+        const suffColor={sufficient:'#22c55e',reduced:'#f59e0b',insufficient:'#ef4444'}[plan.assetSufficiency]||'#8b5cf6';
+        const suffLabel={sufficient:'SUFFICIENT',reduced:'REDUCED',insufficient:'INSUFFICIENT'}[plan.assetSufficiency]||'—';
+        h+='<div style="padding:10px 12px;background:'+suffColor+'12;border:1px solid '+suffColor+'40;border-radius:8px;margin-bottom:10px">';
+        h+='<div style="font-size:10px;font-weight:800;letter-spacing:1px;color:'+suffColor+'">ASSET SUFFICIENCY: '+suffLabel+'</div>';
+        if(plan.assetSufficiencyReason) h+='<div style="font-size:11px;color:var(--dim);margin-top:4px">'+escHTML(plan.assetSufficiencyReason)+'</div>';
+        h+='</div>';
+        h+='<div style="font-size:10px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Scene Plan</div>';
+        h+='<div style="margin-bottom:12px">';
+        plan.scenePlan.forEach(function(sc){
+          h+='<div style="padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:6px">';
+          h+='<div style="font-size:12px;font-weight:700">Scene '+sc.scene_index+' · '+escHTML(sc.label||sc.purpose)+'</div>';
+          h+='<div style="font-size:11px;color:var(--dim);margin-top:2px">Asset: '+escHTML(sc.asset_name||(sc.is_end_card?'None — designed end card':'None available'))+(sc.reused_asset?' (reused from an earlier scene — no distinct asset available)':'')+'</div>';
+          h+='<div style="font-size:11px;color:var(--dim)">Duration: ~'+sc.duration_sec+'s · Motion intent: '+escHTML(String(sc.motion_intent||'').replace(/_/g,' '))+'</div>';
+          h+='</div>';
+        });
+        h+='</div>';
+      }
       if(pkg&&pkg.differentiation_reason){
         h+='<div style="font-size:11px;color:var(--dim);margin-bottom:12px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px"><b style="color:var(--text)">Why this one:</b> '+escHTML(pkg.differentiation_reason)+'</div>';
       }

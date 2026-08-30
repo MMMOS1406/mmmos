@@ -9489,6 +9489,13 @@ async function vaTaskGet(req, res) {
         primaryProductName: pkg.primary_product_ref ? nameFor(pkg.primary_product_ref) : null,
         secondaryProductNames: (Array.isArray(pkg.secondary_product_refs) ? pkg.secondary_product_refs : []).map(nameFor),
         assetCount: Array.isArray(pkg.selected_asset_ids) ? pkg.selected_asset_ids.length : 0,
+        // SMM Professional Ad Creative Engine STEP 1 — Scene Intelligence Foundation. Snapshot
+        // of the Scene Plan generated at Generate time; empty on pre-Step-1 packages, so the
+        // Review UI can tell the difference and skip the section rather than showing an
+        // empty/broken block.
+        scenePlan: Array.isArray(pkg.scene_plan) ? pkg.scene_plan : [],
+        assetSufficiency: pkg.asset_sufficiency || null,
+        assetSufficiencyReason: pkg.asset_sufficiency_reason || null,
       };
     }
     // v16.68.0 — SMM FINAL correction: expose which production pipeline Build will actually
@@ -9990,6 +9997,143 @@ async function smGeneratePlanCreative(offerings, identity, hasVerifiedSocial, fo
   return deterministicFallback();
 }
 
+// ── SMM Professional Ad Creative Engine — STEP 1: Scene Intelligence Foundation ────────────────
+// CEO-approved, inspection-first. This is a PLANNING layer only — it assigns real approved
+// assets to conceptual scene purposes and records intended duration/motion, additively, on the
+// existing Production Plan. It does NOT touch rendering (smSegFromImage, smBuildTimedAssetSegments,
+// ffmpeg, Submagic) — Build continues to consume selected_asset_ids/intended_duration_sec exactly
+// as before. Reuses the EXISTING category/product_ref/origin metadata already captured by the
+// Asset Library — no new asset taxonomy column, per CEO Decision ("do not create unnecessary
+// duplicate taxonomy").
+const SM_ASSET_ROLE_BY_CATEGORY = {
+  storefront_photo: 'exterior_interior',
+  preparation: 'preparation_action',
+  owner_video: 'preparation_action',
+  staff: 'social_proof',
+  menu_image: 'menu',
+  logo: 'logo_brand',
+  brand_colors_graphics: 'logo_brand',
+  packaging_service: 'product_detail',
+};
+
+// A product_photo/finished_food asset tagged to one of THIS plan's products is that product's
+// hero_product; an untagged product photo has no "which product" signal, so it can only serve
+// as a generic product_detail shot — never assumed to belong to the hero product.
+function smAssetRole(asset, planProductRefs) {
+  if (!asset) return null;
+  const cat = asset.category;
+  if (cat === 'product_photo' || cat === 'finished_food') {
+    if (asset.product_ref && planProductRefs.includes(asset.product_ref)) return 'hero_product';
+    return 'product_detail';
+  }
+  if (cat && SM_ASSET_ROLE_BY_CATEGORY[cat]) return SM_ASSET_ROLE_BY_CATEGORY[cat];
+  return null; // music_track/other/unset — not a scene-visual role, excluded from scene planning
+}
+
+// Conceptual scene-purpose sequences (blueprint §A) — NOT a mandatory universal shape. Each slot
+// lists asset roles in preference order; smBuildScenePlan drops an optional slot rather than
+// faking content when nothing real exists to fill it.
+const SM_SCENE_TEMPLATES = {
+  default: [
+    { purpose: 'hook', label: 'Hook', preferredRoles: ['exterior_interior', 'menu', 'hero_product'], durationSec: 2.2, motionIntent: 'fast_push_in', required: true },
+    { purpose: 'hero', label: 'Hero Product', preferredRoles: ['hero_product'], durationSec: 3.2, motionIntent: 'slow_push_in', required: true },
+    { purpose: 'detail', label: 'Product Detail', preferredRoles: ['product_detail'], durationSec: 2.6, motionIntent: 'static_or_slow_pan', required: false },
+    { purpose: 'supporting', label: 'Supporting / Proof', preferredRoles: ['exterior_interior', 'preparation_action', 'social_proof', 'menu'], durationSec: 2.6, motionIntent: 'pull_back_or_pan', required: false },
+    { purpose: 'cta', label: 'CTA / Brand Ending', preferredRoles: ['offer_cta_graphic', 'logo_brand', 'hero_product'], durationSec: 2.4, motionIntent: 'static_design', required: true, isEndCard: true },
+  ],
+  offer_promotion: [
+    { purpose: 'hook', label: 'Hook', preferredRoles: ['exterior_interior', 'menu', 'hero_product'], durationSec: 2.2, motionIntent: 'fast_push_in', required: true },
+    { purpose: 'hero', label: 'Hero Product', preferredRoles: ['hero_product'], durationSec: 3.0, motionIntent: 'slow_push_in', required: true },
+    { purpose: 'offer', label: 'Offer / Reason', preferredRoles: ['offer_cta_graphic', 'product_detail'], durationSec: 2.6, motionIntent: 'static_or_slow_pan', required: false },
+    { purpose: 'cta', label: 'CTA / Brand Ending', preferredRoles: ['offer_cta_graphic', 'logo_brand', 'hero_product'], durationSec: 2.6, motionIntent: 'static_design', required: true, isEndCard: true },
+  ],
+};
+
+// Multi-product formats get one real demonstration scene PER secondary product (never one
+// product's photo standing in for another's) — built dynamically off planOfferings, not
+// hardcoded per format.
+function smScenePurposesForFormat(planOfferings) {
+  if (planOfferings.length <= 1) return null;
+  const scenes = [
+    { purpose: 'hook', label: 'Hook', preferredRoles: ['exterior_interior', 'menu', 'hero_product'], durationSec: 2.2, motionIntent: 'fast_push_in', required: true },
+    { purpose: 'hero', label: `Hero Product — ${planOfferings[0].name}`, preferredRoles: ['hero_product'], productRef: planOfferings[0].id, durationSec: 3.0, motionIntent: 'slow_push_in', required: true },
+  ];
+  planOfferings.slice(1).forEach((o) => {
+    scenes.push({ purpose: 'supporting_product', label: `Featured — ${o.name}`, preferredRoles: ['hero_product', 'product_detail'], productRef: o.id, durationSec: 2.6, motionIntent: 'pull_back_or_pan', required: false });
+  });
+  scenes.push({ purpose: 'cta', label: 'CTA / Brand Ending', preferredRoles: ['offer_cta_graphic', 'logo_brand', 'hero_product'], durationSec: 2.6, motionIntent: 'static_design', required: true, isEndCard: true });
+  return scenes;
+}
+
+// Fills each scene slot from the plan's real distinct approved assets (never a candidate/
+// unapproved asset — same "approved-only" discipline as smSelectPlanAssets). An optional slot
+// with nothing real to fill it is DROPPED, not faked. A required non-end-card slot with nothing
+// left honestly reuses the hero asset (explicitly marked reused_asset:true) rather than
+// fabricating a new one — and this always downgrades the sufficiency classification below
+// SUFFICIENT. The CTA/end-card slot is a designed surface, not a photo requirement, and may run
+// with no asset at all.
+function smBuildScenePlan(format, planOfferings, productAssets, generalAssets) {
+  const planProductRefs = planOfferings.map((o) => o.id);
+  const pool = productAssets.concat(generalAssets).map((a) => ({ asset: a, role: smAssetRole(a, planProductRefs) })).filter((x) => x.role);
+
+  const template = (planOfferings.length > 1)
+    ? smScenePurposesForFormat(planOfferings)
+    : (SM_SCENE_TEMPLATES[format.id] || SM_SCENE_TEMPLATES.default);
+
+  const used = new Set();
+  const scenes = [];
+  const droppedReasons = [];
+  let reusedAssetForRequiredSlot = false;
+
+  template.forEach((slot) => {
+    let candidate = null;
+    for (const role of slot.preferredRoles) {
+      candidate = pool.find((x) => x.role === role && !used.has(x.asset.id) && (!slot.productRef || x.asset.product_ref === slot.productRef));
+      if (candidate) break;
+    }
+    if (!candidate && slot.isEndCard) {
+      scenes.push({ scene_index: scenes.length + 1, purpose: slot.purpose, label: slot.label, asset_id: null, asset_name: null, asset_role: null, duration_sec: slot.durationSec, motion_intent: slot.motionIntent, is_end_card: true });
+      return;
+    }
+    if (!candidate && slot.required) {
+      const hero = scenes.find((s) => s.purpose === 'hero');
+      if (hero && hero.asset_id) {
+        reusedAssetForRequiredSlot = true;
+        scenes.push({ scene_index: scenes.length + 1, purpose: slot.purpose, label: slot.label, asset_id: hero.asset_id, asset_name: hero.asset_name, asset_role: hero.asset_role, duration_sec: slot.durationSec, motion_intent: slot.motionIntent, is_end_card: !!slot.isEndCard, reused_asset: true });
+        return;
+      }
+      droppedReasons.push(`No approved real asset available for required scene "${slot.label}".`);
+      return;
+    }
+    if (!candidate) {
+      droppedReasons.push(`missing ${slot.preferredRoles[0].replace(/_/g, ' ')} asset — "${slot.label}" scene dropped`);
+      return;
+    }
+    used.add(candidate.asset.id);
+    scenes.push({ scene_index: scenes.length + 1, purpose: slot.purpose, label: slot.label, asset_id: candidate.asset.id, asset_name: candidate.asset.asset_name, asset_role: candidate.role, duration_sec: slot.durationSec, motion_intent: slot.motionIntent, is_end_card: !!slot.isEndCard });
+  });
+
+  const requiredMissing = droppedReasons.some((r) => r.startsWith('No approved real asset available for required'));
+  const distinctRealAssetsUsed = new Set(scenes.filter((s) => s.asset_id).map((s) => s.asset_id)).size;
+
+  let asset_sufficiency, asset_sufficiency_reason;
+  if (requiredMissing || distinctRealAssetsUsed === 0) {
+    asset_sufficiency = 'insufficient';
+    asset_sufficiency_reason = droppedReasons.join(' ') || 'No approved real assets available to plan this format.';
+  } else if (reusedAssetForRequiredSlot || droppedReasons.length > 0) {
+    asset_sufficiency = 'reduced';
+    const parts = [];
+    if (reusedAssetForRequiredSlot) parts.push('A required scene reused the same real asset as another scene because no distinct asset was available.');
+    parts.push(...droppedReasons);
+    asset_sufficiency_reason = parts.join(' ');
+  } else {
+    asset_sufficiency = 'sufficient';
+    asset_sufficiency_reason = null;
+  }
+
+  return { scenes, asset_sufficiency, asset_sufficiency_reason };
+}
+
 // ── The orchestrator: SMM V1 Phase 3 Creative Planner ─────────────────────────────────────────
 // One Generate call → one real Production Plan, persisted as a new sm_production_packages
 // attempt (reusing Phase 1's attempt_number/is_current trigger — nothing here bypasses it).
@@ -10054,6 +10198,7 @@ async function smBuildCreativePlan(task) {
 
     const { productAssets, generalAssets } = await smSelectPlanAssets(task.business_id, productRefs);
     const selectedAssets = productAssets.concat(generalAssets).slice(0, 6);
+    const { scenes: scenePlan, asset_sufficiency, asset_sufficiency_reason } = smBuildScenePlan(format, planOfferings, productAssets, generalAssets);
 
     const creative = await smGeneratePlanCreative(planOfferings, identity, hasVerifiedSocial, format);
 
@@ -10098,12 +10243,15 @@ async function smBuildCreativePlan(task) {
       intended_duration_sec: 9 + planOfferings.length * 3,
       selected_asset_ids: selectedAssets.map((a) => a.id),
       narration_required: format.needs_narration,
-      music_direction: 'None — the current pipeline does not add a separate background-music track beyond Submagic\'s own caption/audio polish.',
+      music_direction: 'Background music is selected automatically from the real Music Library (mood-matched, least-recently-used rotation) and mixed under the narration during Build.',
       required_capabilities: {
         presenter_narration: format.needs_narration,
         captions: true,
-        note: 'Recorded plan data only — Build always uses HeyGen + Submagic + ffmpeg in this phase regardless of this field.',
+        note: 'Recorded plan data — Build uses the current V1 asset-driven pipeline (real-asset visual sequence + narration + captions + music) for any package with a Production Plan; only pre-Phase-3 legacy packages fall back to the AI-presenter pipeline.',
       },
+      scene_plan: scenePlan,
+      asset_sufficiency,
+      asset_sufficiency_reason,
       factual_sources: factualSources,
       differentiation_reason,
       asset_coverage_snapshot: assetCoverageSnapshot,
