@@ -2470,13 +2470,14 @@ EXAMPLE (follow this format exactly):
 - "0:15-0:20 runtime" MUST appear verbatim.
 - Vocal starts at 0:00. No instrumental intro. No silence. No fade-in.
 - Hook phrase is the FIRST SOUND the listener hears.
-- SRV identity: "cinematic modern Afghan Persian pop with Persian Deep House-inspired atmosphere" (contemporary, atmospheric positioning — NOT literal club/EDM production), warm intimate ${voiceType.toLowerCase()} vocal.
+- SRV identity: "Persian vocal deep house" (genre anchor) — smooth, emotional, melodic, modern, commercially listenable, vocal-forward. Warm intimate ${voiceType.toLowerCase()} vocal, prominent and always in front.
+- Production vocabulary: steady four-on-the-floor rhythmic foundation (restrained, mood-appropriate) · controlled deep/warm bass (present, never overpowering) · atmospheric pads · restrained plucked synth accents · light optional oud/Persian melodic character woven through.
 - BPM: 72-84 (romantic) · 66-76 (emotional) · 100-116 (happy).
-- No EDM drops, no aggressive club energy, no heavy electronic drums.
+- Explicitly exclude: festival EDM, aggressive EDM drops, harsh club energy, overpowering bass, excessive electronic effects that bury the vocal. This is smooth vocal-forward deep house, NOT aggressive nightclub music.
 - Ends cleanly at the emotional peak. High replay value.
 
 EXAMPLE sunoPrompt:
-"cinematic modern Afghan Persian pop with Persian Deep House-inspired atmosphere, warm intimate close-mic ${voiceType.toLowerCase()} vocal at center, vocal STARTS at 0:00 with hook phrase — NO instrumental intro NO silence NO fade-in, restrained emotional delivery, soft oud accent (optional), warm piano, atmospheric pads, no EDM no aggressive drums, 76 BPM, 0:15-0:20 runtime, ends cleanly at emotional peak, high replay value"
+"Persian vocal deep house, smooth melodic modern vocal-forward production, warm intimate close-mic ${voiceType.toLowerCase()} vocal prominent and always in front, vocal STARTS at 0:00 with hook phrase — NO instrumental intro NO silence NO fade-in, restrained emotional delivery, steady restrained four-on-the-floor foundation, controlled deep warm bass, atmospheric pads, restrained plucked synth accent, light optional oud weaving through, no festival EDM no aggressive drops no overpowering bass, 76 BPM, 0:15-0:20 runtime, ends cleanly at emotional peak, high replay value"
 
 ═══════════ OUTPUT — JSON ONLY, WRAPPED IN <package> ═══════════
 // SHORT VIDEO PACKAGE — sunoPrompt and lyrics hold the short content (client reads these)
@@ -2754,11 +2755,12 @@ Every emotional SRV song must immediately sound like Silk Road Voices — Afghan
 NEVER sound primarily Iranian pop, Arabic pop, Turkish pop, or generic Western pop.
 Bollywood may influence emotional atmosphere only — the result must remain unmistakably Afghan.
 
-PERMANENT MUSICAL PALETTE:
-Primary instruments (always): Warm Piano · Warm Strings · Gentle Cello · Harmonium · Atmospheric/Ambient Pads · Persian Deep House-inspired atmospheric texture (contemporary polish, not club/EDM production)
-Regional accent (optional, light — never the mandatory identity): Oud
-Light rhythm: Very soft Tabla · Very soft Dholak · Minimal percussion only (soft programmed pulse allowed for Happy — never a club beat)
-FORBIDDEN: EDM drops · Trap · Heavy electronic synths · Loud drums · Rock guitars · Aggressive club production
+PERMANENT MUSICAL PALETTE — PERSIAN VOCAL DEEP HOUSE:
+SRV's production direction is Persian vocal deep house: smooth, emotional, melodic, modern, commercially listenable, vocal-forward. This is a real production direction, not background atmosphere.
+Primary elements (always): steady four-on-the-floor rhythmic foundation (restrained, mood-appropriate weight) · controlled deep/warm bass (present and felt, never overpowering) · atmospheric pads · restrained plucked synth / melodic electronic accents · Warm Piano · Warm Strings · Gentle Cello · Harmonium
+Regional accent (optional, light — never the mandatory identity, woven into the melodic line): Oud
+Rhythm: the four-on-the-floor foundation carries the track; layer very soft Tabla/Dholak as light melodic color, not a competing rhythm section
+FORBIDDEN: festival EDM · aggressive EDM drops · harsh club energy · overpowering bass · excessive electronic effects that bury the vocal · Trap · Rock guitars. This is smooth vocal-forward deep house, NOT aggressive nightclub music.
 
 VOCAL STYLE (MANDATORY):
 Warm · Intimate · Close-mic · Emotional · Natural Afghan pronunciation · Soft breathing allowed · Controlled emotion
@@ -2776,8 +2778,8 @@ INVALID as central image (location/backdrop — backdrop only, one line max): tr
 The central image appears in the hook, chorus, and returns in the outro section emotionally.
 
 PRODUCTION (LOCKED):
-Tempo: 72–84 BPM (romantic) · 66–76 BPM (emotional) · 100–116 BPM (happy) · Song length: 3:00–3:20 STRICT · Warm dynamic cinematic mix · Vocals always in front
-The arrangement builds gradually — NEVER gets loud. Do NOT overproduce. Warm acoustic-cinematic core with Persian Deep House-inspired atmospheric polish — NOT club/EDM production.
+Tempo: 72–84 BPM (romantic) · 66–76 BPM (emotional) · 100–116 BPM (happy) · Song length: 3:00–3:20 STRICT · Clean modern production · Vocals always intimate and prominent, mixed in front of the beat
+The arrangement builds gradually — NEVER gets loud or aggressive. Persian vocal deep house: smooth, melodic, modern, vocal-forward — the production supports the vocal, never competes with or buries it.
 HOOK OPENS AT 0:00 — no silent instrumental delay before the vocal. Romantic/Happy: hook opens under a light instrumental bed. Emotional: hook still opens at 0:00; the mid-song instrumental break runs longer instead (15-20s → see Music Break below).
 
 SONG STRUCTURE — MANDATORY (emotional solos and emotional duets):
@@ -2814,7 +2816,7 @@ The sunoPrompt MUST include: "3:00-3:20 runtime, compact structure, end at [Outr
 ✓ Strong memorable chorus
 ✓ One clear emotional theme (not multiple mixed themes)
 ✓ Hook opens at 0:00 — no silent instrumental delay before the vocal
-✓ Warm cinematic production with Persian Deep House-inspired atmosphere (no loud drums, no EDM drops, no aggressive club energy)
+✓ Persian vocal deep house production: four-on-the-floor foundation, controlled bass, plucked synth accents, vocal prominent in front (no festival EDM, no aggressive drops, no overpowering bass burying the vocal)
 ✓ Natural Dari pronunciation
 ✓ No modern pop trends overpowering the Afghan sound
 If ANY item fails → revise before outputting.
@@ -2860,22 +2862,22 @@ Bad: "بدون تو دنیا بی رحمه" — cliché, dramatic-collapse, data
 Good hook: "هنوز چای را با شکر تو می‌خورم" — domestic, specific, romantic gravity through memory.
 Bad hook: "شبای بی ستاره بدون تو" — banned vocab stack, no specificity.
 
-═══════════ SUNO PROMPT QUALITY — REQUIRED IDENTITY ═══════════
-The sunoPrompt MUST carry SRV identity, not just genre tags. Required elements:
-- "cinematic modern Persian pop with Persian Deep House-inspired atmosphere" (genre anchor — contemporary, atmospheric positioning; NOT literal club/EDM production)
-- warm intimate vocal direction (e.g. "warm intimate ${voiceType.toLowerCase()} vocal at center", "restrained emotional delivery", "close-mic vocal mix")
+═══════════ SUNO PROMPT QUALITY — PERSIAN VOCAL DEEP HOUSE — REQUIRED IDENTITY ═══════════
+The sunoPrompt MUST carry SRV's Persian vocal deep house identity, not just genre tags. Required elements:
+- "Persian vocal deep house" (genre anchor) — smooth, emotional, melodic, modern, commercially listenable, vocal-forward
+- warm intimate vocal direction, prominent and always in front (e.g. "warm intimate ${voiceType.toLowerCase()} vocal at center", "restrained emotional delivery", "close-mic vocal mix")
 - hook opens at 0:00 under a light instrumental bed — no silent intro
-- atmospheric texture (e.g. "atmospheric synth pads", "subtle oud accents on the bridge (optional)", "late-night city atmosphere", "soft piano underpinning")
+- production vocabulary: steady four-on-the-floor rhythmic foundation (restrained, mood-appropriate) · controlled deep/warm bass (present, never overpowering) · atmospheric pads · restrained plucked synth / melodic electronic accents · light optional oud or Persian melodic character woven through
 - cinematic build (e.g. "cinematic emotional build into the chorus", "strings swell on final chorus only")
-- production quality (e.g. "clean vocal mix", "emotional warmth", "spacious intimacy")
-- explicitly exclude: EDM drops, aggressive club energy, heavy electronic drums
+- clean modern production quality (e.g. "clean vocal mix", "emotional warmth", "spacious intimacy")
+- explicitly exclude: festival EDM, aggressive EDM drops, harsh club energy, overpowering bass, excessive electronic effects that bury the vocal
 - runtime + structure markers: 3:00-3:20 runtime, end at [Outro]
 
 DO NOT produce simplistic prompts like "Persian vocals piano strings oud cinematic 3:00-3:20". Every Suno prompt must be readable as instructions to a producer who needs the SRV identity from words alone.
 
 Example of GOOD sunoPrompt (style — vary per song):
-"cinematic Afghan Persian pop with Persian Deep House-inspired atmosphere, warm intimate close-mic ${voiceType.toLowerCase()} vocal at center, hook opens at 0:00 under a light instrumental bed, restrained emotional delivery, soft piano and warm strings, gentle cello on verses, harmonium underpinning, optional light oud accent, very soft tabla, atmospheric ambient pads, cinematic emotional build into chorus, clean mix vocals always in front, no loud drums no EDM drops no aggressive club energy, 76 BPM, 3:00-3:20 runtime, end at [Outro]"
-CRITICAL: sunoPrompt MUST include the mood-appropriate BPM ("72-84 BPM" romantic · "66-76 BPM" emotional · "100-116 BPM" happy) and "3:00-3:20 runtime, end at [Outro]" — this controls Suno song length. Without it Suno generates 4+ minute songs.
+"Persian vocal deep house, smooth melodic modern vocal-forward production, warm intimate close-mic ${voiceType.toLowerCase()} vocal prominent and always in front, hook opens at 0:00 under a light instrumental bed, restrained emotional delivery, steady restrained four-on-the-floor foundation, controlled deep warm bass, atmospheric pads, restrained plucked synth accents, soft piano and warm strings, gentle cello on verses, light optional oud weaving through the melodic line, cinematic build into chorus, clean mix vocal always in front, no festival EDM no aggressive drops no overpowering bass, 76 BPM, 3:00-3:20 runtime, end at [Outro]"
+CRITICAL: sunoPrompt MUST include "Persian vocal deep house" as the genre anchor, the mood-appropriate BPM ("72-84 BPM" romantic · "66-76 BPM" emotional · "100-116 BPM" happy), and "3:00-3:20 runtime, end at [Outro]" — this controls Suno song length. Without it Suno generates 4+ minute songs.
 
 ═══════════ OUTPUT — JSON ONLY, WRAPPED IN <package> ═══════════
 CRITICAL: Start your response with <package> IMMEDIATELY. Do NOT write any preamble, acknowledgment, summary, or introductory text before the JSON. Do NOT say "I understand", "I have internalized", "I am ready", or anything else. Your entire response = <package>{...json...}</package> — nothing before, nothing after.
@@ -2884,7 +2886,7 @@ CRITICAL: Start your response with <package> IMMEDIATELY. Do NOT write any pream
 // shortSunoPrompt and shortLyrics are NOT generated here.
 // Short Video packages are produced by a completely separate generator.
 <package>
-{"title":"emoji + Persian title + emoji","shortTitle":"emoji + short Persian title","concept":"one sentence (English) — MUST answer: what does [Person] FEEL toward [Person] RIGHT NOW? — BANNED even with person as grammatical subject: 'A man returns to the bench where...' / 'She sits in the empty hall where...' / 'He stands at the vendor corner where...' — Memory-Through-Setting patterns use place/object as the organizing frame and are BANNED — RIGHT: 'A man who still loves her but cannot bring himself to call' / 'She knows he's still waiting but doesn't know how to go back' — the concept must be about a FEELING, not a location or object a person is near","mood":"${mood}","emotionalSubMode":"the texture chosen from the SUB-MODE list above","hook":"the ONE memorable emotional hook phrase (Persian) — visual, specific, singable, NO location word as the anchor, carries SRV romantic identity — the hook is about a PERSON, a FEELING, or a RELATIONAL MOMENT, never a place name","sunoPrompt":"identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules above — must include cinematic-modern-Persian-pop anchor + vocal direction + atmospheric texture + cinematic build + production quality + 3:00-3:20","lyrics":"full Persian lyrics using EXACT section tags: [Hook] [Verse 1] [Verse 2] [Chorus] [Music Break] [Verse 3] [Final Chorus] [Outro]. [Hook] opens the song at 0:00 with the sung hook phrase under a light instrumental bed — NOT a silent instrumental-only tag. [Music Break] and [Outro] get NO lyrics — just the tag. Sung sections follow the structure rules. Conversational rhythm. ONE central romantic image (human/relational object — NOT a location) running through all sections. [Outro] tag MUST appear as the final section to control Suno song length.","captionYT":"Persian YouTube caption with hook question + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, her scarf, rain on glass, worn photograph, jacket on the hook, half-finished tea — NEVER a location word like bridge, café, rooftop, street)","location":"generic unnamed backdrop only (1-3 words English — e.g. unnamed apartment, unnamed street, unnamed night, unnamed space — NEVER a named landmark, bridge, station, or specific city place that could become the song title)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting, romantic-distance)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, first meeting in a crowd, heartbreak of a last goodbye, longing from another city, the moment love is almost confessed, romantic tension across a room)"}
+{"title":"emoji + Persian title + emoji","shortTitle":"emoji + short Persian title","concept":"one sentence (English) — MUST answer: what does [Person] FEEL toward [Person] RIGHT NOW? — BANNED even with person as grammatical subject: 'A man returns to the bench where...' / 'She sits in the empty hall where...' / 'He stands at the vendor corner where...' — Memory-Through-Setting patterns use place/object as the organizing frame and are BANNED — RIGHT: 'A man who still loves her but cannot bring himself to call' / 'She knows he's still waiting but doesn't know how to go back' — the concept must be about a FEELING, not a location or object a person is near","mood":"${mood}","emotionalSubMode":"the texture chosen from the SUB-MODE list above","hook":"the ONE memorable emotional hook phrase (Persian) — visual, specific, singable, NO location word as the anchor, carries SRV romantic identity — the hook is about a PERSON, a FEELING, or a RELATIONAL MOMENT, never a place name","sunoPrompt":"identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules above — must include Persian vocal deep house anchor + four-on-the-floor/bass/pads/plucked-synth production elements + vocal direction + Persian melodic character + production quality + 3:00-3:20","lyrics":"full Persian lyrics using EXACT section tags: [Hook] [Verse 1] [Verse 2] [Chorus] [Music Break] [Verse 3] [Final Chorus] [Outro]. [Hook] opens the song at 0:00 with the sung hook phrase under a light instrumental bed — NOT a silent instrumental-only tag. [Music Break] and [Outro] get NO lyrics — just the tag. Sung sections follow the structure rules. Conversational rhythm. ONE central romantic image (human/relational object — NOT a location) running through all sections. [Outro] tag MUST appear as the final section to control Suno song length.","captionYT":"Persian YouTube caption with hook question + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, her scarf, rain on glass, worn photograph, jacket on the hook, half-finished tea — NEVER a location word like bridge, café, rooftop, street)","location":"generic unnamed backdrop only (1-3 words English — e.g. unnamed apartment, unnamed street, unnamed night, unnamed space — NEVER a named landmark, bridge, station, or specific city place that could become the song title)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting, romantic-distance)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, first meeting in a crowd, heartbreak of a last goodbye, longing from another city, the moment love is almost confessed, romantic tension across a room)"}
 </package>`;
     } // end isLong (long song branch)
   } else if (engineId === 'srv_english') {

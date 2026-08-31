@@ -287,21 +287,24 @@ Good: "پیراهنت هنوز روی صندلی‌ست" | Bad: "دلم خیلی
 Good: "تاکسی از خیابان تو می‌گذرد" | Bad: "بدون تو دنیا بی رحمه"
 Good hook: "هنوز چای را با شکر تو می‌خورم" | Bad hook: "شبای بی ستاره بدون تو"
 
-═══════════ SUNO PROMPT QUALITY — REQUIRED IDENTITY ═══════════
-The sunoPrompt and shortSunoPrompt MUST carry SRV identity. Required elements:
-- "cinematic modern Persian pop, Persian Deep House-inspired atmosphere" (genre anchor — contemporary, atmospheric positioning; NOT literal club/EDM production)
-- warm intimate vocal direction matched to the chosen vocal type
-- atmospheric texture (atmospheric synth pads · subtle oud accents on the bridge · late-night city atmosphere · soft piano underpinning)
-- cinematic build (cinematic emotional build into the chorus · strings swell on final chorus only)
-- production quality (clean vocal mix · emotional warmth · spacious intimacy)
+═══════════ SUNO PROMPT QUALITY — PERSIAN VOCAL DEEP HOUSE — REQUIRED IDENTITY ═══════════
+SRV's production direction is Persian vocal deep house: smooth, emotional, melodic, modern, commercially listenable, vocal-forward. This is a real production direction, not a vague "atmosphere" — the sunoPrompt and shortSunoPrompt MUST carry it. Required elements:
+- "Persian vocal deep house" (genre anchor) — smooth, melodic, modern, vocal-forward, commercially listenable
+- steady four-on-the-floor rhythmic foundation (mood-appropriate weight — restrained for Emotional, warmer groove for Romantic, most present for Happy)
+- controlled deep/warm bass — present and felt, never overpowering, never burying the vocal
+- atmospheric pads for texture and space
+- restrained plucked synth / melodic electronic elements as accents, not the lead
+- Persian melodic character — oud or other regional melodic accent, optional and light, woven into the electronic bed rather than replaced by it
+- intimate, prominent Persian vocals always mixed in front — the vocal is the focal point, the production supports it
+- clean modern production quality (clean vocal mix · emotional warmth · spacious intimacy)
 - hook opens at 0:00, no instrumental delay — light instrumental bed under the hook, not silence before it
 - runtime + structure markers (3:00-3:20 for the full version; 0:00 hook + chorus only for the 30s short)
-- explicitly exclude: EDM drops, aggressive club energy, heavy electronic drums — the deep-house influence is atmosphere and contemporary polish, not genre replacement
+- explicitly exclude: festival EDM, aggressive EDM drops, harsh club energy, overpowering bass, excessive electronic effects that bury the vocal — this is smooth vocal-forward deep house, NOT aggressive nightclub music
 
 DO NOT produce simplistic prompts like "Persian vocals piano strings oud cinematic 3:00-3:20". Every Suno prompt must be readable as full producer instructions.
 
 Example of GOOD sunoPrompt (style — vary per song):
-"cinematic modern Persian pop with Persian Deep House-inspired atmosphere, warm intimate female vocal at center, hook opens at 0:00 under a light instrumental bed, restrained emotional delivery, atmospheric synth pad underbed, subtle oud accents on the bridge, soft piano carrying verse 1, gentle strings entering pre-chorus, cinematic build into chorus, clean close-mic vocal mix, late-night city intimacy, romantic gravity, no EDM drops no aggressive club energy, 3:00-3:20"
+"Persian vocal deep house, smooth melodic modern vocal-forward production, warm intimate female vocal prominent and always in front, hook opens at 0:00 under a light instrumental bed, restrained emotional delivery, steady four-on-the-floor foundation (restrained, not driving), controlled deep warm bass, atmospheric pads, restrained plucked synth accents, light optional oud weaving through the melodic line, cinematic build into chorus, clean close-mic vocal mix, no festival EDM no aggressive drops no overpowering bass, 3:00-3:20"
 
 TARGET DURATION: emotional 2:45–3:20 | romantic 2:30–3:10 | happy 2:20–2:50
 PACING: 4-6 lines per verse, 4-6 chorus, 1 bridge, structured per the SONG STRUCTURE above.
@@ -316,7 +319,7 @@ OUTPUT: Return ONLY valid JSON, no markdown, no backticks:
   "shortTitle": "Persian short version",
   "hook": "the ONE memorable emotional hook phrase — visual, specific, singable, no cliché vocab",
   "lyrics": "Full Farsi lyrics using [HOOK INTRO] [VERSE 1] [PRE-CHORUS] [CHORUS] [VERSE 2] [BRIDGE] [FINAL CHORUS] section tags",
-  "sunoPrompt": "identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules — must include cinematic-modern-Persian-pop anchor + vocal direction + atmospheric texture + cinematic build + production quality + 3:00-3:20",
+  "sunoPrompt": "identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules — must include Persian vocal deep house anchor + four-on-the-floor/bass/pads/plucked-synth production elements + vocal direction + Persian melodic character + production quality + 3:00-3:20",
   "shortSunoPrompt": "identity-rich 30-sec Suno prompt: vocal at 0:00, hook+chorus only, same SRV identity rules",
   "shortLyrics": "Hook + Chorus only, max 6 Farsi lines",
   "thumbnailText": "Persian title + emoji",

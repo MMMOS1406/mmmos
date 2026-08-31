@@ -15920,30 +15920,32 @@ async function vaGeneratePackage(taskId){
 
 // v13.69.93 — SRV Farsi 9-combination rotation (Female×3 + Male×3 + Duet×3)
 // Fixed order ensures balanced distribution across all artist types and moods.
-// v13.71.0 — weighted rotation: 85% Romantic · 10% Emotional · 5% Special (Happy)
-// 20-item cycle: Female Romantic ×6 · Male Romantic ×6 · Duet Romantic ×5
-//                Female Emotional ×1 · Male Emotional ×1 · Duet Happy ×1
+// V2 PHASE 1 CORRECTION (2026-08-30) — supersedes v13.71.0's 17/2/1 (85/10/5) split
+// per SRV_FARSI_V2_CEO_AUTHORIZATION.md (commit efb955f0). 20-item cycle:
+// 8 Romantic (40%: Female×3 · Male×3 · Duet×2) · 6 Emotional (30%: F×2 · M×2 · D×2)
+// · 6 Happy (30%: F×2 · M×2 · D×2). Female/Male total 7 each, Duet 6 — the closest
+// even split of 20 slots across 3 moods x 3 voice types.
 const FARSI_ROTATION_MODES=[
   'Female — Romantic',   // 1
-  'Male — Romantic',     // 2
-  'Female — Romantic',   // 3
-  'Duet — Romantic',     // 4
-  'Male — Romantic',     // 5
-  'Female — Emotional',  // 6 — Emotional slot
-  'Female — Romantic',   // 7
-  'Male — Romantic',     // 8
-  'Duet — Romantic',     // 9
+  'Male — Emotional',    // 2
+  'Duet — Happy',        // 3
+  'Male — Romantic',     // 4
+  'Female — Emotional',  // 5
+  'Duet — Romantic',     // 6
+  'Female — Happy',      // 7
+  'Male — Happy',        // 8
+  'Duet — Emotional',    // 9
   'Female — Romantic',   // 10
   'Male — Romantic',     // 11
-  'Duet — Romantic',     // 12
-  'Male — Emotional',    // 13 — Emotional slot
-  'Female — Romantic',   // 14
-  'Male — Romantic',     // 15
+  'Female — Emotional',  // 12
+  'Duet — Happy',        // 13
+  'Male — Emotional',    // 14
+  'Female — Happy',      // 15
   'Duet — Romantic',     // 16
-  'Female — Romantic',   // 17
-  'Male — Romantic',     // 18
-  'Duet — Romantic',     // 19
-  'Duet — Happy',        // 20 — Special (5%): wedding · Eid · homeland
+  'Male — Happy',        // 17
+  'Female — Romantic',   // 18
+  'Duet — Emotional',    // 19
+  'Male — Romantic',     // 20
 ];
 // Returns the next rotation mode and advances the pointer (auto-saves state).
 function _srvFarsiNextMode(){
