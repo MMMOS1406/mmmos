@@ -2288,9 +2288,9 @@ async function generatePackage(req, res) {
     const parts = mode.split(' — '); const voiceType = parts[0]; const mood = parts[1] || mode;
 
     if (!isLong) {
-      // ── SRV FARSI SHORT VIDEO GENERATOR — FROZEN v13.71.1 ───────────────────
-      // 85% Romantic · 10% Emotional · 5% Special Themes. 15/15 validation PASS 2026-07-08.
-      // DO NOT EDIT without production data justification.
+      // ── SRV FARSI SHORT VIDEO GENERATOR — V2 PHASE 1 ────────────────────────
+      // 40% Romantic · 30% Emotional · 30% Happy. Supersedes v13.71.1 freeze per
+      // SRV_FARSI_V2_CEO_AUTHORIZATION.md (commit efb955f0e3d3d6a1f4954a8a2c59203445f9f2d3).
       // ARCHITECTURE: Completely independent from the Long Song generator.
       // This generator has NO knowledge of Long Song structure.
       // It never generates [Intro], [Verse], [Chorus], [Outro], or 3:00-3:20 prompts.
@@ -2335,21 +2335,25 @@ THE TITLE must be a FEELING or CONFESSION — not a place, scene, object, or occ
 Title test: "Does this title make sense without any location, scene, or object?" If not → rewrite.
 
 ═══════════ MOOD INTERPRETATION — READ BEFORE WRITING ═══════════
-ROMANTIC (85% — DEFAULT): passionate love · romantic chemistry · falling in love · romantic longing · two people drawn together · romantic tension · desire · warmth between two people. IF IN DOUBT, WRITE ROMANTIC.
-EMOTIONAL (10%): beautiful heartbreak · long-distance longing · reunion after distance · waiting · missing someone · emotional memory — ALWAYS with a romantic partner as the emotional anchor. NOT family loss. NOT cultural grief. Still romantic with emotional weight.
-HAPPY (5% — SPECIAL THEMES ONLY): Fires ONLY when mode is explicitly 'happy'. Write about ONE Afghan/Persian cultural moment of warmth and joy:
+ROMANTIC (40% — DEFAULT): passionate love · romantic chemistry · falling in love · romantic longing · two people drawn together · romantic tension · desire · warmth between two people. 72-84 BPM. IF IN DOUBT, WRITE ROMANTIC.
+Prefer behavioral/physical imagery over declarative "you are my X" claim-hooks — claim-template hooks are heavily saturated in SRV's own history.
+EMOTIONAL (30%): beautiful heartbreak · long-distance longing · reunion after distance · waiting · missing someone · emotional memory — ALWAYS with a romantic partner as the emotional anchor. NOT family loss. NOT cultural grief. Still romantic with emotional weight. 66-76 BPM.
+Avoid word-counting/arithmetic hook devices ("one sentence," "three words") — center the ache in a persistent habit or physical sensation instead.
+HAPPY (30% — SPECIAL THEMES): Fires ONLY when mode is explicitly 'happy'. Write about ONE Afghan/Persian cultural moment of warmth and joy, OR a genuine private-intimacy moment between two people:
   • Wedding night or engagement joy (شب عروسی · نامزدی · شب حنا)
   • Parents' blessing or family warmth (دعای مادر · آغوش پدر)
   • Eid morning or Nouruz celebration (عید · نوروز · جشن)
   • Childhood memory of joy (کودکی · بازی در کوچه · دوست قدیمی)
   • Return to homeland (برگشتن به وطن · خاک آشنا)
-  Tone: warm, joyful, specific. BPM: 104-112.
+  • A private shared language / inside understanding between two people (a look, a gesture, a joke only they know)
+  Tone: warm, joyful, specific. BPM: 100-116.
+  Avoid the "celebration/dancing/hand-holding" and "می‌خندم" (laughing) vocabulary cluster — heavily saturated in SRV's own history.
 
 ═══════════ SRV BRAND THEME ANCHOR — MANDATORY ═══════════
 SRV Farsi is a ROMANTIC MUSIC CHANNEL. The primary identity is Male↔Female romantic love.
 TARGET AUDIENCE: Afghanistan · Iran · Persian/Dari speakers · Ages 25–60.
 
-PRIMARY SONG THEMES — 85% Romantic:
+PRIMARY SONG THEMES — 40% Romantic:
 Love · Romance · Falling in love · First love · First meeting · Missing someone · Waiting · Long-distance longing · Reunion · Beautiful eyes · Smiles · Holding hands · Late-night thoughts · Romantic memories · Heartbreak (romantic) · Hope (for love) · Romantic tension · Love after distance · Weddings (romantic perspective) · Dancing together · Romantic chemistry · A name that still echoes · Walking together · A look across a room.
 
 EXPLICIT PROHIBITIONS IN ROMANTIC AND EMOTIONAL MODES:
@@ -2360,7 +2364,7 @@ Do NOT write short clips whose PRIMARY CONCEPT is about:
 × Homeland longing as main concept
 × Childhood nostalgia as main concept
 × Eid / Nouruz as main concept
-These are SPECIAL THEMES (5% gate — happy mode only). In romantic/emotional modes they may be passing background detail ONLY.
+These are SPECIAL THEMES (HAPPY-mode gate). In romantic/emotional modes they may be passing background detail ONLY.
 
 ═══════════ CENTRAL IMAGE RULE — ALL MODES (READ BEFORE WRITING) ═══════════
 The PRIMARY emotional anchor / central image for EVERY song must NEVER be technology.
@@ -2466,12 +2470,13 @@ EXAMPLE (follow this format exactly):
 - "0:15-0:20 runtime" MUST appear verbatim.
 - Vocal starts at 0:00. No instrumental intro. No silence. No fade-in.
 - Hook phrase is the FIRST SOUND the listener hears.
-- SRV identity: "cinematic modern Afghan Persian pop", warm intimate ${voiceType.toLowerCase()} vocal.
-- BPM: 68-72 BPM (or 104-112 for happy duet mode).
+- SRV identity: "cinematic modern Afghan Persian pop with Persian Deep House-inspired atmosphere" (contemporary, atmospheric positioning — NOT literal club/EDM production), warm intimate ${voiceType.toLowerCase()} vocal.
+- BPM: 72-84 (romantic) · 66-76 (emotional) · 100-116 (happy).
+- No EDM drops, no aggressive club energy, no heavy electronic drums.
 - Ends cleanly at the emotional peak. High replay value.
 
 EXAMPLE sunoPrompt:
-"cinematic modern Afghan Persian pop, warm intimate close-mic ${voiceType.toLowerCase()} vocal at center, vocal STARTS at 0:00 with hook phrase — NO instrumental intro NO silence NO fade-in, restrained emotional delivery, soft Rubab lead, warm piano, atmospheric pads, 68-72 BPM, 0:15-0:20 runtime, ends cleanly at emotional peak, high replay value"
+"cinematic modern Afghan Persian pop with Persian Deep House-inspired atmosphere, warm intimate close-mic ${voiceType.toLowerCase()} vocal at center, vocal STARTS at 0:00 with hook phrase — NO instrumental intro NO silence NO fade-in, restrained emotional delivery, soft oud accent (optional), warm piano, atmospheric pads, no EDM no aggressive drums, 76 BPM, 0:15-0:20 runtime, ends cleanly at emotional peak, high replay value"
 
 ═══════════ OUTPUT — JSON ONLY, WRAPPED IN <package> ═══════════
 // SHORT VIDEO PACKAGE — sunoPrompt and lyrics hold the short content (client reads these)
@@ -2480,9 +2485,9 @@ EXAMPLE sunoPrompt:
 {"isShortVideo":true,"shortTitle":"emoji + Persian short title — must be a FEELING or CONFESSION (e.g. هنوز منتظرم · بمان · حرف آخر) — NEVER a place/scene/object name","title":"emoji + Persian short title — must be a FEELING or CONFESSION — NEVER a place/scene/object name","concept":"one sentence (English) — MUST answer: what does [he/she] FEEL toward [her/him] right now? — NEVER a place/scene/object as organizing frame — WRONG: 'A man returns to the bench where...' or 'The empty hall still holds her memory' — RIGHT: 'A man who still loves her but can't bring himself to call'","mood":"${mood}","hook":"the hook phrase in Persian — line 1 of the lyrics","sunoPrompt":"[SHORT-ONLY SUNO PROMPT — 0:15-0:20 runtime, vocal at 0:00, NO intro]","shortSunoPrompt":"[identical to sunoPrompt]","lyrics":"[EXACTLY 3-4 Persian lines, NO section tags, hook is line 1]","shortLyrics":"[identical to lyrics]","captionYT":"Persian YouTube Short caption — hook + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","shortThumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, taxi headlights, her scarf, worn photograph — NEVER a location word like bench, hall, rooftop, vendor, corner)","location":"unnamed backdrop only (1-3 words — e.g. unnamed room, unnamed night, unnamed space — NOT a named place or landmark that could become a title or hook)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, heartbreak of a last goodbye, longing from another city, first meeting that changed everything)"}
 </package>`;
     } else {
-    // ── SRV FARSI LONG SONG GENERATOR — FROZEN v13.71.1 ────────────────────
-    // 85% Romantic · 10% Emotional · 5% Special Themes. 15/15 validation PASS 2026-07-08.
-    // DO NOT EDIT without production data justification.
+    // ── SRV FARSI LONG SONG GENERATOR — V2 PHASE 1 ─────────────────────────
+    // 40% Romantic · 30% Emotional · 30% Happy. Supersedes v13.71.1 freeze per
+    // SRV_FARSI_V2_CEO_AUTHORIZATION.md (commit efb955f0e3d3d6a1f4954a8a2c59203445f9f2d3).
     prompt = `Generate one SRV Farsi long song package using the rules below. Output ONLY the JSON wrapped in <package> tags. Do NOT write any preamble, acknowledgment, or summary. Start your response with <package> immediately.
 
 ═══════════ THE SUBJECT LAW — READ BEFORE GENERATING ═══════════
@@ -2534,15 +2539,19 @@ The aim is NOT "less sadness" — the aim is MORE emotional beauty, MORE cinemat
 ${voiceType} — ${mood}
 
 ═══════════ MOOD INTERPRETATION — READ BEFORE WRITING ═══════════
-ROMANTIC (85% — DEFAULT): passionate love · romantic chemistry · falling in love · romantic longing · two people drawn toward each other · romantic tension · desire · warmth between two people. IF IN DOUBT, WRITE ROMANTIC.
-EMOTIONAL (10%): beautiful heartbreak · long-distance longing · reunion after distance · waiting · missing someone · emotional memory — ALWAYS with a romantic partner as the emotional anchor. NOT family loss. NOT cultural grief. NOT parent→child. Still romantic but carrying emotional weight.
-HAPPY (5% — SPECIAL THEMES ONLY): Fires ONLY when mode is explicitly 'happy'. Write about ONE Afghan/Persian cultural moment of warmth and joy:
+ROMANTIC (40% — DEFAULT): passionate love · romantic chemistry · falling in love · romantic longing · two people drawn toward each other · romantic tension · desire · warmth between two people. 72-84 BPM. IF IN DOUBT, WRITE ROMANTIC.
+Prefer behavioral/physical imagery over declarative "you are my X" claim-hooks — claim-template hooks are heavily saturated in SRV's own history.
+EMOTIONAL (30%): beautiful heartbreak · long-distance longing · reunion after distance · waiting · missing someone · emotional memory — ALWAYS with a romantic partner as the emotional anchor. NOT family loss. NOT cultural grief. NOT parent→child. Still romantic but carrying emotional weight. 66-76 BPM.
+Avoid word-counting/arithmetic hook devices ("one sentence," "three words") — center the ache in a persistent habit or physical sensation instead.
+HAPPY (30% — SPECIAL THEMES): Fires ONLY when mode is explicitly 'happy'. Write about ONE Afghan/Persian cultural moment of warmth and joy, OR a genuine private-intimacy moment between two people:
   • Wedding night or engagement joy (شب عروسی · نامزدی · شب حنا · رقص عروسی)
   • Parents' blessing or family warmth (دعای مادر · آغوش پدر · صدای مادر)
   • Eid morning or Nouruz celebration (عید · نوروز · جشن · لباس نو · هدیه)
   • Childhood memory of joy (کودکی · بازی در کوچه · دوست قدیمی)
   • Return to homeland (برگشتن به وطن · خاک آشنا)
-  Tone: warm, joyful, culturally specific. BPM: 104-112. Energy: celebratory and heartfelt.
+  • A private shared language / inside understanding between two people (a look, a gesture, a joke only they know)
+  Tone: warm, joyful, culturally specific. BPM: 100-116. Energy: celebratory and heartfelt.
+  Avoid the "celebration/dancing/hand-holding" and "می‌خندم" (laughing) vocabulary cluster — heavily saturated in SRV's own history.
 
 ═══════════ AVOID LIST — recent packages to NOT repeat or echo ═══════════
 ${avoidList}
@@ -2577,7 +2586,7 @@ May appear as background DETAILS but cannot be the central image or hook anchor 
 SRV Farsi is a ROMANTIC MUSIC CHANNEL. The primary identity is Male↔Female romantic love.
 TARGET AUDIENCE: Afghanistan · Iran · Persian/Dari speakers · Ages 25–60.
 
-PRIMARY SONG THEMES — 85% Romantic:
+PRIMARY SONG THEMES — 40% Romantic:
 Love · Romance · Falling in love · First love · First meeting · Missing someone · Waiting · Long-distance longing · Reunion · Beautiful eyes · Smiles · Holding hands · Late-night thoughts · Romantic memories · Heartbreak (romantic) · Hope (for love) · Romantic tension · Love after distance · Weddings (romantic perspective) · Dancing together · Romantic chemistry · Loyalty between partners · A name that still echoes · Walking together.
 
 EXPLICIT PROHIBITIONS IN ROMANTIC AND EMOTIONAL MODES:
@@ -2589,7 +2598,7 @@ Do NOT write songs whose PRIMARY CONCEPT is about:
 × Childhood nostalgia as main concept
 × Eid / Nouruz as main concept
 × Generational family bonds
-These are SPECIAL THEMES (5% gate — only when mode = 'happy'). In romantic/emotional modes they may be passing background detail ONLY — never hook, title, or central concept.
+These are SPECIAL THEMES (HAPPY-mode gate). In romantic/emotional modes they may be passing background detail ONLY — never hook, title, or central concept.
 
 ═══════════ CENTRAL IMAGE RULE — ALL MODES (READ BEFORE WRITING) ═══════════
 The PRIMARY emotional anchor / central image for EVERY song must NEVER be technology.
@@ -2746,9 +2755,10 @@ NEVER sound primarily Iranian pop, Arabic pop, Turkish pop, or generic Western p
 Bollywood may influence emotional atmosphere only — the result must remain unmistakably Afghan.
 
 PERMANENT MUSICAL PALETTE:
-Primary instruments (always): Rubab (main melodic identity) · Soft Piano · Warm Strings · Gentle Cello · Harmonium · Ambient Pads
-Light rhythm: Very soft Tabla · Very soft Dholak · Minimal percussion only
-FORBIDDEN: EDM · Trap · Heavy electronic synths · Loud drums · Rock guitars · Dance beats · Aggressive production
+Primary instruments (always): Warm Piano · Warm Strings · Gentle Cello · Harmonium · Atmospheric/Ambient Pads · Persian Deep House-inspired atmospheric texture (contemporary polish, not club/EDM production)
+Regional accent (optional, light — never the mandatory identity): Oud
+Light rhythm: Very soft Tabla · Very soft Dholak · Minimal percussion only (soft programmed pulse allowed for Happy — never a club beat)
+FORBIDDEN: EDM drops · Trap · Heavy electronic synths · Loud drums · Rock guitars · Aggressive club production
 
 VOCAL STYLE (MANDATORY):
 Warm · Intimate · Close-mic · Emotional · Natural Afghan pronunciation · Soft breathing allowed · Controlled emotion
@@ -2766,32 +2776,33 @@ INVALID as central image (location/backdrop — backdrop only, one line max): tr
 The central image appears in the hook, chorus, and returns in the outro section emotionally.
 
 PRODUCTION (LOCKED):
-Tempo: 68–72 BPM · Song length: 3:00–3:20 STRICT · Warm dynamic cinematic mix · Vocals always in front
-The arrangement builds gradually — NEVER gets loud. Do NOT overproduce. Do NOT sound electronic.
+Tempo: 72–84 BPM (romantic) · 66–76 BPM (emotional) · 100–116 BPM (happy) · Song length: 3:00–3:20 STRICT · Warm dynamic cinematic mix · Vocals always in front
+The arrangement builds gradually — NEVER gets loud. Do NOT overproduce. Warm acoustic-cinematic core with Persian Deep House-inspired atmospheric polish — NOT club/EDM production.
+HOOK OPENS AT 0:00 — no silent instrumental delay before the vocal. Romantic/Happy: hook opens under a light instrumental bed. Emotional: hook still opens at 0:00; the mid-song instrumental break runs longer instead (15-20s → see Music Break below).
 
 SONG STRUCTURE — MANDATORY (emotional solos and emotional duets):
 Lyrics are written FOR A SINGER TO PERFORM. Short lines. Breathing room. Musical pacing.
 
-[Intro] (12–15s instrumental — NO lyrics)
+[Hook] — opens the song at 0:00 under a light instrumental bed (no silent intro). 1-2 short singable lines. The ONE memorable hook phrase, plants the central image.
 
 [Verse 1] — 3-4 SHORT lines. Scene + central image + two-person relational detail. 5-9 syllables per line.
 
 [Verse 2] — 3-4 SHORT lines. Progression — new emotional angle on the same image. NOT a repeat of Verse 1.
 
-[Chorus] — 3-4 SHORT lines. ONE memorable hook phrase. Simple wording. Emotionally strong. Singable in one breath. MUST contain emotional beauty (Beauty Ratio rule). This is what listeners remember.
+[Chorus] — 3-4 SHORT lines. Same hook phrase from [Hook]. Simple wording. Emotionally strong. Singable in one breath. MUST contain emotional beauty (Beauty Ratio rule). This is what listeners remember.
 
-[Music Break] (15–20s instrumental — NO lyrics — emotional breathing room)
+[Music Break] (15–20s instrumental for romantic/happy, 20-25s for emotional — NO lyrics — emotional breathing room)
 
 [Verse 3] — 3-4 SHORT lines. Softer vulnerability, hopeful tension, or quiet realization.
 
 [Final Chorus] — same hook, emotionally elevated. Small wording variation allowed.
 
-[Outro] (12–15s instrumental — NO lyrics — end beautiful, end memorable)
+[Outro] (8–12s instrumental — NO lyrics — end beautiful, end memorable)
 
 Total sung lines: 12–18 across all sections. COMPACT. Every line earns its place.
-For Happy Duet: use [Male Verse] [Female Verse] [Both Chorus] [Female Bridge] [Male Bridge] labels.
-For Emotional Duet: use [Male Verse] [Female Verse] [Both Chorus] [Music Break] labels. BPM 68–74.
-For Happy Duet: BPM 104–112. Instruments: Rubab · Dholak · Tabla · Hand Claps · Bass · Modern Pop Drums.
+For Happy Duet: use [Hook — Both] [Male Verse] [Female Verse] [Both Chorus] [Female Bridge] [Male Bridge] labels. BPM 100-116.
+For Emotional Duet: use [Hook — Both] [Male Verse] [Female Verse] [Both Chorus] [Music Break] labels. BPM 66-76.
+Regional accent (oud) optional and light on all duet variants — never mandatory, never dominant. No hard club beat on any variant.
 
 LENGTH CONTROL — CRITICAL:
 The lyrics output MUST include [Outro] as the final section tag. Suno will use this to end the song at the right time.
@@ -2802,8 +2813,8 @@ The sunoPrompt MUST include: "3:00-3:20 runtime, compact structure, end at [Outr
 ✓ Feels like SRV within the first 10 seconds
 ✓ Strong memorable chorus
 ✓ One clear emotional theme (not multiple mixed themes)
-✓ Rubab present as main melodic identity
-✓ Warm cinematic production (no loud drums, no EDM, no aggressive sounds)
+✓ Hook opens at 0:00 — no silent instrumental delay before the vocal
+✓ Warm cinematic production with Persian Deep House-inspired atmosphere (no loud drums, no EDM drops, no aggressive club energy)
 ✓ Natural Dari pronunciation
 ✓ No modern pop trends overpowering the Afghan sound
 If ANY item fails → revise before outputting.
@@ -2851,18 +2862,20 @@ Bad hook: "شبای بی ستاره بدون تو" — banned vocab stack, no sp
 
 ═══════════ SUNO PROMPT QUALITY — REQUIRED IDENTITY ═══════════
 The sunoPrompt MUST carry SRV identity, not just genre tags. Required elements:
-- "cinematic modern Persian pop" (genre anchor)
+- "cinematic modern Persian pop with Persian Deep House-inspired atmosphere" (genre anchor — contemporary, atmospheric positioning; NOT literal club/EDM production)
 - warm intimate vocal direction (e.g. "warm intimate ${voiceType.toLowerCase()} vocal at center", "restrained emotional delivery", "close-mic vocal mix")
-- atmospheric texture (e.g. "atmospheric synth pads", "subtle oud accents on the bridge", "late-night city atmosphere", "soft piano underpinning")
+- hook opens at 0:00 under a light instrumental bed — no silent intro
+- atmospheric texture (e.g. "atmospheric synth pads", "subtle oud accents on the bridge (optional)", "late-night city atmosphere", "soft piano underpinning")
 - cinematic build (e.g. "cinematic emotional build into the chorus", "strings swell on final chorus only")
 - production quality (e.g. "clean vocal mix", "emotional warmth", "spacious intimacy")
+- explicitly exclude: EDM drops, aggressive club energy, heavy electronic drums
 - runtime + structure markers: 3:00-3:20 runtime, end at [Outro]
 
 DO NOT produce simplistic prompts like "Persian vocals piano strings oud cinematic 3:00-3:20". Every Suno prompt must be readable as instructions to a producer who needs the SRV identity from words alone.
 
 Example of GOOD sunoPrompt (style — vary per song):
-"cinematic Afghan Persian pop, warm intimate close-mic ${voiceType.toLowerCase()} vocal at center, restrained emotional delivery, Rubab as main melodic lead, soft piano and warm strings, gentle cello on verses, harmonium underpinning, very soft tabla, ambient pads, cinematic emotional build into chorus, clean mix vocals always in front, no loud drums no EDM no synths, 68-72 BPM, 3:00-3:20 runtime, end at [Outro]"
-CRITICAL: sunoPrompt MUST include "68-72 BPM" (or 104-112 for happy duet) and "3:00-3:20 runtime, end at [Outro]" — this controls Suno song length. Without it Suno generates 4+ minute songs.
+"cinematic Afghan Persian pop with Persian Deep House-inspired atmosphere, warm intimate close-mic ${voiceType.toLowerCase()} vocal at center, hook opens at 0:00 under a light instrumental bed, restrained emotional delivery, soft piano and warm strings, gentle cello on verses, harmonium underpinning, optional light oud accent, very soft tabla, atmospheric ambient pads, cinematic emotional build into chorus, clean mix vocals always in front, no loud drums no EDM drops no aggressive club energy, 76 BPM, 3:00-3:20 runtime, end at [Outro]"
+CRITICAL: sunoPrompt MUST include the mood-appropriate BPM ("72-84 BPM" romantic · "66-76 BPM" emotional · "100-116 BPM" happy) and "3:00-3:20 runtime, end at [Outro]" — this controls Suno song length. Without it Suno generates 4+ minute songs.
 
 ═══════════ OUTPUT — JSON ONLY, WRAPPED IN <package> ═══════════
 CRITICAL: Start your response with <package> IMMEDIATELY. Do NOT write any preamble, acknowledgment, summary, or introductory text before the JSON. Do NOT say "I understand", "I have internalized", "I am ready", or anything else. Your entire response = <package>{...json...}</package> — nothing before, nothing after.
@@ -2871,7 +2884,7 @@ CRITICAL: Start your response with <package> IMMEDIATELY. Do NOT write any pream
 // shortSunoPrompt and shortLyrics are NOT generated here.
 // Short Video packages are produced by a completely separate generator.
 <package>
-{"title":"emoji + Persian title + emoji","shortTitle":"emoji + short Persian title","concept":"one sentence (English) — MUST answer: what does [Person] FEEL toward [Person] RIGHT NOW? — BANNED even with person as grammatical subject: 'A man returns to the bench where...' / 'She sits in the empty hall where...' / 'He stands at the vendor corner where...' — Memory-Through-Setting patterns use place/object as the organizing frame and are BANNED — RIGHT: 'A man who still loves her but cannot bring himself to call' / 'She knows he's still waiting but doesn't know how to go back' — the concept must be about a FEELING, not a location or object a person is near","mood":"${mood}","emotionalSubMode":"the texture chosen from the SUB-MODE list above","hook":"the ONE memorable emotional hook phrase (Persian) — visual, specific, singable, NO location word as the anchor, carries SRV romantic identity — the hook is about a PERSON, a FEELING, or a RELATIONAL MOMENT, never a place name","sunoPrompt":"identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules above — must include cinematic-modern-Persian-pop anchor + vocal direction + atmospheric texture + cinematic build + production quality + 3:00-3:20","lyrics":"full Persian lyrics using EXACT section tags: [Intro] [Verse 1] [Verse 2] [Chorus] [Music Break] [Verse 3] [Final Chorus] [Outro]. Instrumental sections ([Intro] [Music Break] [Outro]) get NO lyrics — just the tag. Sung sections follow the structure rules. Conversational rhythm. ONE central romantic image (human/relational object — NOT a location) running through all sections. [Outro] tag MUST appear as the final section to control Suno song length.","captionYT":"Persian YouTube caption with hook question + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, her scarf, rain on glass, worn photograph, jacket on the hook, half-finished tea — NEVER a location word like bridge, café, rooftop, street)","location":"generic unnamed backdrop only (1-3 words English — e.g. unnamed apartment, unnamed street, unnamed night, unnamed space — NEVER a named landmark, bridge, station, or specific city place that could become the song title)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting, romantic-distance)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, first meeting in a crowd, heartbreak of a last goodbye, longing from another city, the moment love is almost confessed, romantic tension across a room)"}
+{"title":"emoji + Persian title + emoji","shortTitle":"emoji + short Persian title","concept":"one sentence (English) — MUST answer: what does [Person] FEEL toward [Person] RIGHT NOW? — BANNED even with person as grammatical subject: 'A man returns to the bench where...' / 'She sits in the empty hall where...' / 'He stands at the vendor corner where...' — Memory-Through-Setting patterns use place/object as the organizing frame and are BANNED — RIGHT: 'A man who still loves her but cannot bring himself to call' / 'She knows he's still waiting but doesn't know how to go back' — the concept must be about a FEELING, not a location or object a person is near","mood":"${mood}","emotionalSubMode":"the texture chosen from the SUB-MODE list above","hook":"the ONE memorable emotional hook phrase (Persian) — visual, specific, singable, NO location word as the anchor, carries SRV romantic identity — the hook is about a PERSON, a FEELING, or a RELATIONAL MOMENT, never a place name","sunoPrompt":"identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules above — must include cinematic-modern-Persian-pop anchor + vocal direction + atmospheric texture + cinematic build + production quality + 3:00-3:20","lyrics":"full Persian lyrics using EXACT section tags: [Hook] [Verse 1] [Verse 2] [Chorus] [Music Break] [Verse 3] [Final Chorus] [Outro]. [Hook] opens the song at 0:00 with the sung hook phrase under a light instrumental bed — NOT a silent instrumental-only tag. [Music Break] and [Outro] get NO lyrics — just the tag. Sung sections follow the structure rules. Conversational rhythm. ONE central romantic image (human/relational object — NOT a location) running through all sections. [Outro] tag MUST appear as the final section to control Suno song length.","captionYT":"Persian YouTube caption with hook question + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, her scarf, rain on glass, worn photograph, jacket on the hook, half-finished tea — NEVER a location word like bridge, café, rooftop, street)","location":"generic unnamed backdrop only (1-3 words English — e.g. unnamed apartment, unnamed street, unnamed night, unnamed space — NEVER a named landmark, bridge, station, or specific city place that could become the song title)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting, romantic-distance)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, first meeting in a crowd, heartbreak of a last goodbye, longing from another city, the moment love is almost confessed, romantic tension across a room)"}
 </package>`;
     } // end isLong (long song branch)
   } else if (engineId === 'srv_english') {
