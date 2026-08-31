@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <title>MMM System v16.51.0 — First Complete Autonomous Department</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&family=Lalezar&family=Vazirmatn:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
   --bg:#07090f;--surface:#0d1017;--border:#1a2030;--gold:#c9a84c;--gold2:#f59e0b;
@@ -16375,67 +16375,70 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     pkg._srvBgUrl=null; pkg._srvLongRenderId=null; pkg._srvShortRenderId=null;
     if(typeof saveAppState==='function')saveAppState();
 
-    // Step 1: Fetch Pexels backgrounds (same endpoint as English, mood drives query)
-    // v13.73.1 — Short uses 3 Pexels (non-human) + 3 SRV avatars interleaved = 6 scenes
-    const _bgCount=isLongTask?25:3;
-    setStatus('Fetching Pexels backgrounds ('+(isLongTask?'25 cinematic scenes':'5 scenes')+')…','#c9a84c');
-    const bgRes=await fetch('/api/ops?action=srv_english_pexels_bg',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      // v13.69.93: pass full mode (artist-type + mood) so ops.js can use per-combo Pexels banks
-      // v13.73.1: isFarsi flag routes Long to PEXELS_FARSI_LONG_BANKS (no random humans)
-      body:JSON.stringify({mood:pkg.mood||'Emotional',mode:pkg.mode||(task&&(task.mode||task.mood))||'',photo_only:true,count:_bgCount,isLong:isLongTask,isFarsi:true}),
-    });
-    const bgData=await bgRes.json().catch(function(){return{};});
-    if(!bgData.ok){
-      setStatus('⚠ Pexels: '+(bgData.error||'Add PEXELS_API_KEY to Vercel env vars'),'#fbbf24');
-      if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent='🌹 Build Package — Fetch Background + Render Video';}
-      return;
-    }
-    const _bgPhotos=bgData.photos||[{url:bgData.url,credit:bgData.credit}];
-    const _bgUrls=_bgPhotos.map(function(p){return p.url;}).filter(Boolean);
-    pkg._srvBgUrl=_bgUrls[0]||null;
-    pkg._srvBgCredit=(_bgPhotos[0]&&_bgPhotos[0].credit)||null;
-    if(typeof saveAppState==='function')saveAppState();
+    // V2 PHASE 2 — composed-cover system replaces Pexels full-screen photo backgrounds.
+    // No Pexels fetch: the SRV avatar photo is duotone-masked into a designed panel by
+    // _srvRenderVideo's Farsi-specific path (see VISUAL_BASELINE_v1). Only the avatar
+    // pool + mood palette + mirror side are chosen here.
+    const _fMode=(task&&(task.mode||task.mood))||pkg.mode||'';
+    const _fMoodOnly=pkg.mood||(_fMode.includes(' — ')?_fMode.split(' — ').pop():_fMode)||'Romantic';
+    const _fGroup=/^Duet/i.test(_fMode)?'duet':/^Male/i.test(_fMode)?'male':'female';
 
-    // v13.73.1 — SRV Farsi avatar: mode-based pool (Female/Male/Duet)
-    // Short: interleave 3 SRV avatars (01/02/03) with 3 Pexels env scenes → 6 scenes, 3× human presence
-    // Long: pass single avatar via avatarUrl for time-fraction renderer (beginning/middle/end)
-    const _farsiAvatarIdxSet=new Set();
-    let _fAvUrlForRender=null;
+    // v2-phase2 — memory-aware face rotation: avoid repeating the same avatar photo
+    // this identity group last used, reusing the existing generation_memory mechanism
+    // (memory_type='visual_face') rather than a parallel tracking system.
+    function _farsiPickAvatar(pool){
+      if(!pool.length)return null;
+      if(pool.length===1)return pool[0];
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_face';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})
+        .slice(0,2).map(function(m){return m.value;});
+      const _fresh=pool.filter(function(u){return !_recent.includes(u);});
+      const _choices=_fresh.length?_fresh:pool;
+      return _choices[Math.floor(Math.random()*_choices.length)];
+    }
+    function _farsiPickMirror(){
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_mirror';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})[0];
+      // simple alternation: flip from whatever was used last, default to false
+      return _recent?_recent.value!=='true':(Math.random()<0.5);
+    }
+    // v2-phase2 — background archetype (gradient direction 'a'/'b') and mood intensity
+    // (soft/standard/vivid) are additional anti-repetition dimensions, tracked + rotated
+    // the same way as face/mirror rather than left to raw Math.random() every time.
+    function _farsiPickBgArchetype(){
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_background_archetype';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})[0];
+      return _recent?(_recent.value==='a'?'b':'a'):(Math.random()<0.5?'a':'b');
+    }
+    function _farsiPickIntensity(){
+      const _levels=['soft','standard','vivid'];
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_mood_intensity';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})[0];
+      const _fresh=_recent?_levels.filter(function(l){return l!==_recent.value;}):_levels;
+      return _fresh[Math.floor(Math.random()*_fresh.length)];
+    }
+    let _fAvUrlForRender=null, _fMirror=_farsiPickMirror();
+    const _fBgArchetype=_farsiPickBgArchetype(), _fIntensity=_farsiPickIntensity();
+    const _fSeed=Math.floor(Math.random()*1e9); // fresh atmo/particle layout every render, no repetition concept needed
     (function(){
       const _fCfg=_srvFarsiEngineConfig();
       const _fLib=_fCfg&&_fCfg.avatarLibrary;
       if(!_fLib)return;
-      const _fMode=(task&&(task.mode||task.mood))||pkg.mode||'';
-      const _fGroup=/^Duet/i.test(_fMode)?'duet':/^Male/i.test(_fMode)?'male':'female';
       const _fPool=_fLib[_fGroup]||[];
-      // Short → indices 0-2 (portrait 01-03), Long → indices 3-5 (landscape 04-06)
+      // Short → indices 0-2 (portrait 01-03), Long → indices 3-5 (landscape 04-06) — unchanged slicing convention
       const _fSlice=_fPool.slice(isLongTask?3:0,isLongTask?6:3);
-      if(!_fSlice.length)return;
-      if(isLongTask){
-        // Long: single avatar via time-fraction renderer
-        _fAvUrlForRender=_fSlice[Math.floor(Math.random()*_fSlice.length)];
-      } else {
-        // v13.73.1 — Short: interleave [avatar_01, pexels_0, avatar_02, pexels_1, avatar_03, pexels_2]
-        // All 3 Short avatars used; only SRV avatars appear as humans in the video
-        const _avPool=_fSlice.slice(0,3); // up to 3 avatar URLs
-        const _bgBackup=_bgUrls.splice(0,_bgUrls.length); // drain existing Pexels backgrounds
-        for(let _si=0;_si<_avPool.length;_si++){
-          _bgUrls.push(_avPool[_si]);          // avatar scene
-          _farsiAvatarIdxSet.add(_si*2);       // mark as contain-mode (portrait)
-          if(_bgBackup[_si]) _bgUrls.push(_bgBackup[_si]); // non-human Pexels env scene
-        }
-        // Fallback: if no avatar pool, restore original backgrounds
-        if(!_avPool.length) _bgBackup.forEach(function(u){_bgUrls.push(u);});
-      }
+      _fAvUrlForRender=_farsiPickAvatar(_fSlice);
     })();
 
     // Step 2: SHORT render (9:16) — only for Short tasks
     if(!isLongTask){
       setStatus('Rendering SHORT video… do not close this tab','#8b5cf6');
       const shortResult=await _srvRenderVideo({
-        photoUrls:_bgUrls,
+        photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'short',
         skipChorusSync:true,
@@ -16445,7 +16448,8 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
         // v13.69.80 — Farsi Short: shortLyrics (camelCase from generate) or short_lyrics (legacy snake) or pkg.lyrics
         lyrics:pkg.shortLyrics||pkg.short_lyrics||pkg.lyrics||'',
         statusCb:function(msg){setStatus(msg,'#8b5cf6');},
-        avatarIndices:_farsiAvatarIdxSet,  // v13.69.81 — contain-mode for avatar scene
+        avatarUrl:_fAvUrlForRender,
+        mood:_fMoodOnly, mirror:_fMirror, seed:_fSeed, hookText:pkg.hook||'', bgArchetype:_fBgArchetype, moodIntensity:_fIntensity,
       });
       setStatus('Uploading SHORT video…','#8b5cf6');
       const shortFile=new File([shortResult.blob],'srv_farsi_short.webm',{type:shortResult.blob.type});
@@ -16459,7 +16463,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     if(isLongTask){
       setStatus('Rendering LONG video… this takes the full song length, do not close this tab','#8b5cf6');
       const longResult=await _srvRenderVideo({
-        photoUrls:_bgUrls,
+        photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'long',
         skipChorusSync:false,
@@ -16467,8 +16471,8 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
         channel:'SRV Farsi',
         lyrics:pkg.lyrics||'',
         statusCb:function(msg){setStatus(msg,'#8b5cf6');},
-        avatarIndices:_farsiAvatarIdxSet,  // v13.69.81 — contain-mode for avatar scenes (Short)
         avatarUrl:_fAvUrlForRender,         // v13.69.91 — time-fraction placement (Long only)
+        mood:_fMoodOnly, mirror:_fMirror, seed:_fSeed, hookText:pkg.hook||'', bgArchetype:_fBgArchetype, moodIntensity:_fIntensity,
       });
       setStatus('Uploading LONG video…','#8b5cf6');
       const longFile=new File([longResult.blob],'srv_farsi_long.webm',{type:longResult.blob.type});
@@ -16477,6 +16481,22 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       if(longResult.thumbDataUrl)pkg._srvThumbDataUrl=longResult.thumbDataUrl;
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
+    }
+
+    // v2-phase2 — record visual choices for anti-repetition (extends existing generation_memory)
+    if(_fAvUrlForRender){
+      try{
+        await saveMemoryItem('visual_face',_fAvUrlForRender,'srv_farsi');
+        await saveMemoryItem('visual_mirror',_fMirror?'true':'false','srv_farsi');
+        await saveMemoryItem('visual_palette',_srvFarsiMoodKey(_fMoodOnly),'srv_farsi');
+        await saveMemoryItem('visual_background_archetype',_fBgArchetype,'srv_farsi');
+        await saveMemoryItem('visual_mood_intensity',_fIntensity,'srv_farsi');
+        if(!D._memoryItems)D._memoryItems=[];
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_face',value:_fAvUrlForRender,created_at:new Date().toISOString()});
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_mirror',value:_fMirror?'true':'false',created_at:new Date().toISOString()});
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_background_archetype',value:_fBgArchetype,created_at:new Date().toISOString()});
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_mood_intensity',value:_fIntensity,created_at:new Date().toISOString()});
+      }catch(_){}
     }
 
     _srvFarsiSetStage(taskId,'approve');
@@ -18330,16 +18350,86 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 }
 // ── end Farsi chorus sync ────────────────────────────────────────────────────
 
+// ── SRV Farsi V2 Phase 2 — composed-cover visual system ──────────────────────
+// Ports the CEO-accepted VISUAL_BASELINE_v1 parametric design (see
+// brain/srv_farsi_v2_blueprint/VISUAL_BASELINE_v1/README.md and
+// source/gen_motion_frames_SOURCE.py) from the HTML/CSS proof into canvas.
+// Additive only — gated behind channel==='SRV Farsi' everywhere it's used;
+// the existing Pexels-photo renderer below is unchanged for every other engine.
+const SRV_FARSI_MOOD_PALETTES={
+  romantic:{gradient:['#6b3420','#3a1810','#1c0e0c'],tint:'#c9793f',frame:'#e0b56a',word:'عاشقانه',particle:'#f4d9a8'},
+  emotional:{gradient:['#23283a','#171b28','#0d0f18'],tint:'#5f7290',frame:'#9aa9c2',word:'احساسی',particle:'#c7d4e8'},
+  happy:{gradient:['#7a4a1e','#4a2a12','#241408'],tint:'#e0a544',frame:'#f4cf8a',word:'شاد',particle:'#ffe6ae'},
+};
+function _srvFarsiMoodKey(mood){
+  const m=String(mood||'').toLowerCase();
+  if(m.includes('emotional'))return 'emotional';
+  if(m.includes('happy'))return 'happy';
+  return 'romantic';
+}
+// Deterministic seeded PRNG (mulberry32) — same seed always produces the same
+// particle/rain layout, matching the Python source's random.Random(seed) approach,
+// so a given package's motion is stable across a re-render but differs package-to-package.
+function _srvMulberry32(seed){
+  let a=seed>>>0;
+  return function(){
+    a|=0;a=a+0x6D2B79F5|0;
+    let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function _srvFarsiGenParticles(moodKey,seed,n){
+  const rnd=_srvMulberry32(seed);
+  const out=[];
+  for(let i=0;i<n;i++){
+    out.push({
+      x0:rnd()*1,y0:rnd()*1,
+      wrapsX:(rnd()<0.33)?1:0,
+      size:moodKey==='happy'?(5+rnd()*8):(2.2+rnd()*3.3),
+      baseOp:0.25+rnd()*0.35,
+      harmonic:[1,1,2][Math.floor(rnd()*3)],
+      phase:rnd()*2*Math.PI,
+    });
+  }
+  return out;
+}
+function _srvFarsiGenRain(seed,n){
+  const rnd=_srvMulberry32(seed);
+  const out=[];
+  for(let i=0;i<n;i++){
+    out.push({x0:rnd()*1,y0:rnd()*2-1,length:14+rnd()*16,op:0.18+rnd()*0.22});
+  }
+  return out;
+}
+// Loads the 3 design fonts (Lalezar/Vazirmatn/IBM Plex Mono) so canvas text
+// doesn't silently fall back to a default font on first render.
+async function _srvFarsiEnsureFonts(){
+  try{
+    await Promise.all([
+      document.fonts.load("58px 'Lalezar'"),
+      document.fonts.load("700 20px 'Vazirmatn'"),
+      document.fonts.load("600 13px 'IBM Plex Mono'"),
+    ]);
+    await document.fonts.ready;
+  }catch(_){/* font load is best-effort; canvas falls back gracefully */}
+}
+
 async function _srvRenderVideo(opts){
-  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration } = opts;
+  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration, mood, mirror, seed, hookText, bgArchetype, moodIntensity } = opts;
+  const isFarsiComposed = channel==='SRV Farsi';
+  if(isFarsiComposed) await _srvFarsiEnsureFonts();
   const isShort = type === 'short';
   const W = isShort ? 1080 : 1920;
   const H = isShort ? 1920 : 1080;
   // ── Load all background images (multi-scene support) ─────────────────────
+  // v2-phase2 — the Farsi composed path draws only the avatar panel (loaded below as
+  // _avatarImg); it doesn't need the old multi-scene Pexels image array at all.
   const _urls = photoUrls && photoUrls.length ? photoUrls : (photoUrl ? [photoUrl] : []);
-  if(!_urls.length) throw new Error('No background image provided');
+  if(!isFarsiComposed && !_urls.length) throw new Error('No background image provided');
+  if(isFarsiComposed && !avatarUrl) throw new Error('SRV Farsi composed render requires avatarUrl');
   if(statusCb) statusCb('Loading background scenes…');
-  const imgs = await Promise.all(_urls.map(function(u){
+  const imgs = isFarsiComposed ? [] : await Promise.all(_urls.map(function(u){
     return new Promise(function(res,rej){
       const i=new Image(); i.crossOrigin='anonymous';
       i.onload=function(){res(i);}; i.onerror=function(){rej(new Error('Failed to load: '+u));}; i.src=u;
@@ -18455,8 +18545,193 @@ async function _srvRenderVideo(opts){
     ctx.filter='none';
   }
 
+  // ── SRV Farsi V2 Phase 2 composed-cover frame (canvas port of VISUAL_BASELINE_v1) ──
+  let _farsiPal=null,_farsiAtmo=null,_farsiAtmoKind=null,_farsiGrainPattern=null,_farsiT_ATMO=20;
+  // v2-phase2 — intensity scalar (soft/standard/vivid) modulates atmo density + zoom amplitude;
+  // background archetype (a/b) modulates gradient direction. Both are tracked anti-repetition
+  // dimensions (see saveMemoryItem('visual_mood_intensity'/'visual_background_archetype')) — a
+  // real second axis of variety within a mood, not just the mood itself.
+  const _farsiIntensityMul={soft:0.75,standard:1,vivid:1.3}[moodIntensity]||1;
+  const _farsiBgArchetype=bgArchetype==='b'?'b':'a';
+  if(isFarsiComposed){
+    _farsiPal=SRV_FARSI_MOOD_PALETTES[_srvFarsiMoodKey(mood)];
+    _farsiT_ATMO=isShort?15:20;
+    const _seed=(typeof seed==='number'&&isFinite(seed))?seed:1;
+    const _baseN=_srvFarsiMoodKey(mood)==='happy'?22:20;
+    if(_srvFarsiMoodKey(mood)==='emotional'){
+      _farsiAtmo=_srvFarsiGenRain(_seed,Math.round(46*_farsiIntensityMul)); _farsiAtmoKind='rain';
+    } else {
+      _farsiAtmo=_srvFarsiGenParticles(_srvFarsiMoodKey(mood),_seed,Math.round(_baseN*_farsiIntensityMul)); _farsiAtmoKind='particle';
+    }
+    // one-time cached grain pattern (5%-opacity fine dot texture), reused every frame
+    const _gc=document.createElement('canvas'); _gc.width=3; _gc.height=3;
+    const _gctx=_gc.getContext('2d');
+    _gctx.fillStyle='rgba(255,255,255,0.35)'; _gctx.fillRect(0,0,1,1);
+    _farsiGrainPattern=ctx.createPattern(_gc,'repeat');
+  }
+  function _drawFarsiAtmo(t){
+    const tp=(t%_farsiT_ATMO)/_farsiT_ATMO;
+    ctx.save();
+    if(_farsiAtmoKind==='particle'){
+      for(const p of _farsiAtmo){
+        const yf=((p.y0-1.15*tp)%1.15+1.15)%1.15-0.075;
+        const xf=p.x0+(12*(W/1280))*Math.sin(2*Math.PI*tp+p.phase)/W;
+        const op=Math.max(0.05,p.baseOp*(0.55+0.45*Math.sin(2*Math.PI*p.harmonic*tp+p.phase)));
+        const blur=_srvFarsiMoodKey(mood)==='romantic'?1.5:3.5;
+        ctx.globalAlpha=op; ctx.filter=`blur(${blur}px)`;
+        ctx.fillStyle=_farsiPal.particle;
+        ctx.beginPath(); ctx.arc(xf*W,yf*H,p.size/2,0,2*Math.PI); ctx.fill();
+      }
+    } else {
+      for(const d of _farsiAtmo){
+        const yf=((d.y0+2.4*tp)%1.4+1.4)%1.4-0.2;
+        ctx.globalAlpha=d.op; ctx.strokeStyle=_farsiPal.particle; ctx.lineWidth=1.4;
+        ctx.beginPath(); ctx.moveTo(d.x0*W,yf*H); ctx.lineTo(d.x0*W+3,yf*H+d.length); ctx.stroke();
+      }
+    }
+    ctx.filter='none'; ctx.globalAlpha=1;
+    ctx.restore();
+  }
+  function _drawFarsiPanel(px,py,pw,ph,zoom,radius,withBorder,withDarkFade){
+    ctx.save();
+    // zoom applied around panel center, matching CSS transform:scale/transform-origin:center
+    const cx=px+pw/2, cy=py+ph/2;
+    ctx.translate(cx,cy); ctx.scale(zoom,zoom); ctx.translate(-cx,-cy);
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(px,py,pw,ph,radius); else ctx.rect(px,py,pw,ph);
+    ctx.clip();
+    if(_avatarImg){
+      const iw=_avatarImg.naturalWidth,ih=_avatarImg.naturalHeight;
+      const ir=iw/ih,pr=pw/ph;
+      let sw,sh,sx,sy;
+      if(ir>pr){ sh=ih; sw=ih*pr; sx=(iw-sw)/2; sy=0; } else { sw=iw; sh=iw/pr; sx=0; sy=(ih-sh)*0.2; }
+      ctx.filter='grayscale(1) contrast(1.08) brightness(1.02)';
+      ctx.drawImage(_avatarImg,sx,sy,sw,sh,px,py,pw,ph);
+      ctx.filter='none';
+    } else {
+      ctx.fillStyle='#1a1210'; ctx.fillRect(px,py,pw,ph);
+    }
+    // duotone tint (mix-blend-mode:color equivalent)
+    ctx.globalCompositeOperation='color';
+    ctx.fillStyle=_farsiPal.tint;
+    ctx.fillRect(px,py,pw,ph);
+    ctx.globalCompositeOperation='source-over';
+    if(withDarkFade){
+      const g=ctx.createLinearGradient(0,py+ph*0.55,0,py+ph);
+      g.addColorStop(0,'rgba(10,6,4,0)'); g.addColorStop(1,'rgba(10,6,4,0.55)');
+      ctx.fillStyle=g; ctx.fillRect(px,py,pw,ph);
+    }
+    ctx.restore();
+    if(withBorder){
+      ctx.save();
+      ctx.strokeStyle=_farsiPal.frame; ctx.lineWidth=3;
+      ctx.beginPath();
+      if(ctx.roundRect) ctx.roundRect(px,py,pw,ph,radius); else ctx.rect(px,py,pw,ph);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+  function _drawFarsiWordmark(x,y,align,barColor){
+    ctx.save();
+    ctx.textAlign=align; ctx.fillStyle='rgba(253,246,232,0.75)';
+    ctx.font=`700 ${Math.round(W*0.011)}px 'Vazirmatn', sans-serif`;
+    ctx.fillText('SILK ROAD VOICES',x,y);
+    const label=ctx.measureText('SILK ROAD VOICES').width;
+    const barsX=align==='right'?x-label-Math.round(W*0.008)-40:x+label+Math.round(W*0.008);
+    const bars=[7,13,9,16,6,11]; let bx=align==='right'?barsX:barsX;
+    const bw=Math.max(2,Math.round(W*0.0018));
+    ctx.fillStyle=barColor;
+    for(const bh of bars){ const sc=W/1280; ctx.fillRect(bx,y-bh*sc,bw,bh*sc); bx+=bw+2; }
+    ctx.restore();
+  }
+  function _drawFarsiComposedFrame(t){
+    // background gradient (155deg 3-stop, approximated as a diagonal). Archetype 'a' = top-left→
+    // bottom-right (the locked baseline direction); 'b' = top-right→bottom-left — same 3 approved
+    // colors, a genuinely different-looking background, still within the locked palette spec.
+    const g=_farsiBgArchetype==='b'
+      ? ctx.createLinearGradient(W*0.85,0,W*0.3,H)
+      : ctx.createLinearGradient(W*0.15,0,W*0.7,H);
+    g.addColorStop(0,_farsiPal.gradient[0]); g.addColorStop(0.55,_farsiPal.gradient[1]); g.addColorStop(1,_farsiPal.gradient[2]);
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    if(_farsiGrainPattern){ ctx.save(); ctx.globalAlpha=0.05; ctx.fillStyle=_farsiGrainPattern; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    const zoom=1+(0.028*_farsiIntensityMul)*Math.sin(2*Math.PI*(t%_farsiT_ATMO)/_farsiT_ATMO);
+    const isMirror=!!mirror;
+    if(!isShort){
+      // ── LONG: 46%-width framed panel on left/right + typography zone opposite ──
+      const panelW=Math.round(W*0.46), panelH=Math.round(H-90*H/720), panelTop=Math.round(45*H/720), panelSide=Math.round(45*H/720);
+      const panelX=isMirror?panelSide:(W-panelSide-panelW);
+      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,18,true,true);
+      _drawFarsiAtmo(t);
+      // title zone
+      const titleSide=isMirror?'right':'left';
+      const titleW=W-panelW-Math.round(40*W/1280);
+      const pad=Math.round(W*0.036);
+      const tx=titleSide==='left'?pad:(W-pad);
+      ctx.textAlign=titleSide==='left'?'left':'right';
+      ctx.direction='rtl';
+      const _rawTitle=(title||'').replace(/\s*[|·—–].*$/,'').replace(/\s+(?:Emotional|Romantic|Happy)\b.*/i,'').trim();
+      ctx.font=`${Math.round(W*0.045)}px 'Lalezar', sans-serif`;
+      ctx.fillStyle='#fdf6e8';
+      const titleY=Math.round(H*0.42);
+      _srvWrapLines(ctx,_rawTitle,tx,titleY,titleW-pad*2,Math.round(W*0.052),3);
+      // rule
+      const ruleY=titleY+Math.round(W*0.05);
+      ctx.fillStyle=_farsiPal.frame;
+      const ruleX=titleSide==='left'?tx:tx-56;
+      ctx.fillRect(ruleX,ruleY,56,3);
+      // mood word
+      ctx.font=`600 ${Math.round(W*0.016)}px 'Vazirmatn', sans-serif`;
+      ctx.fillStyle=_farsiPal.frame;
+      ctx.fillText(_farsiPal.word,tx,ruleY+Math.round(W*0.03));
+      ctx.direction='ltr';
+      // wordmark row (opposite side from panel, same side as title — outside the zoomed panel transform)
+      _drawFarsiWordmark(tx,H-Math.round(W*0.02),titleSide,_farsiPal.frame);
+    } else {
+      // ── SHORT: full-bleed panel, hook top, caption bottom, mono mark top-left ──
+      _drawFarsiPanel(0,0,W,H,zoom,0,false,false);
+      // extra fade for legibility (Python .fade gradient)
+      const fg=ctx.createLinearGradient(0,0,0,H);
+      fg.addColorStop(0,'rgba(28,14,12,0.25)'); fg.addColorStop(0.30,'rgba(0,0,0,0)'); fg.addColorStop(0.55,'rgba(0,0,0,0)'); fg.addColorStop(1,'rgba(20,10,8,0.75)');
+      ctx.fillStyle=fg; ctx.fillRect(0,0,W,H);
+      _drawFarsiAtmo(t);
+      ctx.direction='rtl'; ctx.textAlign='right';
+      ctx.font=`${Math.round(W*0.055)}px 'Lalezar', sans-serif`;
+      ctx.fillStyle='#fdf6e8';
+      const _hook=hookText||(title||'');
+      _srvWrapLines(ctx,_hook,W-Math.round(W*0.022),Math.round(W*0.07),W*0.94,Math.round(W*0.06),2);
+      // caption (current lyric line), styled per baseline spec
+      if(lyricLines.length){
+        let idx=0;
+        for(let k=1;k<lyricTimings.length;k++){ if(t>=lyricTimings[k]) idx=k; }
+        const line=lyricLines[idx]||'';
+        const nextT=lyricTimings[idx+1]!==undefined?lyricTimings[idx+1]:targetDur;
+        const lineDur=Math.max(0.5,nextT-lyricTimings[idx]);
+        const inWin=t-lyricTimings[idx];
+        const alpha=Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35)));
+        ctx.save(); ctx.globalAlpha=alpha;
+        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.043)}px 'Vazirmatn', sans-serif`;
+        ctx.fillStyle='#fff';
+        ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=6;
+        // v2-phase2 — bottom margin widened to ~18% of height (was ~6%) to clear the platform-UI
+        // safe zone (username/caption/like-share rail) that Shorts/Reels/TikTok reserve at the bottom.
+        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.88,Math.round(W*0.05),2);
+        ctx.shadowBlur=0; ctx.restore();
+      }
+      ctx.direction='ltr';
+      ctx.textAlign='left'; ctx.fillStyle='rgba(253,246,232,0.6)';
+      ctx.font=`600 ${Math.round(W*0.018)}px 'IBM Plex Mono', monospace`;
+      ctx.fillText('SRV FARSI',Math.round(W*0.022),Math.round(W*0.045));
+    }
+    if(t<0.5){ ctx.fillStyle='rgba(0,0,0,'+(1-t/0.5).toFixed(3)+')'; ctx.fillRect(0,0,W,H); }
+    if(targetDur>1.5&&t>targetDur-1.0){
+      const fo=Math.min(1,(t-(targetDur-1.0))/1.0);
+      ctx.fillStyle='rgba(0,0,0,'+fo.toFixed(3)+')'; ctx.fillRect(0,0,W,H);
+    }
+  }
+
   // ── Main frame renderer ───────────────────────────────────────────────────
   function drawFrame(t){
+    if(isFarsiComposed){ _drawFarsiComposedFrame(t); return; }
     ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     // ── Background rendering ───────────────────────────────────────────────
     // v13.69.91: time-fraction avatar override (SRV Farsi Long)
