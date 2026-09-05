@@ -17278,6 +17278,50 @@ function _nextWavePkgForTask(task){
   const _tId=String(task.taskId||task.id||'');
   return (D.packages||[]).find(function(p){return String(p.taskId||'')===_tId;})||null;
 }
+// NextWave V2 Phase 1 item B — mirrors _smmGetStage (CEO Decision #26, ~line 11363):
+// derives the TRUE current stage from real, persisted package fields instead of trusting
+// only the manually-set D.nextWaveLifecycleStages/pkg.lifecycleStage flag from
+// _nextWaveGetStage(). DISPLAY ONLY — used solely for the lifecycle badge/progress bar/
+// dashboard-summary label. It does NOT replace _nextWaveGetStage() for deciding which
+// buttons render in renderNextWaveLifecycleCard(), so every _nextWaveSetStage(...) onclick
+// handler (Review/Build/Approve/Publish) still requires the exact same explicit human
+// click as before this change — nobody's approval authority changes.
+function _nextWaveGetDerivedStage(pkg){
+  if(!pkg)return 'generate';
+  if(pkg.youtubeVideoId||pkg.youtube_video_id||pkg.published_at)return 'done';
+  const videoUrl=pkg.submagicOutputUrl||pkg.videoUrl||pkg.heygenVideoUrl||pkg._heygenRawUrl||pkg.heygenRawUrl;
+  const rs=pkg.renderStatus;
+  // 'enhanced' (Submagic succeeded) or 'enhance_failed' (operator chose to continue with
+  // the raw MP4) are the only real renderStatus values that reach the Approve UI today —
+  // see renderNextWaveLifecycleCard's build-stage branches.
+  if(videoUrl&&(rs==='enhanced'||rs==='enhance_failed'))return 'approve';
+  if(rs)return 'build'; // rendering / post_processing / rendered / enhancing / failed — build in progress or needs attention
+  return 'review'; // package generated, build not started yet
+}
+// NextWave V2 Phase 1 item C — finance-disclaimer enforcement gate, wired to the actual
+// human "Approve & Publish to YouTube" click (renderNextWaveLifecycleCard's Approve-stage
+// button below). This is the real point of no return before content reaches the live
+// channel. The other `_nextWaveSetStage(...,'approve')` call sites (the Build-stage
+// "Advance to Approve" buttons, and the automatic Submagic-complete auto-advance a few
+// hundred lines up) only move a package INTO the approve/review stage for human
+// inspection — none of them is itself a content approval, so gating those instead would
+// leave this exact publish click completely unchecked, defeating the point of the check.
+// Field-check mirrors the existing _getEngineDisclaimer() idiom (~line 12729) — same
+// isNextWave-implicit/isFinance logic, not touched here since that function only builds
+// the caption auto-append text and stays exactly as-is per Phase 1 scope.
+function _nextWaveApproveAndPublish(taskId,pkgId){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  const isFinance=!!(pkg&&(pkg.topic==='Finance'||pkg.mood==='Finance'));
+  if(isFinance){
+    const scriptText=String((pkg&&(pkg.script||pkg.lyrics))||'');
+    if(!/disclaimer/i.test(scriptText)){
+      alert('⚠ Cannot approve — this is a Finance-topic NextWave package and its script is missing the required disclaimer ([DISCLAIMER: Not financial advice. Educational only.]). Go back to Build or Review and regenerate/fix the script before approving.');
+      return;
+    }
+  }
+  _nextWaveSetStage(taskId,'publish');
+  if(typeof renderTab==='function')renderTab(currentTab);
+}
 const NEXTWAVE_ROTATION_MODES=['Finance','AI / Tech','Motivation'];
 function _nextWaveNextMode(){
   // v15.8.0 — check CDP content_mix override first
@@ -17427,9 +17471,14 @@ async function _nextWaveRunPublish(pkgId,taskId){
 function renderNextWaveLifecycleCard(task){
   const pkg=_nextWavePkgForTask(task);
   const stage=_nextWaveGetStage(task.taskId||task.id);
+  // NextWave V2 Phase 1 item B — displayStage is the real-state-derived stage (see
+  // _nextWaveGetDerivedStage above), used ONLY for the badge/border-color/progress-bar
+  // below. `stage` (the manually-set flag) still drives which buttons render in the
+  // if/else chain that follows — button gating and click requirements are unchanged.
+  const displayStage=_nextWaveGetDerivedStage(pkg);
   const taskId=String(task.taskId||task.id||'');
   const pkgId=pkg?String(pkg.id||''):'';
-  const stageCol=SRV_STAGE_COLORS[stage]||'#3b82f6';
+  const stageCol=SRV_STAGE_COLORS[displayStage]||'#3b82f6';
   const isLongTask=!!(task.isLong||task.contentFormat==='long');
   const btnBlue='width:100%;padding:12px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.4);border-radius:10px;color:#3b82f6;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:10px';
   const btnGreen='width:100%;padding:12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:10px';
@@ -17547,7 +17596,7 @@ function renderNextWaveLifecycleCard(task){
       body+=`<div style="margin-bottom:14px">
         <video src="${escHTML(videoUrl)}" controls style="width:100%;border-radius:10px;max-height:300px;background:#000"></video>
       </div>`;
-      body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
+      body+=`<button style="${btnGreen}" onclick="_nextWaveApproveAndPublish('${taskId}','${pkgId}')">✅ Approve & Publish to YouTube</button>`;
       body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Build</button>`;
     }else{
       body+=`<div style="color:#ef4444;font-size:12px;margin-bottom:14px;padding:10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:8px">⚠ No video URL — go back to Build to complete rendering first.</div>`;
@@ -17572,9 +17621,9 @@ function renderNextWaveLifecycleCard(task){
   return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="card-title" style="margin-bottom:0;color:var(--text)">⚡ NextWave Systems</div>
-      <span style="font-size:10px;font-weight:800;color:${stageCol};background:${stageCol}15;padding:3px 8px;border-radius:5px;letter-spacing:1px;font-family:'JetBrains Mono',monospace">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
+      <span style="font-size:10px;font-weight:800;color:${stageCol};background:${stageCol}15;padding:3px 8px;border-radius:5px;letter-spacing:1px;font-family:'JetBrains Mono',monospace">${SRV_STAGE_LABELS[displayStage]||displayStage.toUpperCase()}</span>
     </div>
-    ${_srvLifecycleProgressBar(stage)}
+    ${_srvLifecycleProgressBar(displayStage)}
     ${body}
   </div>`;
 }
@@ -17603,7 +17652,12 @@ function _renderNextWaveOperatorPanel(nwCurrent){
       h+='<button onclick="_nextWaveResetPublishCalendar()" style="width:100%;padding:7px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.22);border-radius:8px;color:rgba(59,130,246,0.6);font-weight:600;font-size:10px;cursor:pointer;font-family:\'JetBrains Mono\',monospace">↺ Reset Calendar</button>';
     }
   }else{
-    const _lcStage=(typeof _nextWaveGetStage==='function')?_nextWaveGetStage(nwCurrent.id):'generate';
+    // NextWave V2 Phase 1 item B — dashboard summary badge uses the real-state-derived
+    // stage (mirrors _smmGetStage's use in _renderSmmOperatorPanel). Display only: the
+    // "Open Lifecycle" button below just opens the exec view, which re-derives its own
+    // button-gating stage via _nextWaveGetStage inside renderNextWaveLifecycleCard.
+    const _nwPkgForPanel=(typeof _nextWavePkgForTask==='function')?_nextWavePkgForTask(nwCurrent):null;
+    const _lcStage=(typeof _nextWaveGetDerivedStage==='function')?_nextWaveGetDerivedStage(_nwPkgForPanel):'generate';
     const _lcLabels={generate:'Generate',review:'Review',build:'Build',approve:'Approve',publish:'Publish',done:'Done'};
     const _lcColors={generate:'#c9a84c',review:'#3b82f6',build:'#8b5cf6',approve:'#f59e0b',publish:'#22c55e',done:'#22c55e'};
     const _lcCol=_lcColors[_lcStage]||'#3b82f6';
@@ -22317,9 +22371,17 @@ function markAllNotifRead(){
 
 function getActiveChannelIds(){
   return [
-    'UCCUa5BLzGh2eRBoqqWBCK_g',
+    'UCCUa5BLzGh2eRBoqqWBCK_g', // SRV Farsi (see api/youtube/detect.js ENGINE_CHANNEL)
     window.YT_CHANNEL_SRV_ENGLISH||'',
-    window.YT_CHANNEL_NEXTWAVE||'',
+    // NextWave V2 Phase 1 item A — window.YT_CHANNEL_NEXTWAVE was never assigned anywhere
+    // in this codebase, so it always evaluated to '' and was filtered out below: NextWave
+    // never actually got included in this poll, so youtubeSyncPerformance() (the only
+    // caller of action=youtube_sync_performance; no cron reaches it — see
+    // api/youtube/autosync.js, which calls a different endpoint) never ran for NextWave.
+    // Using the real channel ID already defined for NextWave in api/youtube/detect.js's
+    // ENGINE_CHANNEL map (confirmed against api/reports/weekly.js's reverse map too) —
+    // same fix pattern as SRV Farsi above, smallest possible change, no new mechanism.
+    'UC41nsMBfVJCqj4vJRLktZTQ',
     window.YT_CHANNEL_AI_STUDIO||''
   ].filter(function(id){return id.length>0;});
 }
