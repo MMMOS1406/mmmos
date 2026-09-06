@@ -2670,6 +2670,24 @@ async function savePackageToSupabase(pkg){
   }
 }
 
+// v2-derived-metadata-sync — a single Review-stage edit can now fire several independent
+// savePackageToSupabase(pkg) calls in quick succession (the immediate title/lyrics save, plus
+// the async caption/hashtags/titleFinglish regen save that follows it) — as separate
+// fire-and-forget network requests, an earlier-queued call carrying an OLDER snapshot of pkg
+// could complete AFTER a later one and silently overwrite the newer, more complete state (a real
+// last-write-wins race, confirmed via direct testing, not hypothetical). This serializes saves
+// per package id so each one only starts once the previous has finished — since it re-reads
+// pkg's CURRENT fields only when it actually runs (not when queued), the last save to run always
+// carries every edit made so far, and completion order can no longer scramble the result.
+const _farsiPkgSaveQueues={};
+function _srvSavePackageQueued(pkg){
+  const key=String(pkg.id||'');
+  const prev=_farsiPkgSaveQueues[key]||Promise.resolve();
+  const next=prev.then(function(){return savePackageToSupabase(pkg);}).catch(function(e){console.warn('[farsi-save-queue] failed:',e.message);});
+  _farsiPkgSaveQueues[key]=next;
+  return next;
+}
+
 // Write all packages as a backup to app_settings
 async function writePackagesBackup(){
   try{
@@ -16026,6 +16044,15 @@ function _farsisaveEdit(pkgId,field,inputId,btnId){
   pkg[field]=val;
   if(field==='shortLyrics')pkg.short_lyrics=val;
   saveAppState();
+  // v2-save-propagation-fix — this was the actual production defect: this Review Save handler
+  // mutated the in-memory D.packages entry (so the Review UI itself showed the new value) but
+  // never persisted it to Supabase. saveAppState() only writes to localStorage; the Supabase
+  // packages row (the real source of truth every reload/Build reads from via
+  // fetchPackagesFromTable()) kept the ORIGINAL generated title/lyrics forever, which is exactly
+  // why Build could render stale content after a page reload. Every other package-mutation site
+  // in this lifecycle (Build, Publish) already calls savePackageToSupabase — this was the one
+  // that didn't.
+  if(typeof savePackageToSupabase==='function')_srvSavePackageQueued(pkg);
   var btn=document.getElementById(btnId);
   if(btn){var _orig=btn.textContent;btn.textContent='✓ Saved';btn.style.color='#22c55e';setTimeout(function(){btn.textContent=_orig;btn.style.color='';},2000);}
   // v15.7.0 — auto-regen caption when title or lyrics changes
@@ -16040,12 +16067,23 @@ function _farsisaveEdit(pkgId,field,inputId,btnId){
     fetch('/api/ops?action=farsi_regen_caption',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({title:pkg.title||'',lyrics:_lyrics,isLong:_isLong})
+      body:JSON.stringify({title:pkg.title||'',lyrics:_lyrics,isLong:_isLong,needFinglish:field==='title'})
     }).then(function(r){return r.json();}).then(function(d){
       if(d.ok&&d.captionYT){
         pkg.captionYT=d.captionYT;
         pkg.captionYouTube=d.captionYT;
+        // v2-derived-metadata-sync — hashtags/titleFinglish are derived FROM the just-saved
+        // title/lyrics (never the other way around); only overwrite when the regen call actually
+        // returned something, so an edit to lyrics alone (title unchanged) doesn't blank a
+        // titleFinglish that's already correct for the current title.
+        if(d.hashtags)pkg.hashtags=d.hashtags;
+        if(field==='title'&&d.titleFinglish)pkg.titleFinglish=d.titleFinglish;
         saveAppState();
+        // v2-save-propagation-fix — same persistence gap as the title/lyrics save above: this
+        // regenerated caption was only reaching localStorage, not the Supabase source of truth.
+        // v2-derived-metadata-sync — queued (not a bare fire-and-forget call): this save can
+        // race the immediate title/lyrics save above, and whichever finishes LAST must win.
+        if(typeof savePackageToSupabase==='function')_srvSavePackageQueued(pkg);
         // refresh the card so caption field shows new value
         if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
       }

@@ -3409,16 +3409,20 @@ Kelly's energy is the energy of telling your smartest friend something cool — 
 }
 
 // ── v15.6.5 — Farsi Caption Regenerator ─────────────────────────────────────
-// Called when title or lyrics is saved in Review; regenerates captionYT only.
+// Called when title or lyrics is saved in Review; regenerates captionYT, and (v2-derived-
+// metadata-sync) hashtags + titleFinglish alongside it, so a manually-saved title/lyrics stays
+// the single authoritative source and every field derived from it is refreshed to match —
+// never the reverse. Same endpoint, same trigger point, same model as before; the caption
+// prompt/quality itself is untouched.
 async function farsiRegenCaption(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
-  const { title, lyrics, isLong } = req.body || {};
+  const { title, lyrics, isLong, needFinglish } = req.body || {};
   if (!title && !lyrics) return res.json({ ok: false, error: 'title or lyrics required' });
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_API_KEY) return res.json({ ok: false, error: 'no_api_key' });
 
-  const prompt = `You are a Persian social media caption writer for Silk Road Voices, a Persian music channel on YouTube.
+  const captionPrompt = `You are a Persian social media caption writer for Silk Road Voices, a Persian music channel on YouTube.
 
 Given the song title and lyrics below, write a compelling YouTube caption in Persian that:
 - Opens with a poetic hook line drawn from the emotional core of the lyrics (in Persian)
@@ -3434,16 +3438,48 @@ ${lyrics || ''}
 
 Respond with ONLY the caption text, no explanation, no JSON, no tags.`;
 
+  // v2-derived-metadata-sync — titleFinglish is a transliteration, not a translation, and can't
+  // be deterministically derived from the title text alone (Persian script omits short vowels),
+  // so a manually-edited title needs this small dedicated call to stay in sync. Mirrors the exact
+  // instruction already used at generation time (api/generate.js, api/ops.js SRV Farsi schemas).
+  const finglishPrompt = `Transliterate this Persian song title into Latin/Finglish (pronunciation only, NOT an English translation). Example: Persian دلتنگ توام -> Finglish "Deltang-e To'am". Use an apostrophe for a glottal stop where natural and hyphenate compound words for readability. No emoji, no quotes, no explanation — respond with ONLY the transliteration.
+
+Persian title: ${title || ''}`;
+
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
-    });
-    const d = await resp.json();
-    const caption = (d.content || []).map(b => b.text || '').join('').trim();
+    const calls = [
+      fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: captionPrompt }] })
+      })
+    ];
+    // Only make the transliteration call when the title itself was the edited field — an edit
+    // to lyrics alone means the title (and any titleFinglish already matching it) is unchanged.
+    if (title && needFinglish) {
+      calls.push(fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 60, messages: [{ role: 'user', content: finglishPrompt }] })
+      }));
+    }
+    const resps = await Promise.all(calls);
+    const [capD, finD] = await Promise.all(resps.map(r => r.json()));
+
+    const caption = ((capD && capD.content) || []).map(b => b.text || '').join('').trim();
     if (!caption) return res.json({ ok: false, error: 'empty_response' });
-    return res.json({ ok: true, captionYT: caption });
+
+    // v2-derived-metadata-sync — hashtags are extracted from THIS SAME regenerated caption
+    // (whose own prompt already guarantees Persian+English hashtags on the last line) rather
+    // than requested via a separate call, so caption and hashtags can never diverge from each
+    // other — both are exactly one generation, just two views of it, matching how the original
+    // Generate-time schema already treats them.
+    const hashtagMatches = caption.match(/#[\w؀-ۿ_]+/g) || [];
+    const hashtags = hashtagMatches.join(' ');
+
+    const titleFinglish = title && finD ? ((finD.content || []).map(b => b.text || '').join('').trim()) : undefined;
+
+    return res.json({ ok: true, captionYT: caption, hashtags, titleFinglish });
   } catch(e) {
     return res.json({ ok: false, error: e.message });
   }
