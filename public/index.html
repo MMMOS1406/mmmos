@@ -16263,7 +16263,11 @@ function renderSRVFarsiLifecycleCard(task){
       // v15.20.1 — Shorts: independent per-platform controls, shown BEFORE any publish
       // occurs (Engineering Task 1c0e3090 fix-forward — prod regression fix).
       stageContent=`<div style="font-size:11px;color:var(--dim);margin-bottom:12px">Publish this Short to each platform independently. A failure on one does not block another.</div>`
-        + _renderShortPlatformPublishPanel(pkg,taskId,pkgId,'_srvFarsiPublishYouTube','_srvFarsiPublishTikTok');
+        // v2-short-final-fix — CEO instruction: remove TikTok/Instagram Manual Publish from the
+        // SRV Farsi Short Publish stage UI only (showTikTok=false, showInstagram=false). YouTube
+        // publishing, the shared function's other callers (AI Studio), and the platform
+        // connections/analytics themselves are all untouched.
+        + _renderShortPlatformPublishPanel(pkg,taskId,pkgId,'_srvFarsiPublishYouTube','_srvFarsiPublishTikTok',false,false);
     }
   }
 
@@ -16886,7 +16890,13 @@ function _ttAuthRequiredBlock(pkg){
 // a Copy button so the operator can publish manually in-app. This is a display-only change —
 // it does not touch _srvFarsiPublishYouTube/_aiStudioPublishYouTube or the YouTube upload path
 // at all, so YouTube's Generate→Review→Build→Approve→Publish→Done flow is unaffected.
-function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFnTT){
+// v2-short-final-fix — showTikTok/showInstagram default to true so the existing AI Studio call
+// site (unchanged) keeps showing both rows exactly as before; SRV Farsi's Short Publish stage
+// now explicitly passes false for both, per CEO instruction to remove them from ITS UI only —
+// this is a UI-visibility change only, no publishing logic, analytics, or connection is touched.
+function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFnTT,showTikTok,showInstagram){
+  if(showTikTok===undefined)showTikTok=true;
+  if(showInstagram===undefined)showInstagram=true;
   const ytState=(pkg&&pkg.youtubePublishState)||'ready';
   const ttState=(pkg&&pkg.tiktokPublishState)||'ready';
   const rowBase='padding:12px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;margin-bottom:10px';
@@ -16906,7 +16916,7 @@ function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFn
   // ⏸ TikTok row — production frozen, manual publish only. Already-published history (from
   // before the freeze) still shows its confirmation; anything else just shows the frozen
   // banner + the caption so the operator can copy it into the TikTok app themselves.
-  html+=`<div style="${rowBase};opacity:0.75">
+  if(showTikTok)html+=`<div style="${rowBase};opacity:0.75">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ TikTok — Manual Publish</span>${frozenBadge}
     </div>
@@ -16916,7 +16926,7 @@ function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFn
       :`<div style="text-align:center;padding:9px;color:#9ca3af;font-size:11px;font-weight:500;line-height:1.4">Production publishing is frozen. Copy the caption above and post manually in the TikTok app.</div>`}
   </div>`;
   // ⏸ Instagram row — production frozen, no publishing logic (connection reserved for future work)
-  html+=`<div style="${rowBase};opacity:0.5">
+  if(showInstagram)html+=`<div style="${rowBase};opacity:0.5">
     <div style="display:flex;align-items:center;justify-content:space-between">
       <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ Instagram — Manual Publish</span>${frozenBadge}
     </div>
@@ -18833,15 +18843,22 @@ async function _srvRenderVideo(opts){
       ctx.direction='rtl'; ctx.textAlign='right';
       ctx.font=`${Math.round(W*0.055)}px 'Lalezar', sans-serif`;
       ctx.fillStyle='#fdf6e8';
-      const _hook=hookText||(title||'');
+      // v2-short-final-fix — CEO production defect: the top viewer-facing text was showing the
+      // ORIGINAL generated hook even after the operator edited and saved a new title, because
+      // this line prioritized hookText (pkg.hook — never touched by Review Save, so permanently
+      // stuck at its generation-time value) over the final saved title. pkg.title is the
+      // canonical, Review-editable, Supabase-persisted field for Short same as Long; it's now
+      // the primary source, with hookText only as a fallback for the rare case title is empty.
+      const _hook=title||hookText||'';
       // v2-visual-correction-2 — CEO correction: the hook text sat too close to the top edge
       // (anchored ~4% down, center-wrapped, so a 2-line hook could start even higher), risking
       // collision with the YouTube Shorts top UI chrome. SHORT_TOP_SAFE_Y is the explicit,
-      // documented safe-area rule going forward: a fixed 12% top margin, and top-anchored
+      // documented safe-area rule going forward: a fixed top margin, and top-anchored
       // wrapping (not center-anchored) so the FIRST line's top edge — not some line-count-
       // dependent midpoint — is what's pinned to that boundary, guaranteeing a 1-line and a
       // wrapped multi-line hook both stay clear of the top edge.
-      const SHORT_TOP_SAFE_Y=Math.round(H*0.12);
+      // v2-short-final-fix — CEO's real-device test found 12% still too high; raised to 18%.
+      const SHORT_TOP_SAFE_Y=Math.round(H*0.18);
       _srvWrapLinesTop(ctx,_hook,W-Math.round(W*0.022),SHORT_TOP_SAFE_Y,W*0.94,Math.round(W*0.06),2,false);
       // caption (current lyric line), styled per baseline spec
       if(lyricLines.length){
