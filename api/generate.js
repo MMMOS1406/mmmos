@@ -307,6 +307,7 @@ OUTPUT: Return ONLY valid JSON, no markdown, no backticks:
   "emotionalSubMode": "the texture chosen from the SUB-MODE list above",
   "concept": "one sentence — the unique emotional angle + sub-mode of this song",
   "title": "emoji + Persian title + emoji",
+  "titleFinglish": "Latin/Finglish TRANSLITERATION of the Persian title above (pronunciation, not meaning) — NOT an English translation. Example: Persian دلتنگ توام → Finglish \"Deltang-e To'am\". Use an apostrophe for a glottal stop where natural and hyphenate compound words for readability. No emoji.",
   "shortTitle": "Persian short version",
   "hook": "the ONE memorable emotional hook phrase — visual, specific, singable, no cliché vocab",
   "lyrics": "Full Farsi lyrics using [HOOK INTRO] [VERSE 1] [PRE-CHORUS] [CHORUS] [VERSE 2] [BRIDGE] [FINAL CHORUS] section tags",

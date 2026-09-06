@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <title>MMM System v16.51.0 — First Complete Autonomous Department</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&family=Lalezar&family=Vazirmatn:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&family=Lalezar&family=Vazirmatn:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&family=Noto+Nastaliq+Urdu:wght@400..700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
   --bg:#07090f;--surface:#0d1017;--border:#1a2030;--gold:#c9a84c;--gold2:#f59e0b;
@@ -16444,6 +16444,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
         skipChorusSync:true,
         maxDuration:90,                    // v13.73.3 — cap at 90s; Suno Short clips ~30-45s so no clip, but blocks full-length accidental loads
         title:pkg.title||'',
+        titleFinglish:pkg.titleFinglish||'',
         channel:'SRV Farsi',
         // v13.69.80 — Farsi Short: shortLyrics (camelCase from generate) or short_lyrics (legacy snake) or pkg.lyrics
         lyrics:pkg.shortLyrics||pkg.short_lyrics||pkg.lyrics||'',
@@ -16468,6 +16469,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
         type:'long',
         skipChorusSync:false,
         title:pkg.title||'',
+        titleFinglish:pkg.titleFinglish||'',
         channel:'SRV Farsi',
         lyrics:pkg.lyrics||'',
         statusCb:function(msg){setStatus(msg,'#8b5cf6');},
@@ -18402,22 +18404,28 @@ function _srvFarsiGenRain(seed,n){
   }
   return out;
 }
-// Loads the 3 design fonts (Lalezar/Vazirmatn/IBM Plex Mono) so canvas text
-// doesn't silently fall back to a default font on first render.
+// Loads the design fonts (Lalezar/Vazirmatn/IBM Plex Mono/Noto Nastaliq Urdu) so canvas
+// text doesn't silently fall back to a default font on first render.
+// v2-visual-correction-2 — Noto Nastaliq Urdu is the Long Farsi title's calligraphic
+// typeface (CEO correction: the previous Lalezar treatment read as generic bold display
+// text, not calligraphy). Real Nastaliq script, Google Fonts (SIL Open Font License),
+// reliably renders Persian text in production canvas.
 async function _srvFarsiEnsureFonts(){
   try{
     await Promise.all([
       document.fonts.load("58px 'Lalezar'"),
       document.fonts.load("700 20px 'Vazirmatn'"),
       document.fonts.load("600 13px 'IBM Plex Mono'"),
+      document.fonts.load("600 58px 'Noto Nastaliq Urdu'"),
     ]);
     await document.fonts.ready;
   }catch(_){/* font load is best-effort; canvas falls back gracefully */}
 }
 
 async function _srvRenderVideo(opts){
-  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration, mood, mirror, seed, hookText, bgArchetype, moodIntensity } = opts;
+  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration, mood, mirror, seed, hookText, bgArchetype, moodIntensity, titleFinglish } = opts;
   const isFarsiComposed = channel==='SRV Farsi';
+  let _thumbCaptureMode = false; // v2-visual-refinement — true only for the single pre-recording drawFrame(0) call used to capture the thumbnail
   if(isFarsiComposed) await _srvFarsiEnsureFonts();
   const isShort = type === 'short';
   const W = isShort ? 1080 : 1920;
@@ -18631,20 +18639,111 @@ async function _srvRenderVideo(opts){
       ctx.restore();
     }
   }
+  // v2-visual-refinement — small SRV music-identity mark (two connected eighth-notes, drawn as
+  // vector shapes — no external asset/logo, generic and SRV-owned). x,y is the left notehead's own
+  // anchor; flip=true mirrors it around that anchor so it reads correctly on either side of a
+  // right-aligned typography column.
+  function _drawFarsiMusicMark(x,y,scale,color,flip){
+    ctx.save();
+    ctx.translate(x,y); if(flip) ctx.scale(-1,1);
+    ctx.fillStyle=color; ctx.strokeStyle=color;
+    const r=3.4*scale;
+    ctx.lineWidth=Math.max(1.3,2.1*scale);
+    ctx.beginPath(); ctx.ellipse(0,0,r*1.15,r,-0.33,0,2*Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(8.4*scale,-2.6*scale,r*1.15,r,-0.33,0,2*Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(r*0.95,-0.8*scale); ctx.lineTo(r*0.95,-13.5*scale); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8.4*scale+r*0.95,-3.4*scale); ctx.lineTo(8.4*scale+r*0.95,-15.6*scale); ctx.stroke();
+    ctx.lineWidth=Math.max(1.8,3*scale);
+    ctx.beginPath(); ctx.moveTo(r*0.95,-13.5*scale); ctx.lineTo(8.4*scale+r*0.95,-15.6*scale); ctx.stroke();
+    ctx.restore();
+  }
   function _drawFarsiWordmark(x,y,align,barColor){
     ctx.save();
     ctx.textAlign=align; ctx.fillStyle='rgba(253,246,232,0.75)';
     ctx.font=`700 ${Math.round(W*0.011)}px 'Vazirmatn', sans-serif`;
-    ctx.fillText('SILK ROAD VOICES',x,y);
-    const label=ctx.measureText('SILK ROAD VOICES').width;
-    const barsX=align==='right'?x-label-Math.round(W*0.008)-40:x+label+Math.round(W*0.008);
-    const bars=[7,13,9,16,6,11]; let bx=align==='right'?barsX:barsX;
+    const label='SILK ROAD VOICES';
+    const labelW=ctx.measureText(label).width;
+    // v2-visual-refinement — the music mark now precedes the wordmark text (in reading order) as
+    // a small icon+wordmark lockup; the bars keep their original spacing, just measured from the
+    // new text position instead of the raw incoming x.
+    const markScale=W*0.00105, markSpan=Math.round(17*markScale), markGap=Math.round(W*0.014);
+    const textX=align==='left'?x+markSpan+markGap:x-markSpan-markGap;
+    _drawFarsiMusicMark(x,y-4*markScale,markScale,barColor,align!=='left');
+    ctx.fillText(label,textX,y);
+    const barsX=align==='right'?textX-labelW-Math.round(W*0.008)-40:textX+labelW+Math.round(W*0.008);
+    const bars=[7,13,9,16,6,11]; let bx=barsX;
     const bw=Math.max(2,Math.round(W*0.0018));
     ctx.fillStyle=barColor;
     for(const bh of bars){ const sc=W/1280; ctx.fillRect(bx,y-bh*sc,bw,bh*sc); bx+=bw+2; }
     ctx.restore();
   }
-  function _drawFarsiComposedFrame(t){
+  // v2-visual-refinement — measures how many lines a wrap will take without drawing anything, so
+  // the typography stack (title+rule+Finglish+branding) can be vertically centered against the
+  // panel regardless of whether the title wraps to 1 or 3 lines. ctx.font must already be set.
+  function _srvWrapLineCount(ctx,text,maxWidth,maxLines){
+    const words=String(text||'').split(/\s+/);
+    const lines=[]; let line='';
+    for(const w of words){
+      const test=line?line+' '+w:w;
+      if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=w;} else {line=test;}
+      if(lines.length>=maxLines)break;
+    }
+    if(line&&lines.length<maxLines)lines.push(line);
+    return lines.length||1;
+  }
+  // v2-visual-refinement — top-anchored wrap (unlike _srvWrapLines, which centers on y — used
+  // elsewhere for hook/caption text and left untouched). Returns the Y just past the last line so
+  // callers can stack the next element without assuming a fixed line count. bold=true fakes a
+  // heavier weight via fill+stroke, since Lalezar has no separate bold face.
+  function _srvWrapLinesTop(ctx,text,x,topY,maxWidth,lineHeight,maxLines,bold){
+    const words=String(text||'').split(/\s+/);
+    const lines=[]; let line='';
+    for(const w of words){
+      const test=line?line+' '+w:w;
+      if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=w;} else {line=test;}
+      if(lines.length>=maxLines)break;
+    }
+    if(line&&lines.length<maxLines)lines.push(line);
+    lines.forEach((l,i)=>{
+      const ly=topY+i*lineHeight;
+      if(bold){ ctx.save(); ctx.lineWidth=Math.max(1,lineHeight*0.045); ctx.strokeStyle=ctx.fillStyle; ctx.strokeText(l,x,ly); ctx.restore(); }
+      ctx.fillText(l,x,ly);
+    });
+    return topY+lines.length*lineHeight;
+  }
+  // v2-title-layout-fix — CEO correction: a greedy word-wrap at a fixed font size could leave a
+  // single short word orphaned alone on its own second line (e.g. "آهسته عاشقم" / "کن"). This
+  // fits the Farsi title responsively instead: shrink the font (in fine steps, down to minFontPx)
+  // until the WHOLE title fits on one line, since short/medium titles should stay on one line
+  // whenever safely possible. Only if it still doesn't fit at the minimum size does it fall back
+  // to exactly two lines, chosen by the most visually BALANCED word split (minimizing the width
+  // difference between the two lines) rather than a greedy left-to-right fill — and that search
+  // explicitly penalizes any split that strands a single word alone on either line when the title
+  // has enough words to split more evenly. fontStrFn(px) must return the full ctx.font string for
+  // that pixel size (so callers control family/weight).
+  function _srvFitFarsiTitle(ctx,text,maxWidth,maxFontPx,minFontPx,fontStrFn){
+    const words=String(text||'').split(/\s+/).filter(function(w){return w.length>0;});
+    for(let size=maxFontPx; size>=minFontPx; size-=2){
+      ctx.font=fontStrFn(size);
+      if(ctx.measureText(text).width<=maxWidth) return {fontSize:size, lines:[text]};
+    }
+    ctx.font=fontStrFn(minFontPx);
+    if(words.length<=1) return {fontSize:minFontPx, lines:[text]};
+    let bestSplit=1, bestScore=Infinity;
+    for(let i=1;i<words.length;i++){
+      const l1=words.slice(0,i).join(' '), l2=words.slice(i).join(' ');
+      const w1=ctx.measureText(l1).width, w2=ctx.measureText(l2).width;
+      const orphan=(words.length>2 && (i===1 || words.length-i===1)) ? 1e6 : 0;
+      const score=Math.abs(w1-w2)+orphan;
+      if(score<bestScore){ bestScore=score; bestSplit=i; }
+    }
+    return {fontSize:minFontPx, lines:[words.slice(0,bestSplit).join(' '), words.slice(bestSplit).join(' ')]};
+  }
+  function _srvDrawPreSplitLinesTop(ctx,lines,x,topY,lineHeight){
+    lines.forEach(function(l,i){ ctx.fillText(l,x,topY+i*lineHeight); });
+    return topY+lines.length*lineHeight;
+  }
+  function _drawFarsiComposedFrame(t,skipFade){
     // background gradient (155deg 3-stop, approximated as a diagonal). Archetype 'a' = top-left→
     // bottom-right (the locked baseline direction); 'b' = top-right→bottom-left — same 3 approved
     // colors, a genuinely different-looking background, still within the locked palette spec.
@@ -18670,22 +18769,59 @@ async function _srvRenderVideo(opts){
       ctx.textAlign=titleSide==='left'?'left':'right';
       ctx.direction='rtl';
       const _rawTitle=(title||'').replace(/\s*[|·—–].*$/,'').replace(/\s+(?:Emotional|Romantic|Happy)\b.*/i,'').trim();
-      ctx.font=`${Math.round(W*0.045)}px 'Lalezar', sans-serif`;
+      // v2-visual-refinement — Farsi title is the dominant typography element (was 0.045W,
+      // center-anchored, with a visible mood-word label underneath it — mood is internal metadata
+      // only now and is never shown on the cover). The whole stack (title/rule/Finglish/branding) is
+      // measured first and vertically centered against the panel, so a real 1-line title and a real
+      // 3-line title both land balanced against the portrait, instead of fixed offsets that assumed
+      // a specific line count.
+      // v2-visual-correction-2 — CEO correction: the previous Lalezar treatment read as generic
+      // heavy/blocky display text, not calligraphy. Switched to Noto Nastaliq Urdu (real Nastaliq
+      // script, Google Fonts) at its own 600 weight — no synthetic bold stroke here (that would
+      // uniformly thicken every stroke and destroy exactly the thin/thick calligraphic variation
+      // the correction asked to preserve). Font size/line-height increased vs. the old Lalezar
+      // numbers because Nastaliq's diagonal flow reads smaller at the same em-size and needs more
+      // vertical room per line.
+      // v2-title-layout-fix — responsive fit: shrink-to-one-line first, balanced (never
+      // orphaned) two-line split only if the title genuinely can't fit on one line at the floor
+      // size. Replaces the old fixed-size/greedy-wrap approach that could strand a short last
+      // word alone on its own line.
+      const _titleMaxFont=Math.round(W*0.072), _titleMinFont=Math.round(W*0.048);
+      const _titleFontStr=function(px){ return `600 ${px}px 'Noto Nastaliq Urdu', serif`; };
+      const _titleMaxW=titleW-pad*2;
+      const _titleFit=_srvFitFarsiTitle(ctx,_rawTitle,_titleMaxW,_titleMaxFont,_titleMinFont,_titleFontStr);
+      ctx.font=_titleFontStr(_titleFit.fontSize);
+      const _titleLineH=Math.round(_titleFit.fontSize*1.2);
+      const _nTitleLines=_titleFit.lines.length;
+      const _ruleGap=Math.round(W*0.022);
+      const _finglishH=titleFinglish?Math.round(W*0.036):0;
+      const _wordmarkGap=Math.round(W*0.044);
+      const _wordmarkH=Math.round(W*0.028);
+      const _stackH=(_nTitleLines*_titleLineH)+_ruleGap+3+_finglishH+_wordmarkGap+_wordmarkH;
+      const titleTopY=Math.max(Math.round(H*0.16),Math.round(H*0.5-_stackH/2));
       ctx.fillStyle='#fdf6e8';
-      const titleY=Math.round(H*0.42);
-      _srvWrapLines(ctx,_rawTitle,tx,titleY,titleW-pad*2,Math.round(W*0.052),3);
+      const titleBottomY=_srvDrawPreSplitLinesTop(ctx,_titleFit.lines,tx,titleTopY,_titleLineH);
       // rule
-      const ruleY=titleY+Math.round(W*0.05);
+      const ruleY=titleBottomY+_ruleGap;
       ctx.fillStyle=_farsiPal.frame;
       const ruleX=titleSide==='left'?tx:tx-56;
       ctx.fillRect(ruleX,ruleY,56,3);
-      // mood word
-      ctx.font=`600 ${Math.round(W*0.016)}px 'Vazirmatn', sans-serif`;
-      ctx.fillStyle=_farsiPal.frame;
-      ctx.fillText(_farsiPal.word,tx,ruleY+Math.round(W*0.03));
+      let _stackY=ruleY;
+      // Finglish (Latin transliteration) title — only rendered when the package actually supplies a
+      // real deterministic value. Nothing is fabricated or reserved as blank space when absent; see
+      // the SRV Farsi V2 visual-refinement CEO checkpoint for the open decision on how to source
+      // this deterministically without touching frozen title-generation logic.
+      if(titleFinglish){
+        ctx.direction='ltr'; ctx.textAlign=titleSide;
+        ctx.font=`600 ${Math.round(W*0.0195)}px 'IBM Plex Mono', monospace`;
+        ctx.fillStyle='rgba(253,246,232,0.82)';
+        _stackY+=_finglishH;
+        ctx.fillText(String(titleFinglish).toUpperCase(),tx,_stackY);
+      }
       ctx.direction='ltr';
-      // wordmark row (opposite side from panel, same side as title — outside the zoomed panel transform)
-      _drawFarsiWordmark(tx,H-Math.round(W*0.02),titleSide,_farsiPal.frame);
+      // wordmark + music-mark row — grouped directly under the title stack (previously pinned to
+      // the extreme bottom edge, leaving the lower half of the typography zone empty).
+      _drawFarsiWordmark(tx,_stackY+_wordmarkGap,titleSide,_farsiPal.frame);
     } else {
       // ── SHORT: full-bleed panel, hook top, caption bottom, mono mark top-left ──
       _drawFarsiPanel(0,0,W,H,zoom,0,false,false);
@@ -18698,7 +18834,15 @@ async function _srvRenderVideo(opts){
       ctx.font=`${Math.round(W*0.055)}px 'Lalezar', sans-serif`;
       ctx.fillStyle='#fdf6e8';
       const _hook=hookText||(title||'');
-      _srvWrapLines(ctx,_hook,W-Math.round(W*0.022),Math.round(W*0.07),W*0.94,Math.round(W*0.06),2);
+      // v2-visual-correction-2 — CEO correction: the hook text sat too close to the top edge
+      // (anchored ~4% down, center-wrapped, so a 2-line hook could start even higher), risking
+      // collision with the YouTube Shorts top UI chrome. SHORT_TOP_SAFE_Y is the explicit,
+      // documented safe-area rule going forward: a fixed 12% top margin, and top-anchored
+      // wrapping (not center-anchored) so the FIRST line's top edge — not some line-count-
+      // dependent midpoint — is what's pinned to that boundary, guaranteeing a 1-line and a
+      // wrapped multi-line hook both stay clear of the top edge.
+      const SHORT_TOP_SAFE_Y=Math.round(H*0.12);
+      _srvWrapLinesTop(ctx,_hook,W-Math.round(W*0.022),SHORT_TOP_SAFE_Y,W*0.94,Math.round(W*0.06),2,false);
       // caption (current lyric line), styled per baseline spec
       if(lyricLines.length){
         let idx=0;
@@ -18720,18 +18864,28 @@ async function _srvRenderVideo(opts){
       ctx.direction='ltr';
       ctx.textAlign='left'; ctx.fillStyle='rgba(253,246,232,0.6)';
       ctx.font=`600 ${Math.round(W*0.018)}px 'IBM Plex Mono', monospace`;
-      ctx.fillText('SRV FARSI',Math.round(W*0.022),Math.round(W*0.045));
+      // v2-visual-refinement — compact SRV identity mark next to the existing corner label. Short's
+      // hook text / caption safe zones / mobile UI clearance are frozen and untouched — this only
+      // adds a small icon beside a label that was already drawn here.
+      const _markScaleShort=W*0.00075;
+      _drawFarsiMusicMark(Math.round(W*0.022),Math.round(W*0.045)-6*_markScaleShort,_markScaleShort,'rgba(253,246,232,0.75)',false);
+      ctx.fillText('SRV FARSI',Math.round(W*0.022)+Math.round(16*_markScaleShort)+Math.round(W*0.012),Math.round(W*0.045));
     }
-    if(t<0.5){ ctx.fillStyle='rgba(0,0,0,'+(1-t/0.5).toFixed(3)+')'; ctx.fillRect(0,0,W,H); }
-    if(targetDur>1.5&&t>targetDur-1.0){
-      const fo=Math.min(1,(t-(targetDur-1.0))/1.0);
-      ctx.fillStyle='rgba(0,0,0,'+fo.toFixed(3)+')'; ctx.fillRect(0,0,W,H);
+    // v2-visual-refinement — skipFade is true only for the single pre-recording drawFrame(0) call
+    // used to capture the automatic YouTube thumbnail; the recorded video's own fade-in/out (the
+    // normal path, skipFade falsy) is unchanged.
+    if(!skipFade){
+      if(t<0.5){ ctx.fillStyle='rgba(0,0,0,'+(1-t/0.5).toFixed(3)+')'; ctx.fillRect(0,0,W,H); }
+      if(targetDur>1.5&&t>targetDur-1.0){
+        const fo=Math.min(1,(t-(targetDur-1.0))/1.0);
+        ctx.fillStyle='rgba(0,0,0,'+fo.toFixed(3)+')'; ctx.fillRect(0,0,W,H);
+      }
     }
   }
 
   // ── Main frame renderer ───────────────────────────────────────────────────
   function drawFrame(t){
-    if(isFarsiComposed){ _drawFarsiComposedFrame(t); return; }
+    if(isFarsiComposed){ _drawFarsiComposedFrame(t,_thumbCaptureMode); return; }
     ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     // ── Background rendering ───────────────────────────────────────────────
     // v13.69.91: time-fraction avatar override (SRV Farsi Long)
@@ -18824,6 +18978,10 @@ async function _srvRenderVideo(opts){
       ctx.fillStyle='rgba(0,0,0,'+fo.toFixed(3)+')'; ctx.fillRect(0,0,W,H);
     }
   }
+  // v2-visual-refinement — skip the composed-frame fade-in ONLY for this explicit pre-recording
+  // capture so the automatic YouTube thumbnail shows the full cover, not a black frame (t=0 fade
+  // alpha was previously 1.0, i.e. solid black). The real recorded video's own fade-in is untouched.
+  _thumbCaptureMode = isFarsiComposed && !isShort;
   drawFrame(0);
   await new Promise(r => setTimeout(r, 100));
   // v13.69.8 — capture first frame as thumbnail JPEG before recorder starts (clean frame, no mid-animation state)
@@ -18831,6 +18989,7 @@ async function _srvRenderVideo(opts){
   if(!isShort){
     try { thumbDataUrl = canvas.toDataURL('image/jpeg', 0.92); } catch(_){}
   }
+  _thumbCaptureMode = false;
   recorder.start();
   // v13.69.8 — AudioContext auto-suspends in Chrome/Brave until user gesture; resume before play or WebAudio graph is silent → no sound in recording
   await audioCtx.resume();
@@ -18952,7 +19111,7 @@ async function srvBuildPackage(pkgId){
       // v13.69.8 — destructure {blob, thumbDataUrl} from render result
       const _longResult = await _srvRenderVideo({
         photoUrl, audioFile: audio.file, type: 'long',
-        title: pkgTitle, channel: pkgChannel, lyrics: '',
+        title: pkgTitle, titleFinglish: _pkgLocal.titleFinglish || pkg.titleFinglish || '', channel: pkgChannel, lyrics: '',
         statusCb: (msg) => { if(statusEl) statusEl.textContent = msg; }
       });
       longBlob = _longResult.blob; longThumb = _longResult.thumbDataUrl;
@@ -18972,7 +19131,7 @@ async function srvBuildPackage(pkgId){
     if(statusEl) statusEl.textContent = _isLongSongTask ? 'Rendering SHORT video with lyric overlay (30s)…' : 'Rendering Short Video (portrait 9:16)…';
     const { blob: shortBlob } = await _srvRenderVideo({
       photoUrl, audioFile: audio.file, type: 'short',
-      title: pkgTitle, channel: pkgChannel, lyrics: pkgLyrics,
+      title: pkgTitle, titleFinglish: _pkgLocal.titleFinglish || pkg.titleFinglish || '', channel: pkgChannel, lyrics: pkgLyrics,
       statusCb: (msg) => { if(statusEl) statusEl.textContent = msg; }
     });
     if(statusEl) statusEl.textContent = 'Uploading SHORT video to storage…';
