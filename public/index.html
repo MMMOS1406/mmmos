@@ -1962,13 +1962,10 @@ function takeSnapshot(){
   const fsIdx=D.fsnapshots.findIndex(function(s){return s.date===today;});
   if(fsIdx>=0){D.fsnapshots[fsIdx]=fsnap;}else{D.fsnapshots.push(fsnap);}
   // v15.4.1 — persist to Supabase finance_snapshots table (non-blocking, best-effort)
-  fetch('/api/ops?action=finance_snapshot_save',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({date:snap.date,net_worth:snap.net,portfolio:snap.portfolio,
+  _ceoAuthedFetch('/api/ops?action=finance_snapshot_save',{date:snap.date,net_worth:snap.net,portfolio:snap.portfolio,
       debt:snap.debt,cash:snap.availableCash,income:snap.income,expenses:snap.expenses,
       cashflow:snap.cashflow,emergency_fund:snap.emergencyFund,runway:snap.runway,
-      savings_rate:snap.savingsRate,source:'live',plaid_active:!!D.plaidConnected}),
-  }).catch(function(){});
+      savings_rate:snap.savingsRate,source:'live',plaid_active:!!D.plaidConnected}).catch(function(){});
 }
 
 // ── v15.4.1 FINANCE SNAPSHOT ENGINE — Supabase-backed persistent chart data ──
@@ -2065,10 +2062,7 @@ async function _backfillFinanceSnapshots(){
     for(var i=0;i<toUpload.length;i+=BATCH){
       var batch=toUpload.slice(i,i+BATCH);
       await Promise.all(batch.map(function(row){
-        return fetch('/api/ops?action=finance_snapshot_save',{
-          method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify(row),
-        }).catch(function(){});
+        return _ceoAuthedFetch('/api/ops?action=finance_snapshot_save', row).catch(function(){});
       }));
     }
   }catch(e){
@@ -20284,10 +20278,7 @@ async function smmBolRegister(){
   const businessId=smmBolBusinessId;
   const requestKey='ui_'+Array.from(crypto.getRandomValues(new Uint8Array(12))).map(x=>x.toString(16).padStart(2,'0')).join('');
   try{
-    const res=await fetch('/api/ops?action=business_operations_register',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({requestKey,businessId,initialStatus:'Demo',ceoApproved:true,approvalNote:'Added via Business Operations UI',servicePlanId:null})
-    });
+    const res=await _ceoAuthedFetch('/api/ops?action=business_operations_register',{requestKey,businessId,initialStatus:'Demo',ceoApproved:true,approvalNote:'Added via Business Operations UI',servicePlanId:null});
     const json=await res.json().catch(()=>({}));
     if(!res.ok||!json.ok){ if(errEl)errEl.textContent=json.error||('failed ('+res.status+')'); smmBolBusy=false; smmBolRerenderIfMounted(businessId); return; }
     smmBolClient=json.record;
@@ -20315,10 +20306,7 @@ async function smmBolDoTransition(toStatus,ceoApproved,reason){
   const businessId=smmBolBusinessId,fromStatus=smmBolClient.status;
   const errEl=document.getElementById('smmBolActionError');
   try{
-    const res=await fetch('/api/ops?action=business_operations_update_status',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({businessId,fromStatus,toStatus,ceoApproved,reason})
-    });
+    const res=await _ceoAuthedFetch('/api/ops?action=business_operations_update_status',{businessId,fromStatus,toStatus,ceoApproved,reason});
     const json=await res.json().catch(()=>({}));
     if(!res.ok||!json.ok){ if(errEl)errEl.textContent=json.error||('failed ('+res.status+')'); smmBolBusy=false; smmBolRerenderIfMounted(businessId); return; }
     smmBolClient=json.record;
@@ -20612,10 +20600,7 @@ async function smmCpReview(planId,decision){
   const businessId=smmCpBusinessId;
   const errEl=document.getElementById('smmCpActionError');
   try{
-    const res=await fetch('/api/ops?action=content_planning_review',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({planId,decision})
-    });
+    const res=await _ceoAuthedFetch('/api/ops?action=content_planning_review',{planId,decision});
     const json=await res.json().catch(()=>({}));
     if(!res.ok||!json.ok){ if(errEl)errEl.textContent=json.error||('failed ('+res.status+')'); smmCpBusy=false; smmCpRerenderIfMounted(businessId); return; }
     smmCpPlans=smmCpPlans.map(p=>p.id===planId?json.record:p);
@@ -20683,7 +20668,7 @@ function smmVaRerenderIfMounted(businessId){
 
 async function smmReviewQueueLoad(businessId){
   try{
-    const res=await fetch('/api/ops?action=ceo_review_queue_list&businessId='+encodeURIComponent(businessId));
+    const res=await fetch('/api/ops?action=ceo_review_queue_list&businessId='+encodeURIComponent(businessId)+'&ceo_session_token='+encodeURIComponent(_ceoGetSessionToken()||''));
     const json=await res.json().catch(()=>({}));
     if(smmReviewBusinessId!==businessId)return;
     if(!res.ok||!json.ok){ smmReviewError=json.error||('request failed ('+res.status+')'); }
@@ -20996,7 +20981,7 @@ async function smmGapReportLoad(businessId){
   smmGapReportLoading=true;
   smmVaRerenderIfMounted(businessId);
   try{
-    const res=await fetch('/api/ops?action=sm_asset_gap_report&businessId='+encodeURIComponent(businessId));
+    const res=await fetch('/api/ops?action=sm_asset_gap_report&businessId='+encodeURIComponent(businessId)+'&ceo_session_token='+encodeURIComponent(_ceoGetSessionToken()||''));
     const json=await res.json().catch(()=>({}));
     if(smmAssetsBusinessId!==businessId)return;
     if(res.ok&&json.ok){ smmGapReport=json; smmGapReportBusinessId=businessId; }
@@ -21007,7 +20992,7 @@ async function smmGapReportLoad(businessId){
 
 async function smmAssetsLoad(businessId){
   try{
-    const res=await fetch('/api/ops?action=sm_content_asset_list&businessId='+encodeURIComponent(businessId));
+    const res=await fetch('/api/ops?action=sm_content_asset_list&businessId='+encodeURIComponent(businessId)+'&ceo_session_token='+encodeURIComponent(_ceoGetSessionToken()||''));
     const json=await res.json().catch(()=>({}));
     if(smmAssetsBusinessId!==businessId)return;
     if(!res.ok||!json.ok){ smmAssetsError=json.error||('request failed ('+res.status+')'); }
@@ -21060,29 +21045,20 @@ async function smmAssetsUploadFile(inputEl){
         reader.onerror=()=>reject(new Error('could not read file'));
         reader.readAsDataURL(file);
       });
-      const res=await fetch('/api/ops?action=sm_content_asset_upload_direct',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
+      const res=await _ceoAuthedFetch('/api/ops?action=sm_content_asset_upload_direct',{
           businessId:smmAssetsBusinessId, assetName:f.assetName.trim(), assetType:f.assetType,
           category:f.category, mood:f.category==='music_track'?f.mood:undefined,
           notes:f.notes?f.notes.trim():null, fileBase64:base64, mimeType:file.type,
-        }),
-      });
+        });
       const json=await res.json().catch(()=>({}));
       if(!res.ok||!json.ok) throw new Error(json.error||('upload failed ('+res.status+')'));
     }else{
-      const urlRes=await fetch('/api/ops?action=sm_content_asset_upload_url',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({businessId:smmAssetsBusinessId, assetName:f.assetName.trim(), mimeType:file.type}),
-      });
+      const urlRes=await _ceoAuthedFetch('/api/ops?action=sm_content_asset_upload_url',{businessId:smmAssetsBusinessId, assetName:f.assetName.trim(), mimeType:file.type});
       const urlJson=await urlRes.json().catch(()=>({}));
       if(!urlRes.ok||!urlJson.ok) throw new Error(urlJson.error||('could not start upload ('+urlRes.status+')'));
       const putRes=await fetch(urlJson.uploadUrl,{method:'PUT',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
       if(!putRes.ok) throw new Error('file upload to storage failed ('+putRes.status+')');
-      const regRes=await fetch('/api/ops?action=sm_content_asset_register',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({businessId:smmAssetsBusinessId, assetName:f.assetName.trim(), category:f.category, notes:f.notes?f.notes.trim():null, path:urlJson.path}),
-      });
+      const regRes=await _ceoAuthedFetch('/api/ops?action=sm_content_asset_register',{businessId:smmAssetsBusinessId, assetName:f.assetName.trim(), category:f.category, notes:f.notes?f.notes.trim():null, path:urlJson.path});
       const regJson=await regRes.json().catch(()=>({}));
       if(!regRes.ok||!regJson.ok) throw new Error(regJson.error||('could not save upload record ('+regRes.status+')'));
     }
@@ -21106,14 +21082,11 @@ async function smmAssetsSubmit(){
   smmAssetsBusy=true; smmAssetsError=null;
   smmVaRerenderIfMounted(smmAssetsBusinessId);
   try{
-    const res=await fetch('/api/ops?action=sm_content_asset_create',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
+    const res=await _ceoAuthedFetch('/api/ops?action=sm_content_asset_create',{
         businessId:smmAssetsBusinessId, assetName:f.assetName.trim(), assetType:f.assetType,
         category:f.category, sourceProvider:'external_url', sourceUrl:f.sourceUrl.trim(),
         notes:f.notes?f.notes.trim():null,
-      })
-    });
+      });
     const json=await res.json().catch(()=>({}));
     if(!res.ok||!json.ok){ smmAssetsError=json.error||('request failed ('+res.status+')'); }
     else{
@@ -21131,10 +21104,7 @@ async function smmAssetsReview(assetId,decision){
   smmAssetsBusy=true; smmAssetsError=null;
   smmVaRerenderIfMounted(smmAssetsBusinessId);
   try{
-    const res=await fetch('/api/ops?action=sm_content_asset_review',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({assetId,decision})
-    });
+    const res=await _ceoAuthedFetch('/api/ops?action=sm_content_asset_review',{assetId,decision});
     const json=await res.json().catch(()=>({}));
     if(!res.ok||!json.ok){ smmAssetsError=json.error||('request failed ('+res.status+')'); }
   }catch(e){ smmAssetsError='Could not reach Business Assets — check connection and try again.'; }
@@ -23533,8 +23503,7 @@ async function _ebLoadRoadmap(){
 async function _ebApprovePhase(phaseNumber){
   if(!confirm('APPROVE Phase '+phaseNumber+'? This will mark it DONE and unlock the next phase.')) return;
   try{
-    const r=await fetch('/api/ops',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'roadmap_approve_phase',phase_number:phaseNumber,approved_by:'CEO'})});
+    const r=await _ceoAuthedFetch('/api/ops',{action:'roadmap_approve_phase',phase_number:phaseNumber,approved_by:'CEO'});
     const j=await r.json();
     alert(j.message||'Phase approved.');
     _ebRoadmapData=null;
