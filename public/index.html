@@ -18841,7 +18841,6 @@ async function _srvRenderVideo(opts){
       ctx.fillStyle=fg; ctx.fillRect(0,0,W,H);
       _drawFarsiAtmo(t);
       ctx.direction='rtl'; ctx.textAlign='right';
-      ctx.font=`${Math.round(W*0.055)}px 'Lalezar', sans-serif`;
       ctx.fillStyle='#fdf6e8';
       // v2-short-final-fix — CEO production defect: the top viewer-facing text was showing the
       // ORIGINAL generated hook even after the operator edited and saved a new title, because
@@ -18850,16 +18849,23 @@ async function _srvRenderVideo(opts){
       // canonical, Review-editable, Supabase-persisted field for Short same as Long; it's now
       // the primary source, with hookText only as a fallback for the rare case title is empty.
       const _hook=title||hookText||'';
-      // v2-visual-correction-2 — CEO correction: the hook text sat too close to the top edge
-      // (anchored ~4% down, center-wrapped, so a 2-line hook could start even higher), risking
-      // collision with the YouTube Shorts top UI chrome. SHORT_TOP_SAFE_Y is the explicit,
-      // documented safe-area rule going forward: a fixed top margin, and top-anchored
-      // wrapping (not center-anchored) so the FIRST line's top edge — not some line-count-
-      // dependent midpoint — is what's pinned to that boundary, guaranteeing a 1-line and a
-      // wrapped multi-line hook both stay clear of the top edge.
-      // v2-short-final-fix — CEO's real-device test found 12% still too high; raised to 18%.
-      const SHORT_TOP_SAFE_Y=Math.round(H*0.18);
-      _srvWrapLinesTop(ctx,_hook,W-Math.round(W*0.022),SHORT_TOP_SAFE_Y,W*0.94,Math.round(W*0.06),2,false);
+      // v2-short-title-safe-box — CEO correction: nudging one top-margin percentage couldn't
+      // work for every avatar photo, because a full-width band at ANY fixed height will cross
+      // whichever avatar's face happens to sit there. Replaced the free-floating full-width band
+      // with a genuine top-right CORNER box, narrow enough to sit beside the face horizontally
+      // rather than across its forehead regardless of exactly how high/low or how wide that face
+      // sits. _titleBoxMaxW caps the wrap width (not just the right-alignment origin) so even a
+      // long, multi-line title stays inside the corner and never drifts toward center. Tuned
+      // against all three avatar groups, worst case first: a Duet photo (two faces, spanning most
+      // of the frame width) with a deliberately long wrapped title needed the box narrowed to
+      // ~34% width / ~16% top margin before the first line cleared the male figure's hairline;
+      // solo female/male avatars (the majority of real rotation — Duet is 6/20 slots) have far
+      // more clearance at these same numbers, confirmed by re-testing both after tuning.
+      const _titleBoxTopY=Math.round(H*0.16);
+      const _titleBoxMaxW=Math.round(W*0.34);
+      const _titleBoxRightX=W-Math.round(W*0.022);
+      ctx.font=`${Math.round(W*0.050)}px 'Lalezar', sans-serif`;
+      _srvWrapLinesTop(ctx,_hook,_titleBoxRightX,_titleBoxTopY,_titleBoxMaxW,Math.round(W*0.056),3,false);
       // caption (current lyric line), styled per baseline spec
       if(lyricLines.length){
         let idx=0;
