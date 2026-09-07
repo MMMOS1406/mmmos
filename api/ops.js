@@ -5549,6 +5549,7 @@ async function sbPatchPlaid(query, data) {
 }
 
 async function plaidLink(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!PLAID_CLIENT_ID || !PLAID_SECRET) {
     return res.status(500).json({ error: 'plaid_not_configured' });
   }
@@ -5583,6 +5584,7 @@ async function plaidLink(req, res) {
 }
 
 async function plaidExchange(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!PLAID_CLIENT_ID || !PLAID_SECRET) return res.status(500).json({ error: 'plaid_not_configured' });
   if (!SUPABASE_SERVICE_KEY) return res.status(500).json({ error: 'supabase_not_configured' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
@@ -5794,6 +5796,7 @@ Return STRICT JSON only, wrapped in <metadata> tags. Schema:
 }
 
 async function plaidRemoveItem(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!SUPABASE_SERVICE_KEY) return res.status(500).json({ error: 'supabase_not_configured' });
   const body = (req.method === 'POST' && req.body && typeof req.body === 'object') ? req.body : {};
   const query = req.query || {};
@@ -6036,6 +6039,7 @@ async function plaidPullForItem(item) {
 }
 
 async function plaidPull(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!PLAID_CLIENT_ID || !PLAID_SECRET || !SUPABASE_SERVICE_KEY) {
     return res.status(500).json({ error: 'not_configured' });
   }
@@ -6442,6 +6446,7 @@ function ambientMusicWAV(req, res) {
 }
 
 async function heygenStartRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
@@ -6628,6 +6633,7 @@ async function submagicTest(req, res) {
 }
 
 async function submagicCreateProject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
