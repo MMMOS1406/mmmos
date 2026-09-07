@@ -8984,6 +8984,7 @@ async function businessOperationsGet(req, res) {
 }
 
 async function businessOperationsRegister(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { requestKey, businessId, initialStatus, ceoApproved, approvalNote, decisionRef, servicePlanId } = req.body || {};
 
@@ -9052,6 +9053,7 @@ async function businessOperationsRegister(req, res) {
 }
 
 async function businessOperationsUpdateStatus(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { businessId, fromStatus, toStatus, ceoApproved, reason, decisionRef, requestKey } = req.body || {};
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
@@ -9260,6 +9262,7 @@ async function contentPlanningGenerateDemo(req, res) {
 }
 
 async function contentPlanningReview(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { planId, decision } = req.body || {};
   if (!planId) return res.status(400).json({ ok: false, error: 'planId is required' });
@@ -9615,6 +9618,7 @@ async function smVaTaskMarkPublished(req, res) {
 }
 
 async function ceoReviewQueueList(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const { businessId } = req.query || {};
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
@@ -11322,6 +11326,7 @@ async function smMusicLibraryIngestExternal({ businessId, sourceUrl, mood, track
 }
 
 async function smMusicLibraryIngestExternalHandler(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { businessId, sourceUrl, mood, trackName, licenseSource, licenseNotes } = req.body || {};
   if (!businessId || !sourceUrl || !mood || !trackName || !licenseSource) {
@@ -11994,6 +11999,7 @@ async function smVideoProductionReject(req, res) {
 
 // ── Optional supporting subsystem: client-provided assets (logo, brand, product photos, etc.) ──
 async function smContentAssetCreate(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { businessId, assetName, assetType, category, sourceProvider, sourceUrl, notes } = req.body || {};
   if (!businessId || !assetName || !assetType || !sourceUrl) return res.status(400).json({ ok: false, error: 'businessId, assetName, assetType, sourceUrl are required' });
@@ -12010,6 +12016,7 @@ async function smContentAssetCreate(req, res) {
 }
 
 async function smContentAssetList(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const { businessId } = req.query || {};
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
@@ -12036,6 +12043,7 @@ async function smContentAssetList(req, res) {
 // but nothing in the current pipeline selects it regardless of status (smSelectBrandAssets only
 // ever reads origin='client_provided' — see that function's own comment on this).
 async function smContentAssetReview(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { assetId, decision } = req.body || {};
   if (!assetId) return res.status(400).json({ ok: false, error: 'assetId is required' });
@@ -12070,6 +12078,7 @@ function smSanitizeAssetFilename(name) {
 }
 
 async function smContentAssetUploadDirect(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { businessId, assetName, assetType, category, mood, productRef, notes, fileBase64, mimeType } = req.body || {};
   if (!businessId || !assetName || !assetType || !category || !fileBase64) {
@@ -12116,6 +12125,7 @@ async function smContentAssetUploadDirect(req, res) {
 // URL so the browser can PUT the file bytes directly to storage, never through this serverless
 // function's request-body limit.
 async function smContentAssetUploadUrlCreate(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { businessId, assetName, mimeType } = req.body || {};
   if (!businessId || !assetName) return res.status(400).json({ ok: false, error: 'businessId and assetName are required' });
@@ -12140,6 +12150,7 @@ async function smContentAssetUploadUrlCreate(req, res) {
 // Step 2 — called once the browser's direct PUT to the signed URL succeeds. Registers the
 // permanent database row and triggers auto-trim (raw video only).
 async function smContentAssetRegisterUploaded(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   const { businessId, assetName, category, productRef, notes, path } = req.body || {};
   if (!businessId || !assetName || !category || !path) return res.status(400).json({ ok: false, error: 'businessId, assetName, category, path are required' });
@@ -12217,6 +12228,7 @@ async function smAutoTrimVideoAsset(parentAsset) {
 // layers: which asset CATEGORIES have zero approved assets at all, and which verified OFFERINGS
 // still have missing/weak photo coverage (reusing the existing sm_asset_coverage view).
 async function smAssetGapReport(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
   const { businessId } = req.query || {};
   if (!businessId) return res.status(400).json({ ok: false, error: 'businessId is required' });
@@ -14395,6 +14407,7 @@ async function roadmapLoad(req, res) {
 
 async function roadmapApprovePhase(req, res) {
   // CEO approval gate: marks phase as done, unlocks next phase
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   try {
     const body = req.body || {};
     const { phase_number, approved_by } = body;
@@ -15287,6 +15300,7 @@ async function brainV2RecommendNext(req, res) {
 // Upsert one snapshot. Body: { date, net_worth, portfolio, debt, cash, income,
 // expenses, cashflow, emergency_fund, runway, savings_rate, source, plaid_active }
 async function financeSnapshotSave(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!SUPABASE_SERVICE_KEY) return res.status(500).json({ error: 'supabase_not_configured' });
   const b = (req.body && typeof req.body === 'object') ? req.body : {};
   if (!b.date) return res.status(400).json({ error: 'date_required' });
