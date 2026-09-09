@@ -11075,6 +11075,63 @@ async function smSynthesizeNarration(text) {
   throw new Error(`narration synthesis failed — elevenlabs: ${primary.error} · heygen_fallback: ${fallback.error}`);
 }
 
+// ── NextWave V2 — narration (ElevenLabs), NextWave-scoped ──────────────────────────────────
+// Prepared as part of the NextWave V2 production-standard integration PR. Deliberately does
+// NOT touch or call SMM's smSynthesizeNarrationElevenLabs/smSynthesizeNarration above — this
+// is a separate, NextWave-owned function that happens to reuse the same already-configured
+// ELEVENLABS_API_KEY / ELEVENLABS_VOICE_ID / ELEVENLABS_BASE constants (same account, so this
+// is zero incremental vendor cost, not a new commitment). Stateless: synthesizes text -> audio
+// and returns it to the caller; does not persist any artifact server-side. Where/how NextWave
+// should store the resulting audio long-term is a follow-up decision for whoever reviews this
+// PR, once NextWave's actual asset-storage conventions are confirmed — not guessed at here.
+async function nextwaveSynthesizeNarrationElevenLabs(text) {
+  if (!ELEVENLABS_API_KEY) return { ok: false, error: 'elevenlabs_not_configured' };
+  if (!text || typeof text !== 'string' || !text.trim()) return { ok: false, error: 'text_required' };
+  try {
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(ELEVENLABS_VOICE_ID)}`, {
+      method: 'POST',
+      headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.15, use_speaker_boost: true },
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return { ok: false, error: `elevenlabs_error_${r.status}: ${t.slice(0, 200)}` };
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (!buf || buf.length < 512) return { ok: false, error: 'elevenlabs_returned_empty_audio' };
+    return { ok: true, buffer: buf, provider: 'elevenlabs' };
+  } catch (e) {
+    return { ok: false, error: `elevenlabs_request_failed: ${e.message}` };
+  }
+}
+
+// HTTP action — CEO-session-gated, same requirement as every other action that spends money or
+// reaches an external paid API (P0/P0.1 pattern: privileged/costly actions must be authenticated
+// first). script_text is capped to keep a single call's cost bounded and predictable.
+async function nextwaveNarrationSynthesize(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { script_text } = req.body || {};
+  if (!script_text || typeof script_text !== 'string' || !script_text.trim()) {
+    return res.status(400).json({ ok: false, error: 'script_text is required' });
+  }
+  if (script_text.length > 5000) {
+    return res.status(400).json({ ok: false, error: 'script_text too long (max 5000 characters per call)' });
+  }
+  const result = await nextwaveSynthesizeNarrationElevenLabs(script_text);
+  if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
+  return res.status(200).json({
+    ok: true,
+    provider: result.provider,
+    audio_base64: result.buffer.toString('base64'),
+    audio_bytes: result.buffer.length,
+  });
+}
+
 // ── Runway — optional AI motion/enhancement, adapter boundary only ─────────────────────────
 // Deliberately NOT invoked anywhere in the V1 default build path: local Ken Burns motion on
 // real approved photos already meets this pilot's quality bar, and CEO cost discipline
@@ -12287,6 +12344,7 @@ export default async function handler(req, res) {
     if (action === 'sm_va_task_generate_package')    return await smVaTaskGeneratePackage(req, res);        // v16.57.0
     if (action === 'production_package_review')      return await productionPackageReview(req, res);       // v16.31.0
     if (action === 'ceo_review_queue_list')          return await ceoReviewQueueList(req, res);            // v16.31.0
+    if (action === 'nextwave_narration_synthesize')  return await nextwaveNarrationSynthesize(req, res);     // NextWave V2 — ElevenLabs narration, PR pending review, not yet deployed
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
