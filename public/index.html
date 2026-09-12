@@ -19018,8 +19018,16 @@ async function _srvRenderVideo(opts){
       const _titleBoxTopY=Math.round(H*0.16);
       const _titleBoxMaxW=Math.round(W*0.34);
       const _titleBoxRightX=W-Math.round(W*0.022);
-      ctx.font=`${Math.round(W*0.050)}px 'Lalezar', sans-serif`;
-      _srvWrapLinesTop(ctx,_hook,_titleBoxRightX,_titleBoxTopY,_titleBoxMaxW,Math.round(W*0.056),3,false);
+      // v2-short-title-font-fix — Short's on-screen title was still using the Lalezar display
+      // font the LONG cover already moved away from (v2-visual-correction-2: "the previous
+      // Lalezar treatment read as generic heavy/blocky display text, not calligraphy"). Matches
+      // LONG's exact font/weight (Noto Nastaliq Urdu, 600) for the same crisp calligraphic
+      // quality and legibility standard; line-height bumped from 1.12x to 1.2x font size to
+      // match LONG's own ratio, since Nastaliq's diagonal flow needs more vertical room per line
+      // than Lalezar did. The corner safe-box position/width/top-margin (tuned across multiple
+      // avatar-clearance passes) is completely untouched.
+      ctx.font=`600 ${Math.round(W*0.050)}px 'Noto Nastaliq Urdu', serif`;
+      _srvWrapLinesTop(ctx,_hook,_titleBoxRightX,_titleBoxTopY,_titleBoxMaxW,Math.round(W*0.060),3,false);
       // caption (current lyric line), styled per baseline spec
       if(lyricLines.length){
         let idx=0;
