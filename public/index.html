@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <title>MMM System v16.51.0 — First Complete Autonomous Department</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&family=Lalezar&family=Vazirmatn:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&family=Noto+Nastaliq+Urdu:wght@400..700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
   --bg:#07090f;--surface:#0d1017;--border:#1a2030;--gold:#c9a84c;--gold2:#f59e0b;
@@ -715,7 +715,7 @@ const USERS=[
   // v13.69.46 — MMMOS Simplification: access lists now reference the 5 primary tabs (home/tasks/engines/finance/system).
   // Legacy sub-routes (content, packages, integrations, constitution, factory, continuity, settings) remain callable
   // via renderTab(id) for backward compat; they just don't appear in the top nav anymore.
-  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","engines","finance","system","marketing","human_resources","legal_compliance","social_media_manager"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against.
+  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","tasks","engines","finance","system","marketing","human_resources","legal_compliance","social_media_manager"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against. v16.67.1 — restored "tasks": the v13.69.46 5-tabs consolidation's own comment says access lists cover the 5 primary tabs (home/tasks/engines/finance/system), yet admin's array omitted "tasks" — the one place the Developer Options/quick-generate Long-or-Short test control (renderDeveloperCard, called only from renderTasks) renders, so it silently became unreachable for admin/CEO while VA (whose access already includes "tasks") was unaffected.
   {id:"family",name:"Family",role:"Family Access",emoji:"👨‍👩‍👧",pin:"5678",access:["home","finance","engines"]},
   {id:"va",name:"VA",role:"Operator",emoji:"⚙️",pin:"0000",access:["tasks","system"]},
 ];
@@ -2668,6 +2668,24 @@ async function savePackageToSupabase(pkg){
     pkg._pendingSync=true;
     return false;
   }
+}
+
+// v2-derived-metadata-sync — a single Review-stage edit can now fire several independent
+// savePackageToSupabase(pkg) calls in quick succession (the immediate title/lyrics save, plus
+// the async caption/hashtags/titleFinglish regen save that follows it) — as separate
+// fire-and-forget network requests, an earlier-queued call carrying an OLDER snapshot of pkg
+// could complete AFTER a later one and silently overwrite the newer, more complete state (a real
+// last-write-wins race, confirmed via direct testing, not hypothetical). This serializes saves
+// per package id so each one only starts once the previous has finished — since it re-reads
+// pkg's CURRENT fields only when it actually runs (not when queued), the last save to run always
+// carries every edit made so far, and completion order can no longer scramble the result.
+const _farsiPkgSaveQueues={};
+function _srvSavePackageQueued(pkg){
+  const key=String(pkg.id||'');
+  const prev=_farsiPkgSaveQueues[key]||Promise.resolve();
+  const next=prev.then(function(){return savePackageToSupabase(pkg);}).catch(function(e){console.warn('[farsi-save-queue] failed:',e.message);});
+  _farsiPkgSaveQueues[key]=next;
+  return next;
 }
 
 // Write all packages as a backup to app_settings
@@ -12405,6 +12423,77 @@ function _srvFarsiPlaylistCategory(mode){
   if(m.includes('emotional'))return'emotional';
   return'romantic';
 }
+// v16.68.0 — SRV Farsi V2 metadata clarity: deterministic YouTube title/hashtag builders,
+// computed fresh from the FINAL saved package at publish time (never model-generated, never
+// cached at generation time) so they can't drift from what the operator actually saved.
+// Strip leading/trailing non-Persian decoration (emoji, etc.) so the template's "[Farsi Song
+// Name]" segment is the clean phrase itself, matching the required title examples.
+function _srvFarsiCleanFarsiTitle(title){
+  const t=String(title||'');
+  const stripped=t.replace(/^[^؀-ۿ]+/,'').replace(/[^؀-ۿ]+$/,'').trim();
+  return stripped||t.trim();
+}
+// Long: "Silk Road Voices - [Finglish] | Persian Deep House | [Farsi]"
+// Short: "[Farsi] | Persian Love Song | SRV Farsi"
+function _srvFarsiYouTubeTitle(pkg,isLong){
+  const farsi=_srvFarsiCleanFarsiTitle(pkg&&pkg.title)||'آهنگ جدید';
+  const finglish=String((pkg&&pkg.titleFinglish)||'').trim();
+  if(isLong){
+    return finglish
+      ? `Silk Road Voices - ${finglish} | Persian Deep House | ${farsi}`
+      : `Silk Road Voices | Persian Deep House | ${farsi}`;
+  }
+  return `${farsi} | Persian Love Song | SRV Farsi`;
+}
+// Controlled hashtag set: 4 core + 2 mood-specific, matching the mood classification already
+// used by _srvFarsiPlaylistCategory (same substring rule, kept as its own copy here so visual/
+// playlist code and metadata code stay independent).
+function _srvFarsiMoodHashtags(mood){
+  const m=String(mood||'').toLowerCase();
+  if(m.includes('happy'))return['#HappyLove','#PersianLoveSong'];
+  if(m.includes('emotional'))return['#EmotionalMusic','#HeartbreakSong'];
+  return['#RomanticSong','#LoveSong'];
+}
+// v16.68.1 — CEO correction: song-specific tags must NOT come from pkg.hashtags (uncontrolled,
+// model-generated). Instead, derive a single safe tag deterministically from the FINAL saved
+// titleFinglish itself — normalized (drop apostrophes/punctuation, collapse spaces/hyphens) —
+// e.g. titleFinglish "Deltang-e To'am" -> "#DeltangeToam". No model call, no pkg.hashtags read.
+function _srvFarsiTitleHashtag(titleFinglish){
+  const cleaned=String(titleFinglish||'').replace(/[^a-zA-Z0-9\s-]/g,'').replace(/[\s-]+/g,'');
+  return cleaned?'#'+cleaned:'';
+}
+// Core+mood set is fixed (6 tags); at most one additional song-specific tag, derived purely from
+// the final saved titleFinglish (never pkg.hashtags, never a fresh model call).
+function _srvFarsiYouTubeHashtags(pkg,mood){
+  const controlled=['#SilkRoadVoices','#PersianMusic','#PersianDeepHouse','#FarsiMusic'].concat(_srvFarsiMoodHashtags(mood));
+  const controlledLower=controlled.map(function(t){return t.toLowerCase();});
+  const titleTag=_srvFarsiTitleHashtag(pkg&&pkg.titleFinglish);
+  const extra=(titleTag && !controlledLower.includes(titleTag.toLowerCase()))?[titleTag]:[];
+  return controlled.concat(extra);
+}
+// Assembles the full YouTube description: (A+B) Farsi emotional-meaning/story sentences from
+// the final saved captionYT + (C) English identity line + (D) SRV branding line + (F) hashtags.
+// (E) the AI/synthetic-content disclosure is already added automatically server-side
+// (youtubeUploadVideo, api/ops.js) whenever a Farsi description doesn't already contain it —
+// intentionally NOT duplicated here.
+function _srvFarsiYouTubeDescription(pkg,mood){
+  const farsiBody=String((pkg&&(pkg.captionYT||pkg.captionYouTube))||'').trim();
+  const identityLine='Persian Deep House / Modern Persian Pop — Silk Road Voices';
+  const brandingLine='Silk Road Voices — original Persian love songs, new release every week.';
+  const tags=_srvFarsiYouTubeHashtags(pkg,mood).join(' ');
+  return [farsiBody,identityLine,brandingLine,tags].filter(Boolean).join('\n\n');
+}
+// v16.68.1 — SRV Farsi lifecycle display clarity: splits the single stored "Artist — Mood"
+// string (e.g. "Duet — Romantic") into separate business fields, reused by every SRV Farsi
+// task/lifecycle display site so Artist/Mood never render as one combined pseudo-mode again.
+// Data-only: task.mood/task.mode/rotation storage is completely untouched by this function.
+function _srvFarsiSplitMood(mood){
+  const m=String(mood||'');
+  const artist=m.includes(' — ')?m.split(' — ')[0].trim():'';
+  const moodShort=m.includes(' — ')?m.split(' — ')[1].trim():m;
+  const moodLabel=/happy/i.test(moodShort)?'Happy Love':/emotional/i.test(moodShort)?'Emotional Love':'Romantic Love';
+  return {artist,moodLabel};
+}
 // v13.73.1 — reset Farsi publish calendar (clear anchor + seq so next 3 tasks = Fri/Sat/Sun)
 function _srvFarsiResetPublishCalendar(){
   D.srvFarsiShortDayIdx=0;
@@ -14654,13 +14743,27 @@ function renderCurrentTaskCard(){
   const status = String(target.status||'open').toLowerCase();
   const stateLabel = inProgress ? 'IN PROGRESS' : 'NEXT UP';
   const stateColor = inProgress ? '#22c55e' : '#c9a84c';
-  const name = escHTML(String(target.name || target.title || '(untitled)'));
+  // v16.68.1 — SRV Farsi display clarity: this card previously showed target.name verbatim for
+  // every engine, which for SRV Farsi baked in a combined "SRV Farsi — Duet — Romantic · Long"
+  // string at task-creation time. Narrow branch for SRV Farsi only (isSrvFarsiTask) — every
+  // other engine's name/title rendering below is byte-identical to before.
+  const isSrvFarsiTask = typeof _srvFarsiHasLifecycle==='function' && _srvFarsiHasLifecycle(target);
+  let name, farsiMoodLine = '';
+  if(isSrvFarsiTask){
+    const {artist:_ctArtist,moodLabel:_ctMoodLabel} = _srvFarsiSplitMood(target.mode||target.mood||'');
+    const _ctFormat = target.contentType || (target.contentFormat==='long'?'Long':target.contentFormat==='short'?'Short':'');
+    name = escHTML('SRV Farsi'+(_ctFormat?' · '+_ctFormat:''));
+    farsiMoodLine = (_ctArtist?`Artist: ${escHTML(_ctArtist)} · `:'')+`Mood: ${escHTML(_ctMoodLabel)}`;
+  }else{
+    name = escHTML(String(target.name || target.title || '(untitled)'));
+  }
   return `<div class="card" style="margin-top:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div class="card-title" style="margin-bottom:0">Current Task</div>
       <span style="font-size:10px;font-weight:800;color:${stateColor};letter-spacing:1px;padding:3px 8px;background:${inProgress?'rgba(34,197,94,0.10)':'rgba(201,168,76,0.10)'};border:1px solid ${inProgress?'rgba(34,197,94,0.40)':'rgba(201,168,76,0.40)'};border-radius:5px;font-family:'JetBrains Mono',monospace">${stateLabel}</span>
     </div>
     <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">${eIcon} ${name}</div>
+    ${farsiMoodLine?`<div style="font-size:11px;color:var(--dim);margin-bottom:4px;font-family:'JetBrains Mono',monospace">${farsiMoodLine}</div>`:''}
     <div style="font-size:11px;color:var(--dim);margin-bottom:12px;font-family:'JetBrains Mono',monospace">${escHTML(engine)} · status: ${escHTML(status)}${target.priority?(' · P'+target.priority):''}${target.day?(' · '+target.day):''}</div>
     <button onclick="openExec('${escHTML(String(target.id))}')" style="padding:9px 16px;background:rgba(201,168,76,0.18);border:1px solid rgba(201,168,76,0.45);border-radius:8px;color:#c9a84c;font-weight:800;font-size:12px;cursor:pointer;font-family:Syne,sans-serif">Open Exec Mode →</button>
   </div>`;
@@ -14751,7 +14854,9 @@ function _quickGenerateTest(engineId,engineName,contentFormat){
   _setEngineState(engineName,'test');
   saveAppState();
   if(engineId==='srv_farsi'){
-    const mode=(typeof _srvFarsiNextMode==='function')?_srvFarsiNextMode():'Female — Emotional';
+    // v16.67.1 — peek (not advance): this is only choosing a mood label for a TEST task, and must
+    // not consume a real rotation slot — same isolation as the post-generation guard below.
+    const mode=(typeof _srvFarsiPeekNextMode==='function')?_srvFarsiPeekNextMode():'Female — Emotional';
     const newTaskId=vaAddTestTask(engineName,mode,contentFormat);
     if(!newTaskId){alert('Quick Generate failed: could not create persistent test task. Check console.');return;}
     if(typeof vaFarsiGeneratePackage==='function'){
@@ -15049,14 +15154,23 @@ function renderExecMode(taskId){
   }
   // v13.69.80 — SRV Farsi lifecycle fast-path (mirrors English)
   if(typeof _srvFarsiHasLifecycle==='function' && _srvFarsiHasLifecycle(t)){
+    // v16.68.1 — lifecycle display clarity: the top task-identity banner previously showed
+    // t.name verbatim (e.g. "SRV Farsi — Duet — Romantic · Long", baked in at task-creation
+    // time) plus a combined MODE field. Split into separate Artist/Mood/Format — same
+    // _srvFarsiSplitMood used by renderSRVFarsiLifecycleCard, so this stays consistent
+    // everywhere. t.name/t.mood/rotation storage is untouched; display only.
+    const _fMood=t.mode||t.mood||'';
+    const {artist:_fArtist,moodLabel:_fMoodLabel}=_srvFarsiSplitMood(_fMood);
+    const _fFormat=t.contentType||(t.contentFormat==='long'?'Long':t.contentFormat==='short'?'Short':'—');
     return `<div style="padding:0 0 20px 0">
       <div class="exec-banner">
         <div class="exec-banner-label">🌹 SRV FARSI — LIFECYCLE</div>
-        <div class="exec-banner-title">${t.name}</div>
+        <div class="exec-banner-title">SRV Farsi${_fFormat!=='—'?' · '+_fFormat:''}</div>
         <div class="exec-fields">
           <div class="exec-field"><div class="exec-field-label">ENGINE</div><div class="exec-field-val">SRV Farsi</div></div>
-          <div class="exec-field"><div class="exec-field-label">MODE</div><div class="exec-field-val">${t.mode||t.mood||'—'}</div></div>
-          <div class="exec-field"><div class="exec-field-label">TYPE</div><div class="exec-field-val">${t.contentType||'—'}</div></div>
+          ${_fArtist?`<div class="exec-field"><div class="exec-field-label">ARTIST</div><div class="exec-field-val">${escHTML(_fArtist)}</div></div>`:''}
+          <div class="exec-field"><div class="exec-field-label">MOOD</div><div class="exec-field-val">${escHTML(_fMoodLabel)}</div></div>
+          <div class="exec-field"><div class="exec-field-label">FORMAT</div><div class="exec-field-val">${escHTML(_fFormat)}</div></div>
           <div class="exec-field"><div class="exec-field-label">DAY</div><div class="exec-field-val">${t.day||'—'}</div></div>
           <div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>
         </div>
@@ -16026,6 +16140,15 @@ function _farsisaveEdit(pkgId,field,inputId,btnId){
   pkg[field]=val;
   if(field==='shortLyrics')pkg.short_lyrics=val;
   saveAppState();
+  // v2-save-propagation-fix — this was the actual production defect: this Review Save handler
+  // mutated the in-memory D.packages entry (so the Review UI itself showed the new value) but
+  // never persisted it to Supabase. saveAppState() only writes to localStorage; the Supabase
+  // packages row (the real source of truth every reload/Build reads from via
+  // fetchPackagesFromTable()) kept the ORIGINAL generated title/lyrics forever, which is exactly
+  // why Build could render stale content after a page reload. Every other package-mutation site
+  // in this lifecycle (Build, Publish) already calls savePackageToSupabase — this was the one
+  // that didn't.
+  if(typeof savePackageToSupabase==='function')_srvSavePackageQueued(pkg);
   var btn=document.getElementById(btnId);
   if(btn){var _orig=btn.textContent;btn.textContent='✓ Saved';btn.style.color='#22c55e';setTimeout(function(){btn.textContent=_orig;btn.style.color='';},2000);}
   // v15.7.0 — auto-regen caption when title or lyrics changes
@@ -16040,12 +16163,23 @@ function _farsisaveEdit(pkgId,field,inputId,btnId){
     fetch('/api/ops?action=farsi_regen_caption',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({title:pkg.title||'',lyrics:_lyrics,isLong:_isLong})
+      body:JSON.stringify({title:pkg.title||'',lyrics:_lyrics,isLong:_isLong,needFinglish:field==='title'})
     }).then(function(r){return r.json();}).then(function(d){
       if(d.ok&&d.captionYT){
         pkg.captionYT=d.captionYT;
         pkg.captionYouTube=d.captionYT;
+        // v2-derived-metadata-sync — hashtags/titleFinglish are derived FROM the just-saved
+        // title/lyrics (never the other way around); only overwrite when the regen call actually
+        // returned something, so an edit to lyrics alone (title unchanged) doesn't blank a
+        // titleFinglish that's already correct for the current title.
+        if(d.hashtags)pkg.hashtags=d.hashtags;
+        if(field==='title'&&d.titleFinglish)pkg.titleFinglish=d.titleFinglish;
         saveAppState();
+        // v2-save-propagation-fix — same persistence gap as the title/lyrics save above: this
+        // regenerated caption was only reaching localStorage, not the Supabase source of truth.
+        // v2-derived-metadata-sync — queued (not a bare fire-and-forget call): this save can
+        // race the immediate title/lyrics save above, and whichever finishes LAST must win.
+        if(typeof savePackageToSupabase==='function')_srvSavePackageQueued(pkg);
         // refresh the card so caption field shows new value
         if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
       }
@@ -16061,6 +16195,12 @@ function renderSRVFarsiLifecycleCard(task){
   const pkgId=pkg?String(pkg.id||''):'';
   const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
   const mood=task.mode||task.mood||pkg?.mood||'Emotional';
+  // v16.68.0/16.68.1 — lifecycle display clarity: separate Artist/Mood/Format instead of one
+  // combined "Duet — Romantic" string. Data-only display split (_srvFarsiSplitMood) — the
+  // underlying mood string, rotation, and task fields are completely unchanged; only how this
+  // one card renders them.
+  const {artist:_fArtist,moodLabel:_fMoodLabel}=_srvFarsiSplitMood(mood);
+  const _fFormat=(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short';
 
   let stageContent='';
 
@@ -16068,7 +16208,9 @@ function renderSRVFarsiLifecycleCard(task){
   if(stage==='generate'){
     stageContent=`
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Mode: <strong style="color:var(--text)">${escHTML(mood)}</strong></div>
+        ${_fArtist?`<div style="font-size:12px;color:var(--dim);margin-bottom:4px">Artist: <strong style="color:var(--text)">${escHTML(_fArtist)}</strong></div>`:''}
+        <div style="font-size:12px;color:var(--dim);margin-bottom:4px">Mood: <strong style="color:var(--text)">${escHTML(_fMoodLabel)}</strong></div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format: <strong style="color:var(--text)">${escHTML(_fFormat)}</strong></div>
         <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the Persian song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
         <button onclick="vaFarsiGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
           🌹 Generate Package
@@ -16263,7 +16405,11 @@ function renderSRVFarsiLifecycleCard(task){
       // v15.20.1 — Shorts: independent per-platform controls, shown BEFORE any publish
       // occurs (Engineering Task 1c0e3090 fix-forward — prod regression fix).
       stageContent=`<div style="font-size:11px;color:var(--dim);margin-bottom:12px">Publish this Short to each platform independently. A failure on one does not block another.</div>`
-        + _renderShortPlatformPublishPanel(pkg,taskId,pkgId,'_srvFarsiPublishYouTube','_srvFarsiPublishTikTok');
+        // v2-short-final-fix — CEO instruction: remove TikTok/Instagram Manual Publish from the
+        // SRV Farsi Short Publish stage UI only (showTikTok=false, showInstagram=false). YouTube
+        // publishing, the shared function's other callers (AI Studio), and the platform
+        // connections/analytics themselves are all untouched.
+        + _renderShortPlatformPublishPanel(pkg,taskId,pkgId,'_srvFarsiPublishYouTube','_srvFarsiPublishTikTok',false,false);
     }
   }
 
@@ -16375,77 +16521,82 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     pkg._srvBgUrl=null; pkg._srvLongRenderId=null; pkg._srvShortRenderId=null;
     if(typeof saveAppState==='function')saveAppState();
 
-    // Step 1: Fetch Pexels backgrounds (same endpoint as English, mood drives query)
-    // v13.73.1 — Short uses 3 Pexels (non-human) + 3 SRV avatars interleaved = 6 scenes
-    const _bgCount=isLongTask?25:3;
-    setStatus('Fetching Pexels backgrounds ('+(isLongTask?'25 cinematic scenes':'5 scenes')+')…','#c9a84c');
-    const bgRes=await fetch('/api/ops?action=srv_english_pexels_bg',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      // v13.69.93: pass full mode (artist-type + mood) so ops.js can use per-combo Pexels banks
-      // v13.73.1: isFarsi flag routes Long to PEXELS_FARSI_LONG_BANKS (no random humans)
-      body:JSON.stringify({mood:pkg.mood||'Emotional',mode:pkg.mode||(task&&(task.mode||task.mood))||'',photo_only:true,count:_bgCount,isLong:isLongTask,isFarsi:true}),
-    });
-    const bgData=await bgRes.json().catch(function(){return{};});
-    if(!bgData.ok){
-      setStatus('⚠ Pexels: '+(bgData.error||'Add PEXELS_API_KEY to Vercel env vars'),'#fbbf24');
-      if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent='🌹 Build Package — Fetch Background + Render Video';}
-      return;
-    }
-    const _bgPhotos=bgData.photos||[{url:bgData.url,credit:bgData.credit}];
-    const _bgUrls=_bgPhotos.map(function(p){return p.url;}).filter(Boolean);
-    pkg._srvBgUrl=_bgUrls[0]||null;
-    pkg._srvBgCredit=(_bgPhotos[0]&&_bgPhotos[0].credit)||null;
-    if(typeof saveAppState==='function')saveAppState();
+    // V2 PHASE 2 — composed-cover system replaces Pexels full-screen photo backgrounds.
+    // No Pexels fetch: the SRV avatar photo is duotone-masked into a designed panel by
+    // _srvRenderVideo's Farsi-specific path (see VISUAL_BASELINE_v1). Only the avatar
+    // pool + mood palette + mirror side are chosen here.
+    const _fMode=(task&&(task.mode||task.mood))||pkg.mode||'';
+    const _fMoodOnly=pkg.mood||(_fMode.includes(' — ')?_fMode.split(' — ').pop():_fMode)||'Romantic';
+    const _fGroup=/^Duet/i.test(_fMode)?'duet':/^Male/i.test(_fMode)?'male':'female';
 
-    // v13.73.1 — SRV Farsi avatar: mode-based pool (Female/Male/Duet)
-    // Short: interleave 3 SRV avatars (01/02/03) with 3 Pexels env scenes → 6 scenes, 3× human presence
-    // Long: pass single avatar via avatarUrl for time-fraction renderer (beginning/middle/end)
-    const _farsiAvatarIdxSet=new Set();
-    let _fAvUrlForRender=null;
+    // v2-phase2 — memory-aware face rotation: avoid repeating the same avatar photo
+    // this identity group last used, reusing the existing generation_memory mechanism
+    // (memory_type='visual_face') rather than a parallel tracking system.
+    function _farsiPickAvatar(pool){
+      if(!pool.length)return null;
+      if(pool.length===1)return pool[0];
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_face';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})
+        .slice(0,2).map(function(m){return m.value;});
+      const _fresh=pool.filter(function(u){return !_recent.includes(u);});
+      const _choices=_fresh.length?_fresh:pool;
+      return _choices[Math.floor(Math.random()*_choices.length)];
+    }
+    function _farsiPickMirror(){
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_mirror';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})[0];
+      // simple alternation: flip from whatever was used last, default to false
+      return _recent?_recent.value!=='true':(Math.random()<0.5);
+    }
+    // v2-phase2 — background archetype (gradient direction 'a'/'b') and mood intensity
+    // (soft/standard/vivid) are additional anti-repetition dimensions, tracked + rotated
+    // the same way as face/mirror rather than left to raw Math.random() every time.
+    function _farsiPickBgArchetype(){
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_background_archetype';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})[0];
+      return _recent?(_recent.value==='a'?'b':'a'):(Math.random()<0.5?'a':'b');
+    }
+    function _farsiPickIntensity(){
+      const _levels=['soft','standard','vivid'];
+      const _recent=(D._memoryItems||[])
+        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_mood_intensity';})
+        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})[0];
+      const _fresh=_recent?_levels.filter(function(l){return l!==_recent.value;}):_levels;
+      return _fresh[Math.floor(Math.random()*_fresh.length)];
+    }
+    let _fAvUrlForRender=null, _fMirror=_farsiPickMirror();
+    const _fBgArchetype=_farsiPickBgArchetype(), _fIntensity=_farsiPickIntensity();
+    const _fSeed=Math.floor(Math.random()*1e9); // fresh atmo/particle layout every render, no repetition concept needed
     (function(){
       const _fCfg=_srvFarsiEngineConfig();
       const _fLib=_fCfg&&_fCfg.avatarLibrary;
       if(!_fLib)return;
-      const _fMode=(task&&(task.mode||task.mood))||pkg.mode||'';
-      const _fGroup=/^Duet/i.test(_fMode)?'duet':/^Male/i.test(_fMode)?'male':'female';
       const _fPool=_fLib[_fGroup]||[];
-      // Short → indices 0-2 (portrait 01-03), Long → indices 3-5 (landscape 04-06)
+      // Short → indices 0-2 (portrait 01-03), Long → indices 3-5 (landscape 04-06) — unchanged slicing convention
       const _fSlice=_fPool.slice(isLongTask?3:0,isLongTask?6:3);
-      if(!_fSlice.length)return;
-      if(isLongTask){
-        // Long: single avatar via time-fraction renderer
-        _fAvUrlForRender=_fSlice[Math.floor(Math.random()*_fSlice.length)];
-      } else {
-        // v13.73.1 — Short: interleave [avatar_01, pexels_0, avatar_02, pexels_1, avatar_03, pexels_2]
-        // All 3 Short avatars used; only SRV avatars appear as humans in the video
-        const _avPool=_fSlice.slice(0,3); // up to 3 avatar URLs
-        const _bgBackup=_bgUrls.splice(0,_bgUrls.length); // drain existing Pexels backgrounds
-        for(let _si=0;_si<_avPool.length;_si++){
-          _bgUrls.push(_avPool[_si]);          // avatar scene
-          _farsiAvatarIdxSet.add(_si*2);       // mark as contain-mode (portrait)
-          if(_bgBackup[_si]) _bgUrls.push(_bgBackup[_si]); // non-human Pexels env scene
-        }
-        // Fallback: if no avatar pool, restore original backgrounds
-        if(!_avPool.length) _bgBackup.forEach(function(u){_bgUrls.push(u);});
-      }
+      _fAvUrlForRender=_farsiPickAvatar(_fSlice);
     })();
 
     // Step 2: SHORT render (9:16) — only for Short tasks
     if(!isLongTask){
       setStatus('Rendering SHORT video… do not close this tab','#8b5cf6');
       const shortResult=await _srvRenderVideo({
-        photoUrls:_bgUrls,
+        photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'short',
         skipChorusSync:true,
         maxDuration:90,                    // v13.73.3 — cap at 90s; Suno Short clips ~30-45s so no clip, but blocks full-length accidental loads
         title:pkg.title||'',
+        titleFinglish:pkg.titleFinglish||'',
         channel:'SRV Farsi',
         // v13.69.80 — Farsi Short: shortLyrics (camelCase from generate) or short_lyrics (legacy snake) or pkg.lyrics
         lyrics:pkg.shortLyrics||pkg.short_lyrics||pkg.lyrics||'',
         statusCb:function(msg){setStatus(msg,'#8b5cf6');},
-        avatarIndices:_farsiAvatarIdxSet,  // v13.69.81 — contain-mode for avatar scene
+        avatarUrl:_fAvUrlForRender,
+        mood:_fMoodOnly, mirror:_fMirror, seed:_fSeed, hookText:pkg.hook||'', bgArchetype:_fBgArchetype, moodIntensity:_fIntensity,
       });
       setStatus('Uploading SHORT video…','#8b5cf6');
       const shortFile=new File([shortResult.blob],'srv_farsi_short.webm',{type:shortResult.blob.type});
@@ -16459,16 +16610,17 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     if(isLongTask){
       setStatus('Rendering LONG video… this takes the full song length, do not close this tab','#8b5cf6');
       const longResult=await _srvRenderVideo({
-        photoUrls:_bgUrls,
+        photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'long',
         skipChorusSync:false,
         title:pkg.title||'',
+        titleFinglish:pkg.titleFinglish||'',
         channel:'SRV Farsi',
         lyrics:pkg.lyrics||'',
         statusCb:function(msg){setStatus(msg,'#8b5cf6');},
-        avatarIndices:_farsiAvatarIdxSet,  // v13.69.81 — contain-mode for avatar scenes (Short)
         avatarUrl:_fAvUrlForRender,         // v13.69.91 — time-fraction placement (Long only)
+        mood:_fMoodOnly, mirror:_fMirror, seed:_fSeed, hookText:pkg.hook||'', bgArchetype:_fBgArchetype, moodIntensity:_fIntensity,
       });
       setStatus('Uploading LONG video…','#8b5cf6');
       const longFile=new File([longResult.blob],'srv_farsi_long.webm',{type:longResult.blob.type});
@@ -16477,6 +16629,22 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       if(longResult.thumbDataUrl)pkg._srvThumbDataUrl=longResult.thumbDataUrl;
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
+    }
+
+    // v2-phase2 — record visual choices for anti-repetition (extends existing generation_memory)
+    if(_fAvUrlForRender){
+      try{
+        await saveMemoryItem('visual_face',_fAvUrlForRender,'srv_farsi');
+        await saveMemoryItem('visual_mirror',_fMirror?'true':'false','srv_farsi');
+        await saveMemoryItem('visual_palette',_srvFarsiMoodKey(_fMoodOnly),'srv_farsi');
+        await saveMemoryItem('visual_background_archetype',_fBgArchetype,'srv_farsi');
+        await saveMemoryItem('visual_mood_intensity',_fIntensity,'srv_farsi');
+        if(!D._memoryItems)D._memoryItems=[];
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_face',value:_fAvUrlForRender,created_at:new Date().toISOString()});
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_mirror',value:_fMirror?'true':'false',created_at:new Date().toISOString()});
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_background_archetype',value:_fBgArchetype,created_at:new Date().toISOString()});
+        D._memoryItems.unshift({engine_id:'srv_farsi',memory_type:'visual_mood_intensity',value:_fIntensity,created_at:new Date().toISOString()});
+      }catch(_){}
     }
 
     _srvFarsiSetStage(taskId,'approve');
@@ -16512,21 +16680,25 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     const _buildEngineState=_getEngineState(pkgChannel);
     const _inTestMode=_buildEngineState==='test';
     const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
-    const pkgTitle=_inTestMode?'[TEST] '+(pkg.title||'SRV Farsi'):(pkg.title||'SRV Farsi');
     // v13.72.0 — look up playlist category from the task for this package
     const _farsiPubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
     const _farsiPlaylistCat=(_farsiPubTask&&_farsiPubTask.playlistCategory)||_srvFarsiPlaylistCategory(_farsiPubTask&&_farsiPubTask.mood);
+    // v16.68.0 — metadata clarity: title now differs Long vs Short (deterministic template from
+    // the FINAL saved title/titleFinglish); description/hashtags built the same way for both.
+    const _farsiDescription=_srvFarsiYouTubeDescription(pkg,_farsiPubTask&&_farsiPubTask.mood);
+    const _farsiTags=_srvFarsiYouTubeHashtags(pkg,_farsiPubTask&&_farsiPubTask.mood).map(function(t){return t.replace(/^#/,'');});
 
-    async function doUpload(videoUrl,label){
+    async function doUpload(videoUrl,label,isLong){
       if(!videoUrl)return null;
       if(statusEl)statusEl.textContent=`Uploading ${label} to YouTube…`;
+      const _title=_srvFarsiYouTubeTitle(pkg,isLong);
       const r=await fetch('/api/ops?action=youtube_upload_video',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          videoUrl,engine:pkgChannel,title:pkgTitle,
-          description:pkg.captionYT||pkg.captionYouTube||'',
-          tags:(pkg.hashtags||'').split(/[\s,#]+/).filter(Boolean),
+          videoUrl,engine:pkgChannel,title:_inTestMode?'[TEST] '+_title:_title,
+          description:_farsiDescription,
+          tags:_farsiTags,
           categoryId:'10',privacyStatus:'private',madeForKids:false,
           publishAt:_srvPublishAt,
           playlistCategory:_farsiPlaylistCat, // v13.72.0 — auto-add to Romantic/Emotional/Happy playlist
@@ -16538,8 +16710,8 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     const _pubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
     const _isLongPub=!!(_pubTask&&_pubTask.isLong);
     const [longUp,shortUp]=await Promise.all([
-      _isLongPub?doUpload(longUrl,'LONG'):Promise.resolve(null),
-      doUpload(shortUrl,'SHORT'),
+      _isLongPub?doUpload(longUrl,'LONG',true):Promise.resolve(null),
+      doUpload(shortUrl,'SHORT',false),
     ]);
     if(longUp?.videoId)pkg._srvYtLongId=longUp.videoId;
     if(shortUp?.videoId)pkg._srvYtShortId=shortUp.videoId;
@@ -16587,18 +16759,20 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
   const _buildEngineState=_getEngineState(pkgChannel);
   const _inTestMode=_buildEngineState==='test';
   const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
-  const pkgTitle=_inTestMode?'[TEST] '+(pkg.title||'SRV Farsi'):(pkg.title||'SRV Farsi');
   const _farsiPubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
   const _farsiPlaylistCat=(_farsiPubTask&&_farsiPubTask.playlistCategory)||_srvFarsiPlaylistCategory(_farsiPubTask&&_farsiPubTask.mood);
+  // v16.68.0 — metadata clarity: deterministic Short title/description/hashtags from the FINAL
+  // saved package (never model-generated at this step, so they can't drift from what was saved).
+  const _pkgTitle=_srvFarsiYouTubeTitle(pkg,false);
   pkg.youtubePublishState='publishing'; pkg.youtubePublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
     const r=await fetch('/api/ops?action=youtube_upload_video',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        videoUrl:shortUrl,engine:pkgChannel,title:pkgTitle,
-        description:pkg.captionYT||pkg.captionYouTube||'',
-        tags:(pkg.hashtags||'').split(/[\s,#]+/).filter(Boolean),
+        videoUrl:shortUrl,engine:pkgChannel,title:_inTestMode?'[TEST] '+_pkgTitle:_pkgTitle,
+        description:_srvFarsiYouTubeDescription(pkg,_farsiPubTask&&_farsiPubTask.mood),
+        tags:_srvFarsiYouTubeHashtags(pkg,_farsiPubTask&&_farsiPubTask.mood).map(function(t){return t.replace(/^#/,'');}),
         categoryId:'10',privacyStatus:'private',madeForKids:false,
         publishAt:_srvPublishAt,
         playlistCategory:_farsiPlaylistCat,
@@ -16765,9 +16939,15 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
     console.log('[SRV Farsi] ✓ memory saved · title="'+(_pkg.title||'').slice(0,40)+'"');
     // v13.69.93 — advance rotation pointer after successful generate (mode was auto-pre-selected in goStep2)
     // This ensures the NEXT generate call auto-highlights the next combination in sequence.
-    if(typeof _srvFarsiNextMode==='function'){
+    // v16.67.1 — guarded: a Developer Options quick-generate TEST package (engine in 'test'
+    // state, pkg.isTest stamped by generatePackage) must not consume/advance the real production
+    // rotation pointer, per the same isolation the isTest flag already gives test runs elsewhere
+    // (private YouTube, no publish slot). Real (non-test) generation is completely unaffected.
+    if(typeof _srvFarsiNextMode==='function' && !_pkg.isTest){
       _srvFarsiNextMode(); // advances D.srvFarsiRotationIdx and saves state
       console.log('[SRV Farsi] ✓ rotation advanced → next mode: '+_srvFarsiPeekNextMode());
+    }else if(_pkg.isTest){
+      console.log('[SRV Farsi] TEST package — rotation pointer left untouched');
     }
   }
   return _pkg;
@@ -16864,7 +17044,13 @@ function _ttAuthRequiredBlock(pkg){
 // a Copy button so the operator can publish manually in-app. This is a display-only change —
 // it does not touch _srvFarsiPublishYouTube/_aiStudioPublishYouTube or the YouTube upload path
 // at all, so YouTube's Generate→Review→Build→Approve→Publish→Done flow is unaffected.
-function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFnTT){
+// v2-short-final-fix — showTikTok/showInstagram default to true so the existing AI Studio call
+// site (unchanged) keeps showing both rows exactly as before; SRV Farsi's Short Publish stage
+// now explicitly passes false for both, per CEO instruction to remove them from ITS UI only —
+// this is a UI-visibility change only, no publishing logic, analytics, or connection is touched.
+function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFnTT,showTikTok,showInstagram){
+  if(showTikTok===undefined)showTikTok=true;
+  if(showInstagram===undefined)showInstagram=true;
   const ytState=(pkg&&pkg.youtubePublishState)||'ready';
   const ttState=(pkg&&pkg.tiktokPublishState)||'ready';
   const rowBase='padding:12px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;margin-bottom:10px';
@@ -16884,7 +17070,7 @@ function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFn
   // ⏸ TikTok row — production frozen, manual publish only. Already-published history (from
   // before the freeze) still shows its confirmation; anything else just shows the frozen
   // banner + the caption so the operator can copy it into the TikTok app themselves.
-  html+=`<div style="${rowBase};opacity:0.75">
+  if(showTikTok)html+=`<div style="${rowBase};opacity:0.75">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ TikTok — Manual Publish</span>${frozenBadge}
     </div>
@@ -16894,7 +17080,7 @@ function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFn
       :`<div style="text-align:center;padding:9px;color:#9ca3af;font-size:11px;font-weight:500;line-height:1.4">Production publishing is frozen. Copy the caption above and post manually in the TikTok app.</div>`}
   </div>`;
   // ⏸ Instagram row — production frozen, no publishing logic (connection reserved for future work)
-  html+=`<div style="${rowBase};opacity:0.5">
+  if(showInstagram)html+=`<div style="${rowBase};opacity:0.5">
     <div style="display:flex;align-items:center;justify-content:space-between">
       <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ Instagram — Manual Publish</span>${frozenBadge}
     </div>
@@ -18330,16 +18516,92 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 }
 // ── end Farsi chorus sync ────────────────────────────────────────────────────
 
+// ── SRV Farsi V2 Phase 2 — composed-cover visual system ──────────────────────
+// Ports the CEO-accepted VISUAL_BASELINE_v1 parametric design (see
+// brain/srv_farsi_v2_blueprint/VISUAL_BASELINE_v1/README.md and
+// source/gen_motion_frames_SOURCE.py) from the HTML/CSS proof into canvas.
+// Additive only — gated behind channel==='SRV Farsi' everywhere it's used;
+// the existing Pexels-photo renderer below is unchanged for every other engine.
+const SRV_FARSI_MOOD_PALETTES={
+  romantic:{gradient:['#6b3420','#3a1810','#1c0e0c'],tint:'#c9793f',frame:'#e0b56a',word:'عاشقانه',particle:'#f4d9a8'},
+  emotional:{gradient:['#23283a','#171b28','#0d0f18'],tint:'#5f7290',frame:'#9aa9c2',word:'احساسی',particle:'#c7d4e8'},
+  happy:{gradient:['#7a4a1e','#4a2a12','#241408'],tint:'#e0a544',frame:'#f4cf8a',word:'شاد',particle:'#ffe6ae'},
+};
+function _srvFarsiMoodKey(mood){
+  const m=String(mood||'').toLowerCase();
+  if(m.includes('emotional'))return 'emotional';
+  if(m.includes('happy'))return 'happy';
+  return 'romantic';
+}
+// Deterministic seeded PRNG (mulberry32) — same seed always produces the same
+// particle/rain layout, matching the Python source's random.Random(seed) approach,
+// so a given package's motion is stable across a re-render but differs package-to-package.
+function _srvMulberry32(seed){
+  let a=seed>>>0;
+  return function(){
+    a|=0;a=a+0x6D2B79F5|0;
+    let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function _srvFarsiGenParticles(moodKey,seed,n){
+  const rnd=_srvMulberry32(seed);
+  const out=[];
+  for(let i=0;i<n;i++){
+    out.push({
+      x0:rnd()*1,y0:rnd()*1,
+      wrapsX:(rnd()<0.33)?1:0,
+      size:moodKey==='happy'?(5+rnd()*8):(2.2+rnd()*3.3),
+      baseOp:0.25+rnd()*0.35,
+      harmonic:[1,1,2][Math.floor(rnd()*3)],
+      phase:rnd()*2*Math.PI,
+    });
+  }
+  return out;
+}
+function _srvFarsiGenRain(seed,n){
+  const rnd=_srvMulberry32(seed);
+  const out=[];
+  for(let i=0;i<n;i++){
+    out.push({x0:rnd()*1,y0:rnd()*2-1,length:14+rnd()*16,op:0.18+rnd()*0.22});
+  }
+  return out;
+}
+// Loads the design fonts (Lalezar/Vazirmatn/IBM Plex Mono/Noto Nastaliq Urdu) so canvas
+// text doesn't silently fall back to a default font on first render.
+// v2-visual-correction-2 — Noto Nastaliq Urdu is the Long Farsi title's calligraphic
+// typeface (CEO correction: the previous Lalezar treatment read as generic bold display
+// text, not calligraphy). Real Nastaliq script, Google Fonts (SIL Open Font License),
+// reliably renders Persian text in production canvas.
+async function _srvFarsiEnsureFonts(){
+  try{
+    await Promise.all([
+      document.fonts.load("58px 'Lalezar'"),
+      document.fonts.load("700 20px 'Vazirmatn'"),
+      document.fonts.load("600 13px 'IBM Plex Mono'"),
+      document.fonts.load("600 58px 'Noto Nastaliq Urdu'"),
+    ]);
+    await document.fonts.ready;
+  }catch(_){/* font load is best-effort; canvas falls back gracefully */}
+}
+
 async function _srvRenderVideo(opts){
-  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration } = opts;
+  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration, mood, mirror, seed, hookText, bgArchetype, moodIntensity, titleFinglish } = opts;
+  const isFarsiComposed = channel==='SRV Farsi';
+  let _thumbCaptureMode = false; // v2-visual-refinement — true only for the single pre-recording drawFrame(0) call used to capture the thumbnail
+  if(isFarsiComposed) await _srvFarsiEnsureFonts();
   const isShort = type === 'short';
   const W = isShort ? 1080 : 1920;
   const H = isShort ? 1920 : 1080;
   // ── Load all background images (multi-scene support) ─────────────────────
+  // v2-phase2 — the Farsi composed path draws only the avatar panel (loaded below as
+  // _avatarImg); it doesn't need the old multi-scene Pexels image array at all.
   const _urls = photoUrls && photoUrls.length ? photoUrls : (photoUrl ? [photoUrl] : []);
-  if(!_urls.length) throw new Error('No background image provided');
+  if(!isFarsiComposed && !_urls.length) throw new Error('No background image provided');
+  if(isFarsiComposed && !avatarUrl) throw new Error('SRV Farsi composed render requires avatarUrl');
   if(statusCb) statusCb('Loading background scenes…');
-  const imgs = await Promise.all(_urls.map(function(u){
+  const imgs = isFarsiComposed ? [] : await Promise.all(_urls.map(function(u){
     return new Promise(function(res,rej){
       const i=new Image(); i.crossOrigin='anonymous';
       i.onload=function(){res(i);}; i.onerror=function(){rej(new Error('Failed to load: '+u));}; i.src=u;
@@ -18455,8 +18717,352 @@ async function _srvRenderVideo(opts){
     ctx.filter='none';
   }
 
+  // ── SRV Farsi V2 Phase 2 composed-cover frame (canvas port of VISUAL_BASELINE_v1) ──
+  let _farsiPal=null,_farsiAtmo=null,_farsiAtmoKind=null,_farsiGrainPattern=null,_farsiT_ATMO=20;
+  // v2-phase2 — intensity scalar (soft/standard/vivid) modulates atmo density + zoom amplitude;
+  // background archetype (a/b) modulates gradient direction. Both are tracked anti-repetition
+  // dimensions (see saveMemoryItem('visual_mood_intensity'/'visual_background_archetype')) — a
+  // real second axis of variety within a mood, not just the mood itself.
+  const _farsiIntensityMul={soft:0.75,standard:1,vivid:1.3}[moodIntensity]||1;
+  const _farsiBgArchetype=bgArchetype==='b'?'b':'a';
+  if(isFarsiComposed){
+    _farsiPal=SRV_FARSI_MOOD_PALETTES[_srvFarsiMoodKey(mood)];
+    _farsiT_ATMO=isShort?15:20;
+    const _seed=(typeof seed==='number'&&isFinite(seed))?seed:1;
+    const _baseN=_srvFarsiMoodKey(mood)==='happy'?22:20;
+    if(_srvFarsiMoodKey(mood)==='emotional'){
+      _farsiAtmo=_srvFarsiGenRain(_seed,Math.round(46*_farsiIntensityMul)); _farsiAtmoKind='rain';
+    } else {
+      _farsiAtmo=_srvFarsiGenParticles(_srvFarsiMoodKey(mood),_seed,Math.round(_baseN*_farsiIntensityMul)); _farsiAtmoKind='particle';
+    }
+    // one-time cached grain pattern (5%-opacity fine dot texture), reused every frame
+    const _gc=document.createElement('canvas'); _gc.width=3; _gc.height=3;
+    const _gctx=_gc.getContext('2d');
+    _gctx.fillStyle='rgba(255,255,255,0.35)'; _gctx.fillRect(0,0,1,1);
+    _farsiGrainPattern=ctx.createPattern(_gc,'repeat');
+  }
+  function _drawFarsiAtmo(t){
+    const tp=(t%_farsiT_ATMO)/_farsiT_ATMO;
+    ctx.save();
+    if(_farsiAtmoKind==='particle'){
+      for(const p of _farsiAtmo){
+        const yf=((p.y0-1.15*tp)%1.15+1.15)%1.15-0.075;
+        const xf=p.x0+(12*(W/1280))*Math.sin(2*Math.PI*tp+p.phase)/W;
+        const op=Math.max(0.05,p.baseOp*(0.55+0.45*Math.sin(2*Math.PI*p.harmonic*tp+p.phase)));
+        const blur=_srvFarsiMoodKey(mood)==='romantic'?1.5:3.5;
+        ctx.globalAlpha=op; ctx.filter=`blur(${blur}px)`;
+        ctx.fillStyle=_farsiPal.particle;
+        ctx.beginPath(); ctx.arc(xf*W,yf*H,p.size/2,0,2*Math.PI); ctx.fill();
+      }
+    } else {
+      for(const d of _farsiAtmo){
+        const yf=((d.y0+2.4*tp)%1.4+1.4)%1.4-0.2;
+        ctx.globalAlpha=d.op; ctx.strokeStyle=_farsiPal.particle; ctx.lineWidth=1.4;
+        ctx.beginPath(); ctx.moveTo(d.x0*W,yf*H); ctx.lineTo(d.x0*W+3,yf*H+d.length); ctx.stroke();
+      }
+    }
+    ctx.filter='none'; ctx.globalAlpha=1;
+    ctx.restore();
+  }
+  function _drawFarsiPanel(px,py,pw,ph,zoom,radius,withBorder,withDarkFade){
+    ctx.save();
+    // zoom applied around panel center, matching CSS transform:scale/transform-origin:center
+    const cx=px+pw/2, cy=py+ph/2;
+    ctx.translate(cx,cy); ctx.scale(zoom,zoom); ctx.translate(-cx,-cy);
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(px,py,pw,ph,radius); else ctx.rect(px,py,pw,ph);
+    ctx.clip();
+    if(_avatarImg){
+      const iw=_avatarImg.naturalWidth,ih=_avatarImg.naturalHeight;
+      const ir=iw/ih,pr=pw/ph;
+      let sw,sh,sx,sy;
+      if(ir>pr){ sh=ih; sw=ih*pr; sx=(iw-sw)/2; sy=0; } else { sw=iw; sh=iw/pr; sx=0; sy=(ih-sh)*0.2; }
+      ctx.filter='grayscale(1) contrast(1.08) brightness(1.02)';
+      ctx.drawImage(_avatarImg,sx,sy,sw,sh,px,py,pw,ph);
+      ctx.filter='none';
+    } else {
+      ctx.fillStyle='#1a1210'; ctx.fillRect(px,py,pw,ph);
+    }
+    // duotone tint (mix-blend-mode:color equivalent)
+    ctx.globalCompositeOperation='color';
+    ctx.fillStyle=_farsiPal.tint;
+    ctx.fillRect(px,py,pw,ph);
+    ctx.globalCompositeOperation='source-over';
+    if(withDarkFade){
+      const g=ctx.createLinearGradient(0,py+ph*0.55,0,py+ph);
+      g.addColorStop(0,'rgba(10,6,4,0)'); g.addColorStop(1,'rgba(10,6,4,0.55)');
+      ctx.fillStyle=g; ctx.fillRect(px,py,pw,ph);
+    }
+    ctx.restore();
+    if(withBorder){
+      ctx.save();
+      ctx.strokeStyle=_farsiPal.frame; ctx.lineWidth=3;
+      ctx.beginPath();
+      if(ctx.roundRect) ctx.roundRect(px,py,pw,ph,radius); else ctx.rect(px,py,pw,ph);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+  // v2-visual-refinement — small SRV music-identity mark (two connected eighth-notes, drawn as
+  // vector shapes — no external asset/logo, generic and SRV-owned). x,y is the left notehead's own
+  // anchor; flip=true mirrors it around that anchor so it reads correctly on either side of a
+  // right-aligned typography column.
+  function _drawFarsiMusicMark(x,y,scale,color,flip){
+    ctx.save();
+    ctx.translate(x,y); if(flip) ctx.scale(-1,1);
+    ctx.fillStyle=color; ctx.strokeStyle=color;
+    const r=3.4*scale;
+    ctx.lineWidth=Math.max(1.3,2.1*scale);
+    ctx.beginPath(); ctx.ellipse(0,0,r*1.15,r,-0.33,0,2*Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(8.4*scale,-2.6*scale,r*1.15,r,-0.33,0,2*Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(r*0.95,-0.8*scale); ctx.lineTo(r*0.95,-13.5*scale); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8.4*scale+r*0.95,-3.4*scale); ctx.lineTo(8.4*scale+r*0.95,-15.6*scale); ctx.stroke();
+    ctx.lineWidth=Math.max(1.8,3*scale);
+    ctx.beginPath(); ctx.moveTo(r*0.95,-13.5*scale); ctx.lineTo(8.4*scale+r*0.95,-15.6*scale); ctx.stroke();
+    ctx.restore();
+  }
+  function _drawFarsiWordmark(x,y,align,barColor){
+    ctx.save();
+    ctx.textAlign=align; ctx.fillStyle='rgba(253,246,232,0.75)';
+    ctx.font=`700 ${Math.round(W*0.011)}px 'Vazirmatn', sans-serif`;
+    const label='SILK ROAD VOICES';
+    const labelW=ctx.measureText(label).width;
+    // v2-visual-refinement — the music mark now precedes the wordmark text (in reading order) as
+    // a small icon+wordmark lockup; the bars keep their original spacing, just measured from the
+    // new text position instead of the raw incoming x.
+    const markScale=W*0.00105, markSpan=Math.round(17*markScale), markGap=Math.round(W*0.014);
+    const textX=align==='left'?x+markSpan+markGap:x-markSpan-markGap;
+    _drawFarsiMusicMark(x,y-4*markScale,markScale,barColor,align!=='left');
+    ctx.fillText(label,textX,y);
+    const barsX=align==='right'?textX-labelW-Math.round(W*0.008)-40:textX+labelW+Math.round(W*0.008);
+    const bars=[7,13,9,16,6,11]; let bx=barsX;
+    const bw=Math.max(2,Math.round(W*0.0018));
+    ctx.fillStyle=barColor;
+    for(const bh of bars){ const sc=W/1280; ctx.fillRect(bx,y-bh*sc,bw,bh*sc); bx+=bw+2; }
+    ctx.restore();
+  }
+  // v2-visual-refinement — measures how many lines a wrap will take without drawing anything, so
+  // the typography stack (title+rule+Finglish+branding) can be vertically centered against the
+  // panel regardless of whether the title wraps to 1 or 3 lines. ctx.font must already be set.
+  function _srvWrapLineCount(ctx,text,maxWidth,maxLines){
+    const words=String(text||'').split(/\s+/);
+    const lines=[]; let line='';
+    for(const w of words){
+      const test=line?line+' '+w:w;
+      if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=w;} else {line=test;}
+      if(lines.length>=maxLines)break;
+    }
+    if(line&&lines.length<maxLines)lines.push(line);
+    return lines.length||1;
+  }
+  // v2-visual-refinement — top-anchored wrap (unlike _srvWrapLines, which centers on y — used
+  // elsewhere for hook/caption text and left untouched). Returns the Y just past the last line so
+  // callers can stack the next element without assuming a fixed line count. bold=true fakes a
+  // heavier weight via fill+stroke, since Lalezar has no separate bold face.
+  function _srvWrapLinesTop(ctx,text,x,topY,maxWidth,lineHeight,maxLines,bold){
+    const words=String(text||'').split(/\s+/);
+    const lines=[]; let line='';
+    for(const w of words){
+      const test=line?line+' '+w:w;
+      if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=w;} else {line=test;}
+      if(lines.length>=maxLines)break;
+    }
+    if(line&&lines.length<maxLines)lines.push(line);
+    lines.forEach((l,i)=>{
+      const ly=topY+i*lineHeight;
+      if(bold){ ctx.save(); ctx.lineWidth=Math.max(1,lineHeight*0.045); ctx.strokeStyle=ctx.fillStyle; ctx.strokeText(l,x,ly); ctx.restore(); }
+      ctx.fillText(l,x,ly);
+    });
+    return topY+lines.length*lineHeight;
+  }
+  // v2-title-layout-fix — CEO correction: a greedy word-wrap at a fixed font size could leave a
+  // single short word orphaned alone on its own second line (e.g. "آهسته عاشقم" / "کن"). This
+  // fits the Farsi title responsively instead: shrink the font (in fine steps, down to minFontPx)
+  // until the WHOLE title fits on one line, since short/medium titles should stay on one line
+  // whenever safely possible. Only if it still doesn't fit at the minimum size does it fall back
+  // to exactly two lines, chosen by the most visually BALANCED word split (minimizing the width
+  // difference between the two lines) rather than a greedy left-to-right fill — and that search
+  // explicitly penalizes any split that strands a single word alone on either line when the title
+  // has enough words to split more evenly. fontStrFn(px) must return the full ctx.font string for
+  // that pixel size (so callers control family/weight).
+  function _srvFitFarsiTitle(ctx,text,maxWidth,maxFontPx,minFontPx,fontStrFn){
+    const words=String(text||'').split(/\s+/).filter(function(w){return w.length>0;});
+    for(let size=maxFontPx; size>=minFontPx; size-=2){
+      ctx.font=fontStrFn(size);
+      if(ctx.measureText(text).width<=maxWidth) return {fontSize:size, lines:[text]};
+    }
+    ctx.font=fontStrFn(minFontPx);
+    if(words.length<=1) return {fontSize:minFontPx, lines:[text]};
+    let bestSplit=1, bestScore=Infinity;
+    for(let i=1;i<words.length;i++){
+      const l1=words.slice(0,i).join(' '), l2=words.slice(i).join(' ');
+      const w1=ctx.measureText(l1).width, w2=ctx.measureText(l2).width;
+      const orphan=(words.length>2 && (i===1 || words.length-i===1)) ? 1e6 : 0;
+      const score=Math.abs(w1-w2)+orphan;
+      if(score<bestScore){ bestScore=score; bestSplit=i; }
+    }
+    return {fontSize:minFontPx, lines:[words.slice(0,bestSplit).join(' '), words.slice(bestSplit).join(' ')]};
+  }
+  function _srvDrawPreSplitLinesTop(ctx,lines,x,topY,lineHeight){
+    lines.forEach(function(l,i){ ctx.fillText(l,x,topY+i*lineHeight); });
+    return topY+lines.length*lineHeight;
+  }
+  function _drawFarsiComposedFrame(t,skipFade){
+    // background gradient (155deg 3-stop, approximated as a diagonal). Archetype 'a' = top-left→
+    // bottom-right (the locked baseline direction); 'b' = top-right→bottom-left — same 3 approved
+    // colors, a genuinely different-looking background, still within the locked palette spec.
+    const g=_farsiBgArchetype==='b'
+      ? ctx.createLinearGradient(W*0.85,0,W*0.3,H)
+      : ctx.createLinearGradient(W*0.15,0,W*0.7,H);
+    g.addColorStop(0,_farsiPal.gradient[0]); g.addColorStop(0.55,_farsiPal.gradient[1]); g.addColorStop(1,_farsiPal.gradient[2]);
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    if(_farsiGrainPattern){ ctx.save(); ctx.globalAlpha=0.05; ctx.fillStyle=_farsiGrainPattern; ctx.fillRect(0,0,W,H); ctx.restore(); }
+    const zoom=1+(0.028*_farsiIntensityMul)*Math.sin(2*Math.PI*(t%_farsiT_ATMO)/_farsiT_ATMO);
+    const isMirror=!!mirror;
+    if(!isShort){
+      // ── LONG: 46%-width framed panel on left/right + typography zone opposite ──
+      const panelW=Math.round(W*0.46), panelH=Math.round(H-90*H/720), panelTop=Math.round(45*H/720), panelSide=Math.round(45*H/720);
+      const panelX=isMirror?panelSide:(W-panelSide-panelW);
+      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,18,true,true);
+      _drawFarsiAtmo(t);
+      // title zone
+      const titleSide=isMirror?'right':'left';
+      const titleW=W-panelW-Math.round(40*W/1280);
+      const pad=Math.round(W*0.036);
+      const tx=titleSide==='left'?pad:(W-pad);
+      ctx.textAlign=titleSide==='left'?'left':'right';
+      ctx.direction='rtl';
+      const _rawTitle=(title||'').replace(/\s*[|·—–].*$/,'').replace(/\s+(?:Emotional|Romantic|Happy)\b.*/i,'').trim();
+      // v2-visual-refinement — Farsi title is the dominant typography element (was 0.045W,
+      // center-anchored, with a visible mood-word label underneath it — mood is internal metadata
+      // only now and is never shown on the cover). The whole stack (title/rule/Finglish/branding) is
+      // measured first and vertically centered against the panel, so a real 1-line title and a real
+      // 3-line title both land balanced against the portrait, instead of fixed offsets that assumed
+      // a specific line count.
+      // v2-visual-correction-2 — CEO correction: the previous Lalezar treatment read as generic
+      // heavy/blocky display text, not calligraphy. Switched to Noto Nastaliq Urdu (real Nastaliq
+      // script, Google Fonts) at its own 600 weight — no synthetic bold stroke here (that would
+      // uniformly thicken every stroke and destroy exactly the thin/thick calligraphic variation
+      // the correction asked to preserve). Font size/line-height increased vs. the old Lalezar
+      // numbers because Nastaliq's diagonal flow reads smaller at the same em-size and needs more
+      // vertical room per line.
+      // v2-title-layout-fix — responsive fit: shrink-to-one-line first, balanced (never
+      // orphaned) two-line split only if the title genuinely can't fit on one line at the floor
+      // size. Replaces the old fixed-size/greedy-wrap approach that could strand a short last
+      // word alone on its own line.
+      const _titleMaxFont=Math.round(W*0.072), _titleMinFont=Math.round(W*0.048);
+      const _titleFontStr=function(px){ return `600 ${px}px 'Noto Nastaliq Urdu', serif`; };
+      const _titleMaxW=titleW-pad*2;
+      const _titleFit=_srvFitFarsiTitle(ctx,_rawTitle,_titleMaxW,_titleMaxFont,_titleMinFont,_titleFontStr);
+      ctx.font=_titleFontStr(_titleFit.fontSize);
+      const _titleLineH=Math.round(_titleFit.fontSize*1.2);
+      const _nTitleLines=_titleFit.lines.length;
+      const _ruleGap=Math.round(W*0.022);
+      const _finglishH=titleFinglish?Math.round(W*0.036):0;
+      const _wordmarkGap=Math.round(W*0.044);
+      const _wordmarkH=Math.round(W*0.028);
+      const _stackH=(_nTitleLines*_titleLineH)+_ruleGap+3+_finglishH+_wordmarkGap+_wordmarkH;
+      const titleTopY=Math.max(Math.round(H*0.16),Math.round(H*0.5-_stackH/2));
+      ctx.fillStyle='#fdf6e8';
+      const titleBottomY=_srvDrawPreSplitLinesTop(ctx,_titleFit.lines,tx,titleTopY,_titleLineH);
+      // rule
+      const ruleY=titleBottomY+_ruleGap;
+      ctx.fillStyle=_farsiPal.frame;
+      const ruleX=titleSide==='left'?tx:tx-56;
+      ctx.fillRect(ruleX,ruleY,56,3);
+      let _stackY=ruleY;
+      // Finglish (Latin transliteration) title — only rendered when the package actually supplies a
+      // real deterministic value. Nothing is fabricated or reserved as blank space when absent; see
+      // the SRV Farsi V2 visual-refinement CEO checkpoint for the open decision on how to source
+      // this deterministically without touching frozen title-generation logic.
+      if(titleFinglish){
+        ctx.direction='ltr'; ctx.textAlign=titleSide;
+        ctx.font=`600 ${Math.round(W*0.0195)}px 'IBM Plex Mono', monospace`;
+        ctx.fillStyle='rgba(253,246,232,0.82)';
+        _stackY+=_finglishH;
+        ctx.fillText(String(titleFinglish).toUpperCase(),tx,_stackY);
+      }
+      ctx.direction='ltr';
+      // wordmark + music-mark row — grouped directly under the title stack (previously pinned to
+      // the extreme bottom edge, leaving the lower half of the typography zone empty).
+      _drawFarsiWordmark(tx,_stackY+_wordmarkGap,titleSide,_farsiPal.frame);
+    } else {
+      // ── SHORT: full-bleed panel, hook top, caption bottom, mono mark top-left ──
+      _drawFarsiPanel(0,0,W,H,zoom,0,false,false);
+      // extra fade for legibility (Python .fade gradient)
+      const fg=ctx.createLinearGradient(0,0,0,H);
+      fg.addColorStop(0,'rgba(28,14,12,0.25)'); fg.addColorStop(0.30,'rgba(0,0,0,0)'); fg.addColorStop(0.55,'rgba(0,0,0,0)'); fg.addColorStop(1,'rgba(20,10,8,0.75)');
+      ctx.fillStyle=fg; ctx.fillRect(0,0,W,H);
+      _drawFarsiAtmo(t);
+      ctx.direction='rtl'; ctx.textAlign='right';
+      ctx.fillStyle='#fdf6e8';
+      // v2-short-final-fix — CEO production defect: the top viewer-facing text was showing the
+      // ORIGINAL generated hook even after the operator edited and saved a new title, because
+      // this line prioritized hookText (pkg.hook — never touched by Review Save, so permanently
+      // stuck at its generation-time value) over the final saved title. pkg.title is the
+      // canonical, Review-editable, Supabase-persisted field for Short same as Long; it's now
+      // the primary source, with hookText only as a fallback for the rare case title is empty.
+      const _hook=title||hookText||'';
+      // v2-short-title-safe-box — CEO correction: nudging one top-margin percentage couldn't
+      // work for every avatar photo, because a full-width band at ANY fixed height will cross
+      // whichever avatar's face happens to sit there. Replaced the free-floating full-width band
+      // with a genuine top-right CORNER box, narrow enough to sit beside the face horizontally
+      // rather than across its forehead regardless of exactly how high/low or how wide that face
+      // sits. _titleBoxMaxW caps the wrap width (not just the right-alignment origin) so even a
+      // long, multi-line title stays inside the corner and never drifts toward center. Tuned
+      // against all three avatar groups, worst case first: a Duet photo (two faces, spanning most
+      // of the frame width) with a deliberately long wrapped title needed the box narrowed to
+      // ~34% width / ~16% top margin before the first line cleared the male figure's hairline;
+      // solo female/male avatars (the majority of real rotation — Duet is 6/20 slots) have far
+      // more clearance at these same numbers, confirmed by re-testing both after tuning.
+      const _titleBoxTopY=Math.round(H*0.16);
+      const _titleBoxMaxW=Math.round(W*0.34);
+      const _titleBoxRightX=W-Math.round(W*0.022);
+      ctx.font=`${Math.round(W*0.050)}px 'Lalezar', sans-serif`;
+      _srvWrapLinesTop(ctx,_hook,_titleBoxRightX,_titleBoxTopY,_titleBoxMaxW,Math.round(W*0.056),3,false);
+      // caption (current lyric line), styled per baseline spec
+      if(lyricLines.length){
+        let idx=0;
+        for(let k=1;k<lyricTimings.length;k++){ if(t>=lyricTimings[k]) idx=k; }
+        const line=lyricLines[idx]||'';
+        const nextT=lyricTimings[idx+1]!==undefined?lyricTimings[idx+1]:targetDur;
+        const lineDur=Math.max(0.5,nextT-lyricTimings[idx]);
+        const inWin=t-lyricTimings[idx];
+        const alpha=Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35)));
+        ctx.save(); ctx.globalAlpha=alpha;
+        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.043)}px 'Vazirmatn', sans-serif`;
+        ctx.fillStyle='#fff';
+        ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=6;
+        // v2-phase2 — bottom margin widened to ~18% of height (was ~6%) to clear the platform-UI
+        // safe zone (username/caption/like-share rail) that Shorts/Reels/TikTok reserve at the bottom.
+        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.88,Math.round(W*0.05),2);
+        ctx.shadowBlur=0; ctx.restore();
+      }
+      ctx.direction='ltr';
+      ctx.textAlign='left'; ctx.fillStyle='rgba(253,246,232,0.6)';
+      ctx.font=`600 ${Math.round(W*0.018)}px 'IBM Plex Mono', monospace`;
+      // v2-visual-refinement — compact SRV identity mark next to the existing corner label. Short's
+      // hook text / caption safe zones / mobile UI clearance are frozen and untouched — this only
+      // adds a small icon beside a label that was already drawn here.
+      const _markScaleShort=W*0.00075;
+      _drawFarsiMusicMark(Math.round(W*0.022),Math.round(W*0.045)-6*_markScaleShort,_markScaleShort,'rgba(253,246,232,0.75)',false);
+      ctx.fillText('SRV FARSI',Math.round(W*0.022)+Math.round(16*_markScaleShort)+Math.round(W*0.012),Math.round(W*0.045));
+    }
+    // v2-visual-refinement — skipFade is true only for the single pre-recording drawFrame(0) call
+    // used to capture the automatic YouTube thumbnail; the recorded video's own fade-in/out (the
+    // normal path, skipFade falsy) is unchanged.
+    if(!skipFade){
+      if(t<0.5){ ctx.fillStyle='rgba(0,0,0,'+(1-t/0.5).toFixed(3)+')'; ctx.fillRect(0,0,W,H); }
+      if(targetDur>1.5&&t>targetDur-1.0){
+        const fo=Math.min(1,(t-(targetDur-1.0))/1.0);
+        ctx.fillStyle='rgba(0,0,0,'+fo.toFixed(3)+')'; ctx.fillRect(0,0,W,H);
+      }
+    }
+  }
+
   // ── Main frame renderer ───────────────────────────────────────────────────
   function drawFrame(t){
+    if(isFarsiComposed){ _drawFarsiComposedFrame(t,_thumbCaptureMode); return; }
     ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     // ── Background rendering ───────────────────────────────────────────────
     // v13.69.91: time-fraction avatar override (SRV Farsi Long)
@@ -18549,6 +19155,10 @@ async function _srvRenderVideo(opts){
       ctx.fillStyle='rgba(0,0,0,'+fo.toFixed(3)+')'; ctx.fillRect(0,0,W,H);
     }
   }
+  // v2-visual-refinement — skip the composed-frame fade-in ONLY for this explicit pre-recording
+  // capture so the automatic YouTube thumbnail shows the full cover, not a black frame (t=0 fade
+  // alpha was previously 1.0, i.e. solid black). The real recorded video's own fade-in is untouched.
+  _thumbCaptureMode = isFarsiComposed && !isShort;
   drawFrame(0);
   await new Promise(r => setTimeout(r, 100));
   // v13.69.8 — capture first frame as thumbnail JPEG before recorder starts (clean frame, no mid-animation state)
@@ -18556,6 +19166,7 @@ async function _srvRenderVideo(opts){
   if(!isShort){
     try { thumbDataUrl = canvas.toDataURL('image/jpeg', 0.92); } catch(_){}
   }
+  _thumbCaptureMode = false;
   recorder.start();
   // v13.69.8 — AudioContext auto-suspends in Chrome/Brave until user gesture; resume before play or WebAudio graph is silent → no sound in recording
   await audioCtx.resume();
@@ -18677,7 +19288,7 @@ async function srvBuildPackage(pkgId){
       // v13.69.8 — destructure {blob, thumbDataUrl} from render result
       const _longResult = await _srvRenderVideo({
         photoUrl, audioFile: audio.file, type: 'long',
-        title: pkgTitle, channel: pkgChannel, lyrics: '',
+        title: pkgTitle, titleFinglish: _pkgLocal.titleFinglish || pkg.titleFinglish || '', channel: pkgChannel, lyrics: '',
         statusCb: (msg) => { if(statusEl) statusEl.textContent = msg; }
       });
       longBlob = _longResult.blob; longThumb = _longResult.thumbDataUrl;
@@ -18697,7 +19308,7 @@ async function srvBuildPackage(pkgId){
     if(statusEl) statusEl.textContent = _isLongSongTask ? 'Rendering SHORT video with lyric overlay (30s)…' : 'Rendering Short Video (portrait 9:16)…';
     const { blob: shortBlob } = await _srvRenderVideo({
       photoUrl, audioFile: audio.file, type: 'short',
-      title: pkgTitle, channel: pkgChannel, lyrics: pkgLyrics,
+      title: pkgTitle, titleFinglish: _pkgLocal.titleFinglish || pkg.titleFinglish || '', channel: pkgChannel, lyrics: pkgLyrics,
       statusCb: (msg) => { if(statusEl) statusEl.textContent = msg; }
     });
     if(statusEl) statusEl.textContent = 'Uploading SHORT video to storage…';
@@ -21316,7 +21927,12 @@ function renderIntegrations(){
     }
   }
   // Filter every section down to currently-connected items only.
-  integrations.content = integrations.content.filter(i=>i.connected);
+  // v16.67.0 — bugfix: this blanket filter also hid YouTube once disconnected/token-expired,
+  // even though it has a real, working Connect/Reconnect flow (ytConnect -> /api/youtube/auth)
+  // unlike the placeholder finance/system rows this cleanup was meant to hide — leaving no way
+  // to reconnect from the UI at all. YouTube stays visible regardless of connected state so its
+  // Not Connected badge + Connect button (already implemented in intCard above) can always render.
+  integrations.content = integrations.content.filter(i=>i.connected||i.isYouTube);
   integrations.finance = integrations.finance.filter(i=>i.connected);
   integrations.system  = integrations.system.filter(i=>i.connected);
 

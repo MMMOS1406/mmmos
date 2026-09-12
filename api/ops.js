@@ -2477,7 +2477,7 @@ EXAMPLE sunoPrompt:
 // SHORT VIDEO PACKAGE — sunoPrompt and lyrics hold the short content (client reads these)
 // shortSunoPrompt and shortLyrics are identical copies (for downstream compat)
 <package>
-{"isShortVideo":true,"shortTitle":"emoji + Persian short title — must be a FEELING or CONFESSION (e.g. هنوز منتظرم · بمان · حرف آخر) — NEVER a place/scene/object name","title":"emoji + Persian short title — must be a FEELING or CONFESSION — NEVER a place/scene/object name","concept":"one sentence (English) — MUST answer: what does [he/she] FEEL toward [her/him] right now? — NEVER a place/scene/object as organizing frame — WRONG: 'A man returns to the bench where...' or 'The empty hall still holds her memory' — RIGHT: 'A man who still loves her but can't bring himself to call'","mood":"${mood}","hook":"the hook phrase in Persian — line 1 of the lyrics","sunoPrompt":"[SHORT-ONLY SUNO PROMPT — 0:15-0:20 runtime, vocal at 0:00, NO intro]","shortSunoPrompt":"[identical to sunoPrompt]","lyrics":"[EXACTLY 3-4 Persian lines, NO section tags, hook is line 1]","shortLyrics":"[identical to lyrics]","captionYT":"Persian YouTube Short caption — hook + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","shortThumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, taxi headlights, her scarf, worn photograph — NEVER a location word like bench, hall, rooftop, vendor, corner)","location":"unnamed backdrop only (1-3 words — e.g. unnamed room, unnamed night, unnamed space — NOT a named place or landmark that could become a title or hook)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, heartbreak of a last goodbye, longing from another city, first meeting that changed everything)"}
+{"isShortVideo":true,"shortTitle":"emoji + Persian short title — must be a FEELING or CONFESSION (e.g. هنوز منتظرم · بمان · حرف آخر) — NEVER a place/scene/object name","title":"emoji + Persian short title — must be a FEELING or CONFESSION — NEVER a place/scene/object name","titleFinglish":"Latin/Finglish TRANSLITERATION of the title above (pronunciation, not meaning) — NOT an English translation, e.g. Persian دلتنگ توام → Finglish \"Deltang-e To'am\". Apostrophe for a glottal stop where natural, hyphenate compound words for readability, no emoji.","concept":"one sentence (English) — MUST answer: what does [he/she] FEEL toward [her/him] right now? — NEVER a place/scene/object as organizing frame — WRONG: 'A man returns to the bench where...' or 'The empty hall still holds her memory' — RIGHT: 'A man who still loves her but can't bring himself to call'","mood":"${mood}","hook":"the hook phrase in Persian — line 1 of the lyrics","sunoPrompt":"[SHORT-ONLY SUNO PROMPT — 0:15-0:20 runtime, vocal at 0:00, NO intro]","shortSunoPrompt":"[identical to sunoPrompt]","lyrics":"[EXACTLY 3-4 Persian lines, NO section tags, hook is line 1]","shortLyrics":"[identical to lyrics]","captionYT":"Persian YouTube Short caption — hook + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","shortThumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, taxi headlights, her scarf, worn photograph — NEVER a location word like bench, hall, rooftop, vendor, corner)","location":"unnamed backdrop only (1-3 words — e.g. unnamed room, unnamed night, unnamed space — NOT a named place or landmark that could become a title or hook)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, heartbreak of a last goodbye, longing from another city, first meeting that changed everything)"}
 </package>`;
     } else {
     // ── SRV FARSI LONG SONG GENERATOR — FROZEN v13.71.1 ────────────────────
@@ -2871,7 +2871,7 @@ CRITICAL: Start your response with <package> IMMEDIATELY. Do NOT write any pream
 // shortSunoPrompt and shortLyrics are NOT generated here.
 // Short Video packages are produced by a completely separate generator.
 <package>
-{"title":"emoji + Persian title + emoji","shortTitle":"emoji + short Persian title","concept":"one sentence (English) — MUST answer: what does [Person] FEEL toward [Person] RIGHT NOW? — BANNED even with person as grammatical subject: 'A man returns to the bench where...' / 'She sits in the empty hall where...' / 'He stands at the vendor corner where...' — Memory-Through-Setting patterns use place/object as the organizing frame and are BANNED — RIGHT: 'A man who still loves her but cannot bring himself to call' / 'She knows he's still waiting but doesn't know how to go back' — the concept must be about a FEELING, not a location or object a person is near","mood":"${mood}","emotionalSubMode":"the texture chosen from the SUB-MODE list above","hook":"the ONE memorable emotional hook phrase (Persian) — visual, specific, singable, NO location word as the anchor, carries SRV romantic identity — the hook is about a PERSON, a FEELING, or a RELATIONAL MOMENT, never a place name","sunoPrompt":"identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules above — must include cinematic-modern-Persian-pop anchor + vocal direction + atmospheric texture + cinematic build + production quality + 3:00-3:20","lyrics":"full Persian lyrics using EXACT section tags: [Intro] [Verse 1] [Verse 2] [Chorus] [Music Break] [Verse 3] [Final Chorus] [Outro]. Instrumental sections ([Intro] [Music Break] [Outro]) get NO lyrics — just the tag. Sung sections follow the structure rules. Conversational rhythm. ONE central romantic image (human/relational object — NOT a location) running through all sections. [Outro] tag MUST appear as the final section to control Suno song length.","captionYT":"Persian YouTube caption with hook question + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, her scarf, rain on glass, worn photograph, jacket on the hook, half-finished tea — NEVER a location word like bridge, café, rooftop, street)","location":"generic unnamed backdrop only (1-3 words English — e.g. unnamed apartment, unnamed street, unnamed night, unnamed space — NEVER a named landmark, bridge, station, or specific city place that could become the song title)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting, romantic-distance)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, first meeting in a crowd, heartbreak of a last goodbye, longing from another city, the moment love is almost confessed, romantic tension across a room)"}
+{"title":"emoji + Persian title + emoji","titleFinglish":"Latin/Finglish TRANSLITERATION of the title above (pronunciation, not meaning) — NOT an English translation, e.g. Persian دلتنگ توام → Finglish \"Deltang-e To'am\". Apostrophe for a glottal stop where natural, hyphenate compound words for readability, no emoji.","shortTitle":"emoji + short Persian title","concept":"one sentence (English) — MUST answer: what does [Person] FEEL toward [Person] RIGHT NOW? — BANNED even with person as grammatical subject: 'A man returns to the bench where...' / 'She sits in the empty hall where...' / 'He stands at the vendor corner where...' — Memory-Through-Setting patterns use place/object as the organizing frame and are BANNED — RIGHT: 'A man who still loves her but cannot bring himself to call' / 'She knows he's still waiting but doesn't know how to go back' — the concept must be about a FEELING, not a location or object a person is near","mood":"${mood}","emotionalSubMode":"the texture chosen from the SUB-MODE list above","hook":"the ONE memorable emotional hook phrase (Persian) — visual, specific, singable, NO location word as the anchor, carries SRV romantic identity — the hook is about a PERSON, a FEELING, or a RELATIONAL MOMENT, never a place name","sunoPrompt":"identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules above — must include cinematic-modern-Persian-pop anchor + vocal direction + atmospheric texture + cinematic build + production quality + 3:00-3:20","lyrics":"full Persian lyrics using EXACT section tags: [Intro] [Verse 1] [Verse 2] [Chorus] [Music Break] [Verse 3] [Final Chorus] [Outro]. Instrumental sections ([Intro] [Music Break] [Outro]) get NO lyrics — just the tag. Sung sections follow the structure rules. Conversational rhythm. ONE central romantic image (human/relational object — NOT a location) running through all sections. [Outro] tag MUST appear as the final section to control Suno song length.","captionYT":"Persian YouTube caption with hook question + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, her scarf, rain on glass, worn photograph, jacket on the hook, half-finished tea — NEVER a location word like bridge, café, rooftop, street)","location":"generic unnamed backdrop only (1-3 words English — e.g. unnamed apartment, unnamed street, unnamed night, unnamed space — NEVER a named landmark, bridge, station, or specific city place that could become the song title)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting, romantic-distance)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, first meeting in a crowd, heartbreak of a last goodbye, longing from another city, the moment love is almost confessed, romantic tension across a room)"}
 </package>`;
     } // end isLong (long song branch)
   } else if (engineId === 'srv_english') {
@@ -3409,30 +3409,39 @@ Kelly's energy is the energy of telling your smartest friend something cool — 
 }
 
 // ── v15.6.5 — Farsi Caption Regenerator ─────────────────────────────────────
-// Called when title or lyrics is saved in Review; regenerates captionYT only.
+// Called when title or lyrics is saved in Review. Single Claude Haiku call — the one existing
+// metadata-refresh mechanism — regenerates captionYT and, when the title itself was the edited
+// field, titleFinglish alongside it in the SAME response (v2-single-metadata-call: a prior pass
+// used a second separate Haiku call for titleFinglish; consolidated back into one per explicit
+// CEO correction). hashtags are extracted from the same caption text, never a separate call.
+// A manually-saved title/lyrics stays the single authoritative source; every field here is
+// derived FROM it, never the reverse.
 async function farsiRegenCaption(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
-  const { title, lyrics, isLong } = req.body || {};
+  const { title, lyrics, isLong, needFinglish } = req.body || {};
   if (!title && !lyrics) return res.json({ ok: false, error: 'title or lyrics required' });
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_API_KEY) return res.json({ ok: false, error: 'no_api_key' });
 
-  const prompt = `You are a Persian social media caption writer for Silk Road Voices, a Persian music channel on YouTube.
+  const wantFinglish = !!(title && needFinglish);
+  const prompt = `You are writing the Farsi portion of a YouTube description for Silk Road Voices, a Persian music channel.
 
-Given the song title and lyrics below, write a compelling YouTube caption in Persian that:
-- Opens with a poetic hook line drawn from the emotional core of the lyrics (in Persian)
-- 2-3 lines of description — evocative, not descriptive
-- Ends with a question or CTA inviting listeners to comment or share
-- Includes relevant Persian and English hashtags on the last line
-- Total length: 4-6 lines maximum
-- Language: Persian (Farsi) with hashtags
+Given the song title and lyrics below, write 2-3 concise Farsi sentences reflecting THIS song's actual content:
+- Sentence 1: the song's real emotional meaning/message
+- Next 1-2 sentences: the emotional situation/story (concise, not generic)
+- No hook-as-question, no CTA, no hashtags, no English — those are assembled separately
+- Language: Persian (Farsi) only
 
 Song Title: ${title || ''}
 Lyrics:
 ${lyrics || ''}
+${wantFinglish ? `
+Also transliterate the song title into Latin/Finglish — pronunciation only, NOT an English translation (e.g. Persian دلتنگ توام -> Finglish "Deltang-e To'am"). Use an apostrophe for a glottal stop where natural, hyphenate compound words for readability, no emoji.` : ''}
 
-Respond with ONLY the caption text, no explanation, no JSON, no tags.`;
+Respond in EXACTLY this format and nothing else:
+CAPTION:
+<the caption text>${wantFinglish ? `\nTITLEFINGLISH:\n<the transliteration, one line>` : ''}`;
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -3441,9 +3450,25 @@ Respond with ONLY the caption text, no explanation, no JSON, no tags.`;
       body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
     });
     const d = await resp.json();
-    const caption = (d.content || []).map(b => b.text || '').join('').trim();
+    const raw = ((d && d.content) || []).map(b => b.text || '').join('').trim();
+    if (!raw) return res.json({ ok: false, error: 'empty_response' });
+
+    // Defensive parsing: fall back to treating the whole response as the caption if the model
+    // didn't follow the CAPTION:/TITLEFINGLISH: format exactly.
+    const capMatch = raw.match(/CAPTION:\s*([\s\S]*?)(?:\n?TITLEFINGLISH:|$)/i);
+    const finMatch = raw.match(/TITLEFINGLISH:\s*([\s\S]*)$/i);
+    const caption = (capMatch ? capMatch[1] : raw).trim();
     if (!caption) return res.json({ ok: false, error: 'empty_response' });
-    return res.json({ ok: true, captionYT: caption });
+
+    // hashtags are extracted from THIS SAME caption (whose prompt already guarantees Persian+
+    // English hashtags on its last line) rather than a separate field, so caption and hashtags
+    // can never diverge from each other.
+    const hashtagMatches = caption.match(/#[\w؀-ۿ_]+/g) || [];
+    const hashtags = hashtagMatches.join(' ');
+
+    const titleFinglish = wantFinglish && finMatch ? finMatch[1].trim() : undefined;
+
+    return res.json({ ok: true, captionYT: caption, hashtags, titleFinglish });
   } catch(e) {
     return res.json({ ok: false, error: e.message });
   }
