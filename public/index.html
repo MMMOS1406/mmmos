@@ -715,7 +715,7 @@ const USERS=[
   // v13.69.46 — MMMOS Simplification: access lists now reference the 5 primary tabs (home/tasks/engines/finance/system).
   // Legacy sub-routes (content, packages, integrations, constitution, factory, continuity, settings) remain callable
   // via renderTab(id) for backward compat; they just don't appear in the top nav anymore.
-  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","engines","finance","system","marketing","human_resources","legal_compliance","social_media_manager"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against.
+  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","tasks","engines","finance","system","marketing","human_resources","legal_compliance","social_media_manager"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against. v16.67.1 — restored "tasks": the v13.69.46 5-tabs consolidation's own comment says access lists cover the 5 primary tabs (home/tasks/engines/finance/system), yet admin's array omitted "tasks" — the one place the Developer Options/quick-generate Long-or-Short test control (renderDeveloperCard, called only from renderTasks) renders, so it silently became unreachable for admin/CEO while VA (whose access already includes "tasks") was unaffected.
   {id:"family",name:"Family",role:"Family Access",emoji:"👨‍👩‍👧",pin:"5678",access:["home","finance","engines"]},
   {id:"va",name:"VA",role:"Operator",emoji:"⚙️",pin:"0000",access:["tasks","system"]},
 ];
@@ -14769,7 +14769,9 @@ function _quickGenerateTest(engineId,engineName,contentFormat){
   _setEngineState(engineName,'test');
   saveAppState();
   if(engineId==='srv_farsi'){
-    const mode=(typeof _srvFarsiNextMode==='function')?_srvFarsiNextMode():'Female — Emotional';
+    // v16.67.1 — peek (not advance): this is only choosing a mood label for a TEST task, and must
+    // not consume a real rotation slot — same isolation as the post-generation guard below.
+    const mode=(typeof _srvFarsiPeekNextMode==='function')?_srvFarsiPeekNextMode():'Female — Emotional';
     const newTaskId=vaAddTestTask(engineName,mode,contentFormat);
     if(!newTaskId){alert('Quick Generate failed: could not create persistent test task. Check console.');return;}
     if(typeof vaFarsiGeneratePackage==='function'){
@@ -16829,9 +16831,15 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
     console.log('[SRV Farsi] ✓ memory saved · title="'+(_pkg.title||'').slice(0,40)+'"');
     // v13.69.93 — advance rotation pointer after successful generate (mode was auto-pre-selected in goStep2)
     // This ensures the NEXT generate call auto-highlights the next combination in sequence.
-    if(typeof _srvFarsiNextMode==='function'){
+    // v16.67.1 — guarded: a Developer Options quick-generate TEST package (engine in 'test'
+    // state, pkg.isTest stamped by generatePackage) must not consume/advance the real production
+    // rotation pointer, per the same isolation the isTest flag already gives test runs elsewhere
+    // (private YouTube, no publish slot). Real (non-test) generation is completely unaffected.
+    if(typeof _srvFarsiNextMode==='function' && !_pkg.isTest){
       _srvFarsiNextMode(); // advances D.srvFarsiRotationIdx and saves state
       console.log('[SRV Farsi] ✓ rotation advanced → next mode: '+_srvFarsiPeekNextMode());
+    }else if(_pkg.isTest){
+      console.log('[SRV Farsi] TEST package — rotation pointer left untouched');
     }
   }
   return _pkg;
