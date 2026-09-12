@@ -12454,21 +12454,21 @@ function _srvFarsiMoodHashtags(mood){
   if(m.includes('emotional'))return['#EmotionalMusic','#HeartbreakSong'];
   return['#RomanticSong','#LoveSong'];
 }
-// Core+mood set is fixed; at most 3 additional song-specific tags are allowed, reused from
-// whatever the model already produced for this package (never a fresh, uncontrolled model call),
-// filtered to drop anything that duplicates the controlled set.
+// v16.68.1 — CEO correction: song-specific tags must NOT come from pkg.hashtags (uncontrolled,
+// model-generated). Instead, derive a single safe tag deterministically from the FINAL saved
+// titleFinglish itself — normalized (drop apostrophes/punctuation, collapse spaces/hyphens) —
+// e.g. titleFinglish "Deltang-e To'am" -> "#DeltangeToam". No model call, no pkg.hashtags read.
+function _srvFarsiTitleHashtag(titleFinglish){
+  const cleaned=String(titleFinglish||'').replace(/[^a-zA-Z0-9\s-]/g,'').replace(/[\s-]+/g,'');
+  return cleaned?'#'+cleaned:'';
+}
+// Core+mood set is fixed (6 tags); at most one additional song-specific tag, derived purely from
+// the final saved titleFinglish (never pkg.hashtags, never a fresh model call).
 function _srvFarsiYouTubeHashtags(pkg,mood){
   const controlled=['#SilkRoadVoices','#PersianMusic','#PersianDeepHouse','#FarsiMusic'].concat(_srvFarsiMoodHashtags(mood));
   const controlledLower=controlled.map(function(t){return t.toLowerCase();});
-  const modelTags=String((pkg&&pkg.hashtags)||'').match(/#[\w؀-ۿ_]+/g)||[];
-  const extra=[];
-  for(const t of modelTags){
-    if(extra.length>=3)break;
-    const tl=t.toLowerCase();
-    if(controlledLower.includes(tl))continue;
-    if(extra.some(function(e){return e.toLowerCase()===tl;}))continue;
-    extra.push(t);
-  }
+  const titleTag=_srvFarsiTitleHashtag(pkg&&pkg.titleFinglish);
+  const extra=(titleTag && !controlledLower.includes(titleTag.toLowerCase()))?[titleTag]:[];
   return controlled.concat(extra);
 }
 // Assembles the full YouTube description: (A+B) Farsi emotional-meaning/story sentences from
@@ -12482,6 +12482,17 @@ function _srvFarsiYouTubeDescription(pkg,mood){
   const brandingLine='Silk Road Voices — original Persian love songs, new release every week.';
   const tags=_srvFarsiYouTubeHashtags(pkg,mood).join(' ');
   return [farsiBody,identityLine,brandingLine,tags].filter(Boolean).join('\n\n');
+}
+// v16.68.1 — SRV Farsi lifecycle display clarity: splits the single stored "Artist — Mood"
+// string (e.g. "Duet — Romantic") into separate business fields, reused by every SRV Farsi
+// task/lifecycle display site so Artist/Mood never render as one combined pseudo-mode again.
+// Data-only: task.mood/task.mode/rotation storage is completely untouched by this function.
+function _srvFarsiSplitMood(mood){
+  const m=String(mood||'');
+  const artist=m.includes(' — ')?m.split(' — ')[0].trim():'';
+  const moodShort=m.includes(' — ')?m.split(' — ')[1].trim():m;
+  const moodLabel=/happy/i.test(moodShort)?'Happy Love':/emotional/i.test(moodShort)?'Emotional Love':'Romantic Love';
+  return {artist,moodLabel};
 }
 // v13.73.1 — reset Farsi publish calendar (clear anchor + seq so next 3 tasks = Fri/Sat/Sun)
 function _srvFarsiResetPublishCalendar(){
@@ -14732,13 +14743,27 @@ function renderCurrentTaskCard(){
   const status = String(target.status||'open').toLowerCase();
   const stateLabel = inProgress ? 'IN PROGRESS' : 'NEXT UP';
   const stateColor = inProgress ? '#22c55e' : '#c9a84c';
-  const name = escHTML(String(target.name || target.title || '(untitled)'));
+  // v16.68.1 — SRV Farsi display clarity: this card previously showed target.name verbatim for
+  // every engine, which for SRV Farsi baked in a combined "SRV Farsi — Duet — Romantic · Long"
+  // string at task-creation time. Narrow branch for SRV Farsi only (isSrvFarsiTask) — every
+  // other engine's name/title rendering below is byte-identical to before.
+  const isSrvFarsiTask = typeof _srvFarsiHasLifecycle==='function' && _srvFarsiHasLifecycle(target);
+  let name, farsiMoodLine = '';
+  if(isSrvFarsiTask){
+    const {artist:_ctArtist,moodLabel:_ctMoodLabel} = _srvFarsiSplitMood(target.mode||target.mood||'');
+    const _ctFormat = target.contentType || (target.contentFormat==='long'?'Long':target.contentFormat==='short'?'Short':'');
+    name = escHTML('SRV Farsi'+(_ctFormat?' · '+_ctFormat:''));
+    farsiMoodLine = (_ctArtist?`Artist: ${escHTML(_ctArtist)} · `:'')+`Mood: ${escHTML(_ctMoodLabel)}`;
+  }else{
+    name = escHTML(String(target.name || target.title || '(untitled)'));
+  }
   return `<div class="card" style="margin-top:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div class="card-title" style="margin-bottom:0">Current Task</div>
       <span style="font-size:10px;font-weight:800;color:${stateColor};letter-spacing:1px;padding:3px 8px;background:${inProgress?'rgba(34,197,94,0.10)':'rgba(201,168,76,0.10)'};border:1px solid ${inProgress?'rgba(34,197,94,0.40)':'rgba(201,168,76,0.40)'};border-radius:5px;font-family:'JetBrains Mono',monospace">${stateLabel}</span>
     </div>
     <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">${eIcon} ${name}</div>
+    ${farsiMoodLine?`<div style="font-size:11px;color:var(--dim);margin-bottom:4px;font-family:'JetBrains Mono',monospace">${farsiMoodLine}</div>`:''}
     <div style="font-size:11px;color:var(--dim);margin-bottom:12px;font-family:'JetBrains Mono',monospace">${escHTML(engine)} · status: ${escHTML(status)}${target.priority?(' · P'+target.priority):''}${target.day?(' · '+target.day):''}</div>
     <button onclick="openExec('${escHTML(String(target.id))}')" style="padding:9px 16px;background:rgba(201,168,76,0.18);border:1px solid rgba(201,168,76,0.45);border-radius:8px;color:#c9a84c;font-weight:800;font-size:12px;cursor:pointer;font-family:Syne,sans-serif">Open Exec Mode →</button>
   </div>`;
@@ -15129,14 +15154,23 @@ function renderExecMode(taskId){
   }
   // v13.69.80 — SRV Farsi lifecycle fast-path (mirrors English)
   if(typeof _srvFarsiHasLifecycle==='function' && _srvFarsiHasLifecycle(t)){
+    // v16.68.1 — lifecycle display clarity: the top task-identity banner previously showed
+    // t.name verbatim (e.g. "SRV Farsi — Duet — Romantic · Long", baked in at task-creation
+    // time) plus a combined MODE field. Split into separate Artist/Mood/Format — same
+    // _srvFarsiSplitMood used by renderSRVFarsiLifecycleCard, so this stays consistent
+    // everywhere. t.name/t.mood/rotation storage is untouched; display only.
+    const _fMood=t.mode||t.mood||'';
+    const {artist:_fArtist,moodLabel:_fMoodLabel}=_srvFarsiSplitMood(_fMood);
+    const _fFormat=t.contentType||(t.contentFormat==='long'?'Long':t.contentFormat==='short'?'Short':'—');
     return `<div style="padding:0 0 20px 0">
       <div class="exec-banner">
         <div class="exec-banner-label">🌹 SRV FARSI — LIFECYCLE</div>
-        <div class="exec-banner-title">${t.name}</div>
+        <div class="exec-banner-title">SRV Farsi${_fFormat!=='—'?' · '+_fFormat:''}</div>
         <div class="exec-fields">
           <div class="exec-field"><div class="exec-field-label">ENGINE</div><div class="exec-field-val">SRV Farsi</div></div>
-          <div class="exec-field"><div class="exec-field-label">MODE</div><div class="exec-field-val">${t.mode||t.mood||'—'}</div></div>
-          <div class="exec-field"><div class="exec-field-label">TYPE</div><div class="exec-field-val">${t.contentType||'—'}</div></div>
+          ${_fArtist?`<div class="exec-field"><div class="exec-field-label">ARTIST</div><div class="exec-field-val">${escHTML(_fArtist)}</div></div>`:''}
+          <div class="exec-field"><div class="exec-field-label">MOOD</div><div class="exec-field-val">${escHTML(_fMoodLabel)}</div></div>
+          <div class="exec-field"><div class="exec-field-label">FORMAT</div><div class="exec-field-val">${escHTML(_fFormat)}</div></div>
           <div class="exec-field"><div class="exec-field-label">DAY</div><div class="exec-field-val">${t.day||'—'}</div></div>
           <div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>
         </div>
@@ -16161,12 +16195,11 @@ function renderSRVFarsiLifecycleCard(task){
   const pkgId=pkg?String(pkg.id||''):'';
   const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
   const mood=task.mode||task.mood||pkg?.mood||'Emotional';
-  // v16.68.0 — lifecycle display clarity: separate Artist/Mood/Format instead of one combined
-  // "Duet — Romantic" string. Data-only display split — the underlying mood string, rotation,
-  // and task fields are completely unchanged; only how this one card renders them.
-  const _fArtist=mood.includes(' — ')?mood.split(' — ')[0].trim():'';
-  const _fMoodShort=mood.includes(' — ')?mood.split(' — ')[1].trim():mood;
-  const _fMoodLabel=/happy/i.test(_fMoodShort)?'Happy Love':/emotional/i.test(_fMoodShort)?'Emotional Love':'Romantic Love';
+  // v16.68.0/16.68.1 — lifecycle display clarity: separate Artist/Mood/Format instead of one
+  // combined "Duet — Romantic" string. Data-only display split (_srvFarsiSplitMood) — the
+  // underlying mood string, rotation, and task fields are completely unchanged; only how this
+  // one card renders them.
+  const {artist:_fArtist,moodLabel:_fMoodLabel}=_srvFarsiSplitMood(mood);
   const _fFormat=(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short';
 
   let stageContent='';
