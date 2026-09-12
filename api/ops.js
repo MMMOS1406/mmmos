@@ -3425,15 +3425,13 @@ async function farsiRegenCaption(req, res) {
   if (!ANTHROPIC_API_KEY) return res.json({ ok: false, error: 'no_api_key' });
 
   const wantFinglish = !!(title && needFinglish);
-  const prompt = `You are a Persian social media caption writer for Silk Road Voices, a Persian music channel on YouTube.
+  const prompt = `You are writing the Farsi portion of a YouTube description for Silk Road Voices, a Persian music channel.
 
-Given the song title and lyrics below, write a compelling YouTube caption in Persian that:
-- Opens with a poetic hook line drawn from the emotional core of the lyrics (in Persian)
-- 2-3 lines of description — evocative, not descriptive
-- Ends with a question or CTA inviting listeners to comment or share
-- Includes relevant Persian and English hashtags on the last line
-- Total length: 4-6 lines maximum
-- Language: Persian (Farsi) with hashtags
+Given the song title and lyrics below, write 2-3 concise Farsi sentences reflecting THIS song's actual content:
+- Sentence 1: the song's real emotional meaning/message
+- Next 1-2 sentences: the emotional situation/story (concise, not generic)
+- No hook-as-question, no CTA, no hashtags, no English — those are assembled separately
+- Language: Persian (Farsi) only
 
 Song Title: ${title || ''}
 Lyrics:

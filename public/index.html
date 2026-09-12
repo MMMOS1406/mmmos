@@ -12423,6 +12423,66 @@ function _srvFarsiPlaylistCategory(mode){
   if(m.includes('emotional'))return'emotional';
   return'romantic';
 }
+// v16.68.0 — SRV Farsi V2 metadata clarity: deterministic YouTube title/hashtag builders,
+// computed fresh from the FINAL saved package at publish time (never model-generated, never
+// cached at generation time) so they can't drift from what the operator actually saved.
+// Strip leading/trailing non-Persian decoration (emoji, etc.) so the template's "[Farsi Song
+// Name]" segment is the clean phrase itself, matching the required title examples.
+function _srvFarsiCleanFarsiTitle(title){
+  const t=String(title||'');
+  const stripped=t.replace(/^[^؀-ۿ]+/,'').replace(/[^؀-ۿ]+$/,'').trim();
+  return stripped||t.trim();
+}
+// Long: "Silk Road Voices - [Finglish] | Persian Deep House | [Farsi]"
+// Short: "[Farsi] | Persian Love Song | SRV Farsi"
+function _srvFarsiYouTubeTitle(pkg,isLong){
+  const farsi=_srvFarsiCleanFarsiTitle(pkg&&pkg.title)||'آهنگ جدید';
+  const finglish=String((pkg&&pkg.titleFinglish)||'').trim();
+  if(isLong){
+    return finglish
+      ? `Silk Road Voices - ${finglish} | Persian Deep House | ${farsi}`
+      : `Silk Road Voices | Persian Deep House | ${farsi}`;
+  }
+  return `${farsi} | Persian Love Song | SRV Farsi`;
+}
+// Controlled hashtag set: 4 core + 2 mood-specific, matching the mood classification already
+// used by _srvFarsiPlaylistCategory (same substring rule, kept as its own copy here so visual/
+// playlist code and metadata code stay independent).
+function _srvFarsiMoodHashtags(mood){
+  const m=String(mood||'').toLowerCase();
+  if(m.includes('happy'))return['#HappyLove','#PersianLoveSong'];
+  if(m.includes('emotional'))return['#EmotionalMusic','#HeartbreakSong'];
+  return['#RomanticSong','#LoveSong'];
+}
+// Core+mood set is fixed; at most 3 additional song-specific tags are allowed, reused from
+// whatever the model already produced for this package (never a fresh, uncontrolled model call),
+// filtered to drop anything that duplicates the controlled set.
+function _srvFarsiYouTubeHashtags(pkg,mood){
+  const controlled=['#SilkRoadVoices','#PersianMusic','#PersianDeepHouse','#FarsiMusic'].concat(_srvFarsiMoodHashtags(mood));
+  const controlledLower=controlled.map(function(t){return t.toLowerCase();});
+  const modelTags=String((pkg&&pkg.hashtags)||'').match(/#[\w؀-ۿ_]+/g)||[];
+  const extra=[];
+  for(const t of modelTags){
+    if(extra.length>=3)break;
+    const tl=t.toLowerCase();
+    if(controlledLower.includes(tl))continue;
+    if(extra.some(function(e){return e.toLowerCase()===tl;}))continue;
+    extra.push(t);
+  }
+  return controlled.concat(extra);
+}
+// Assembles the full YouTube description: (A+B) Farsi emotional-meaning/story sentences from
+// the final saved captionYT + (C) English identity line + (D) SRV branding line + (F) hashtags.
+// (E) the AI/synthetic-content disclosure is already added automatically server-side
+// (youtubeUploadVideo, api/ops.js) whenever a Farsi description doesn't already contain it —
+// intentionally NOT duplicated here.
+function _srvFarsiYouTubeDescription(pkg,mood){
+  const farsiBody=String((pkg&&(pkg.captionYT||pkg.captionYouTube))||'').trim();
+  const identityLine='Persian Deep House / Modern Persian Pop — Silk Road Voices';
+  const brandingLine='Silk Road Voices — original Persian love songs, new release every week.';
+  const tags=_srvFarsiYouTubeHashtags(pkg,mood).join(' ');
+  return [farsiBody,identityLine,brandingLine,tags].filter(Boolean).join('\n\n');
+}
 // v13.73.1 — reset Farsi publish calendar (clear anchor + seq so next 3 tasks = Fri/Sat/Sun)
 function _srvFarsiResetPublishCalendar(){
   D.srvFarsiShortDayIdx=0;
@@ -16101,6 +16161,13 @@ function renderSRVFarsiLifecycleCard(task){
   const pkgId=pkg?String(pkg.id||''):'';
   const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
   const mood=task.mode||task.mood||pkg?.mood||'Emotional';
+  // v16.68.0 — lifecycle display clarity: separate Artist/Mood/Format instead of one combined
+  // "Duet — Romantic" string. Data-only display split — the underlying mood string, rotation,
+  // and task fields are completely unchanged; only how this one card renders them.
+  const _fArtist=mood.includes(' — ')?mood.split(' — ')[0].trim():'';
+  const _fMoodShort=mood.includes(' — ')?mood.split(' — ')[1].trim():mood;
+  const _fMoodLabel=/happy/i.test(_fMoodShort)?'Happy Love':/emotional/i.test(_fMoodShort)?'Emotional Love':'Romantic Love';
+  const _fFormat=(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short';
 
   let stageContent='';
 
@@ -16108,7 +16175,9 @@ function renderSRVFarsiLifecycleCard(task){
   if(stage==='generate'){
     stageContent=`
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Mode: <strong style="color:var(--text)">${escHTML(mood)}</strong></div>
+        ${_fArtist?`<div style="font-size:12px;color:var(--dim);margin-bottom:4px">Artist: <strong style="color:var(--text)">${escHTML(_fArtist)}</strong></div>`:''}
+        <div style="font-size:12px;color:var(--dim);margin-bottom:4px">Mood: <strong style="color:var(--text)">${escHTML(_fMoodLabel)}</strong></div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format: <strong style="color:var(--text)">${escHTML(_fFormat)}</strong></div>
         <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the Persian song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
         <button onclick="vaFarsiGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
           🌹 Generate Package
@@ -16578,21 +16647,25 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     const _buildEngineState=_getEngineState(pkgChannel);
     const _inTestMode=_buildEngineState==='test';
     const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
-    const pkgTitle=_inTestMode?'[TEST] '+(pkg.title||'SRV Farsi'):(pkg.title||'SRV Farsi');
     // v13.72.0 — look up playlist category from the task for this package
     const _farsiPubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
     const _farsiPlaylistCat=(_farsiPubTask&&_farsiPubTask.playlistCategory)||_srvFarsiPlaylistCategory(_farsiPubTask&&_farsiPubTask.mood);
+    // v16.68.0 — metadata clarity: title now differs Long vs Short (deterministic template from
+    // the FINAL saved title/titleFinglish); description/hashtags built the same way for both.
+    const _farsiDescription=_srvFarsiYouTubeDescription(pkg,_farsiPubTask&&_farsiPubTask.mood);
+    const _farsiTags=_srvFarsiYouTubeHashtags(pkg,_farsiPubTask&&_farsiPubTask.mood).map(function(t){return t.replace(/^#/,'');});
 
-    async function doUpload(videoUrl,label){
+    async function doUpload(videoUrl,label,isLong){
       if(!videoUrl)return null;
       if(statusEl)statusEl.textContent=`Uploading ${label} to YouTube…`;
+      const _title=_srvFarsiYouTubeTitle(pkg,isLong);
       const r=await fetch('/api/ops?action=youtube_upload_video',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          videoUrl,engine:pkgChannel,title:pkgTitle,
-          description:pkg.captionYT||pkg.captionYouTube||'',
-          tags:(pkg.hashtags||'').split(/[\s,#]+/).filter(Boolean),
+          videoUrl,engine:pkgChannel,title:_inTestMode?'[TEST] '+_title:_title,
+          description:_farsiDescription,
+          tags:_farsiTags,
           categoryId:'10',privacyStatus:'private',madeForKids:false,
           publishAt:_srvPublishAt,
           playlistCategory:_farsiPlaylistCat, // v13.72.0 — auto-add to Romantic/Emotional/Happy playlist
@@ -16604,8 +16677,8 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     const _pubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
     const _isLongPub=!!(_pubTask&&_pubTask.isLong);
     const [longUp,shortUp]=await Promise.all([
-      _isLongPub?doUpload(longUrl,'LONG'):Promise.resolve(null),
-      doUpload(shortUrl,'SHORT'),
+      _isLongPub?doUpload(longUrl,'LONG',true):Promise.resolve(null),
+      doUpload(shortUrl,'SHORT',false),
     ]);
     if(longUp?.videoId)pkg._srvYtLongId=longUp.videoId;
     if(shortUp?.videoId)pkg._srvYtShortId=shortUp.videoId;
@@ -16653,18 +16726,20 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
   const _buildEngineState=_getEngineState(pkgChannel);
   const _inTestMode=_buildEngineState==='test';
   const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
-  const pkgTitle=_inTestMode?'[TEST] '+(pkg.title||'SRV Farsi'):(pkg.title||'SRV Farsi');
   const _farsiPubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
   const _farsiPlaylistCat=(_farsiPubTask&&_farsiPubTask.playlistCategory)||_srvFarsiPlaylistCategory(_farsiPubTask&&_farsiPubTask.mood);
+  // v16.68.0 — metadata clarity: deterministic Short title/description/hashtags from the FINAL
+  // saved package (never model-generated at this step, so they can't drift from what was saved).
+  const _pkgTitle=_srvFarsiYouTubeTitle(pkg,false);
   pkg.youtubePublishState='publishing'; pkg.youtubePublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
     const r=await fetch('/api/ops?action=youtube_upload_video',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        videoUrl:shortUrl,engine:pkgChannel,title:pkgTitle,
-        description:pkg.captionYT||pkg.captionYouTube||'',
-        tags:(pkg.hashtags||'').split(/[\s,#]+/).filter(Boolean),
+        videoUrl:shortUrl,engine:pkgChannel,title:_inTestMode?'[TEST] '+_pkgTitle:_pkgTitle,
+        description:_srvFarsiYouTubeDescription(pkg,_farsiPubTask&&_farsiPubTask.mood),
+        tags:_srvFarsiYouTubeHashtags(pkg,_farsiPubTask&&_farsiPubTask.mood).map(function(t){return t.replace(/^#/,'');}),
         categoryId:'10',privacyStatus:'private',madeForKids:false,
         publishAt:_srvPublishAt,
         playlistCategory:_farsiPlaylistCat,

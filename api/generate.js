@@ -315,7 +315,7 @@ OUTPUT: Return ONLY valid JSON, no markdown, no backticks:
   "shortSunoPrompt": "identity-rich 30-sec Suno prompt: vocal at 0:00, hook+chorus only, same SRV identity rules",
   "shortLyrics": "Hook + Chorus only, max 6 Farsi lines",
   "thumbnailText": "Persian title + emoji",
-  "captionYouTube": "Persian emotional hook. Question. CTA. #آهنگ_جدید #موسیقی_فارسی #SilkRoadVoices + mood tags",
+  "captionYouTube": "2-3 concise Farsi sentences for the YouTube description, reflecting THIS song's actual content: sentence 1 states the song's real emotional meaning/message; the next 1-2 sentences explain the emotional situation/story. No hook-as-question, no CTA, no hashtags, no English — those are added separately.",
   "captionTikTok": "One punchy Persian line. #آهنگ_جدید #فارسی #SilkRoadVoices",
   "captionInstagram": "2-3 line Persian caption with dot spacers. #آهنگ_جدید #موسیقی #SilkRoadVoices",
   "workflowNotes": "Suno production notes specific to this package — chosen sub-mode + key SRV identity callouts",
