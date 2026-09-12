@@ -21811,7 +21811,12 @@ function renderIntegrations(){
     }
   }
   // Filter every section down to currently-connected items only.
-  integrations.content = integrations.content.filter(i=>i.connected);
+  // v16.67.0 — bugfix: this blanket filter also hid YouTube once disconnected/token-expired,
+  // even though it has a real, working Connect/Reconnect flow (ytConnect -> /api/youtube/auth)
+  // unlike the placeholder finance/system rows this cleanup was meant to hide — leaving no way
+  // to reconnect from the UI at all. YouTube stays visible regardless of connected state so its
+  // Not Connected badge + Connect button (already implemented in intCard above) can always render.
+  integrations.content = integrations.content.filter(i=>i.connected||i.isYouTube);
   integrations.finance = integrations.finance.filter(i=>i.connected);
   integrations.system  = integrations.system.filter(i=>i.connected);
 
