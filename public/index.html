@@ -786,32 +786,46 @@ const ENGINES_CONFIG=[
    type:"song",weeklyCapacity:3,cadenceDays:["Monday","Tuesday","Wednesday","Thursday"], // v15.7.0 — 3 slots/week (Fri Long + Sat Short + Sun Short); production Mon-Thu
    // v13.69.80 — SRV Farsi Lifecycle: Generate→Review→Build→Approve→Publish→Done (mirrors English)
    lifecycle:{musicAdapter:'manual',imageAdapter:'pexels',rendererAdapter:'canvas',requireApprove:true},
-   // v13.69.81 — SRV Farsi Avatar Library (mode-based: female/male/duet × short(01-03)/long(04-06))
+   // v2-avatar-library-v2 — SRV Farsi Avatar Library: format(long|short) x artist(female|male|duet)
+   // x mood(happy|emotional|romantic), exactly 2 approved photos per bucket (36 total). Replaces
+   // the prior flat 6-per-artist/index-sliced library (v13.69.81) — format and mood are now each
+   // their own manifest key instead of an implicit index-range convention, so a Long task can
+   // structurally never draw a Short-shaped (or wrong-mood) photo. See _srvFarsiPickAvatarFor.
    avatarLibrary:{
-     female:[
-       '/assets/avatars/srv_farsi/female/SRV_Farsi_Female_01.png',
-       '/assets/avatars/srv_farsi/female/SRV_Farsi_Female_02.png',
-       '/assets/avatars/srv_farsi/female/SRV_Farsi_Female_03.png',
-       '/assets/avatars/srv_farsi/female/SRV_Farsi_Female_04.png',
-       '/assets/avatars/srv_farsi/female/SRV_Farsi_Female_05.png',
-       '/assets/avatars/srv_farsi/female/SRV_Farsi_Female_06.png',
-     ],
-     male:[
-       '/assets/avatars/srv_farsi/male/SRV_Farsi_Male_01.png',
-       '/assets/avatars/srv_farsi/male/SRV_Farsi_Male_02.png',
-       '/assets/avatars/srv_farsi/male/SRV_Farsi_Male_03.png',
-       '/assets/avatars/srv_farsi/male/SRV_Farsi_Male_04.png',
-       '/assets/avatars/srv_farsi/male/SRV_Farsi_Male_05.png',
-       '/assets/avatars/srv_farsi/male/SRV_Farsi_Male_06.png',
-     ],
-     duet:[
-       '/assets/avatars/srv_farsi/duet/SRV_Farsi_Duet_01.png',
-       '/assets/avatars/srv_farsi/duet/SRV_Farsi_Duet_02.png',
-       '/assets/avatars/srv_farsi/duet/SRV_Farsi_Duet_03.png',
-       '/assets/avatars/srv_farsi/duet/SRV_Farsi_Duet_04.png',
-       '/assets/avatars/srv_farsi/duet/SRV_Farsi_Duet_05.png',
-       '/assets/avatars/srv_farsi/duet/SRV_Farsi_Duet_06.png',
-     ],
+     long:{
+       female:{
+         happy:['/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_01.png','/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_02.png'],
+         emotional:['/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_01.png','/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_02.png'],
+         romantic:['/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_01.png','/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_02.png'],
+       },
+       male:{
+         happy:['/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_01.png','/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_02.png'],
+         emotional:['/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_01.png','/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_02.png'],
+         romantic:['/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_01.png','/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_02.png'],
+       },
+       duet:{
+         happy:['/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_01.png','/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_02.png'],
+         emotional:['/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_01.png','/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_02.png'],
+         romantic:['/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_01.png','/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_02.png'],
+       },
+     },
+     short:{
+       female:{
+         happy:['/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_01.png','/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_02.png'],
+         emotional:['/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_01.png','/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_02.png'],
+         romantic:['/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_01.png','/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_02.png'],
+       },
+       male:{
+         happy:['/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_01.png','/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_02.png'],
+         emotional:['/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_01.png','/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_02.png'],
+         romantic:['/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_01.png','/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_02.png'],
+       },
+       duet:{
+         happy:['/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_01.png','/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_02.png'],
+         emotional:['/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_01.png','/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_02.png'],
+         romantic:['/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_01.png','/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_02.png'],
+       },
+     },
    }},
   {id:"srv_english",name:"SRV English",icon:"🎵",hint:"English indie pop songs",
    modes:["Female — Romantic","Female — Emotional","Female — Happy"],
@@ -16574,10 +16588,18 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const _fCfg=_srvFarsiEngineConfig();
       const _fLib=_fCfg&&_fCfg.avatarLibrary;
       if(!_fLib)return;
-      const _fPool=_fLib[_fGroup]||[];
-      // Short → indices 0-2 (portrait 01-03), Long → indices 3-5 (landscape 04-06) — unchanged slicing convention
-      const _fSlice=_fPool.slice(isLongTask?3:0,isLongTask?6:3);
-      _fAvUrlForRender=_farsiPickAvatar(_fSlice);
+      // v2-avatar-library-v2 — strict format+artist+mood lookup (never an index-range slice), so
+      // a Long task can only ever draw from long/*, Short only from short/*, and each artist/mood
+      // only from its own exact bucket — the wrong pose/mood/format cannot structurally leak in.
+      const _fFormatKey=isLongTask?'long':'short';
+      const _fMoodKey=String(_fMoodOnly||'').toLowerCase().trim();
+      const _fFormatBucket=_fLib[_fFormatKey];
+      const _fArtistBucket=_fFormatBucket&&_fFormatBucket[_fGroup];
+      const _fPool=(_fArtistBucket&&_fArtistBucket[_fMoodKey])||[];
+      if(!_fPool.length){
+        console.warn('[SRV Farsi] avatar library: no photos for '+_fFormatKey+'/'+_fGroup+'/'+_fMoodKey+' — check avatarLibrary manifest');
+      }
+      _fAvUrlForRender=_farsiPickAvatar(_fPool);
     })();
 
     // Step 2: SHORT render (9:16) — only for Short tasks
