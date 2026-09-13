@@ -7326,7 +7326,12 @@ async function youtubeAnalyticsPull(req, res) {
   const lookbackDays = parseInt((req.query && req.query.days) || (req.body && req.body.days) || '30', 10);
   const startDate = new Date(Date.now() - lookbackDays * 86400 * 1000).toISOString().slice(0,10);
   const endDate = new Date().toISOString().slice(0,10);
-  const metrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained';
+  // v16.68.2 — growth instrumentation: impressions + CTR are supported by the YouTube Analytics
+  // API's video-dimension report under the SAME yt-analytics.readonly scope already gated above
+  // (no new OAuth scope, no new vendor) — added to the existing metrics request rather than a
+  // separate call. ctr already existed as an unused column; impressions is the one minimal
+  // schema addition this required (see migration add_youtube_videos_impressions_column).
+  const metrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,impressions,impressionsClickThroughRate';
   try {
     const conns = await sbGet('youtube_connections?select=channel_id,refresh_token,scope&order=connected_at.desc');
     if (!Array.isArray(conns) || !conns.length) return res.status(404).json({ ok:false, error:'no_connections' });
@@ -7361,7 +7366,9 @@ async function youtubeAnalyticsPull(req, res) {
               iMinWatched = colIdx('estimatedMinutesWatched'),
               iAvgDuration = colIdx('averageViewDuration'),
               iAvgPct = colIdx('averageViewPercentage'),
-              iSubs = colIdx('subscribersGained');
+              iSubs = colIdx('subscribersGained'),
+              iImpressions = colIdx('impressions'),
+              iCtr = colIdx('impressionsClickThroughRate');
         const upserts = [];
         for (const row of rows) {
           const vid = row[iVid];
@@ -7374,6 +7381,11 @@ async function youtubeAnalyticsPull(req, res) {
             avg_view_duration_sec: row[iAvgDuration] || null,
             retention_pct: row[iAvgPct] || null,
             subs_gained: row[iSubs] || null,
+            // v16.68.2 — growth instrumentation: iImpressions/iCtr are -1 (colIdx not found) on
+            // any Analytics API response that doesn't include these columns (e.g. an older cached
+            // response shape); guarded the same way the existing metrics above already are.
+            impressions: iImpressions >= 0 ? (row[iImpressions] ?? null) : null,
+            ctr: iCtr >= 0 ? (row[iCtr] ?? null) : null,
             analytics_synced_at: nowIso,
           });
         }

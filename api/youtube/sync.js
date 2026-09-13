@@ -212,8 +212,39 @@ export default async function handler(req, res) {
       updated_at: new Date().toISOString(),
     });
 
+    // v16.68.2 — growth instrumentation: exact-ID package<->video attribution.
+    // Root cause of linked_package_id always being null: this upsert previously hardcoded
+    // linked_package_id:null on every single sync (both the primary and pre-migration-fallback
+    // payloads below) — since this upsert uses on_conflict=video_id with merge-duplicates,
+    // including the key in the payload at all means every re-sync explicitly overwrote any
+    // existing link back to null, even one set by a prior sync or a one-time backfill. Fixed by:
+    // (a) only ever including linked_package_id in the payload when we found a real match — an
+    //     already-linked video with no match this run is left completely untouched, never reset;
+    // (b) the match itself is an EXACT equality on packages.youtube_video_id = video_id, batched
+    //     in one query for all videos in this sync call — never a title/text guess.
+    // Package rows are engine-agnostic here on purpose: youtube_video_id is only ever set on the
+    // one package that was actually uploaded to that exact video, so this can't cross-link
+    // between engines/channels — but it does mean every engine's videos now get linked the same
+    // way, not just SRV Farsi's, since the read side (api/ops.js topic clustering) already
+    // expected this field to work for any engine.
+    const videoIds = videos.map(v => v.videoId).filter(Boolean);
+    const pkgLinkMap = {};
+    if (videoIds.length) {
+      try {
+        const idList = videoIds.map(id => `"${id}"`).join(',');
+        const matches = await sbGet(`packages?youtube_video_id=in.(${idList})&select=package_id,youtube_video_id`);
+        for (const m of (matches || [])) {
+          if (m.youtube_video_id) pkgLinkMap[m.youtube_video_id] = m.package_id;
+        }
+        console.log('[v16.68.2] exact package<->video matches found:', Object.keys(pkgLinkMap).length, 'of', videoIds.length, 'synced videos');
+      } catch (e) {
+        console.warn('[v16.68.2] package link lookup failed (non-fatal, sync continues without linking):', e.message);
+      }
+    }
+
     // 6. Save videos to Supabase (conflict on video_id)
     for (const video of videos) {
+      const linkedPackageId = pkgLinkMap[video.videoId] || undefined; // undefined -> omitted from payload, never overwrites an existing link with null
       try {
         await sbUpsert('youtube_videos', {
           video_id: video.videoId,
@@ -225,8 +256,8 @@ export default async function handler(req, res) {
           view_count: video.viewCount,
           like_count: video.likeCount,
           comment_count: video.commentCount,
-          linked_package_id: null,
           upload_status: null,
+          ...(linkedPackageId ? { linked_package_id: linkedPackageId } : {}),
           synced_at: new Date().toISOString(),
         }, 'video_id');
       } catch (e) {
@@ -239,8 +270,8 @@ export default async function handler(req, res) {
             description: video.description,
             thumbnail_url: video.thumbnailUrl,
             published_at: video.publishedAt,
-            linked_package_id: null,
             upload_status: null,
+            ...(linkedPackageId ? { linked_package_id: linkedPackageId } : {}),
             synced_at: new Date().toISOString(),
           }, 'video_id');
         } else {
