@@ -11176,6 +11176,261 @@ async function nextwaveNarrationSynthesize(req, res) {
   });
 }
 
+// ── NextWave V2 — visual planning (meaning-unit segmentation, visual-intent
+// classification, generalized asset resolution) ────────────────────────────
+// Ported from local prototype validation (nextwave-v2-visualdna/), adapted
+// to this current codebase. Read/compute-only: no database writes, no
+// external API calls, no cost — so, per this codebase's own P0/P0.1
+// authentication convention (which gates actions that spend money, reach a
+// paid external API, or touch sensitive business data — see
+// nextwaveNarrationSynthesize above, plaidLink, heygenStartRender, etc. for
+// that pattern), this is deliberately NOT requireCeoSession-gated. If that
+// judgment call is wrong for this codebase's conventions, flag it for a
+// one-line addition rather than reworking the function.
+//
+// Does not touch, call, or duplicate nextwaveSynthesizeNarrationElevenLabs /
+// nextwaveNarrationSynthesize above, or SMM's smSynthesizeNarration* --
+// narration stays exactly as it already exists in this file.
+
+const NEXTWAVE_V2_CONCEPT_KEYWORDS = {
+  debt: ['debt', 'owe', 'balance', 'loan', 'borrowed'],
+  credit_card: ['credit card', 'minimum payment', 'interest rate on your card'],
+  bank_account: ['bank account', 'checking account', 'your bank'],
+  tax: ['tax', 'taxes', 'irs', 'withholding'],
+  growth: ['grow', 'growing', 'compound', 'compounding', 'accumulate'],
+  loss: ['lose', 'lost', 'losing', 'leak', 'drain', 'gone', 'disappear'],
+  comparison: ['versus', ' vs ', 'compare', 'compared', 'comparing', 'compares',
+    'which one', 'side by side', 'two paths', 'two options'],
+  time: ['years from now', 'over time', 'eventually', 'someday'],
+  delay: ['wait', 'delay', 'later', 'put off', 'procrastinate'],
+  retirement: ['retire', 'retirement', '401k', '401(k)', 'ira'],
+  home: ['home', 'house', 'mortgage', 'rent'],
+  car: ['car', 'auto loan', 'vehicle'],
+  bills: ['bill', 'bills', 'utility', 'subscription'],
+  income: ['paycheck', 'salary', 'income', 'your pay'],
+  savings: ['savings', 'save', 'emergency fund', 'rainy day'],
+  risk: ['risk', 'risky', 'volatile', 'volatility'],
+  decision: ['decide', 'decision', 'choice', 'choose'],
+  opportunity_cost: ['instead of', 'opportunity cost', 'what you give up'],
+  market_movement: ['market', 'stock price', 'index', 'portfolio value'],
+  goal_progress: ['goal', 'progress', 'on track', 'milestone'],
+  cash_flow: ['cash flow', 'money in', 'money out', 'spend', 'spending'],
+  control: ['control', 'bracket', 'in your hands', 'decide how much'],
+  tradeoff: ['tradeoff', 'trade-off', 'give up', 'sacrifice'],
+  accumulation: ['stack up', 'pile up', 'add up', 'build up'],
+  compounding: ['compound interest', 'compounding'],
+  transaction_cost: ['closing cost', 'closing costs', 'realtor commission',
+    'selling costs', 'transaction cost', 'transaction costs'],
+};
+
+function _nextwaveKeywordMatches(keyword, text) {
+  if (keyword.trim().includes(' ')) return text.includes(keyword);
+  const re = new RegExp('\\b' + keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+  return re.test(text);
+}
+
+function nextwaveClassifyVisualIntent(phrase, topN = 2) {
+  const text = String(phrase || '').toLowerCase();
+  const scores = [];
+  for (const [concept, keywords] of Object.entries(NEXTWAVE_V2_CONCEPT_KEYWORDS)) {
+    const hits = keywords.filter((kw) => _nextwaveKeywordMatches(kw, text)).length;
+    if (hits > 0) scores.push([concept, hits]);
+  }
+  scores.sort((a, b) => b[1] - a[1]);
+  const ranked = scores.slice(0, topN).map(([c]) => c);
+  return ranked.length ? ranked : ['none_detected'];
+}
+
+// The real Colin/NextWave prompt format uses [BRACKET] for two DIFFERENT
+// things: timestamped section headers ([0:00 HOOK]) and an inline
+// compliance meta-marker ([DISCLAIMER: <text>]) whose <text> is real,
+// spoken narration content, not a label. Unwrapping known non-section
+// meta-markers to their inner text before section-splitting keeps the
+// mandatory disclaimer sentence from being silently dropped.
+const NEXTWAVE_V2_META_MARKER_RE = /\[DISCLAIMER:\s*([^\]]+)\]/gi;
+
+function nextwaveSegmentMeaningUnits(script, minWords = 4) {
+  const text = String(script || '').replace(NEXTWAVE_V2_META_MARKER_RE, (_, inner) => ' ' + inner.trim());
+  const sectionRe = /\[([^\]]+)\]/g;
+  const sections = [];
+  let match, lastIndex = 0, lastLabel = 'UNMARKED';
+  while ((match = sectionRe.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      sections.push({ label: lastLabel, text: text.slice(lastIndex, match.index) });
+    }
+    lastLabel = match[1];
+    lastIndex = sectionRe.lastIndex;
+  }
+  sections.push({ label: lastLabel, text: text.slice(lastIndex) });
+
+  const units = [];
+  let n = 0;
+  for (const section of sections) {
+    const sentences = section.text
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    let buffer = '';
+    for (const s of sentences) {
+      buffer = buffer ? `${buffer} ${s}` : s;
+      if (buffer.split(/\s+/).filter(Boolean).length >= minWords) {
+        units.push({ unit: `u${String(n).padStart(2, '0')}`, section: section.label, text: buffer });
+        n += 1;
+        buffer = '';
+      }
+    }
+    if (buffer) {
+      units.push({ unit: `u${String(n).padStart(2, '0')}`, section: section.label, text: buffer });
+      n += 1;
+    }
+  }
+  return units;
+}
+
+const NEXTWAVE_V2_NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +
+  'fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|' +
+  'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion';
+const NEXTWAVE_V2_DYNAMIC_NUMBER_RE = new RegExp(
+  '\\$\\s?\\d|\\d[\\d,]*\\s*(?:dollars?|percent)\\b|' +
+  '\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b(?:[\\s,-]+(?:' + NEXTWAVE_V2_NUMBER_WORDS + '))*' +
+  '[^.!?]{0,40}\\b(?:dollars?|percent)\\b',
+  'i',
+);
+
+// True only when the phrase actually SPEAKS a real number tied to money/
+// percent -- concept-independent, since real dynamic financial data must
+// always render programmatically regardless of which concept tag also
+// happens to match.
+function nextwaveHasDynamicNumbers(phrase) {
+  return NEXTWAVE_V2_DYNAMIC_NUMBER_RE.test(String(phrase || ''));
+}
+
+const NEXTWAVE_V2_RESULT_CUE_WORDS = [
+  'ahead', 'behind', 'gap', 'difference', 'advantage', 'save', 'saves',
+  'saved', 'savings', 'wins', 'winning', 'outpaces', 'outruns', 'more',
+  'less', 'favor', 'tips', 'beat', 'beats',
+];
+
+// A bounded structural heuristic (proximity to a small fixed cue-word list,
+// a same-clause "by <amount>" pattern, a mild recency tiebreak) for which
+// number in a multi-number sentence is the narratively important one --
+// not semantic understanding, documented as such.
+function nextwaveRankNumberPhrase(text) {
+  text = String(text || '');
+  const re = new RegExp(NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, 'gi');
+  const matches = [...text.matchAll(re)];
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0][0].trim();
+
+  let bestScore = -Infinity, bestText = null;
+  matches.forEach((m, i) => {
+    const start = m.index;
+    const windowStart = Math.max(0, start - 50);
+    const before = text.slice(windowStart, start).toLowerCase();
+    let score = i * 0.1;
+    if (NEXTWAVE_V2_RESULT_CUE_WORDS.some((cue) => before.includes(cue))) score += 10;
+    const byWindow = text.slice(Math.max(0, start - 15), start).toLowerCase();
+    if (/\bby\s*$/.test(byWindow)) score += 5;
+    if (score >= bestScore) { bestScore = score; bestText = m[0].trim(); }
+  });
+  return bestText;
+}
+
+// Generalized resolver: real dynamic financial figures resolve to
+// programmatic class B FIRST regardless of concept, then a genuinely
+// reusable COMPOSED SCENE (matched on the asset's `primary_concepts` when
+// present, so an incidental secondary tag on one scene can't hijack an
+// unrelated topic's video), then character, then metaphor_graphic /
+// metaphor_illustration, then plain programmatic annotation, else D.
+// Nothing here is specific to any one candidate/topic.
+function nextwaveResolveAsset(conceptType, needsCharacter, manifest, phrase) {
+  const assets = Array.isArray(manifest) ? manifest : [];
+
+  if (phrase !== undefined && phrase !== null && nextwaveHasDynamicNumbers(phrase)) {
+    return {
+      class: 'B', asset_id: null,
+      reason: 'real dynamic financial figure spoken -- renders programmatically regardless of concept, never AI-illustrated',
+    };
+  }
+
+  const sceneHits = assets.filter((a) => a.category === 'composed_scene' &&
+    (a.primary_concepts || a.concept_tags || []).includes(conceptType));
+  const reusableScene = sceneHits.filter((a) => a.reusable);
+  if (reusableScene.length) {
+    return { class: 'A', asset_id: reusableScene[0].asset_id, reason: `banked composed scene already covers '${conceptType}'` };
+  }
+  if (sceneHits.length) {
+    return {
+      class: 'D', asset_id: sceneHits[0].asset_id,
+      reason: `composed-scene spec exists for '${conceptType}' but is not yet reusable -- needs generation/re-roll, not build capability`,
+    };
+  }
+
+  if (needsCharacter) {
+    const charHits = assets.filter((a) => a.category === 'character' && (a.concept_tags || []).includes(conceptType));
+    const reusableChar = charHits.filter((a) => a.reusable);
+    if (reusableChar.length) {
+      return { class: 'A', asset_id: reusableChar[0].asset_id, reason: `banked character pose tagged for '${conceptType}'` };
+    }
+    if (charHits.length) {
+      return {
+        class: 'D', asset_id: charHits[0].asset_id,
+        reason: `pose spec exists for '${conceptType}' but is pending_human_generation -- Ideogram Character API access, not build capability`,
+      };
+    }
+  }
+  const metaHits = assets.filter((a) => (a.category === 'metaphor_graphic' || a.category === 'metaphor_illustration') &&
+    (a.concept_tags || []).includes(conceptType) && a.reusable);
+  metaHits.sort((a, b) => (a.local_path ? 0 : 1) - (b.local_path ? 0 : 1));
+  if (metaHits.length) {
+    return { class: 'C', asset_id: metaHits[0].asset_id, reason: `reusable metaphor illustration/graphic already covers '${conceptType}'` };
+  }
+  const progOk = assets.filter((a) => a.category === 'annotation_graphic' && a.reusable);
+  if (progOk.length && conceptType === 'emphasis') {
+    return { class: 'B', asset_id: progOk[0].asset_id, reason: 'pure programmatic annotation, no asset lookup needed' };
+  }
+  return { class: 'D', asset_id: null, reason: `no reusable or programmatic coverage exists yet for '${conceptType}'` };
+}
+
+// Safe, narrow fallback for a generic closer/summary line (no keyword hits
+// at all) inside a CLOSE/TAKEAWAY section -- NOT a broader keyword list
+// (risks false-positiving elsewhere). Falls back to 'closer_summary' ONLY
+// when the classifier found nothing AND the script's own structural section
+// marker says this unit is a wrap-up beat. Any other none_detected unit is
+// left exactly as none_detected.
+function nextwaveResolveFallbackConcept(sectionLabel, conceptTags) {
+  const isNoneDetected = Array.isArray(conceptTags) && conceptTags.length === 1 && conceptTags[0] === 'none_detected';
+  const section = String(sectionLabel || '').trim().toUpperCase();
+  if (isNoneDetected && (section === 'CLOSE' || section === 'TAKEAWAY')) return 'closer_summary';
+  return null;
+}
+
+// Single read/compute-only entry point: segment -> classify -> fallback ->
+// resolve, in one call. No side effects, no auth required (nothing here
+// reads or writes anything sensitive).
+async function nextwaveV2PlanVisuals(req, res) {
+  try {
+    const body = req.body || {};
+    const { script, manifest, needs_character_default } = body;
+    if (!script || typeof script !== 'string') {
+      return res.status(400).json({ ok: false, error: 'script (string) required' });
+    }
+    const units = nextwaveSegmentMeaningUnits(script);
+    const plan = units.map((u) => {
+      const tags = nextwaveClassifyVisualIntent(u.text);
+      const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+      const top = fallback || (tags[0] !== 'none_detected' ? tags[0] : null);
+      const resolution = top
+        ? nextwaveResolveAsset(top, needs_character_default !== false, manifest, u.text)
+        : { class: null, asset_id: null, reason: 'no concept detected for this unit' };
+      return { ...u, concept_tags: tags, fallback_concept: fallback, resolution };
+    });
+    return res.status(200).json({ ok: true, unit_count: plan.length, plan });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
 // ── Runway — optional AI motion/enhancement, adapter boundary only ─────────────────────────
 // Deliberately NOT invoked anywhere in the V1 default build path: local Ken Burns motion on
 // real approved photos already meets this pilot's quality bar, and CEO cost discipline
@@ -12389,6 +12644,9 @@ export default async function handler(req, res) {
     if (action === 'production_package_review')      return await productionPackageReview(req, res);       // v16.31.0
     if (action === 'ceo_review_queue_list')          return await ceoReviewQueueList(req, res);            // v16.31.0
     if (action === 'nextwave_narration_synthesize')  return await nextwaveNarrationSynthesize(req, res);     // NextWave V2 — ElevenLabs narration, PR pending review, not yet deployed
+    // NextWave V2 Phase 4: read/compute-only visual-planning (segment ->
+    // classify -> resolve). Does not touch narration above in any way.
+    if (action === 'nextwave_v2_plan_visuals')       return await nextwaveV2PlanVisuals(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0

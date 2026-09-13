@@ -15388,7 +15388,7 @@ function renderExecMode(taskId){
     <div class="card" style="margin-top:4px">
       <div class="card-title">Generate Package</div>
       <p style="font-size:13px;color:var(--dim);margin-bottom:14px;line-height:1.6">MMM OS will send this task to Claude and generate a complete content package.</p>
-      <button class="gen-btn" id="genBtn" onclick="generatePackage(${taskId})"><span id="genBtnText">⚡ Generate Package with Claude</span></button>
+      <button class="gen-btn" id="genBtn" onclick="${t.engine==='NextWave'?'_nextwaveGeneratePackageWithV2Plan':'generatePackage'}(${taskId})"><span id="genBtnText">⚡ Generate Package with Claude</span></button>
       <div id="genError" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></div>
     </div>`}
     ${_sunoBlock}
@@ -15781,6 +15781,35 @@ async function _srvEnglishRegeneratePackage(taskId,pkgId){
     if(sd)sd.remove();
   }
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+}
+// ── NextWave V2 Phase 4 — additive-only planning hook ───────────────────────
+// Calls the existing, UNMODIFIED generatePackage(taskId) exactly as every
+// other engine already does (same wrap-don't-touch pattern as
+// _srvEnglishRegeneratePackage above), then — NextWave tasks only — also
+// calls the new read/compute-only nextwave_v2_plan_visuals action with the
+// real script generatePackage just produced, and attaches the returned
+// plan onto the package object. Does not call, touch, or duplicate the
+// existing nextwave_narration_synthesize action in any way.
+async function _nextwaveGeneratePackageWithV2Plan(taskId){
+  const numericId=Number(taskId);
+  await generatePackage(isNaN(numericId)?taskId:numericId);
+  try{
+    const t=(D.tasks||[]).find(function(x){return String(x.id)===String(taskId);});
+    if(!t||t.engine!=='NextWave')return;
+    const pkg=(D.packages||[]).find(function(p){return String(p.taskId)===String(taskId);});
+    if(!pkg||!pkg.script)return;
+    const r=await fetch('/api/ops?action=nextwave_v2_plan_visuals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script:pkg.script})});
+    const d=await r.json();
+    if(d.ok){
+      pkg.nextwaveV2Plan=d.plan;
+      if(typeof saveAppState==='function')saveAppState();
+      console.log('[NextWave V2] visual plan attached — units:',d.unit_count);
+    }else{
+      console.warn('[NextWave V2] plan_visuals failed (package still saved normally):',d.error);
+    }
+  }catch(e){
+    console.warn('[NextWave V2] plan_visuals error (non-fatal, package still saved normally):',e.message);
+  }
 }
 function _srvEnglishCancelTask(taskId){
   if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
