@@ -7326,12 +7326,19 @@ async function youtubeAnalyticsPull(req, res) {
   const lookbackDays = parseInt((req.query && req.query.days) || (req.body && req.body.days) || '30', 10);
   const startDate = new Date(Date.now() - lookbackDays * 86400 * 1000).toISOString().slice(0,10);
   const endDate = new Date().toISOString().slice(0,10);
-  // v16.68.2 — growth instrumentation: impressions + CTR are supported by the YouTube Analytics
-  // API's video-dimension report under the SAME yt-analytics.readonly scope already gated above
-  // (no new OAuth scope, no new vendor) — added to the existing metrics request rather than a
-  // separate call. ctr already existed as an unused column; impressions is the one minimal
-  // schema addition this required (see migration add_youtube_videos_impressions_column).
-  const metrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,impressions,impressionsClickThroughRate';
+  // v16.68.3 — CORRECTION: live validation against the real YouTube Analytics API (after the
+  // preview auth fix let the request actually reach Google) proved 'impressions' and
+  // 'impressionsClickThroughRate' are NOT valid API metric identifiers — confirmed against
+  // Google's own metrics reference (developers.google.com/youtube/analytics/metrics): the only
+  // impressions-named metrics are annotationImpressions, cardImpressions/cardTeaserImpressions,
+  // and adImpressions (ad-specific, previously named 'impressions'). The Studio-UI "impressions/
+  // CTR" (Reach tab) numbers are not exposed via the public Analytics API at all. Including the
+  // two invalid identifiers made the ENTIRE request 400 for every channel, silently breaking the
+  // 5 pre-existing metrics too — reverted to the original, valid metrics list. impressions/ctr
+  // columns stay in schema (harmless) but will remain null: colIdx('impressions') and
+  // colIdx('impressionsClickThroughRate') below now correctly resolve to -1 on every real
+  // response, so the existing null-guard already handles this honestly with no further change.
+  const metrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained';
   try {
     const conns = await sbGet('youtube_connections?select=channel_id,refresh_token,scope&order=connected_at.desc');
     if (!Array.isArray(conns) || !conns.length) return res.status(404).json({ ok:false, error:'no_connections' });
