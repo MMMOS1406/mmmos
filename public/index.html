@@ -17935,6 +17935,36 @@ async function _nextWaveGeneratePackage(taskId){
       alert('Package generation timed out — try again.');
       return;
     }
+    // Phase 4.4D — REAL root cause of the Build-stage HeyGen dispatch: THIS
+    // is the function the actual NextWave lifecycle UI's "Auto-Generate
+    // Package" button calls (renderNextWaveLifecycleCard, stage='generate')
+    // — _nextwaveGeneratePackageWithV2Plan (Phase 4.4A's isTest-propagation
+    // fix) is only reachable from the OLDER renderExecMode Generate button,
+    // which is skipped entirely for NextWave lifecycle tasks. So every V2
+    // preview-test package generated through the real UI had pkg.isTest
+    // silently stay false and no V2 plan attached — meaning the Build
+    // stage's isNextWaveV2Preview check (pkg.isTest + workflowNotes marker)
+    // was ALWAYS false, and Build silently fell through to the real,
+    // unmodified legacy HeyGen path every time. Confirmed live: a freshly
+    // generated package's pkg.isTest was false and workflowNotes carried
+    // only the generic HeyGen-production template text, with no
+    // NEXTWAVE_V2_PREVIEW_TEST marker anywhere. heygenStartRender is ALSO
+    // requireCeoSession-gated and returns the byte-identical
+    // 'ceo_authorization_required' string, which is why the UI error text
+    // alone couldn't distinguish the two paths — only inspecting pkg.isTest
+    // directly proved which one actually ran. Fixed here, inline, in the
+    // one function the real UI actually calls.
+    const _t=(D.tasks||[]).find(function(x){return String(x.id)===String(taskId);});
+    if(_t&&_t.isTest&&!_pkg.isTest){
+      _pkg.isTest=true;
+      _pkg.workflowNotes=(_pkg.workflowNotes?_pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST';
+      try{
+        const _vr=await fetch('/api/ops?action=nextwave_v2_plan_visuals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script:_pkg.script})});
+        const _vd=await _vr.json();
+        if(_vd.ok){_pkg.nextwaveV2Plan=_vd.plan;console.log('[NextWave V2] visual plan attached — units:',_vd.unit_count);}
+        else console.warn('[NextWave V2] plan_visuals failed (package still saved normally):',_vd.error);
+      }catch(e){console.warn('[NextWave V2] plan_visuals error (non-fatal):',e.message);}
+    }
     if(typeof savePackageToSupabase==='function')await savePackageToSupabase(_pkg).catch(function(){});
     _nextWaveSetStage(taskId,'review');
     if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
