@@ -15907,6 +15907,24 @@ async function _nextwaveV2ChooseVoice(taskId,voiceId,name){
 // for real production output, and never auto-advances real calendars.
 async function nextwaveV2StartBuild(pkg){
   if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  // Phase 4.4D Step 6 — refuse to silently fall back to the server's
+  // Rachel/default voice. If the CEO hasn't explicitly picked a voice via
+  // "List ElevenLabs Voices -> Use this voice" yet, stop here and say so,
+  // rather than rendering with an unconfirmed voice and only surfacing that
+  // after spending real ElevenLabs characters.
+  try{
+    const vr=await fetch('/api/ops?action=nextwave_v2_get_voice');
+    const vd=await vr.json();
+    if(!vd.ok||!vd.voice_id){
+      pkg.renderStatus='failed';
+      pkg.renderError='no_voice_selected: pick a voice under "List ElevenLabs Voices" before starting Build.';
+      return{ok:false,reason:'no_voice_selected',detail:pkg.renderError};
+    }
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='voice_check_failed: '+e.message;
+    return{ok:false,reason:'voice_check_failed',detail:pkg.renderError};
+  }
   try{
     const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_build_render',{script:pkg.script});
     const data=await r.json();
@@ -18031,18 +18049,69 @@ function renderNextWaveLifecycleCard(task){
   // ── BUILD — pkg.renderStatus state machine ────────────────────────────────
   else if(stage==='build'){
     const renderStatus=pkg?pkg.renderStatus:'';
-    if(!renderStatus||!pkg){
-      // v16.70.0 — Phase 4.4: NextWave V2 Build renderer replaces HeyGen+Submagic
-      // for NextWave only. Every other engine's Build path is untouched.
-      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">NextWave V2 renders the video directly — original environment + programmatic finance visuals + real ElevenLabs narration. No HeyGen, no Submagic.</div>`;
-      body+=`<div style="border:1px solid rgba(59,130,246,0.25);border-radius:10px;padding:12px;margin-bottom:12px">
+    // Phase 4.4D — root cause of the CEO's "HeyGen render failed /
+    // ceo_authorization_required" report: nextwaveV2StartBuild already
+    // correctly used _ceoAuthedFetch and got a real (correctly-enforced)
+    // 401 from the server — HeyGen was never invoked. But the FAILURE
+    // display below was the same shared, HeyGen-labeled 'failed' branch
+    // every engine's Build stage uses, whose Retry button was hardcoded to
+    // autoStartHeygenRender — meaning a retry click would have genuinely
+    // fired the legacy HeyGen path. The CEO was right not to retry. Fixed
+    // by giving a NextWave V2 preview package (isTest + the
+    // NEXTWAVE_V2_PREVIEW_TEST marker — the exact criteria this order
+    // specifies) its own fully self-contained state branch below, which
+    // never touches renderStatus values the legacy HeyGen/Submagic branches
+    // interpret, never shows HeyGen/Submagic language, and always retries
+    // via nextwaveV2StartBuild. Real (non-preview) NextWave packages fall
+    // through to the original HeyGen+Submagic state machine, byte-for-byte
+    // unchanged, further below.
+    const isNextWaveV2Preview=!!(pkg&&pkg.isTest&&typeof pkg.workflowNotes==='string'&&pkg.workflowNotes.indexOf('NEXTWAVE_V2_PREVIEW_TEST')!==-1);
+    if(isNextWaveV2Preview){
+      const _voicePanel=`<div style="border:1px solid rgba(59,130,246,0.25);border-radius:10px;padding:12px;margin-bottom:12px">
         <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">ELEVENLABS VOICE</div>
         <div id="nwv2-voice-status-${taskId}" style="font-size:12px;color:#fff;margin-bottom:8px">checking…</div>
         <button style="width:100%;padding:9px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.3);border-radius:8px;color:#3b82f6;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="_nextwaveV2ListVoices('${taskId}')">🎙 List ElevenLabs Voices</button>
         <div id="nwv2-voice-list-${taskId}" style="margin-top:8px"></div>
       </div>`;
-      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Rendering (ElevenLabs + ffmpeg, ~1-2 min)…';const r=await nextwaveV2StartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{btn.textContent='⚡ Start Build (NextWave V2)';alert('NextWave V2 build failed: '+(r&&(r.detail||r.reason)||'unknown'));}})()">⚡ Start Build (NextWave V2)</button>`;
+      const _buildBtn=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Rendering (ElevenLabs + ffmpeg, ~1-2 min)…';const r=await nextwaveV2StartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{btn.textContent=(p.renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)');if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}})()">${renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)'}</button>`;
+      if(renderStatus==='enhanced'&&pkg&&pkg.videoUrl){
+        body+=`<div style="padding:20px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.50);border-radius:12px;text-align:center;margin-bottom:12px">
+          <div style="font-size:32px;margin-bottom:12px">🎬</div>
+          <div style="font-size:16px;font-weight:800;color:#22c55e;margin-bottom:8px">NextWave V2 video ready</div>
+          <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">duration: ${escHTML(String(pkg.renderDurationSec||'—'))}s · ElevenLabs narration · original environment/icons</div>
+          <video src="${escHTML(pkg.videoUrl)}" controls style="width:100%;border-radius:10px;max-height:280px;background:#000;margin-top:8px"></video>
+        </div>`;
+        body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>`;
+      }else{
+        if(renderStatus==='failed'){
+          const _errRaw=pkg&&pkg.renderError||'unknown';
+          const _errFailed=escHTML((typeof _errRaw==='object'?(_errRaw.message||_errRaw.code||JSON.stringify(_errRaw)):String(_errRaw)).slice(0,250));
+          const _isAuthErr=/ceo_authorization_required/i.test(String(_errRaw));
+          body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">🔴</span><span style="font-size:14px;font-weight:800;color:#ef4444">NextWave V2 build failed</span></div>
+            <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
+            ${_isAuthErr?`<div style="margin-top:10px;font-size:11px;color:#f59e0b">Your CEO session may have expired or was never established in this tab. Log out and log back in as CEO with your PIN, then retry — this does not touch HeyGen and will not consume any HeyGen/Submagic quota.</div>`:''}
+          </div>`;
+        }else{
+          body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">NextWave V2 renders the video directly — original environment + programmatic finance visuals + real ElevenLabs narration. No HeyGen, no Submagic.</div>`;
+        }
+        body+=_voicePanel;
+        body+=_buildBtn;
+      }
       setTimeout(function(){if(typeof _nextwaveV2LoadVoiceStatus==='function')_nextwaveV2LoadVoiceStatus(taskId);},50);
+      body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
+      return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin-bottom:0;color:var(--text)">⚡ NextWave Systems</div>
+          <span style="font-size:10px;font-weight:800;color:${stageCol};background:${stageCol}15;padding:3px 8px;border-radius:5px;letter-spacing:1px;font-family:'JetBrains Mono',monospace">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
+        </div>
+        ${_srvLifecycleProgressBar(stage)}
+        ${body}
+      </div>`;
+    }
+    if(!renderStatus||!pkg){
+      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">HeyGen renders the video automatically. MMM polls every 45 sec.<br>Submagic captions apply after render.</div>`;
+      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const r=await autoStartHeygenRender(p);if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('HeyGen submit failed: '+(r&&(r.detail||r.reason)||'unknown'));}})()">⚡ Start Build (HeyGen → Submagic)</button>`;
     }else if(renderStatus==='rendering'){
       const _jobShort=escHTML(String(pkg.heygenJobId||'').slice(0,16));
       const _started=pkg.renderStartedAt?new Date(pkg.renderStartedAt).toLocaleTimeString():'—';
