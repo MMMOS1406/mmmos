@@ -15811,6 +15811,93 @@ async function _nextwaveGeneratePackageWithV2Plan(taskId){
     console.warn('[NextWave V2] plan_visuals error (non-fatal, package still saved normally):',e.message);
   }
 }
+// ── NextWave V2 Build renderer (Phase 4.4) — voice picker + Build trigger ──
+// Replaces autoStartHeygenRender for NextWave only. Every other engine's
+// Build trigger (autoStartHeygenRender itself, _srvEnglishBuildTrigger,
+// canvas_renderer_* etc.) is untouched.
+async function _nextwaveV2LoadVoiceStatus(taskId){
+  const el=document.getElementById('nwv2-voice-status-'+taskId);
+  if(!el)return;
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_get_voice');
+    const d=await r.json();
+    if(d.ok&&d.voice_id){
+      el.innerHTML='<span style="color:#22c55e">✓ '+escHTML(d.name||d.voice_id)+'</span> <span style="color:var(--dim);font-family:\'JetBrains Mono\',monospace;font-size:10px">('+escHTML(d.voice_id)+')</span>';
+    }else{
+      el.innerHTML='<span style="color:#f59e0b">No voice selected yet — click List ElevenLabs Voices, then choose a male American voice below.</span>';
+    }
+  }catch(e){
+    el.innerHTML='<span style="color:var(--dim)">Could not check voice status.</span>';
+  }
+}
+async function _nextwaveV2ListVoices(taskId){
+  const listEl=document.getElementById('nwv2-voice-list-'+taskId);
+  if(!listEl)return;
+  listEl.innerHTML='<div style="font-size:11px;color:var(--dim)">Loading voices…</div>';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_list_elevenlabs_voices',{});
+    const d=await r.json();
+    if(!d.ok){
+      listEl.innerHTML='<div style="font-size:11px;color:#ef4444">'+escHTML(d.error||'failed to load voices')+(d.error==='ceo_authorization_required'?' — log in as CEO first.':'')+'</div>';
+      return;
+    }
+    if(!d.voices||!d.voices.length){listEl.innerHTML='<div style="font-size:11px;color:var(--dim)">No voices found on this account.</div>';return;}
+    listEl.innerHTML=d.voices.map(function(v){
+      const labels=v.labels||{};
+      const labelStr=[labels.gender,labels.accent,labels.description||labels.use_case].filter(Boolean).join(' · ');
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:6px;margin-bottom:6px">'
+        +'<div><div style="font-size:12px;color:#fff;font-weight:700">'+escHTML(v.name)+'</div><div style="font-size:10px;color:var(--dim)">'+escHTML(labelStr||v.category||'')+'</div></div>'
+        +'<button style="padding:6px 10px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:6px;color:#22c55e;font-size:10px;font-weight:700;cursor:pointer" onclick="_nextwaveV2ChooseVoice(\''+taskId+'\',\''+v.voice_id+'\',\''+escHTML(v.name).replace(/'/g,"\\'")+'\')">Use this voice</button>'
+        +'</div>';
+    }).join('');
+  }catch(e){
+    listEl.innerHTML='<div style="font-size:11px;color:#ef4444">'+escHTML(e.message)+'</div>';
+  }
+}
+async function _nextwaveV2ChooseVoice(taskId,voiceId,name){
+  const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_set_voice',{voice_id:voiceId,name:name});
+  const d=await r.json();
+  if(d.ok){
+    await _nextwaveV2LoadVoiceStatus(taskId);
+    const listEl=document.getElementById('nwv2-voice-list-'+taskId);
+    if(listEl)listEl.innerHTML='';
+  }else{
+    alert('Could not save voice selection: '+(d.error||'unknown'));
+  }
+}
+// Real, synchronous (single request/response) render — no HeyGen-style
+// polling needed since ffmpeg + ElevenLabs both complete within this one
+// call. Stamps pkg.isTest + a readable workflowNotes marker (Step 10 —
+// reuses the existing pkg.isTest convention already honored elsewhere in
+// this file; no schema change) so this preview candidate is never mistaken
+// for real production output, and never auto-advances real calendars.
+async function nextwaveV2StartBuild(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_build_render',{script:pkg.script});
+    const data=await r.json();
+    if(data.ok&&data.video_url){
+      pkg.videoUrl=data.video_url;
+      pkg.renderStatus='enhanced'; // reuses the existing "publishable MP4 ready" UI state
+      pkg.renderDurationSec=data.duration_sec;
+      pkg.renderStartedAt=new Date().toISOString();
+      pkg.isTest=true; // NEXTWAVE_V2_PREVIEW_TEST — existing convention, keeps this out of real production consumption
+      pkg.workflowNotes=(pkg.workflowNotes?pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST — Phase 4.4 build renderer, voice='+(data.voice_id_used||'default');
+      pkg.nextwaveV2RenderMeta={sceneCount:data.scene_count,scenes:data.scenes,meaningfulVisualChangeCount:data.meaningful_visual_change_count,placeholderCount:data.placeholder_count,narrationCharsSent:data.narration_chars_sent,renderId:data.render_id};
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Build] rendered:',data.render_id,'duration:',data.duration_sec+'s','scenes:',data.scene_count);
+      return{ok:true,video_url:data.video_url};
+    }else{
+      pkg.renderStatus='failed';
+      pkg.renderError=data.error||('HTTP '+(data.status||'?'));
+      return{ok:false,reason:'nextwave_v2_error',detail:pkg.renderError};
+    }
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
 function _srvEnglishCancelTask(taskId){
   if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
   const t=D.tasks.find(function(x){return String(x.id)===String(taskId);});
@@ -17807,8 +17894,17 @@ function renderNextWaveLifecycleCard(task){
   else if(stage==='build'){
     const renderStatus=pkg?pkg.renderStatus:'';
     if(!renderStatus||!pkg){
-      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">HeyGen renders the video automatically. MMM polls every 45 sec.<br>Submagic captions apply after render.</div>`;
-      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const r=await autoStartHeygenRender(p);if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('HeyGen submit failed: '+(r&&(r.detail||r.reason)||'unknown'));}})()">⚡ Start Build (HeyGen → Submagic)</button>`;
+      // v16.70.0 — Phase 4.4: NextWave V2 Build renderer replaces HeyGen+Submagic
+      // for NextWave only. Every other engine's Build path is untouched.
+      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">NextWave V2 renders the video directly — original environment + programmatic finance visuals + real ElevenLabs narration. No HeyGen, no Submagic.</div>`;
+      body+=`<div style="border:1px solid rgba(59,130,246,0.25);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">ELEVENLABS VOICE</div>
+        <div id="nwv2-voice-status-${taskId}" style="font-size:12px;color:#fff;margin-bottom:8px">checking…</div>
+        <button style="width:100%;padding:9px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.3);border-radius:8px;color:#3b82f6;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="_nextwaveV2ListVoices('${taskId}')">🎙 List ElevenLabs Voices</button>
+        <div id="nwv2-voice-list-${taskId}" style="margin-top:8px"></div>
+      </div>`;
+      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Rendering (ElevenLabs + ffmpeg, ~1-2 min)…';const r=await nextwaveV2StartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{btn.textContent='⚡ Start Build (NextWave V2)';alert('NextWave V2 build failed: '+(r&&(r.detail||r.reason)||'unknown'));}})()">⚡ Start Build (NextWave V2)</button>`;
+      setTimeout(function(){if(typeof _nextwaveV2LoadVoiceStatus==='function')_nextwaveV2LoadVoiceStatus(taskId);},50);
     }else if(renderStatus==='rendering'){
       const _jobShort=escHTML(String(pkg.heygenJobId||'').slice(0,16));
       const _started=pkg.renderStartedAt?new Date(pkg.renderStartedAt).toLocaleTimeString():'—';

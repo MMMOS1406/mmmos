@@ -11128,11 +11128,12 @@ async function smSynthesizeNarration(text) {
 // and returns it to the caller; does not persist any artifact server-side. Where/how NextWave
 // should store the resulting audio long-term is a follow-up decision for whoever reviews this
 // PR, once NextWave's actual asset-storage conventions are confirmed — not guessed at here.
-async function nextwaveSynthesizeNarrationElevenLabs(text) {
+async function nextwaveSynthesizeNarrationElevenLabs(text, voiceId) {
   if (!ELEVENLABS_API_KEY) return { ok: false, error: 'elevenlabs_not_configured' };
   if (!text || typeof text !== 'string' || !text.trim()) return { ok: false, error: 'text_required' };
+  const useVoiceId = (voiceId && typeof voiceId === 'string') ? voiceId : ELEVENLABS_VOICE_ID;
   try {
-    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(ELEVENLABS_VOICE_ID)}`, {
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(useVoiceId)}`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
       body: JSON.stringify({
@@ -11159,14 +11160,14 @@ async function nextwaveSynthesizeNarrationElevenLabs(text) {
 async function nextwaveNarrationSynthesize(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { script_text } = req.body || {};
+  const { script_text, voice_id } = req.body || {};
   if (!script_text || typeof script_text !== 'string' || !script_text.trim()) {
     return res.status(400).json({ ok: false, error: 'script_text is required' });
   }
   if (script_text.length > 5000) {
     return res.status(400).json({ ok: false, error: 'script_text too long (max 5000 characters per call)' });
   }
-  const result = await nextwaveSynthesizeNarrationElevenLabs(script_text);
+  const result = await nextwaveSynthesizeNarrationElevenLabs(script_text, voice_id);
   if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
   return res.status(200).json({
     ok: true,
@@ -11488,6 +11489,342 @@ async function nextwaveV2PlanVisuals(req, res) {
     return res.status(200).json({ ok: true, unit_count: plan.length, plan });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── NextWave V2 — Build renderer (Phase 4.4) ────────────────────────────────
+// NextWave-only replacement for the HeyGen+Submagic Build step. Every other
+// engine's Build path (heygenStartRender etc.) is untouched. Reuses proven
+// production infrastructure rather than inventing a parallel system:
+//   - @ffmpeg-installer/ffmpeg + SMM_FONT_PATH (same binary/font SMM's real
+//     video assembly already uses in production — see smSegEndCard etc.)
+//   - smAssertValidMediaFile / smConcatSegments (same validation + concat
+//     pattern, called directly, not duplicated)
+//   - sbStorageUpload (same Supabase Storage path SMM video already uses)
+//   - nextwaveSegmentMeaningUnits / nextwaveClassifyVisualIntent /
+//     nextwaveHasDynamicNumbers / nextwaveRankNumberPhrase /
+//     nextwaveFormatFinancialNumber (Phase 4 / 4.1B, unchanged)
+//   - nextwaveSynthesizeNarrationElevenLabs (real ElevenLabs, now accepting
+//     an optional voiceId — the only change made to that function)
+// Icon/background/host assets are original, programmatically-drawn PNGs at
+// api/assets/nextwave-v2/ (same directory pattern as api/assets/smm-font.ttf
+// so they are bundled into this function the same proven way).
+
+const NEXTWAVE_V2_ASSETS_DIR = join(process.cwd(), 'api', 'assets', 'nextwave-v2');
+const NEXTWAVE_V2_BG = join(NEXTWAVE_V2_ASSETS_DIR, 'bg_environment_1920x1080.png');
+const NEXTWAVE_V2_HOST_POINTING = join(NEXTWAVE_V2_ASSETS_DIR, 'host_hud_pointing.png');
+const NEXTWAVE_V2_HOST_DEFAULT = join(NEXTWAVE_V2_ASSETS_DIR, 'host_hud_default.png');
+
+// Keyed to the exact same concept tags NEXTWAVE_V2_CONCEPT_KEYWORDS already
+// produces (Phase 4) — no new mapping/taxonomy to keep in sync separately.
+const NEXTWAVE_V2_ICON_MAP = {
+  home: 'icon_home.png', debt: 'icon_credit_card.png', credit_card: 'icon_credit_card.png',
+  bank_account: 'icon_bank.png', tax: 'icon_dollar_generic.png', growth: 'icon_growth.png',
+  loss: 'icon_loss.png', comparison: 'icon_scale.png', time: 'icon_calendar.png',
+  delay: 'icon_calendar.png', retirement: 'icon_savings.png', car: 'icon_car.png',
+  bills: 'icon_calendar.png', income: 'icon_income.png', savings: 'icon_savings.png',
+  risk: 'icon_risk.png', decision: 'icon_scale.png', opportunity_cost: 'icon_scale.png',
+  market_movement: 'icon_growth.png', goal_progress: 'icon_growth.png',
+  cash_flow: 'icon_income.png', control: 'icon_scale.png', tradeoff: 'icon_scale.png',
+};
+const NEXTWAVE_V2_ICON_FALLBACK = 'icon_dollar_generic.png';
+function nextwaveV2IconPath(conceptTag) {
+  return join(NEXTWAVE_V2_ASSETS_DIR, NEXTWAVE_V2_ICON_MAP[conceptTag] || NEXTWAVE_V2_ICON_FALLBACK);
+}
+
+// Same escaping class as smSanitizeForDrawtext (quotes/colons/brackets are
+// ffmpeg filter-syntax metacharacters — this is a correctness/injection
+// concern, not just cosmetic), but without that helper's 60-char cap since
+// caption lines run longer than end-card labels.
+function nextwaveV2SanitizeDrawtext(s, maxLen) {
+  return String(s || '').replace(/['":\\\[\],;]/g, '').slice(0, maxLen || 110);
+}
+
+// Groups meaning units into scenes generically — a new scene starts once the
+// current one already holds 3+ units, or the next unit's concept tags share
+// nothing with the scene so far (a real topic shift). Nothing here is
+// hardcoded to any one script; this is the same grouping logic validated
+// locally in Phase 4.4's dry-run test before being written here.
+function nextwaveV2GroupScenes(plan) {
+  const scenes = [];
+  let cur = null;
+  for (const u of plan) {
+    const tags = (u.concept_tags || []).filter((t) => t !== 'none_detected');
+    const shift = cur && cur.units.length >= 1 && tags.length && cur.conceptSet.size &&
+      !tags.some((t) => cur.conceptSet.has(t));
+    if (!cur || cur.units.length >= 3 || shift) {
+      cur = { units: [], conceptSet: new Set() };
+      scenes.push(cur);
+    }
+    cur.units.push(u);
+    tags.forEach((t) => cur.conceptSet.add(t));
+  }
+  return scenes;
+}
+
+// Top 1-2 concepts by frequency within the scene -> at most 2 distinct icon
+// assets (never more, to avoid clutter) -> generic fallback icon if the
+// scene's units carried no recognized concept at all (so no scene is ever a
+// bare background with nothing on it).
+function nextwaveV2SceneIcons(scene) {
+  const freq = {};
+  scene.units.forEach((u) => (u.concept_tags || []).forEach((t) => {
+    if (t === 'none_detected') return;
+    freq[t] = (freq[t] || 0) + 1;
+  }));
+  const top = Object.keys(freq).sort((a, b) => freq[b] - freq[a]).slice(0, 2);
+  const icons = [...new Set(top.map(nextwaveV2IconPath))];
+  return icons.length ? icons : [nextwaveV2IconPath(null)];
+}
+
+// No ffprobe binary is vendored — same technique smAssertValidMediaFile
+// already relies on (a decode pass's own stderr reports real stream info).
+// `ffmpeg -i <file>` always exits non-zero with no output specified; the
+// Duration line is on stderr regardless of that exit code.
+async function nextwaveV2GetDurationSec(path) {
+  try {
+    await execFileAsync(ffmpegInstaller.path, ['-i', path], { timeout: 15000, maxBuffer: 1024 * 1024 * 5 });
+    throw new Error('unexpected: ffmpeg -i exited 0 with no output specified');
+  } catch (e) {
+    const stderr = String((e && e.stderr) || '');
+    const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+    if (!m) throw new Error(`could not determine duration for ${path}: ${stderr.slice(-300)}`);
+    return (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+  }
+}
+
+// Builds one scene's MP4 segment: branded environment + 1-2 concept icons +
+// the recurring host as a small, toggleable corner presence (visible only on
+// non-dynamic-number units within the scene, per the "character supports,
+// never defaults to the whole scene" rule) + a real ElevenLabs audio track +
+// a slow zoompan (the same technique already proven for SMM's Ken Burns
+// segments) + drawtext number labels/captions timed to each unit's real,
+// proportional share of the scene's actual spoken duration.
+async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId) {
+  const sceneText = scene.units.map((u) => u.text).join(' ');
+  const narration = await nextwaveSynthesizeNarrationElevenLabs(sceneText, voiceId);
+  if (!narration.ok) throw new Error(`scene ${sceneIdx} narration failed: ${narration.error}`);
+
+  const audioPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}-audio.mp3`);
+  await writeFile(audioPath, narration.buffer);
+  await smAssertValidMediaFile(audioPath, `scene ${sceneIdx} narration audio`);
+  const dur = await nextwaveV2GetDurationSec(audioPath);
+
+  const totalChars = Math.max(1, sceneText.length);
+  let cursor = 0;
+  const timedUnits = scene.units.map((u) => {
+    const uDur = dur * (u.text.length / totalChars);
+    const start = cursor;
+    cursor = Math.min(dur, cursor + uDur);
+    const hasNumber = nextwaveHasDynamicNumbers(u.text);
+    const numberLabel = hasNumber ? nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text)) : null;
+    return { text: u.text, start, end: cursor, hasNumber, numberLabel };
+  });
+
+  const icons = nextwaveV2SceneIcons(scene);
+  const useHost = (sceneIdx % 2 === 0) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT;
+  const W = 1920, H = 1080, groundY = Math.round(H * 0.74);
+
+  const inputs = ['-loop', '1', '-i', NEXTWAVE_V2_BG];
+  icons.forEach((p) => inputs.push('-i', p));
+  const hostIdx = icons.length + 1;
+  inputs.push('-i', useHost);
+  const audioIdx = hostIdx + 1;
+  inputs.push('-i', audioPath);
+
+  const frames = Math.max(1, Math.round(dur * 25));
+  const filters = [`[0:v]scale=${W}:${H},zoompan=z='min(zoom+0.0004,1.06)':d=${frames}:s=${W}x${H}:fps=25[bg]`];
+  let last = 'bg';
+  const positions = icons.length === 2 ? [[560, 380], [1360, 380]] : [[960, 420]];
+  icons.forEach((_, i) => {
+    const iidx = i + 1;
+    const [cx, iconH] = positions[i];
+    filters.push(`[${iidx}:v]scale=-1:${iconH}[ic${i}]`);
+    const next = `v${i}`;
+    filters.push(`[${last}][ic${i}]overlay=x='${cx}-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${dur.toFixed(2)})'[${next}]`);
+    last = next;
+  });
+
+  // Host visible only during units that are NOT carrying a hard number —
+  // the number/visual is the hero in those beats, matching the locked
+  // "character must not default to being the entire scene" principle.
+  const hostWindows = timedUnits.filter((u) => !u.hasNumber);
+  if (hostWindows.length) {
+    const expr = hostWindows.map((u) => `between(t,${u.start.toFixed(2)},${u.end.toFixed(2)})`).join('+');
+    filters.push(`[${hostIdx}:v]scale=-1:220[hud]`);
+    filters.push(`[${last}][hud]overlay=x=40:y=${H}-overlay_h-40:enable='${expr}'[vh]`);
+    last = 'vh';
+  }
+
+  const drawtexts = [];
+  timedUnits.forEach((u) => {
+    if (u.numberLabel) {
+      drawtexts.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${nextwaveV2SanitizeDrawtext(u.numberLabel, 40)}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(u.numberLabel, 54, 900)}:box=1:boxcolor=white@0.92:boxborderw=18:x=(w-text_w)/2:y=170:enable='between(t\\,${u.start.toFixed(2)}\\,${dur.toFixed(2)})'`);
+    }
+    const capTxt = nextwaveV2SanitizeDrawtext(u.text, 110);
+    drawtexts.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${capTxt}':fontcolor=white:fontsize=${smFitFontSize(capTxt, 34, 1700)}:box=1:boxcolor=black@0.6:boxborderw=16:x=(w-text_w)/2:y=${H}-140:enable='between(t\\,${u.start.toFixed(2)}\\,${u.end.toFixed(2)})'`);
+  });
+  const vf = filters.join(';') + (drawtexts.length ? `;[${last}]` + drawtexts.join(',') + '[vout]' : `;[${last}]null[vout]`);
+
+  const outPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}.mp4`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', ...inputs,
+      '-filter_complex', vf,
+      '-map', '[vout]', '-map', `${audioIdx}:a`,
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+      '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest',
+      outPath,
+    ], { timeout: 90000, maxBuffer: 1024 * 1024 * 40 });
+  } catch (e) {
+    throw new Error(`scene ${sceneIdx} ffmpeg failed: ${String((e && e.stderr) || e.message).slice(-500)}`);
+  } finally {
+    await unlink(audioPath).catch(() => {});
+  }
+  await smAssertValidMediaFile(outPath, `scene ${sceneIdx} segment`);
+  return {
+    path: outPath, durationSec: dur,
+    hostVisible: hostWindows.length > 0,
+    numbersShown: timedUnits.filter((u) => u.numberLabel).map((u) => u.numberLabel),
+    iconCount: icons.length,
+  };
+}
+
+// app_settings-backed voice selection (same key-value table/pattern already
+// used for ceo_login_security_production — no new schema). Namespaced to
+// 'preview' explicitly per Step 10/PM instruction: this is not promoted to
+// production automatically.
+const NEXTWAVE_V2_VOICE_SETTING_KEY = 'nextwave_v2_voice_id_preview';
+async function nextwaveV2GetVoiceConfig() {
+  try {
+    const rows = await sbGet(`app_settings?key=eq.${NEXTWAVE_V2_VOICE_SETTING_KEY}&select=value&limit=1`);
+    if (rows && rows[0]) { try { return JSON.parse(rows[0].value || '{}'); } catch { return {}; } }
+  } catch {}
+  return {};
+}
+async function nextwaveV2SetVoiceConfig(state) {
+  const existing = await sbGetSafe(`app_settings?key=eq.${NEXTWAVE_V2_VOICE_SETTING_KEY}&select=key&limit=1`);
+  const body = { key: NEXTWAVE_V2_VOICE_SETTING_KEY, value: JSON.stringify(state), updated_at: new Date().toISOString() };
+  if (existing.length) await sbPatch('app_settings', `key=eq.${NEXTWAVE_V2_VOICE_SETTING_KEY}`, body);
+  else await sbInsert('app_settings', body);
+}
+
+// Read-only, CEO-gated, zero-cost voice catalog lookup. Returns only
+// name/id/labels/description/preview_url — never the API key, never touches
+// generation (no billable ElevenLabs call; GET /v1/voices is a free list
+// endpoint). This is the "single required CEO action" surfaced in the Phase
+// 4.3 checkpoint: the CEO triggers this once, logged into Preview, to pick a
+// real male voice from the actual account instead of Claude guessing one.
+async function nextwaveListElevenLabsVoices(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!ELEVENLABS_API_KEY) return res.status(200).json({ ok: false, error: 'elevenlabs_not_configured' });
+  try {
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/voices`, { headers: { 'xi-api-key': ELEVENLABS_API_KEY } });
+    if (!r.ok) return res.status(502).json({ ok: false, error: `elevenlabs_error_${r.status}` });
+    const data = await r.json();
+    const voices = (data.voices || []).map((v) => ({
+      voice_id: v.voice_id, name: v.name, category: v.category,
+      labels: v.labels || {}, description: v.description || '', preview_url: v.preview_url || null,
+    }));
+    return res.status(200).json({ ok: true, voices });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `elevenlabs_request_failed: ${e.message}` });
+  }
+}
+
+// Not CEO-gated, same reasoning as nextwave_v2_plan_visuals: read-only,
+// zero-cost, and the voice ID/name themselves are not sensitive (the API
+// key never appears here) — only setting it requires CEO auth.
+async function nextwaveV2GetVoice(req, res) {
+  const cfg = await nextwaveV2GetVoiceConfig();
+  return res.status(200).json({ ok: true, voice_id: cfg.voice_id || null, name: cfg.name || null, savedAt: cfg.savedAt || null });
+}
+
+// CEO-gated: persists the CEO's chosen voice as the NextWave V2 preview
+// candidate's voice configuration. Zero-cost (no generation call), does not
+// touch production narration's default ELEVENLABS_VOICE_ID constant at all.
+async function nextwaveV2SetVoice(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { voice_id, name } = req.body || {};
+  if (!voice_id || typeof voice_id !== 'string') return res.status(400).json({ ok: false, error: 'voice_id required' });
+  await nextwaveV2SetVoiceConfig({ voice_id, name: name || '', savedAt: new Date().toISOString() });
+  return res.status(200).json({ ok: true, voice_id, name: name || '' });
+}
+
+// Main entry point: real approved package script -> V2 plan -> scenes ->
+// real ElevenLabs narration per scene -> composited segments -> concatenated
+// final MP4 -> uploaded to the same Supabase Storage path SMM video already
+// uses. CEO-gated (spends real ElevenLabs money). Stateless per call, same
+// as nextwaveNarrationSynthesize — the caller (Build button) is responsible
+// for persisting the returned video_url onto the package row, exactly like
+// autoStartHeygenRender already does for pkg.videoUrl today.
+async function nextwaveV2BuildRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { script, voice_id } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) {
+    return res.status(400).json({ ok: false, error: 'script is required' });
+  }
+  if (script.length > 3000) {
+    return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 3000 characters)' });
+  }
+
+  const savedVoice = await nextwaveV2GetVoiceConfig();
+  const useVoiceId = voice_id || savedVoice.voice_id || null; // null -> nextwaveSynthesizeNarrationElevenLabs's own default
+
+  const units = nextwaveSegmentMeaningUnits(script);
+  const plan = units.map((u) => {
+    const tags = nextwaveClassifyVisualIntent(u.text);
+    const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+    return { ...u, concept_tags: tags, fallback_concept: fallback };
+  });
+  const scenes = nextwaveV2GroupScenes(plan);
+  if (!scenes.length) return res.status(400).json({ ok: false, error: 'no meaning units resolved from script' });
+
+  const renderId = randomBytes(6).toString('hex');
+  const segPaths = [];
+  let totalDurationSec = 0;
+  const sceneReports = [];
+  let charsSent = 0;
+  try {
+    for (let i = 0; i < scenes.length; i++) {
+      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, useVoiceId, renderId);
+      segPaths.push(seg.path);
+      totalDurationSec += seg.durationSec;
+      charsSent += scenes[i].units.map((u) => u.text).join(' ').length;
+      sceneReports.push({
+        sceneIndex: i, unitCount: scenes[i].units.length, durationSec: Number(seg.durationSec.toFixed(2)),
+        iconCount: seg.iconCount, hostVisible: seg.hostVisible, numbersShown: seg.numbersShown,
+      });
+    }
+    const concatOut = await smConcatSegments({ paths: segPaths, id: `nwv2-${renderId}` });
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/${renderId}.mp4`, finalBuf, 'video/mp4');
+
+    // Meaningful-visual-change count (Step 9 QA metric): every number
+    // reveal + every host on/off toggle across scenes, generic — not
+    // hand-counted per script.
+    let meaningfulChanges = 0;
+    sceneReports.forEach((s) => { meaningfulChanges += s.numbersShown.length + (s.hostVisible ? 1 : 0) + 1; });
+
+    return res.status(200).json({
+      ok: true,
+      video_url: videoUrl,
+      duration_sec: Number(totalDurationSec.toFixed(2)),
+      scene_count: scenes.length,
+      scenes: sceneReports,
+      meaningful_visual_change_count: meaningfulChanges,
+      placeholder_count: 0,
+      voice_id_used: useVoiceId || ELEVENLABS_VOICE_ID,
+      narration_chars_sent: charsSent,
+      narration_provider: 'elevenlabs',
+      render_id: renderId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    for (const p of segPaths) await unlink(p).catch(() => {});
   }
 }
 
@@ -12707,6 +13044,11 @@ export default async function handler(req, res) {
     // NextWave V2 Phase 4: read/compute-only visual-planning (segment ->
     // classify -> resolve). Does not touch narration above in any way.
     if (action === 'nextwave_v2_plan_visuals')       return await nextwaveV2PlanVisuals(req, res);
+    // NextWave V2 Phase 4.4 — Build-stage renderer (NextWave only, HeyGen/Submagic untouched)
+    if (action === 'nextwave_list_elevenlabs_voices') return await nextwaveListElevenLabsVoices(req, res);
+    if (action === 'nextwave_v2_get_voice')           return await nextwaveV2GetVoice(req, res);
+    if (action === 'nextwave_v2_set_voice')           return await nextwaveV2SetVoice(req, res);
+    if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
