@@ -11129,6 +11129,7 @@ function _engineWeeklyTasksThisWeek(engineName){
   const sunMs=sunday.getTime();
   return D.tasks.filter(function(t){
     if(!t)return false;
+    if(t.isTest)return false; // Phase 4.4A — preview/test tasks never count toward the real weekly cap
     const TERM=new Set(['uploaded','verified','done']);
     if(TERM.has(String(t.status||'').toLowerCase()))return false;
     if(!_engineNameMatches(t.engine,engineName))return false;
@@ -15798,6 +15799,16 @@ async function _nextwaveGeneratePackageWithV2Plan(taskId){
     if(!t||t.engine!=='NextWave')return;
     const pkg=(D.packages||[]).find(function(p){return String(p.taskId)===String(taskId);});
     if(!pkg||!pkg.script)return;
+    // Phase 4.4A — generatePackage's own isTest stamp is keyed to a GLOBAL
+    // per-engine test-mode toggle (_getEngineState), not this specific task,
+    // so a task-level isTest flag (from _nextwaveV2CreatePreviewTestTask)
+    // would not otherwise reach the package. Propagate it explicitly here —
+    // the one place both the task and its just-generated package are
+    // already in scope — without touching the global engine-state mechanism.
+    if(t.isTest&&!pkg.isTest){
+      pkg.isTest=true;
+      pkg.workflowNotes=(pkg.workflowNotes?pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST';
+    }
     const r=await fetch('/api/ops?action=nextwave_v2_plan_visuals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script:pkg.script})});
     const d=await r.json();
     if(d.ok){
@@ -17770,6 +17781,44 @@ function vaStartNextWaveProductionTask(){
   if(typeof renderTab==='function')renderTab('tasks');
   window.scrollTo(0,0);
 }
+// Phase 4.4A — fresh NextWave V2 preview-test lifecycle, independent of the
+// real weekly cap/publish calendar (vaStartNextWaveProductionTask's
+// _nextWaveNextFormat/_nextWaveNextMode/_nextWaveNextPublishDate all advance
+// real shared-DB rotation state — deliberately not called here). isTest=true
+// is the ONLY thing that makes this task/package different from a real one;
+// same shape otherwise, so it flows through the exact same, unmodified
+// _nextWaveHasLifecycle/renderNextWaveLifecycleCard lifecycle — no second
+// lifecycle created.
+function _nextwaveV2CreatePreviewTestTask(){
+  const nextId=D.tasks.reduce(function(m,t){return Math.max(m,Number(t&&t.id)||0);},0)+1;
+  const task={
+    id:nextId,
+    name:'🧪 NEXTWAVE V2 PREVIEW TEST — Finance',
+    engine:'NextWave',
+    mood:'Finance',
+    mode:'Finance',
+    platform:'YouTube',
+    contentType:'Short',
+    contentFormat:'short',
+    isLong:false,
+    isoDate:new Date().toISOString().slice(0,10),
+    publishAt:null, // never enters the real Fri/Sat/Sun publish calendar
+    status:'assigned',
+    subStage:null,
+    autoCreated:false,
+    reviewStatus:'acknowledged',
+    createdAt:Date.now(),
+    isTest:true, // NEXTWAVE_V2_PREVIEW_TEST — existing convention (see Phase 4.4 checkpoint)
+  };
+  if(!D.nextWaveLifecycleStages)D.nextWaveLifecycleStages={};
+  D.nextWaveLifecycleStages[String(nextId)]='generate';
+  D.tasks.push(task);
+  saveData();
+  if(typeof vaFocusTaskId!=='undefined')vaFocusTaskId=nextId;
+  if(typeof renderTab==='function')renderTab('tasks');
+  window.scrollTo(0,0);
+  return task;
+}
 async function _nextWaveGeneratePackage(taskId){
   const genBtn=document.querySelector('button[onclick="_nextWaveGeneratePackage(\''+taskId+'\')"]');
   if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
@@ -17800,6 +17849,14 @@ async function _nextWaveRunPublish(pkgId,taskId){
   const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
   if(!pkg){alert('Package not found');return;}
   const statusEl=document.getElementById('nw-publish-status-'+taskId);
+  // Phase 4.4A — hard safety guard: a NEXTWAVE V2 PREVIEW TEST package must
+  // never actually reach YouTube, regardless of how the 'publish' stage was
+  // entered. This is the real network-call boundary, not just a UI hint.
+  if(pkg.isTest){
+    if(statusEl){statusEl.style.color='#f59e0b';statusEl.innerHTML='🧪 NEXTWAVE V2 PREVIEW TEST — Publish is disabled for test packages. Review the rendered video in Build/Approve; this will not be uploaded to YouTube.';}
+    _nextWaveSetStage(taskId,'approve');
+    return;
+  }
   const videoUrl=pkg.submagicOutputUrl||pkg.videoUrl||pkg._heygenRawUrl||pkg.heygenVideoUrl;
   if(!videoUrl){if(statusEl)statusEl.textContent='No video URL — go back to Build.';return;}
   const task=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
@@ -17977,7 +18034,11 @@ function renderNextWaveLifecycleCard(task){
       body+=`<div style="margin-bottom:14px">
         <video src="${escHTML(videoUrl)}" controls style="width:100%;border-radius:10px;max-height:300px;background:#000"></video>
       </div>`;
-      body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
+      if(pkg&&pkg.isTest){
+        body+=`<div style="padding:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#f59e0b;font-size:12px;margin-bottom:10px">🧪 NEXTWAVE V2 PREVIEW TEST — Publish to YouTube is disabled for this task. This is a preview candidate for CEO visual/audio review only.</div>`;
+      }else{
+        body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
+      }
       body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Build</button>`;
     }else{
       body+=`<div style="color:#ef4444;font-size:12px;margin-bottom:14px;padding:10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:8px">⚠ No video URL — go back to Build to complete rendering first.</div>`;
@@ -18013,6 +18074,11 @@ function _renderNextWaveOperatorPanel(nwCurrent){
   var h='';
   h+='<div class="card" style="margin-bottom:12px;padding:20px;border-color:rgba(59,130,246,0.2)">';
   h+='<div style="font-size:11px;font-weight:800;color:#3b82f6;letter-spacing:1.5px;font-family:\'JetBrains Mono\',monospace;margin-bottom:14px">⚡ NEXTWAVE</div>';
+  // Phase 4.4A — always available regardless of the real weekly cap/current
+  // task, since a preview-test task must never depend on or consume real
+  // production scheduling state. isTest=true keeps it out of that state
+  // entirely (see _engineWeeklyTasksThisWeek, _nextWaveRunPublish guards).
+  h+='<button onclick="_nextwaveV2CreatePreviewTestTask()" style="width:100%;padding:9px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#f59e0b;font-weight:700;font-size:11px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;margin-bottom:12px">🧪 Start V2 PREVIEW TEST Task (fresh lifecycle, does not touch real weekly calendar)</button>';
   if(!nwCurrent){
     // v15.7.0 — weekly cap check
     const _nwWeekCount=_engineWeeklyTasksThisWeek('NextWave');
