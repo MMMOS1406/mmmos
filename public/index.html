@@ -11795,7 +11795,18 @@ function renderVAOperatorMode(tab){
   const farsiCurrent=_fFoc||farsiPending[0]||null;
   const engCurrent=_eFoc||engPending[0]||null;
   const aiStudioCurrent=_aiFoc||aiStudioPending[0]||null;
-  const nwCurrent=_nwFoc||nwPending[0]||null; // v13.94.0
+  // Phase 4.4B — vaFocusTaskId is in-memory only (let vaFocusTaskId=null at
+  // module scope) and does not survive a page reload/new tab, at which point
+  // this used to silently fall back to nwPending[0] -- the OLDEST non-done
+  // NextWave task by D.tasks' push-append order, not the newest -- which is
+  // exactly how a stale, already-in-progress task could reopen after
+  // creating a fresh preview-test one. Recomputed fresh from persisted
+  // D.tasks every render (unlike vaFocusTaskId), so this survives a reload.
+  // Real (non-test) tasks are completely unaffected: falls through to the
+  // original nwPending[0] whenever no isTest task exists.
+  const _nwTestTasks=nwPending.filter(function(t){return t&&t.isTest;}).sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0);});
+  const nwCurrent=_nwFoc||_nwTestTasks[0]||nwPending[0]||null; // v13.94.0, v16.70.0 Phase 4.4B
+  if(nwCurrent)console.log('[NextWave V2] nwCurrent resolved -> id='+nwCurrent.id+' name="'+nwCurrent.name+'" isTest='+(!!nwCurrent.isTest)+' via='+(_nwFoc?'vaFocusTaskId':(_nwTestTasks[0]?'newest-isTest':'nwPending[0]-fallback')));
   // current = legacy non-lifecycle tasks only (NextWave and AI Studio now have own panels)
   const current=(vaFocusTaskId?otherPending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null)||otherPending[0]||null;
 
@@ -17815,6 +17826,7 @@ function _nextwaveV2CreatePreviewTestTask(){
   D.tasks.push(task);
   saveData();
   if(typeof vaFocusTaskId!=='undefined')vaFocusTaskId=nextId;
+  console.log('[NextWave V2 Preview Test] created task id='+nextId+' isTest='+task.isTest+' stage=generate | D.tasks length now='+D.tasks.length+' | vaFocusTaskId='+vaFocusTaskId);
   if(typeof renderTab==='function')renderTab('tasks');
   window.scrollTo(0,0);
   return task;
