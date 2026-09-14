@@ -11805,8 +11805,20 @@ function renderVAOperatorMode(tab){
   // Real (non-test) tasks are completely unaffected: falls through to the
   // original nwPending[0] whenever no isTest task exists.
   const _nwTestTasks=nwPending.filter(function(t){return t&&t.isTest;}).sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0);});
-  const nwCurrent=_nwFoc||_nwTestTasks[0]||nwPending[0]||null; // v13.94.0, v16.70.0 Phase 4.4B
-  if(nwCurrent)console.log('[NextWave V2] nwCurrent resolved -> id='+nwCurrent.id+' name="'+nwCurrent.name+'" isTest='+(!!nwCurrent.isTest)+' via='+(_nwFoc?'vaFocusTaskId':(_nwTestTasks[0]?'newest-isTest':'nwPending[0]-fallback')));
+  // Phase 4.4C — explicit id pointer (set by _nextwaveV2CreatePreviewTestTask
+  // right after a CONFIRMED canonical-state write) outranks every inference
+  // heuristic below it, including newest-isTest — an explicit "this is the
+  // task I just created and verified" signal beats any guess. Only used for
+  // this SUMMARY panel's fallback display (the actual post-creation
+  // navigation already goes straight to the exact task via openExec() and
+  // never reaches this code at all) and for reopening the same task after a
+  // same-tab reload.
+  let _nwPointerId=null; try{_nwPointerId=sessionStorage.getItem('nwv2_preview_task_id');}catch(e){}
+  const _nwPointerTask=_nwPointerId?nwPending.find(function(t){return String(t.id)===String(_nwPointerId);}):null;
+  const _nwPointerStale=!!(_nwPointerId&&!_nwPointerTask); // pointer set, but task no longer in D.tasks at all
+  const nwCurrent=_nwFoc||_nwPointerTask||_nwTestTasks[0]||nwPending[0]||null; // v13.94.0, v16.70.0 Phase 4.4B/4.4C
+  if(nwCurrent)console.log('[NextWave V2] nwCurrent resolved -> id='+nwCurrent.id+' name="'+nwCurrent.name+'" isTest='+(!!nwCurrent.isTest)+' via='+(_nwFoc?'vaFocusTaskId':(_nwPointerTask?'sessionStorage-pointer':(_nwTestTasks[0]?'newest-isTest':'nwPending[0]-fallback'))));
+  if(_nwPointerStale)console.error('[NextWave V2] sessionStorage pointer id='+_nwPointerId+' no longer exists in D.tasks — likely a concurrent-save overwrite conflict, not falling back silently.');
   // current = legacy non-lifecycle tasks only (NextWave and AI Studio now have own panels)
   const current=(vaFocusTaskId?otherPending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null)||otherPending[0]||null;
 
@@ -17800,19 +17812,26 @@ function vaStartNextWaveProductionTask(){
 // same shape otherwise, so it flows through the exact same, unmodified
 // _nextWaveHasLifecycle/renderNextWaveLifecycleCard lifecycle — no second
 // lifecycle created.
-function _nextwaveV2CreatePreviewTestTask(){
-  // Phase 4.4B (round 2) — REAL root cause found by live inspection: a
-  // sequential max(D.tasks id)+1 scheme can reuse an id that an OLD task
-  // used before being pruned from D.tasks, while that id's entries in
-  // D.nextWaveLifecycleStages / D.packages (which are never cleaned up)
-  // linger — so _nextWaveGetStage(reusedId) resolved to a STALE 'done' from
-  // a month-old, unrelated completed package sharing the same numeric id
-  // (confirmed live: id 72 collided with pkg_1787232663843, taskId:72,
-  // lifecycleStage:'done', generatedAt 2026-08-20). A time-based string id
-  // can never collide with any historical numeric task id; the NextWave
-  // lifecycle code already tolerates non-numeric task ids everywhere
-  // (`const numericId=Number(taskId); ...isNaN(numericId)?taskId:numericId`
-  // appears at every Generate/Review/Build call site), so this is safe.
+// Phase 4.4C — root cause of 4.4B's real-CEO-session failure: D.tasks
+// persists as ONE monolithic blob (see saveAppState — tasks:D.tasks is one
+// field in a single app_settings upsert row), so ANY concurrent save from
+// ANY session (including real, independent production activity sharing
+// this exact row) can silently overwrite a task created moments earlier
+// elsewhere. "Latest task" inference (nwCurrent/nwPending[0]/newest-isTest)
+// is therefore inherently unreliable as the PRIMARY navigation mechanism —
+// it depends on a re-read of shared state that something else may have
+// already clobbered. Fixed by removing that dependency entirely for the
+// critical moment: capture the exact new task id, await the save, verify
+// via a genuine canonical readback (a direct fresh fetch of the same
+// Supabase row loadAppState itself reads — not local D, which could just be
+// echoing back what we ourselves wrote), and navigate straight to that
+// exact id via openExec() — which renders renderNextWaveLifecycleCard(task)
+// for the literal task object passed in, with zero dependency on
+// nwCurrent/"latest" inference. A sessionStorage pointer (preview-only,
+// NextWave-only, per the order's explicitly authorized temporary mitigation)
+// lets a same-tab reload also reopen this exact task by id rather than
+// falling back to inference.
+async function _nextwaveV2CreatePreviewTestTask(){
   const nextId='nwv2preview_'+Date.now();
   const task={
     id:nextId,
@@ -17836,10 +17855,48 @@ function _nextwaveV2CreatePreviewTestTask(){
   if(!D.nextWaveLifecycleStages)D.nextWaveLifecycleStages={};
   D.nextWaveLifecycleStages[String(nextId)]='generate';
   D.tasks.push(task);
-  saveData();
+  const _localHasAfterPush=(D.tasks||[]).some(function(t){return String(t.id)===nextId;});
+  console.log('[NextWave V2 Preview Test] step 1/3 — pushed to local D.tasks. id='+nextId+' present locally='+_localHasAfterPush);
+
+  await saveData(); // now explicitly awaited — saveAppState is async and previously wasn't awaited here
+
+  // Canonical readback: fetch the SAME Supabase row loadAppState() reads on
+  // a fresh page load, independent of local D, so this proves the write
+  // actually reached shared state instead of only trusting our own memory.
+  let _canonicalHas=false, _canonicalStage=null;
+  try{
+    const res=await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${SB_FINANCE_KEY}&select=value`,{
+      signal:AbortSignal.timeout(8000),
+      headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}
+    });
+    if(res.ok){
+      const rows=await res.json();
+      if(rows&&rows[0]){
+        const canon=JSON.parse(rows[0].value);
+        const ct=(canon.tasks||[]).find(function(t){return String(t.id)===nextId;});
+        _canonicalHas=!!ct;
+        _canonicalStage=canon.nextWaveLifecycleStages?canon.nextWaveLifecycleStages[nextId]:undefined;
+      }
+    }else{
+      console.error('[NextWave V2 Preview Test] canonical readback HTTP '+res.status);
+    }
+  }catch(e){
+    console.error('[NextWave V2 Preview Test] canonical readback failed:',e.message);
+  }
+  console.log('[NextWave V2 Preview Test] step 2/3 — canonical readback: found='+_canonicalHas+' stage='+_canonicalStage);
+
+  if(!_canonicalHas){
+    alert('⚠ NEXTWAVE V2 PREVIEW TEST did not persist to shared canonical state — likely a concurrent save from another session overwrote it (task id '+nextId+'). This is a real write-overwrite conflict, not a UI bug. Please try again; if it keeps happening, tell Claude the exact task id above so this can be investigated rather than papered over.');
+    console.error('[NextWave V2 Preview Test] STOP — write-overwrite conflict, task id '+nextId+' missing from canonical state after save.');
+    return null;
+  }
+
+  try{ sessionStorage.setItem('nwv2_preview_task_id', nextId); }catch(e){}
   if(typeof vaFocusTaskId!=='undefined')vaFocusTaskId=nextId;
-  console.log('[NextWave V2 Preview Test] created task id='+nextId+' isTest='+task.isTest+' stage=generate | D.tasks length now='+D.tasks.length+' | vaFocusTaskId='+vaFocusTaskId);
-  if(typeof renderTab==='function')renderTab('tasks');
+  console.log('[NextWave V2 Preview Test] step 3/3 — persistence confirmed, opening exact task id='+nextId+' directly (no latest-task inference)');
+
+  if(typeof openExec==='function') await openExec(nextId);
+  else if(typeof renderTab==='function') renderTab('tasks');
   window.scrollTo(0,0);
   return task;
 }
@@ -18103,6 +18160,17 @@ function _renderNextWaveOperatorPanel(nwCurrent){
   // production scheduling state. isTest=true keeps it out of that state
   // entirely (see _engineWeeklyTasksThisWeek, _nextWaveRunPublish guards).
   h+='<button onclick="_nextwaveV2CreatePreviewTestTask()" style="width:100%;padding:9px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#f59e0b;font-weight:700;font-size:11px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;margin-bottom:12px">🧪 Start V2 PREVIEW TEST Task (fresh lifecycle, does not touch real weekly calendar)</button>';
+  // Phase 4.4C — surface a real write-overwrite conflict explicitly instead
+  // of silently falling back to whatever task inference happens to resolve
+  // to (which is exactly how a stale Done task could reopen with no visible
+  // explanation). This checks the same sessionStorage pointer nwCurrent's
+  // computation already reads.
+  (function(){
+    var _ptrId=null; try{_ptrId=sessionStorage.getItem('nwv2_preview_task_id');}catch(e){}
+    if(_ptrId&&!(D.tasks||[]).some(function(t){return String(t.id)===String(_ptrId);})){
+      h+='<div style="padding:10px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.35);border-radius:8px;color:#ef4444;font-size:11px;margin-bottom:12px">⚠ The preview-test task you created (id '+escHTML(_ptrId)+') is no longer in the shared task state — a concurrent save from another session likely overwrote it. This is a real conflict, not resolved automatically. Click "Start V2 PREVIEW TEST Task" again.</div>';
+    }
+  })();
   if(!nwCurrent){
     // v15.7.0 — weekly cap check
     const _nwWeekCount=_engineWeeklyTasksThisWeek('NextWave');
