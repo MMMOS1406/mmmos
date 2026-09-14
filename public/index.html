@@ -16980,18 +16980,22 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
     if(_pkg.hookStructure){await saveMemoryItem('hook_structure',_pkg.hookStructure,'srv_farsi');}
     if(_pkg.emotionalScenario){await saveMemoryItem('emotional_scenario',_pkg.emotionalScenario,'srv_farsi');}
     console.log('[SRV Farsi] ✓ memory saved · title="'+(_pkg.title||'').slice(0,40)+'"');
-    // v13.69.93 — advance rotation pointer after successful generate (mode was auto-pre-selected in goStep2)
-    // This ensures the NEXT generate call auto-highlights the next combination in sequence.
-    // v16.67.1 — guarded: a Developer Options quick-generate TEST package (engine in 'test'
-    // state, pkg.isTest stamped by generatePackage) must not consume/advance the real production
-    // rotation pointer, per the same isolation the isTest flag already gives test runs elsewhere
-    // (private YouTube, no publish slot). Real (non-test) generation is completely unaffected.
-    if(typeof _srvFarsiNextMode==='function' && !_pkg.isTest){
-      _srvFarsiNextMode(); // advances D.srvFarsiRotationIdx and saves state
-      console.log('[SRV Farsi] ✓ rotation advanced → next mode: '+_srvFarsiPeekNextMode());
-    }else if(_pkg.isTest){
-      console.log('[SRV Farsi] TEST package — rotation pointer left untouched');
-    }
+    // v16.68.6 — REMOVED double rotation-advance bug (was v13.69.93, guarded v16.67.1). This call
+    // was written for the legacy 5-step Factory wizard, where goStep2 only PEEKS the next mode
+    // (_srvFarsiPeekNextMode, no advance) and startGeneration() never calls _srvFarsiNextMode() —
+    // so a single advance here, after generate succeeded, was that flow's only consumption point.
+    // But _srvFarsiGenerateWithGuard is called ONLY from the current lifecycle-card production
+    // flow (vaFarsiGeneratePackage, _srvFarsiRegeneratePackage) — confirmed via full call-site
+    // search, the legacy wizard path never reaches this function — and that flow already consumes
+    // the rotation pointer ONCE, at task creation (vaStartFarsiProductionTask -> _srvFarsiNextMode()),
+    // with task.mood fixed from that point on. Advancing again here burned a second, unused slot on
+    // every real generate (and every Regenerate click), so D.srvFarsiRotationIdx moved by 2 per real
+    // task against a 20-slot array: parity never changes, permanently locking real tasks out of half
+    // of FARSI_ROTATION_MODES — including one of the two Emotional slots and the sole Happy slot —
+    // and (combined with each format+artist+mood avatar bucket holding exactly 2 approved photos by
+    // design) is why Shorts kept landing on the same narrow artist/mood combination and, with it,
+    // the same 2 avatar photos. No separate avatar-picker fix is needed: once the mode genuinely
+    // rotates across the full 20-slot cycle, each new task draws from a different 2-photo bucket.
   }
   return _pkg;
 }
