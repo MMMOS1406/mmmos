@@ -17801,7 +17801,19 @@ function vaStartNextWaveProductionTask(){
 // _nextWaveHasLifecycle/renderNextWaveLifecycleCard lifecycle — no second
 // lifecycle created.
 function _nextwaveV2CreatePreviewTestTask(){
-  const nextId=D.tasks.reduce(function(m,t){return Math.max(m,Number(t&&t.id)||0);},0)+1;
+  // Phase 4.4B (round 2) — REAL root cause found by live inspection: a
+  // sequential max(D.tasks id)+1 scheme can reuse an id that an OLD task
+  // used before being pruned from D.tasks, while that id's entries in
+  // D.nextWaveLifecycleStages / D.packages (which are never cleaned up)
+  // linger — so _nextWaveGetStage(reusedId) resolved to a STALE 'done' from
+  // a month-old, unrelated completed package sharing the same numeric id
+  // (confirmed live: id 72 collided with pkg_1787232663843, taskId:72,
+  // lifecycleStage:'done', generatedAt 2026-08-20). A time-based string id
+  // can never collide with any historical numeric task id; the NextWave
+  // lifecycle code already tolerates non-numeric task ids everywhere
+  // (`const numericId=Number(taskId); ...isNaN(numericId)?taskId:numericId`
+  // appears at every Generate/Review/Build call site), so this is safe.
+  const nextId='nwv2preview_'+Date.now();
   const task={
     id:nextId,
     name:'🧪 NEXTWAVE V2 PREVIEW TEST — Finance',
