@@ -16542,6 +16542,14 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     const _fMode=(task&&(task.mode||task.mood))||pkg.mode||'';
     const _fMoodOnly=pkg.mood||(_fMode.includes(' — ')?_fMode.split(' — ').pop():_fMode)||'Romantic';
     const _fGroup=/^Duet/i.test(_fMode)?'duet':/^Male/i.test(_fMode)?'male':'female';
+    // v16.68.2 — growth instrumentation: durably stamp artist (Female/Male/Duet) onto the
+    // package itself so it survives in Supabase (full_package JSON, via the existing
+    // savePackageToSupabase calls already made later in this function) instead of living only
+    // on the client-side task record. This is the earliest point in the SRV-Farsi-only build
+    // path where the artist group is already reliably computed (_fGroup, from the task's own
+    // rotation-assigned mode) — no rotation/selection/generation logic touched, this only
+    // records what was already decided. SRV Farsi only; no other engine's code path is touched.
+    pkg.artist=_fGroup==='duet'?'Duet':_fGroup==='male'?'Male':'Female';
 
     // v2-phase2 — memory-aware face rotation: avoid repeating the same avatar photo
     // this identity group last used, reusing the existing generation_memory mechanism

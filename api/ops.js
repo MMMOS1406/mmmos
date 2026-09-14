@@ -7326,6 +7326,18 @@ async function youtubeAnalyticsPull(req, res) {
   const lookbackDays = parseInt((req.query && req.query.days) || (req.body && req.body.days) || '30', 10);
   const startDate = new Date(Date.now() - lookbackDays * 86400 * 1000).toISOString().slice(0,10);
   const endDate = new Date().toISOString().slice(0,10);
+  // v16.68.3 — CORRECTION: live validation against the real YouTube Analytics API (after the
+  // preview auth fix let the request actually reach Google) proved 'impressions' and
+  // 'impressionsClickThroughRate' are NOT valid API metric identifiers — confirmed against
+  // Google's own metrics reference (developers.google.com/youtube/analytics/metrics): the only
+  // impressions-named metrics are annotationImpressions, cardImpressions/cardTeaserImpressions,
+  // and adImpressions (ad-specific, previously named 'impressions'). The Studio-UI "impressions/
+  // CTR" (Reach tab) numbers are not exposed via the public Analytics API at all. Including the
+  // two invalid identifiers made the ENTIRE request 400 for every channel, silently breaking the
+  // 5 pre-existing metrics too — reverted to the original, valid metrics list. impressions/ctr
+  // columns stay in schema (harmless) but will remain null: colIdx('impressions') and
+  // colIdx('impressionsClickThroughRate') below now correctly resolve to -1 on every real
+  // response, so the existing null-guard already handles this honestly with no further change.
   const metrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained';
   try {
     const conns = await sbGet('youtube_connections?select=channel_id,refresh_token,scope&order=connected_at.desc');
@@ -7361,7 +7373,9 @@ async function youtubeAnalyticsPull(req, res) {
               iMinWatched = colIdx('estimatedMinutesWatched'),
               iAvgDuration = colIdx('averageViewDuration'),
               iAvgPct = colIdx('averageViewPercentage'),
-              iSubs = colIdx('subscribersGained');
+              iSubs = colIdx('subscribersGained'),
+              iImpressions = colIdx('impressions'),
+              iCtr = colIdx('impressionsClickThroughRate');
         const upserts = [];
         for (const row of rows) {
           const vid = row[iVid];
@@ -7374,6 +7388,11 @@ async function youtubeAnalyticsPull(req, res) {
             avg_view_duration_sec: row[iAvgDuration] || null,
             retention_pct: row[iAvgPct] || null,
             subs_gained: row[iSubs] || null,
+            // v16.68.2 — growth instrumentation: iImpressions/iCtr are -1 (colIdx not found) on
+            // any Analytics API response that doesn't include these columns (e.g. an older cached
+            // response shape); guarded the same way the existing metrics above already are.
+            impressions: iImpressions >= 0 ? (row[iImpressions] ?? null) : null,
+            ctr: iCtr >= 0 ? (row[iCtr] ?? null) : null,
             analytics_synced_at: nowIso,
           });
         }
