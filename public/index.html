@@ -16743,8 +16743,21 @@ async function _srvFarsiRunPublish(pkgId,taskId){
       _isLongPub?doUpload(longUrl,'LONG',true):Promise.resolve(null),
       doUpload(shortUrl,'SHORT',false),
     ]);
-    if(longUp?.videoId)pkg._srvYtLongId=longUp.videoId;
-    if(shortUp?.videoId)pkg._srvYtShortId=shortUp.videoId;
+    // v16.68.4 — Long attribution fix: the API (youtubeUploadVideo, api/ops.js) returns the id
+    // under `youtubeVideoId`, never `videoId` — the same field-name bug already fixed once in
+    // _srvFarsiPublishYouTube (v15.20.5) but never applied here, so longUp?.videoId/shortUp?.videoId
+    // were always undefined and _srvYtLongId/_srvYtShortId were never actually captured. Beyond
+    // that, this function never set pkg.youtubeVideoId at all (the field savePackageToSupabase
+    // maps to the packages.youtube_video_id column), so a real published Long could never be
+    // exact-ID-linked to youtube_videos by the sync — confirmed via two real Long publishes with
+    // youtube_video_id left null in Supabase despite the videos existing on YouTube.
+    const _longYtId=longUp&&(longUp.youtubeVideoId||longUp.videoId);
+    const _shortYtId=shortUp&&(shortUp.youtubeVideoId||shortUp.videoId);
+    if(_longYtId)pkg._srvYtLongId=_longYtId;
+    if(_shortYtId)pkg._srvYtShortId=_shortYtId;
+    // Package format is Long here, so youtubeVideoId (-> packages.youtube_video_id) tracks the
+    // Long's own id, matching how _srvFarsiPublishYouTube already sets it for pure-Short packages.
+    if(_longYtId)pkg.youtubeVideoId=_longYtId;
     // v15.20.0 — TikTok is no longer auto-fired here (Engineering Task 1c0e3090): it's now
     // an independent, operator-visible action (_srvFarsiPublishTikTok) triggered from the
     // Done stage UI, with its own Ready/Publishing/Published/Failed status. This keeps
@@ -18638,17 +18651,37 @@ async function _srvRenderVideo(opts){
     });
   }));
   const img = imgs[0]; // backward compat reference
-  // v13.69.91: load Farsi avatar image for time-fraction placement (Long videos only)
+  // v13.69.91: load Farsi avatar image (used by _drawFarsiPanel for both Long and Short composed renders)
   let _avatarImg=null;
+  function _loadFarsiAvatar(url){
+    return new Promise(function(res,rej){
+      const _ai=new Image();_ai.crossOrigin='anonymous';
+      _ai.onload=function(){res(_ai);};_ai.onerror=function(){rej(new Error('Avatar load failed'));};
+      _ai.src=url;
+    });
+  }
   if(avatarUrl){
     try{
-      _avatarImg=await new Promise(function(res,rej){
-        const _ai=new Image();_ai.crossOrigin='anonymous';
-        _ai.onload=function(){res(_ai);};_ai.onerror=function(){rej(new Error('Avatar load failed'));};
-        _ai.src=avatarUrl;
-      });
-      console.log('[v13.69.91] avatar loaded for time-fraction placement:',avatarUrl);
-    }catch(_avErr){console.warn('[v13.69.91] avatar image load failed:',_avErr.message);}
+      _avatarImg=await _loadFarsiAvatar(avatarUrl);
+      console.log('[v13.69.91] avatar loaded:',avatarUrl);
+    }catch(_avErr){
+      // v16.68.5 — reliability fix: a real production Long was published and then manually
+      // deleted after the avatar panel rendered as a plain dark box for the entire video —
+      // traced to this exact load failing silently (console.warn only, render continued with
+      // _avatarImg left null). Live re-check of the same asset URLs afterward confirmed they load
+      // fine, so the failure was transient (network/decode hiccup during a long render session),
+      // not a broken asset or a Duet-specific bug — but a transient failure deserves one retry
+      // before giving up, and giving up should stop the render (matching how a genuinely missing
+      // avatarUrl already throws just above in this function) instead of silently shipping a
+      // blank-panel video that only a human happened to catch after publish.
+      console.warn('[v16.68.5] avatar image load failed, retrying once:',_avErr.message);
+      try{
+        _avatarImg=await _loadFarsiAvatar(avatarUrl);
+        console.log('[v16.68.5] avatar loaded on retry:',avatarUrl);
+      }catch(_avErr2){
+        throw new Error('SRV Farsi avatar image failed to load after retry ('+avatarUrl+'): '+_avErr2.message);
+      }
+    }
   }
   const audioObjectUrl = URL.createObjectURL(audioFile);
   const audio = new Audio(); audio.crossOrigin = 'anonymous'; audio.src = audioObjectUrl;
