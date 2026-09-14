@@ -19101,12 +19101,21 @@ async function _srvRenderVideo(opts){
         const inWin=t-lyricTimings[idx];
         const alpha=Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35)));
         ctx.save(); ctx.globalAlpha=alpha;
-        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.043)}px 'Vazirmatn', sans-serif`;
+        // v2-short-lyric-font-fix — the on-screen lyric caption was still on Vazirmatn sans-serif,
+        // the same pre-correction treatment the title moved away from in v2-short-title-font-fix
+        // ("Lalezar treatment read as generic heavy/blocky, not calligraphy"). Matches the title's
+        // exact family (Noto Nastaliq Urdu, 600) for one consistent premium Persian identity across
+        // title and lyric; size/weight otherwise unchanged (lyric text is deliberately smaller than
+        // the title, that's a legibility choice, not a font-consistency issue). Line height bumped
+        // ~1.16x->~1.21x font size, the same small ratio increase already made for the title, since
+        // Nastaliq's diagonal flow needs slightly more vertical room per line than Vazirmatn did —
+        // safe-zone, bottom placement, timing, wrapping line-count, and content are all untouched.
+        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.043)}px 'Noto Nastaliq Urdu', serif`;
         ctx.fillStyle='#fff';
         ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=6;
         // v2-phase2 — bottom margin widened to ~18% of height (was ~6%) to clear the platform-UI
         // safe zone (username/caption/like-share rail) that Shorts/Reels/TikTok reserve at the bottom.
-        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.88,Math.round(W*0.05),2);
+        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.88,Math.round(W*0.052),2);
         ctx.shadowBlur=0; ctx.restore();
       }
       ctx.direction='ltr';
