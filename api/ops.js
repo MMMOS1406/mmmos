@@ -11593,14 +11593,119 @@ async function nextwaveV2GetDurationSec(path) {
   }
 }
 
-// Builds one scene's MP4 segment: branded environment + 1-2 concept icons +
-// the recurring host as a small, toggleable corner presence (visible only on
-// non-dynamic-number units within the scene, per the "character supports,
-// never defaults to the whole scene" rule) + a real ElevenLabs audio track +
-// a slow zoompan (the same technique already proven for SMM's Ken Burns
-// segments) + drawtext number labels/captions timed to each unit's real,
-// proportional share of the scene's actual spoken duration.
-async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId) {
+// ── Phase 4.5 — narration-to-visual storyboard mapper ──────────────────────
+// CEO rejection: icon + mostly-empty background + tiny caption does not
+// TEACH the argument. Deriving "what should the viewer see to understand
+// this statement" (the CEO's own examples — "WHEN SHOULD YOU CONVERT? /
+// MARKET PRICE vs TAXABLE INCOME") is a reading-comprehension task, not a
+// keyword match — a regex classifier cannot generalize to arbitrary future
+// finance topics the way the order requires. Reuses the exact Anthropic
+// call pattern already proven elsewhere in this file (smBuildVideoCreative
+// etc. — <tag>JSON</tag> response, x-api-key header, claude-sonnet-4-5,
+// validated then parsed) rather than adding a new vendor or a second
+// pattern. Never asked to invent numbers/facts — only structure (which
+// screen_type, a short heading, which existing unit each slot's LABEL
+// corresponds to, host role) — every number that actually appears on
+// screen is still attached afterward from the same proven
+// nextwaveRankNumberPhrase/nextwaveFormatFinancialNumber extractors Phase
+// 4.1B already validated, never from the model's own text.
+async function nextwaveV2GenerateStoryboard(plan, scenes) {
+  const deterministicFallback = () => scenes.map((scene) => {
+    const idxs = scene.units.map((u) => u.__idx);
+    const numberIdxs = idxs.filter((i) => plan[i].__hasNumber);
+    const joined = scene.units.map((u) => u.text).join(' ').toLowerCase();
+    let screen_type = 'single';
+    if (/\bversus\b|\bvs\.?\b|instead of|rather than|compared to/.test(joined)) screen_type = 'comparison';
+    else if (/\bbefore\b.*\bafter\b|\bnow\b.*\blater\b|used to\b/.test(joined)) screen_type = 'before_after';
+    else if (numberIdxs.length >= 3) screen_type = 'buildup';
+    const topConcept = [...scene.conceptSet].filter((c) => c !== 'none_detected')[0] || 'the numbers';
+    const heading = topConcept.replace(/_/g, ' ').toUpperCase();
+    let slots;
+    if (screen_type === 'comparison' || screen_type === 'before_after') {
+      const pick = (numberIdxs.length ? numberIdxs : idxs).slice(0, 2);
+      const labels = screen_type === 'before_after' ? ['BEFORE', 'AFTER'] : ['OPTION A', 'OPTION B'];
+      slots = pick.map((i, k) => ({ unit_index: i, label: labels[k] || `POINT ${k + 1}` }));
+    } else if (screen_type === 'buildup') {
+      const pick = numberIdxs.slice(0, 4);
+      slots = pick.map((i, k) => ({ unit_index: i, label: k === pick.length - 1 ? 'RESULT' : `FACTOR ${k + 1}` }));
+    } else {
+      slots = [{ unit_index: idxs[0], label: heading }];
+    }
+    return { screen_type, heading, slots, host_role: numberIdxs.length ? 'beside_calculation' : 'intro', teaching_objective: '' };
+  });
+
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return deterministicFallback();
+
+  const scriptUnitsBlock = plan.map((u, i) => `[${i}] ${u.text}`).join('\n');
+  const scenesBlock = scenes.map((s, i) => `Scene ${i}: units [${s.units.map((u) => u.__idx).join(',')}]`).join('\n');
+  const prompt = `You are a visual storyboard planner for a short finance-explainer video. You will be given the full narration, split into numbered units, and a grouping of those units into SCENES (consecutive units that will share one visual scene).
+
+For EACH scene, decide:
+- screen_type: one of "comparison" (contrasts two options/paths/amounts), "before_after" (contrasts an earlier state vs a later/eventual one), "buildup" (several factors accumulate toward one result, e.g. base + bonus + gains -> total), or "single" (explains one concept, no clear structural contrast).
+- heading: 2-6 words, ALL CAPS, a punchy question or statement capturing what the viewer should learn from this scene — never a restatement of the narration sentence itself. Base it ONLY on what the script actually says.
+- slots: 1-4 items, each {"unit_index": <a unit index from THIS scene>, "label": "1-4 word ALL CAPS label for what that slot represents, e.g. 'MARKET PRICE', 'BASE INCOME', 'BEFORE'"}.
+- host_role: one of "intro" (host introduces/transitions), "point_at_comparison" (host gestures at a contrast), "beside_calculation" (host stands near a number/buildup), "step_back" (minimize the host — the data should be the whole story).
+- teaching_objective: one sentence — what the viewer should understand even with audio muted.
+
+Never invent a dollar amount, percentage, or fact not already in the script. Only choose structure/labels, never values.
+
+NARRATION UNITS:
+<script_units>
+${scriptUnitsBlock}
+</script_units>
+
+SCENES:
+<scenes>
+${scenesBlock}
+</scenes>
+
+Respond with ONLY:
+<storyboard>
+{"scenes":[{"screen_type":"...","heading":"...","slots":[{"unit_index":0,"label":"..."}],"host_role":"...","teaching_objective":"..."}]}
+</storyboard>`;
+
+  try {
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!claudeRes.ok) return deterministicFallback();
+    const d = await claudeRes.json();
+    const text = (d.content && d.content[0] && d.content[0].text) || '';
+    const m = text.match(/<storyboard>([\s\S]*?)<\/storyboard>/);
+    if (!m) return deterministicFallback();
+    const parsed = JSON.parse(m[1]);
+    if (!parsed || !Array.isArray(parsed.scenes) || parsed.scenes.length !== scenes.length) return deterministicFallback();
+    const validTypes = new Set(['comparison', 'before_after', 'buildup', 'single']);
+    const validRoles = new Set(['intro', 'point_at_comparison', 'beside_calculation', 'step_back']);
+    const out = parsed.scenes.map((s, i) => {
+      const validIdxs = new Set(scenes[i].units.map((u) => u.__idx));
+      const slots = Array.isArray(s.slots) ? s.slots.filter((sl) => sl && validIdxs.has(sl.unit_index) && typeof sl.label === 'string').slice(0, 4) : [];
+      if (!slots.length) return deterministicFallback()[i];
+      return {
+        screen_type: validTypes.has(s.screen_type) ? s.screen_type : 'single',
+        heading: (typeof s.heading === 'string' && s.heading.trim()) ? s.heading.trim().slice(0, 60) : 'THE KEY IDEA',
+        slots,
+        host_role: validRoles.has(s.host_role) ? s.host_role : 'intro',
+        teaching_objective: typeof s.teaching_objective === 'string' ? s.teaching_objective.slice(0, 200) : '',
+      };
+    });
+    return out;
+  } catch (e) {
+    return deterministicFallback();
+  }
+}
+
+// Builds one scene's MP4 segment: branded environment + a storyboard-driven
+// EXPLANATORY SCREEN (comparison / before-after / buildup / single, per
+// nextwaveV2GenerateStoryboard) + the recurring host positioned/sized per
+// its storyboard-assigned role + a real ElevenLabs audio track + a slow
+// zoompan (the same technique already proven for SMM's Ken Burns segments)
+// + drawtext captions timed to each unit's real, proportional share of the
+// scene's actual spoken duration.
+async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, storyboard) {
   const sceneText = scene.units.map((u) => u.text).join(' ');
   const narration = await nextwaveSynthesizeNarrationElevenLabs(sceneText, voiceId);
   if (!narration.ok) throw new Error(`scene ${sceneIdx} narration failed: ${narration.error}`);
@@ -11618,53 +11723,136 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId) {
     cursor = Math.min(dur, cursor + uDur);
     const hasNumber = nextwaveHasDynamicNumbers(u.text);
     const numberLabel = hasNumber ? nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text)) : null;
-    return { text: u.text, start, end: cursor, hasNumber, numberLabel };
+    return { idx: u.__idx, text: u.text, start, end: cursor, hasNumber, numberLabel };
   });
+  const byIdx = {};
+  timedUnits.forEach((u) => { byIdx[u.idx] = u; });
 
-  const icons = nextwaveV2SceneIcons(scene);
+  const screenType = storyboard.screen_type;
+  // Real extracted number attached per slot from the proven Phase 4.1B
+  // extractor — never from the storyboard model's own generated text.
+  const slots = storyboard.slots.map((sl) => ({ ...sl, unit: byIdx[sl.unit_index] })).filter((sl) => sl.unit);
+
   const useHost = (sceneIdx % 2 === 0) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT;
-  const W = 1920, H = 1080, groundY = Math.round(H * 0.74);
+  const W = 1920, H = 1080;
+  const includeHost = storyboard.host_role !== 'step_back';
+  // Icons are now only used by the 'single' fallback layout — comparison/
+  // before_after/buildup are built from drawbox panels + drawtext below,
+  // which is what actually gives structure instead of a lone icon on an
+  // otherwise-empty frame (the exact CEO rejection).
+  const icons = (screenType === 'single' && slots.length) ? nextwaveV2SceneIcons(scene).slice(0, 1) : [];
 
   const inputs = ['-loop', '1', '-i', NEXTWAVE_V2_BG];
   icons.forEach((p) => inputs.push('-i', p));
   const hostIdx = icons.length + 1;
-  inputs.push('-i', useHost);
-  const audioIdx = hostIdx + 1;
+  if (includeHost) inputs.push('-i', useHost);
+  const audioIdx = includeHost ? hostIdx + 1 : hostIdx;
   inputs.push('-i', audioPath);
 
   const frames = Math.max(1, Math.round(dur * 25));
   const filters = [`[0:v]scale=${W}:${H},zoompan=z='min(zoom+0.0004,1.06)':d=${frames}:s=${W}x${H}:fps=25[bg]`];
   let last = 'bg';
-  const positions = icons.length === 2 ? [[560, 380], [1360, 380]] : [[960, 420]];
-  icons.forEach((_, i) => {
-    const iidx = i + 1;
-    const [cx, iconH] = positions[i];
-    filters.push(`[${iidx}:v]scale=-1:${iconH}[ic${i}]`);
-    const next = `v${i}`;
-    filters.push(`[${last}][ic${i}]overlay=x='${cx}-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${dur.toFixed(2)})'[${next}]`);
-    last = next;
-  });
 
-  // Host visible only during units that are NOT carrying a hard number —
-  // the number/visual is the hero in those beats, matching the locked
-  // "character must not default to being the entire scene" principle.
-  const hostWindows = timedUnits.filter((u) => !u.hasNumber);
-  if (hostWindows.length) {
-    const expr = hostWindows.map((u) => `between(t,${u.start.toFixed(2)},${u.end.toFixed(2)})`).join('+');
-    filters.push(`[${hostIdx}:v]scale=-1:220[hud]`);
-    filters.push(`[${last}][hud]overlay=x=40:y=${H}-overlay_h-40:enable='${expr}'[vh]`);
-    last = 'vh';
+  if (icons.length) {
+    const groundY = Math.round(H * 0.68);
+    filters.push(`[1:v]scale=-1:440[ic0]`);
+    filters.push(`[${last}][ic0]overlay=x='560-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${dur.toFixed(2)})'[vic]`);
+    last = 'vic';
   }
 
-  const drawtexts = [];
-  timedUnits.forEach((u) => {
-    if (u.numberLabel) {
-      drawtexts.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${nextwaveV2SanitizeDrawtext(u.numberLabel, 40)}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(u.numberLabel, 54, 900)}:box=1:boxcolor=white@0.92:boxborderw=18:x=(w-text_w)/2:y=170:enable='between(t\\,${u.start.toFixed(2)}\\,${dur.toFixed(2)})'`);
+  if (includeHost) {
+    let hx, hy, hh, hostWindows;
+    if (storyboard.host_role === 'point_at_comparison') {
+      hh = 250; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h-26`;
+      hostWindows = [{ start: 0, end: dur }];
+    } else if (storyboard.host_role === 'beside_calculation') {
+      hh = 230; hx = `${W}-overlay_w-40`; hy = `${H}-overlay_h-40`;
+      hostWindows = [{ start: 0, end: dur }];
+    } else { // 'intro' — visible only on units NOT carrying a hard number, matching the locked "character never defaults to the whole scene" rule
+      hh = 210; hx = '40'; hy = `${H}-overlay_h-40`;
+      hostWindows = timedUnits.filter((u) => !u.hasNumber).map((u) => ({ start: u.start, end: u.end }));
     }
+    if (hostWindows.length) {
+      const expr = hostWindows.map((w) => `between(t,${w.start.toFixed(2)},${w.end.toFixed(2)})`).join('+');
+      filters.push(`[${hostIdx}:v]scale=-1:${hh}[hud]`);
+      filters.push(`[${last}][hud]overlay=x='${hx}':y='${hy}':enable='${expr}'[vh]`);
+      last = 'vh';
+    }
+  }
+
+  // ── explanatory screen-content layer + caption layer, combined as one
+  // comma-chained overlay pass (drawbox panels first so drawtext labels
+  // composite on top of them, matching the proven working pattern already
+  // used for the caption band below). ──────────────────────────────────
+  const ov = [];
+  const headingSafe = nextwaveV2SanitizeDrawtext(storyboard.heading || 'THE KEY IDEA', 60);
+  ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${headingSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(headingSafe, 56, 1700)}:box=1:boxcolor=black@0.55:boxborderw=20:x=(w-text_w)/2:y=90:enable='between(t\\,0\\,${dur.toFixed(2)})'`);
+
+  if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+    const panelY0 = 260, panelY1 = 760, panelW = 760, panelXs = [140, 1020];
+    // Phase 4.5 local dry-run found the navy fill nearly invisible against
+    // the (also navy) background — lightened + given a gold border so each
+    // panel reads as a distinct card regardless of background proximity.
+    const fills = ['0x2A3A5C', '0x2E5A3A'];
+    slots.slice(0, 2).forEach((sl, i) => {
+      const x0 = panelXs[i];
+      const en = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+      const enPlain = `between(t,${sl.unit.start.toFixed(2)},${dur.toFixed(2)})`;
+      ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
+      ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
+      const label = nextwaveV2SanitizeDrawtext(sl.label, 24);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=white:fontsize=${smFitFontSize(label, 36, panelW - 60)}:x=${x0 + panelW / 2}-text_w/2:y=${panelY0 + 55}:enable='${en}'`);
+      if (sl.unit.numberLabel) {
+        const val = nextwaveV2SanitizeDrawtext(sl.unit.numberLabel, 30);
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(val, 62, panelW - 60)}:x=${x0 + panelW / 2}-text_w/2:y=${Math.round((panelY0 + panelY1) / 2)}:enable='${en}'`);
+      }
+    });
+    const bothEn = `between(t\\,${Math.max(slots[0].unit.start, slots[1].unit.start).toFixed(2)}\\,${dur.toFixed(2)})`;
+    const connector = screenType === 'before_after' ? '->' : 'VS';
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=0xC99E4C:fontsize=48:box=1:boxcolor=black@0.7:boxborderw=14:x=(w-text_w)/2:y=${Math.round((panelY0 + panelY1) / 2) - 24}:enable='${bothEn}'`);
+  } else if (screenType === 'buildup' && slots.length) {
+    const picked = slots.slice(0, 4);
+    const n = picked.length;
+    const boxW = 360, gap = 40, totalW = n * boxW + (n - 1) * gap;
+    const startX = Math.round((W - totalW) / 2);
+    const y0 = 430, y1 = 650;
+    picked.forEach((sl, i) => {
+      const x0 = startX + i * (boxW + gap);
+      const isLast = i === n - 1;
+      const en = `between(t,${sl.unit.start.toFixed(2)},${dur.toFixed(2)})`;
+      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+      ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=${isLast ? '0xC99E4C' : '0x2A3A5C'}@0.95:t=fill:enable='${en}'`);
+      if (!isLast) ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=0xC99E4C@0.9:t=3:enable='${en}'`);
+      const label = nextwaveV2SanitizeDrawtext(sl.label, 24);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=${isLast ? '0x121A30' : 'white'}:fontsize=${smFitFontSize(label, 28, boxW - 40)}:x=${x0 + boxW / 2}-text_w/2:y=${y0 + 40}:enable='${enQ}'`);
+      if (sl.unit.numberLabel) {
+        const val = nextwaveV2SanitizeDrawtext(sl.unit.numberLabel, 26);
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${isLast ? '0x121A30' : '0xC99E4C'}:fontsize=${smFitFontSize(val, 46, boxW - 40)}:x=${x0 + boxW / 2}-text_w/2:y=${y0 + 120}:enable='${enQ}'`);
+      }
+      if (i > 0) {
+        const prevEn = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+        const connector = isLast ? '->' : '+';
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=white:fontsize=44:x=${x0 - gap / 2}-text_w/2:y=${Math.round((y0 + y1) / 2)}:enable='${prevEn}'`);
+      }
+    });
+  } else if (screenType === 'single' && slots.length) {
+    const sl = slots[0];
+    const en = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+    const label = nextwaveV2SanitizeDrawtext(sl.label, 30);
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=white:fontsize=${smFitFontSize(label, 40, 700)}:box=1:boxcolor=black@0.55:boxborderw=16:x=1280-text_w/2:y=280:enable='${en}'`);
+    if (sl.unit.numberLabel) {
+      const val = nextwaveV2SanitizeDrawtext(sl.unit.numberLabel, 30);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(val, 72, 700)}:box=1:boxcolor=white@0.92:boxborderw=20:x=1280-text_w/2:y=420:enable='${en}'`);
+    }
+  }
+
+  // Caption band — every unit, real timing, unchanged mechanism.
+  timedUnits.forEach((u) => {
     const capTxt = nextwaveV2SanitizeDrawtext(u.text, 110);
-    drawtexts.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${capTxt}':fontcolor=white:fontsize=${smFitFontSize(capTxt, 34, 1700)}:box=1:boxcolor=black@0.6:boxborderw=16:x=(w-text_w)/2:y=${H}-140:enable='between(t\\,${u.start.toFixed(2)}\\,${u.end.toFixed(2)})'`);
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${capTxt}':fontcolor=white:fontsize=${smFitFontSize(capTxt, 32, 1700)}:box=1:boxcolor=black@0.6:boxborderw=16:x=(w-text_w)/2:y=${H}-130:enable='between(t\\,${u.start.toFixed(2)}\\,${u.end.toFixed(2)})'`);
   });
-  const vf = filters.join(';') + (drawtexts.length ? `;[${last}]` + drawtexts.join(',') + '[vout]' : `;[${last}]null[vout]`);
+
+  const vf = filters.join(';') + (ov.length ? `;[${last}]` + ov.join(',') + '[vout]' : `;[${last}]null[vout]`);
 
   const outPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}.mp4`);
   try {
@@ -11684,9 +11872,9 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId) {
   await smAssertValidMediaFile(outPath, `scene ${sceneIdx} segment`);
   return {
     path: outPath, durationSec: dur,
-    hostVisible: hostWindows.length > 0,
+    screenType, heading: storyboard.heading, hostRole: storyboard.host_role,
     numbersShown: timedUnits.filter((u) => u.numberLabel).map((u) => u.numberLabel),
-    iconCount: icons.length,
+    slotCount: slots.length,
   };
 }
 
@@ -11783,13 +11971,19 @@ async function nextwaveV2BuildRender(req, res) {
   const useVoiceId = voice_id || savedVoice.voice_id || null; // null -> nextwaveSynthesizeNarrationElevenLabs's own default
 
   const units = nextwaveSegmentMeaningUnits(script);
-  const plan = units.map((u) => {
+  const plan = units.map((u, idx) => {
     const tags = nextwaveClassifyVisualIntent(u.text);
     const fallback = nextwaveResolveFallbackConcept(u.section, tags);
-    return { ...u, concept_tags: tags, fallback_concept: fallback };
+    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback };
   });
   const scenes = nextwaveV2GroupScenes(plan);
   if (!scenes.length) return res.status(400).json({ ok: false, error: 'no meaning units resolved from script' });
+
+  // Phase 4.5 — one storyboard-mapping call for the whole script (not
+  // per-scene) so the model can see full context; deterministic, keyword-
+  // based fallback inside nextwaveV2GenerateStoryboard if this fails for
+  // any reason, so a render never blocks on it.
+  const storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
 
   const renderId = randomBytes(6).toString('hex');
   const segPaths = [];
@@ -11798,13 +11992,14 @@ async function nextwaveV2BuildRender(req, res) {
   let charsSent = 0;
   try {
     for (let i = 0; i < scenes.length; i++) {
-      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, useVoiceId, renderId);
+      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, useVoiceId, renderId, storyboards[i]);
       segPaths.push(seg.path);
       totalDurationSec += seg.durationSec;
       charsSent += scenes[i].units.map((u) => u.text).join(' ').length;
       sceneReports.push({
         sceneIndex: i, unitCount: scenes[i].units.length, durationSec: Number(seg.durationSec.toFixed(2)),
-        iconCount: seg.iconCount, hostVisible: seg.hostVisible, numbersShown: seg.numbersShown,
+        screenType: seg.screenType, heading: seg.heading, hostRole: seg.hostRole,
+        slotCount: seg.slotCount, numbersShown: seg.numbersShown,
       });
     }
     const concatOut = await smConcatSegments({ paths: segPaths, id: `nwv2-${renderId}` });
@@ -11813,10 +12008,11 @@ async function nextwaveV2BuildRender(req, res) {
     const videoUrl = await sbStorageUpload(`nextwave-v2-preview/${renderId}.mp4`, finalBuf, 'video/mp4');
 
     // Meaningful-visual-change count (Step 9 QA metric): every number
-    // reveal + every host on/off toggle across scenes, generic — not
-    // hand-counted per script.
+    // reveal + every explanatory slot reveal + one for the scene's own
+    // heading/structure appearing, across scenes — not hand-counted per
+    // script.
     let meaningfulChanges = 0;
-    sceneReports.forEach((s) => { meaningfulChanges += s.numbersShown.length + (s.hostVisible ? 1 : 0) + 1; });
+    sceneReports.forEach((s) => { meaningfulChanges += s.numbersShown.length + s.slotCount + 1; });
 
     return res.status(200).json({
       ok: true,
