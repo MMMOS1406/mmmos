@@ -1845,7 +1845,9 @@ let D={
   // Only SRV English tasks with lifecycle config use this. All other engines: unaffected.
   srvLifecycleStages:{},
   srvFarsiLifecycleStages:{}, // v13.69.80 — SRV Farsi lifecycle stage per taskId
-  srvFarsiRotationIdx:0,      // v13.69.93 — 9-mode rotation cycle pointer (0–8)
+  srvFarsiRotationIdx:0,      // v13.69.93 — RETIRED combined-array pointer, kept only for backward compat; no longer advanced
+  srvFarsiArtistIdx:0,        // v16.68.7 — independent artist rotation pointer (Male/Female/Duet)
+  srvFarsiMoodIdx:0,          // v16.68.7 — independent mood rotation pointer (40/30/30 cycle)
   srvEnglishRotationIdx:0,   // v13.74.0 — English 20-mode rotation pointer
   aiStudioLifecycleStages:{},  // v13.75.0 — AI Studio lifecycle stage per taskId
   aiStudioRotationIdx:0,       // v13.75.0 — 9-mode rotation cycle pointer
@@ -2127,7 +2129,9 @@ async function saveAppState(){
     engineState:(D.engineState&&typeof D.engineState==='object')?D.engineState:{}, // v13.69.49 — 4-state engine model: running|paused|maintenance|test
     srvLifecycleStages:(D.srvLifecycleStages&&typeof D.srvLifecycleStages==='object')?D.srvLifecycleStages:{}, // v13.69.50 — SRV English lifecycle stage per taskId
     srvFarsiLifecycleStages:(D.srvFarsiLifecycleStages&&typeof D.srvFarsiLifecycleStages==='object')?D.srvFarsiLifecycleStages:{}, // v13.69.80 — SRV Farsi lifecycle stage per taskId
-    srvFarsiRotationIdx:(typeof D.srvFarsiRotationIdx==='number')?D.srvFarsiRotationIdx:0, // v13.69.93 — rotation pointer
+    srvFarsiRotationIdx:(typeof D.srvFarsiRotationIdx==='number')?D.srvFarsiRotationIdx:0, // v13.69.93 — RETIRED, backward compat only
+    srvFarsiArtistIdx:(typeof D.srvFarsiArtistIdx==='number')?D.srvFarsiArtistIdx:0,     // v16.68.7 — artist rotation pointer
+    srvFarsiMoodIdx:(typeof D.srvFarsiMoodIdx==='number')?D.srvFarsiMoodIdx:0,           // v16.68.7 — mood rotation pointer
     srvFarsiTaskSeq:(typeof D.srvFarsiTaskSeq==='number')?D.srvFarsiTaskSeq:0,           // v13.70.0 — 2S+1L format cycle counter
     srvFarsiShortDayIdx:(typeof D.srvFarsiShortDayIdx==='number')?D.srvFarsiShortDayIdx:0, // v13.70.0 — Sat(0)/Sun(1) alternator
     srvEnglishRotationIdx:(typeof D.srvEnglishRotationIdx==='number')?D.srvEnglishRotationIdx:0, // v13.74.0 — English rotation pointer
@@ -2245,6 +2249,8 @@ function financePayloadSnapshot(){
     srvLifecycleStages:(D.srvLifecycleStages&&typeof D.srvLifecycleStages==='object')?D.srvLifecycleStages:{},
     srvFarsiLifecycleStages:(D.srvFarsiLifecycleStages&&typeof D.srvFarsiLifecycleStages==='object')?D.srvFarsiLifecycleStages:{},
     srvFarsiRotationIdx:(typeof D.srvFarsiRotationIdx==='number')?D.srvFarsiRotationIdx:0,
+    srvFarsiArtistIdx:(typeof D.srvFarsiArtistIdx==='number')?D.srvFarsiArtistIdx:0,
+    srvFarsiMoodIdx:(typeof D.srvFarsiMoodIdx==='number')?D.srvFarsiMoodIdx:0,
     srvFarsiTaskSeq:(typeof D.srvFarsiTaskSeq==='number')?D.srvFarsiTaskSeq:0,
     srvFarsiShortDayIdx:(typeof D.srvFarsiShortDayIdx==='number')?D.srvFarsiShortDayIdx:0,
     srvEnglishRotationIdx:(typeof D.srvEnglishRotationIdx==='number')?D.srvEnglishRotationIdx:0,
@@ -2565,8 +2571,11 @@ function applyFinanceState(p){
   if(p.srvLifecycleStages&&typeof p.srvLifecycleStages==='object') D.srvLifecycleStages=p.srvLifecycleStages;
   // v13.69.80 — restore SRV Farsi lifecycle stages
   if(p.srvFarsiLifecycleStages&&typeof p.srvFarsiLifecycleStages==='object') D.srvFarsiLifecycleStages=p.srvFarsiLifecycleStages;
-  // v13.69.93 — restore SRV Farsi rotation pointer
+  // v13.69.93 — restore SRV Farsi rotation pointer (RETIRED, backward compat only)
   if(typeof p.srvFarsiRotationIdx==='number') D.srvFarsiRotationIdx=p.srvFarsiRotationIdx;
+  // v16.68.7 — restore independent artist/mood rotation pointers
+  if(typeof p.srvFarsiArtistIdx==='number') D.srvFarsiArtistIdx=p.srvFarsiArtistIdx;
+  if(typeof p.srvFarsiMoodIdx==='number') D.srvFarsiMoodIdx=p.srvFarsiMoodIdx;
   // v13.70.0 — restore format cycle + short-day alternator
   if(typeof p.srvFarsiTaskSeq==='number') D.srvFarsiTaskSeq=p.srvFarsiTaskSeq;
   if(typeof p.srvFarsiShortDayIdx==='number') D.srvFarsiShortDayIdx=p.srvFarsiShortDayIdx;
@@ -16040,45 +16049,59 @@ async function vaGeneratePackage(taskId){
 //   • Channel mapping: 'SRV Farsi' → 'Silk Road Voices' YouTube channel
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// v13.69.93 — SRV Farsi 9-combination rotation (Female×3 + Male×3 + Duet×3)
-// Fixed order ensures balanced distribution across all artist types and moods.
-// v13.71.0 — weighted rotation: 85% Romantic · 10% Emotional · 5% Special (Happy)
-// 20-item cycle: Female Romantic ×6 · Male Romantic ×6 · Duet Romantic ×5
-//                Female Emotional ×1 · Male Emotional ×1 · Duet Happy ×1
-const FARSI_ROTATION_MODES=[
-  'Female — Romantic',   // 1
-  'Male — Romantic',     // 2
-  'Female — Romantic',   // 3
-  'Duet — Romantic',     // 4
-  'Male — Romantic',     // 5
-  'Female — Emotional',  // 6 — Emotional slot
-  'Female — Romantic',   // 7
-  'Male — Romantic',     // 8
-  'Duet — Romantic',     // 9
-  'Female — Romantic',   // 10
-  'Male — Romantic',     // 11
-  'Duet — Romantic',     // 12
-  'Male — Emotional',    // 13 — Emotional slot
-  'Female — Romantic',   // 14
-  'Male — Romantic',     // 15
-  'Duet — Romantic',     // 16
-  'Female — Romantic',   // 17
-  'Male — Romantic',     // 18
-  'Duet — Romantic',     // 19
-  'Duet — Happy',        // 20 — Special (5%): wedding · Eid · homeland
+// v16.68.7 — RETIRED: the old FARSI_ROTATION_MODES combined artist+mood array (85% Romantic /
+// 10% Emotional / 5% Happy, coupled so artist and mood advanced together on one shared pointer).
+// CEO correction: that distribution is legacy and must not be treated as the current approved
+// V2 rule; the coupling also made strict "Male -> Female -> Duet -> repeat" artist rotation
+// impossible to guarantee (an artist could accidentally repeat back-to-back depending on which
+// combined slot the shared pointer landed on). Replaced with two independent, deterministic
+// rotations — artist and mood no longer share a pointer or an array, so each is exact and
+// neither can distort the other. Format cadence (_srvFarsiNextFormat, 2 Short + 1 Long) was
+// already independent and is unchanged.
+//
+// ARTIST rotation — strict 3-slot cycle, exactly Male -> Female -> Duet -> repeat, no exceptions.
+const FARSI_ARTIST_CYCLE=['Male','Female','Duet'];
+// MOOD rotation — approved V2 distribution: 40% Romantic / 30% Emotional / 30% Happy.
+// 20-slot cycle = 8 Romantic + 6 Emotional + 6 Happy (exact 40/30/30). Order hand-picked so no
+// two adjacent slots share a mood (checked including the wrap from slot 20 back to slot 1), for
+// even spread rather than clumping — the exact 8/6/6 counts are what encodes the approved ratio,
+// not this specific ordering.
+const FARSI_MOOD_CYCLE=[
+  'Happy','Romantic','Happy','Romantic','Emotional','Romantic','Happy','Romantic','Emotional',
+  'Romantic','Happy','Emotional','Romantic','Happy','Romantic','Emotional','Romantic','Emotional',
+  'Happy','Emotional',
 ];
-// Returns the next rotation mode and advances the pointer (auto-saves state).
+function _srvFarsiNextArtist(){
+  if(typeof D.srvFarsiArtistIdx!=='number')D.srvFarsiArtistIdx=0;
+  const artist=FARSI_ARTIST_CYCLE[D.srvFarsiArtistIdx%FARSI_ARTIST_CYCLE.length];
+  D.srvFarsiArtistIdx=(D.srvFarsiArtistIdx+1)%FARSI_ARTIST_CYCLE.length;
+  return artist;
+}
+function _srvFarsiPeekNextArtist(){
+  if(typeof D.srvFarsiArtistIdx!=='number')D.srvFarsiArtistIdx=0;
+  return FARSI_ARTIST_CYCLE[D.srvFarsiArtistIdx%FARSI_ARTIST_CYCLE.length];
+}
+function _srvFarsiNextMood(){
+  if(typeof D.srvFarsiMoodIdx!=='number')D.srvFarsiMoodIdx=0;
+  const mood=FARSI_MOOD_CYCLE[D.srvFarsiMoodIdx%FARSI_MOOD_CYCLE.length];
+  D.srvFarsiMoodIdx=(D.srvFarsiMoodIdx+1)%FARSI_MOOD_CYCLE.length;
+  return mood;
+}
+function _srvFarsiPeekNextMood(){
+  if(typeof D.srvFarsiMoodIdx!=='number')D.srvFarsiMoodIdx=0;
+  return FARSI_MOOD_CYCLE[D.srvFarsiMoodIdx%FARSI_MOOD_CYCLE.length];
+}
+// Returns the next "Artist — Mood" combined mode string and advances BOTH independent pointers
+// (auto-saves state) — kept as the single entry point so every existing call site (task creation,
+// display) is unaffected by the artist/mood decoupling underneath it.
 function _srvFarsiNextMode(){
-  if(typeof D.srvFarsiRotationIdx!=='number')D.srvFarsiRotationIdx=0;
-  const mode=FARSI_ROTATION_MODES[D.srvFarsiRotationIdx%20];
-  D.srvFarsiRotationIdx=(D.srvFarsiRotationIdx+1)%20;
+  const mode=_srvFarsiNextArtist()+' — '+_srvFarsiNextMood();
   if(typeof saveAppState==='function')saveAppState();
   return mode;
 }
-// Returns the next rotation mode WITHOUT advancing (for display-only preview).
+// Returns the next combined mode WITHOUT advancing (for display-only preview).
 function _srvFarsiPeekNextMode(){
-  if(typeof D.srvFarsiRotationIdx!=='number')D.srvFarsiRotationIdx=0;
-  return FARSI_ROTATION_MODES[D.srvFarsiRotationIdx%20];
+  return _srvFarsiPeekNextArtist()+' — '+_srvFarsiPeekNextMood();
 }
 
 // v13.74.0 — SRV English: balanced 20-mode rotation. Female only. ~35% Romantic, ~35% Emotional, ~30% Happy.
@@ -16980,18 +17003,22 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
     if(_pkg.hookStructure){await saveMemoryItem('hook_structure',_pkg.hookStructure,'srv_farsi');}
     if(_pkg.emotionalScenario){await saveMemoryItem('emotional_scenario',_pkg.emotionalScenario,'srv_farsi');}
     console.log('[SRV Farsi] ✓ memory saved · title="'+(_pkg.title||'').slice(0,40)+'"');
-    // v13.69.93 — advance rotation pointer after successful generate (mode was auto-pre-selected in goStep2)
-    // This ensures the NEXT generate call auto-highlights the next combination in sequence.
-    // v16.67.1 — guarded: a Developer Options quick-generate TEST package (engine in 'test'
-    // state, pkg.isTest stamped by generatePackage) must not consume/advance the real production
-    // rotation pointer, per the same isolation the isTest flag already gives test runs elsewhere
-    // (private YouTube, no publish slot). Real (non-test) generation is completely unaffected.
-    if(typeof _srvFarsiNextMode==='function' && !_pkg.isTest){
-      _srvFarsiNextMode(); // advances D.srvFarsiRotationIdx and saves state
-      console.log('[SRV Farsi] ✓ rotation advanced → next mode: '+_srvFarsiPeekNextMode());
-    }else if(_pkg.isTest){
-      console.log('[SRV Farsi] TEST package — rotation pointer left untouched');
-    }
+    // v16.68.6 — REMOVED double rotation-advance bug (was v13.69.93, guarded v16.67.1). This call
+    // was written for the legacy 5-step Factory wizard, where goStep2 only PEEKS the next mode
+    // (_srvFarsiPeekNextMode, no advance) and startGeneration() never calls _srvFarsiNextMode() —
+    // so a single advance here, after generate succeeded, was that flow's only consumption point.
+    // But _srvFarsiGenerateWithGuard is called ONLY from the current lifecycle-card production
+    // flow (vaFarsiGeneratePackage, _srvFarsiRegeneratePackage) — confirmed via full call-site
+    // search, the legacy wizard path never reaches this function — and that flow already consumes
+    // the rotation pointer ONCE, at task creation (vaStartFarsiProductionTask -> _srvFarsiNextMode()),
+    // with task.mood fixed from that point on. Advancing again here burned a second, unused slot on
+    // every real generate (and every Regenerate click), so D.srvFarsiRotationIdx moved by 2 per real
+    // task against a 20-slot array: parity never changes, permanently locking real tasks out of half
+    // of FARSI_ROTATION_MODES — including one of the two Emotional slots and the sole Happy slot —
+    // and (combined with each format+artist+mood avatar bucket holding exactly 2 approved photos by
+    // design) is why Shorts kept landing on the same narrow artist/mood combination and, with it,
+    // the same 2 avatar photos. No separate avatar-picker fix is needed: once the mode genuinely
+    // rotates across the full 20-slot cycle, each new task draws from a different 2-photo bucket.
   }
   return _pkg;
 }
@@ -23192,7 +23219,10 @@ function goStep2(engineId){
   }
   // v13.69.93 — SRV Farsi rotation: if no mode pre-selected yet, auto-highlight next rotation mode
   if(fEngine&&fEngine.id==='srv_farsi'&&!fMode){
-    const _rotMode=typeof _srvFarsiPeekNextMode==='function'?_srvFarsiPeekNextMode():(FARSI_ROTATION_MODES&&FARSI_ROTATION_MODES[0]);
+    // v16.68.7 — fallback literal updated after FARSI_ROTATION_MODES retirement (was its [0]); this
+    // branch only runs if _srvFarsiPeekNextMode itself is somehow undefined, which never happens in
+    // practice since it's declared unconditionally in the same script.
+    const _rotMode=typeof _srvFarsiPeekNextMode==='function'?_srvFarsiPeekNextMode():'Male — Romantic';
     if(_rotMode){
       const _rotBtn=Array.from(document.querySelectorAll('.mode-opt')).find(function(b){return b.textContent.trim()===_rotMode;});
       if(_rotBtn)_rotBtn.click();
