@@ -15864,6 +15864,28 @@ async function _nextwaveV2LoadVoiceStatus(taskId){
     el.innerHTML='<span style="color:var(--dim)">Could not check voice status.</span>';
   }
 }
+// Phase 4.4E — surfaces the EXISTING, already-safe ceo_check_session read
+// (action=ceo_check_session; requireCeoSession internally, always returns
+// 200 {ok:true/false}, never mutates anything) so the operator can see
+// BEFORE clicking Build whether this browser tab actually has a valid CEO
+// session, instead of only discovering it after a failed, misleading-until-
+// 4.4D build attempt. Does not touch _ceoAuthedFetch, requireCeoSession, or
+// any auth code — read-only, additive UI only.
+async function _nextwaveV2CheckCeoStatus(taskId){
+  const el=document.getElementById('nwv2-ceo-status-'+taskId);
+  if(!el)return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=ceo_check_session',{});
+    const d=await r.json();
+    if(d.ok){
+      el.innerHTML='<span style="color:#22c55e">✓ CEO session active — Build/voice actions will work.</span>';
+    }else{
+      el.innerHTML='<span style="color:#ef4444">✗ No valid CEO session in this tab. Log out, select the Admin/CEO profile, and enter your PIN before using Build or the voice picker — this is why "ceo_authorization_required" appears otherwise.</span>';
+    }
+  }catch(e){
+    el.innerHTML='<span style="color:var(--dim)">Could not check CEO session status.</span>';
+  }
+}
 async function _nextwaveV2ListVoices(taskId){
   const listEl=document.getElementById('nwv2-voice-list-'+taskId);
   if(!listEl)return;
@@ -18097,6 +18119,25 @@ function renderNextWaveLifecycleCard(task){
     // unchanged, further below.
     const isNextWaveV2Preview=!!(pkg&&pkg.isTest&&typeof pkg.workflowNotes==='string'&&pkg.workflowNotes.indexOf('NEXTWAVE_V2_PREVIEW_TEST')!==-1);
     if(isNextWaveV2Preview){
+      // Phase 4.4E — traced end-to-end: _ceoAuthedFetch/requireCeoSession/
+      // _ceoVerifySession have no domain/origin binding (pure HMAC, verified
+      // against the shared Supabase ceo_auth_config row) and the 12h-TTL
+      // token is issued and attached correctly — there is no code defect in
+      // the auth mechanism itself. Generate/Review/Approve are NOT
+      // CEO-gated, so this entire lifecycle UI (including this Build panel)
+      // renders identically regardless of which profile is active -- only
+      // the actual Build/voice actions are gated server-side. That means a
+      // non-CEO-authenticated session (VA/Family, or Admin without a
+      // completed PIN login) can navigate all the way to this exact screen
+      // and only discover the gate on the final click, with no prior
+      // indication anything was missing. This status line makes that
+      // visible up front instead, without touching requireCeoSession or any
+      // auth code at all -- it just surfaces the EXISTING, already-safe
+      // ceo_check_session read.
+      const _ceoStatusPanel=`<div style="border:1px solid rgba(201,158,76,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">CEO SESSION</div>
+        <div id="nwv2-ceo-status-${taskId}" style="font-size:12px;color:#fff">checking…</div>
+      </div>`;
       const _voicePanel=`<div style="border:1px solid rgba(59,130,246,0.25);border-radius:10px;padding:12px;margin-bottom:12px">
         <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">ELEVENLABS VOICE</div>
         <div id="nwv2-voice-status-${taskId}" style="font-size:12px;color:#fff;margin-bottom:8px">checking…</div>
@@ -18120,15 +18161,19 @@ function renderNextWaveLifecycleCard(task){
           body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">🔴</span><span style="font-size:14px;font-weight:800;color:#ef4444">NextWave V2 build failed</span></div>
             <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
-            ${_isAuthErr?`<div style="margin-top:10px;font-size:11px;color:#f59e0b">Your CEO session may have expired or was never established in this tab. Log out and log back in as CEO with your PIN, then retry — this does not touch HeyGen and will not consume any HeyGen/Submagic quota.</div>`:''}
+            ${_isAuthErr?`<div style="margin-top:10px;font-size:11px;color:#f59e0b">Check the CEO SESSION status below. This usually means the active browser profile is not a completed CEO/Admin PIN login (e.g. it's on VA or Family, or Admin was never fully logged in this tab) — log out, select the Admin/CEO profile, and enter your PIN. This does not touch HeyGen and will not consume any HeyGen/Submagic quota.</div>`:''}
           </div>`;
         }else{
           body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">NextWave V2 renders the video directly — original environment + programmatic finance visuals + real ElevenLabs narration. No HeyGen, no Submagic.</div>`;
         }
+        body+=_ceoStatusPanel;
         body+=_voicePanel;
         body+=_buildBtn;
       }
-      setTimeout(function(){if(typeof _nextwaveV2LoadVoiceStatus==='function')_nextwaveV2LoadVoiceStatus(taskId);},50);
+      setTimeout(function(){
+        if(typeof _nextwaveV2LoadVoiceStatus==='function')_nextwaveV2LoadVoiceStatus(taskId);
+        if(typeof _nextwaveV2CheckCeoStatus==='function')_nextwaveV2CheckCeoStatus(taskId);
+      },50);
       body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
       return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
