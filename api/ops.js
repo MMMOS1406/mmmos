@@ -11719,8 +11719,18 @@ async function nextwaveListElevenLabsVoices(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!ELEVENLABS_API_KEY) return res.status(200).json({ ok: false, error: 'elevenlabs_not_configured' });
   try {
-    const r = await fetch(`${ELEVENLABS_BASE}/v1/voices`, { headers: { 'xi-api-key': ELEVENLABS_API_KEY } });
-    if (!r.ok) return res.status(502).json({ ok: false, error: `elevenlabs_error_${r.status}` });
+    // Phase 4.4F — this previously discarded ElevenLabs' own response body on
+    // failure (just the bare numeric status), unlike nextwaveSynthesizeNarrationElevenLabs
+    // above, which already captures and returns it (t.slice(0,200)). ElevenLabs'
+    // error body (e.g. {"detail":{"status":"...","message":"..."}}) is what
+    // actually explains a 401 (bad key vs. expired vs. missing permission vs.
+    // wrong header) — never the key itself, safe to return. Matching that
+    // proven pattern here so a real 401 is diagnosable instead of opaque.
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/voices`, { headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Accept': 'application/json' } });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return res.status(502).json({ ok: false, error: `elevenlabs_error_${r.status}: ${t.slice(0, 300)}`, key_present: true, key_length: ELEVENLABS_API_KEY.length });
+    }
     const data = await r.json();
     const voices = (data.voices || []).map((v) => ({
       voice_id: v.voice_id, name: v.name, category: v.category,
