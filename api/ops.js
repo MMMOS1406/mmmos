@@ -11293,7 +11293,14 @@ const NEXTWAVE_V2_NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|t
 const NEXTWAVE_V2_DYNAMIC_NUMBER_RE = new RegExp(
   '\\$\\s?\\d|\\d[\\d,]*\\s*(?:dollars?|percent)\\b|' +
   '\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b(?:[\\s,-]+(?:' + NEXTWAVE_V2_NUMBER_WORDS + '))*' +
-  '[^.!?]{0,40}\\b(?:dollars?|percent)\\b',
+  // Phase 4.1B fix: the gap before dollars/percent must not cross into
+  // another separate number-word -- that's what merged two distinct nearby
+  // quantities ("seven percent...outruns three and a half percent") into
+  // one garbled span. Negative lookahead blocks the gap from stepping onto
+  // a new number word; 15-char cap (down from 40) keeps it to connective
+  // words only.
+  '(?:(?!\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b)[^.!?]){0,15}' +
+  '\\b(?:dollars?|percent)\\b',
   'i',
 );
 
@@ -11334,6 +11341,59 @@ function nextwaveRankNumberPhrase(text) {
     if (score >= bestScore) { bestScore = score; bestText = m[0].trim(); }
   });
   return bestText;
+}
+
+// Phase 4.1B, Defect 2: concise financial notation ($1,122,717, 6.5%)
+// instead of literally reproducing spelled-out narration wording on a
+// display card. Generic English-number-words parser -- not a lookup
+// table -- so it works for any future Finance/Growth/Wealth amount.
+const NEXTWAVE_V2_ONES = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+  fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const NEXTWAVE_V2_TENS = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
+  eighty: 80, ninety: 90,
+};
+const NEXTWAVE_V2_SCALES = { thousand: 1000, million: 1000000, billion: 1000000000 };
+
+function _nextwaveWordsToNumber(phrase) {
+  let text = String(phrase || '').trim().toLowerCase();
+  let suffix = null;
+  if (/dollars?$/.test(text)) { suffix = 'dollar'; text = text.replace(/\s*dollars?$/, '').trim(); }
+  else if (/percent$/.test(text)) { suffix = 'percent'; text = text.replace(/\s*percent$/, '').trim(); }
+
+  const digitMatch = text.match(/^\$?\s?([\d,]+(?:\.\d+)?)$/);
+  if (digitMatch) return { value: parseFloat(digitMatch[1].replace(/,/g, '')), suffix };
+
+  let tokens = text.split(/[\s,-]+/).filter((t) => t && t !== 'and');
+  let halfBonus = 0;
+  if (tokens.slice(-2).join(' ') === 'a half') { halfBonus = 0.5; tokens = tokens.slice(0, -2); }
+  else if (tokens.slice(-2).join(' ') === 'a quarter') { halfBonus = 0.25; tokens = tokens.slice(0, -2); }
+
+  let result = 0, current = 0;
+  for (const tok of tokens) {
+    if (tok in NEXTWAVE_V2_ONES) current += NEXTWAVE_V2_ONES[tok];
+    else if (tok in NEXTWAVE_V2_TENS) current += NEXTWAVE_V2_TENS[tok];
+    else if (tok === 'hundred') current = (current || 1) * 100;
+    else if (tok in NEXTWAVE_V2_SCALES) { result += (current || 1) * NEXTWAVE_V2_SCALES[tok]; current = 0; }
+    else if (tok === 'a') current += 1;
+  }
+  result += current + halfBonus;
+  return { value: result, suffix };
+}
+
+function nextwaveFormatFinancialNumber(phrase) {
+  try {
+    const { value, suffix } = _nextwaveWordsToNumber(phrase);
+    if (suffix === 'dollar') return '$' + Math.round(value).toLocaleString('en-US');
+    if (suffix === 'percent') {
+      const s = String(value);
+      return (Number.isInteger(value) ? value.toString() : s) + '%';
+    }
+  } catch (e) { /* fall through to raw phrase */ }
+  return String(phrase || '').toUpperCase();
 }
 
 // Generalized resolver: real dynamic financial figures resolve to
