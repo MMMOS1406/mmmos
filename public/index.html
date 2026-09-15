@@ -14546,6 +14546,14 @@ function autoCreateCadenceTasksForCurrentWeek(){
       reviewStatus:'pending',
       assignmentReason:'[cadence-auto-long] v13.69.462 — '+cfg.name+' long-form day '+cfg.longFormDay+' ('+iso+')',
       createdAt:Date.now(),
+      // v16.68.9 — SRV Farsi only: _srvFarsiBuildTrigger determines Long-vs-Short purely from
+      // task.isLong (a boolean), never task.contentFormat — this shared task object never set
+      // isLong at all, so an SRV Farsi auto-created Long silently built as a Short (confirmed via
+      // a real rebuild: correct Duet/Happy avatar selection, but Short 1080x1920 composition and
+      // the short.duet.happy avatar tier instead of Long). Scoped strictly to SRV Farsi
+      // (cfg.id==='srv_farsi') — this is the only engine confirmed affected; other engines using
+      // this same pass (NextWave, AI Studio) are read-only audited separately, not changed here.
+      ...(cfg.id==='srv_farsi'?{isLong:true}:{}),
     };
     D.tasks.push(lfTask);
     D.cadenceAutoCreatedSlots[lfKey]=Date.now();
