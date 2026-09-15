@@ -16582,7 +16582,23 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
   if(btn){btn.disabled=true;btn.style.opacity='0.6';btn.textContent='⏳ Building…';}
   const setStatus=function(msg,col){if(statusEl){statusEl.textContent=msg;if(col)statusEl.style.color=col;}};
   try{
-    const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);})||{};
+    const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+    // v16.68.10 — SRV Farsi build-guard: the old `||{}` fallback let this function proceed on a
+    // brand-new empty object whenever D.packages had been reloaded (loadAppState/session
+    // refresh) since the Build button was rendered, so pkgId no longer matched anything local.
+    // The render/upload still ran (against blank title/lyrics/hook from the empty pkg) and
+    // _srvFarsiSetStage still advanced the task to Approve, producing a real but content-less
+    // video saved to Supabase under an EMPTY package_id/null task_id — orphaned from the task,
+    // unlinked, and impossible to review or approve. Confirmed via real production logs: task 76
+    // reached Approve with "Long video not ready yet." while its actual render landed as a
+    // package row with package_id='' / task_id=null. Failing fast here (SRV Farsi only) instead
+    // of the empty fallback keeps the button re-clickable and the failure visible, and removes
+    // this as a way to reach Approve without a real, linked video.
+    if(!pkg||!pkg.id){
+      setStatus('⚠ Package not found for this task — please reopen from Review/Generate and try again.','#ef4444');
+      if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent='🌹 Build Package — Fetch Background + Render Video';}
+      return;
+    }
     const task=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);});
     const isLongTask=!!(task&&task.isLong);
 
