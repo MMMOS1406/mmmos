@@ -784,6 +784,13 @@ const ENGINES_CONFIG=[
   {id:"srv_farsi",name:"SRV Farsi",icon:"🌹",hint:"Persian emotional songs",
    modes:["Female — Emotional","Female — Romantic","Female — Happy","Male — Emotional","Male — Romantic","Male — Happy","Duet — Emotional","Duet — Romantic","Duet — Happy"],
    type:"song",weeklyCapacity:3,cadenceDays:["Monday","Tuesday","Wednesday","Thursday"], // v15.7.0 — 3 slots/week (Fri Long + Sat Short + Sun Short); production Mon-Thu
+   // v16.68.8 — longFormDay was never actually set despite the comment above always saying
+   // "Fri Long" — so autoCreateCadenceTasksForCurrentWeek's long-form pass (which every field
+   // here exists to drive) silently skipped SRV Farsi entirely, and no Long was ever
+   // auto-created in production; the single real Long that exists was created manually. Setting
+   // it now turns on the already-existing, already-used-by-other-engines long-form pass for SRV
+   // Farsi, matching the cadence this comment already documented as the intent.
+   longFormDay:"Friday",
    // v13.69.80 — SRV Farsi Lifecycle: Generate→Review→Build→Approve→Publish→Done (mirrors English)
    lifecycle:{musicAdapter:'manual',imageAdapter:'pexels',rendererAdapter:'canvas',requireApprove:true},
    // v2-avatar-library-v2 — SRV Farsi Avatar Library: format(long|short) x artist(female|male|duet)
@@ -14445,7 +14452,20 @@ function autoCreateCadenceTasksForCurrentWeek(){
       const load=engineWeeklyLoad(cfg.name);
       if(load>=cap){reasons.capFull++;skipped++;continue;}
       // create
-      const mode=(Array.isArray(cfg.modes)&&cfg.modes.length)?cfg.modes[0]:null;
+      // v16.68.8 — SRV Farsi real-production rotation fix: this generic cross-engine
+      // auto-cadence creator hardcoded mode=cfg.modes[0] for every engine — cfg.modes is only
+      // the manual-wizard's button-order list (index 0 for SRV Farsi is permanently
+      // "Female — Emotional") and was never rotated. THIS function, not the manual "Start SRV
+      // Farsi Task" button, is what actually creates real SRV Farsi tasks in production (fires
+      // on engine-resume/session render, not on a manual click) — confirmed via a real
+      // post-fix task (id 75, created 2026-09-14T23:06:29Z, ~3h after the PR #13 rotation fix
+      // reached production) that still showed Female — Emotional, proving that fix never
+      // reached this path. SRV Farsi only: consume the real rotation source of truth here
+      // instead of the static modes[0] literal. Every other engine keeps cfg.modes[0] exactly
+      // as before — untouched.
+      const mode=(cfg.id==='srv_farsi'&&typeof _srvFarsiNextMode==='function')
+        ?_srvFarsiNextMode()
+        :((Array.isArray(cfg.modes)&&cfg.modes.length)?cfg.modes[0]:null);
       const nextId=D.tasks.reduce((m,t)=>Math.max(m,Number(t?.id)||0),0)+1+createdTasks.length;
       const task={
         id:nextId,
@@ -14502,7 +14522,11 @@ function autoCreateCadenceTasksForCurrentWeek(){
       return String(t.isoDate||'')===iso;
     });
     if(lfCollides){D.cadenceAutoCreatedSlots[lfKey]=Date.now();reasons.existingTask++;skipped++;continue;}
-    const lfMode=cfg.longFormMode||cfg.modes[0]||'Auto';
+    // v16.68.8 — SRV Farsi: same fix as the short-form pass above — prefer the real rotation
+    // source of truth over the static modes[0] fallback. SRV Farsi has no cfg.longFormMode set
+    // (see ENGINES_CONFIG), so it now falls through to _srvFarsiNextMode(). Other engines are
+    // unaffected: they already have an explicit longFormMode set, which still takes priority.
+    const lfMode=cfg.longFormMode||(cfg.id==='srv_farsi'&&typeof _srvFarsiNextMode==='function'?_srvFarsiNextMode():null)||cfg.modes[0]||'Auto';
     const lfId=D.tasks.reduce((m,t)=>Math.max(m,Number(t?.id)||0),0)+1+createdTasks.length;
     const lfTask={
       id:lfId,
