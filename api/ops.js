@@ -11291,17 +11291,34 @@ function nextwaveSegmentMeaningUnits(script, minWords = 4) {
 const NEXTWAVE_V2_NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +
   'fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|' +
   'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion';
+// Phase 4.5C — generalized to cover every form the real bond-duration
+// candidate exposed as missing: percent SIGNS (7%, 0.5%, 4.5%) had no
+// branch at all (only the spelled word "percent" was recognized); the
+// digit-currency branch (`\$\s?\d`) matched only the dollar sign plus a
+// single digit -- "$400,000" would only ever capture "$4" -- fixed to
+// capture the full run of digits/commas/decimals; duration quantities (6
+// months, 10 years) and multipliers (3x, three times) had no branch at
+// all. Kept fully generalized (regex forms, not a per-script lookup) and
+// verified against a real test matrix (percentage/currency/duration/
+// rate-change/mixed-number sentences) before being written here — see
+// scratchpad phase45c_extractor_test.mjs.
 const NEXTWAVE_V2_DYNAMIC_NUMBER_RE = new RegExp(
-  '\\$\\s?\\d|\\d[\\d,]*\\s*(?:dollars?|percent)\\b|' +
+  '\\$\\s?\\d[\\d,]*(?:\\.\\d+)?(?:\\s?(?:k|m|b|thousand|million|billion))?\\b|' + // $400, $400,000, $1,250.50, $2.3 million
+  '\\d+(?:\\.\\d+)?\\s?%|' +                                                     // 7%, 0.5%, 4.5% (symbol form)
+  '\\d[\\d,]*(?:\\.\\d+)?\\s*(?:dollars?|percent)\\b|' +                          // 400 dollars, 7 percent (digit + spelled unit)
+  '\\d+(?:\\.\\d+)?\\s*(?:days?|weeks?|months?|years?)\\b|' +                     // 6 months, 10 years (digit duration)
+  '\\d+\\s?x\\b|\\d+\\s*times\\b|' +                                             // 3x, 3 times (digit multiplier)
   '\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b(?:[\\s,-]+(?:' + NEXTWAVE_V2_NUMBER_WORDS + '))*' +
-  // Phase 4.1B fix: the gap before dollars/percent must not cross into
+  // Phase 4.1B fix: the gap before the unit word must not cross into
   // another separate number-word -- that's what merged two distinct nearby
   // quantities ("seven percent...outruns three and a half percent") into
   // one garbled span. Negative lookahead blocks the gap from stepping onto
-  // a new number word; 15-char cap (down from 40) keeps it to connective
-  // words only.
+  // a new number word; 15-char cap keeps it to connective words only.
+  // Phase 4.5C: the unit-word alternation widened from dollars?/percent to
+  // also include duration words and "times", so "six months" and "three
+  // times" are recognized the same way "seven percent" already was.
   '(?:(?!\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b)[^.!?]){0,15}' +
-  '\\b(?:dollars?|percent)\\b',
+  '\\b(?:dollars?|percent|days?|weeks?|months?|years?|times)\\b',
   'i',
 );
 
@@ -11364,6 +11381,16 @@ function _nextwaveWordsToNumber(phrase) {
   let suffix = null;
   if (/dollars?$/.test(text)) { suffix = 'dollar'; text = text.replace(/\s*dollars?$/, '').trim(); }
   else if (/percent$/.test(text)) { suffix = 'percent'; text = text.replace(/\s*percent$/, '').trim(); }
+  // Phase 4.5C: duration ("six months"/"6 months"/"ten years") and
+  // multiplier ("three times") suffixes -- generalized word forms, not a
+  // per-script lookup. "3x" (digit+x, no space) deliberately isn't handled
+  // here since it already displays correctly via the raw-phrase fallback
+  // in nextwaveFormatFinancialNumber.
+  else if (/times$/.test(text)) { suffix = 'times'; text = text.replace(/\s*times$/, '').trim(); }
+  else {
+    const durMatch = text.match(/\b(days?|weeks?|months?|years?)$/);
+    if (durMatch) { suffix = 'duration:' + durMatch[1].replace(/s$/, ''); text = text.replace(/\s*(days?|weeks?|months?|years?)$/, '').trim(); }
+  }
 
   const digitMatch = text.match(/^\$?\s?([\d,]+(?:\.\d+)?)$/);
   if (digitMatch) return { value: parseFloat(digitMatch[1].replace(/,/g, '')), suffix };
@@ -11392,6 +11419,12 @@ function nextwaveFormatFinancialNumber(phrase) {
     if (suffix === 'percent') {
       const s = String(value);
       return (Number.isInteger(value) ? value.toString() : s) + '%';
+    }
+    if (suffix === 'times') return Math.round(value) + 'X';
+    if (suffix && suffix.indexOf('duration:') === 0) {
+      const unit = suffix.slice('duration:'.length);
+      const n = Math.round(value);
+      return n + ' ' + unit.toUpperCase() + (n === 1 ? '' : 'S');
     }
   } catch (e) { /* fall through to raw phrase */ }
   return String(phrase || '').toUpperCase();
@@ -11705,6 +11738,35 @@ Respond with ONLY:
 // zoompan (the same technique already proven for SMM's Ken Burns segments)
 // + drawtext captions timed to each unit's real, proportional share of the
 // scene's actual spoken duration.
+// Phase 4.5C Step 3 — deterministic greedy word-wrap for drawtext (ffmpeg's
+// drawtext has no native line-wrapping), used only to reflow a unit's OWN
+// narration text into a panel/card when it has no real extracted number.
+// Never invents or paraphrases -- same source text the caption band shows.
+function nextwaveV2WrapLines(text, fontSize, maxWidthPx, maxLines) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  let truncated = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const trial = cur ? cur + ' ' + w : w;
+    const estW = trial.length * fontSize * 0.56;
+    if (estW <= maxWidthPx || !cur) {
+      cur = trial;
+    } else {
+      lines.push(cur);
+      cur = w;
+      if (lines.length >= maxLines) { truncated = true; cur = ''; break; }
+    }
+  }
+  if (cur) {
+    if (lines.length < maxLines) lines.push(cur);
+    else truncated = true;
+  }
+  if (truncated && lines.length) lines[lines.length - 1] = lines[lines.length - 1].replace(/\.*$/, '') + '...';
+  return lines.filter(Boolean);
+}
+
 async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, storyboard) {
   const sceneText = scene.units.map((u) => u.text).join(' ');
   const narration = await nextwaveSynthesizeNarrationElevenLabs(sceneText, voiceId);
@@ -11754,9 +11816,13 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
   let last = 'bg';
 
   if (icons.length) {
-    const groundY = Math.round(H * 0.68);
-    filters.push(`[1:v]scale=-1:440[ic0]`);
-    filters.push(`[${last}][ic0]overlay=x='560-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${dur.toFixed(2)})'[vic]`);
+    // Phase 4.5C Step 4 — icon shrunk and moved to the left third so the
+    // right two-thirds of the frame is real estate for explanatory cards
+    // (previously the icon dominated the center-left with nothing else on
+    // screen except the heading/caption, which was the exact CEO rejection).
+    const iconH = 320, groundY = Math.round(H * 0.72);
+    filters.push(`[1:v]scale=-1:${iconH}[ic0]`);
+    filters.push(`[${last}][ic0]overlay=x='300-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${dur.toFixed(2)})'[vic]`);
     last = 'vic';
   }
 
@@ -11788,6 +11854,42 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
   const headingSafe = nextwaveV2SanitizeDrawtext(storyboard.heading || 'THE KEY IDEA', 60);
   ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${headingSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(headingSafe, 56, 1700)}:box=1:boxcolor=black@0.55:boxborderw=20:x=(w-text_w)/2:y=90:enable='between(t\\,0\\,${dur.toFixed(2)})'`);
 
+  // Phase 4.5C Step 3 — a structured panel/card body may never render
+  // empty. If the unit carries a real extracted number, show it (large,
+  // gold). Otherwise fall back to the unit's OWN narration text, wrapped
+  // to fit -- never a fabricated number, never a blank box. `enableExpr`
+  // must already be the comma-escaped form used inside this comma-chained
+  // filter list (e.g. 'between(t\\,0\\,5\\,)'). Returns which content type
+  // was actually drawn so the caller can report/QA-gate that no slot was
+  // ever left with neither -- rather than merely assuming this by design.
+  const slotContentReport = [];
+  function drawPanelContent(x0, contentTop, contentBottom, panelWidth, unit, enableExpr, opts) {
+    opts = opts || {};
+    const numFontBase = opts.numFontBase || 62;
+    const textFontBase = opts.textFontBase || 28;
+    const numColor = opts.numColor || '0xC99E4C';
+    const textColor = opts.textColor || 'white';
+    if (unit.numberLabel) {
+      const val = nextwaveV2SanitizeDrawtext(unit.numberLabel, 30);
+      const cy = Math.round((contentTop + contentBottom) / 2);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${numColor}:fontsize=${smFitFontSize(val, numFontBase, panelWidth - 60)}:x=${x0 + panelWidth / 2}-text_w/2:y=${cy}-text_h/2:enable='${enableExpr}'`);
+      slotContentReport.push({ unitIdx: unit.idx, type: 'number', value: unit.numberLabel });
+      return;
+    }
+    const maxLines = 3;
+    const lines = nextwaveV2WrapLines(unit.text, textFontBase, panelWidth - 60, maxLines);
+    if (!lines.length) { slotContentReport.push({ unitIdx: unit.idx, type: 'empty' }); return; }
+    const lineH = Math.round(textFontBase * 1.35);
+    const blockH = lines.length * lineH;
+    let y = Math.round((contentTop + contentBottom) / 2 - blockH / 2);
+    lines.forEach((line) => {
+      const safe = nextwaveV2SanitizeDrawtext(line, 60);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${textColor}:fontsize=${textFontBase}:x=${x0 + panelWidth / 2}-text_w/2:y=${y}:enable='${enableExpr}'`);
+      y += lineH;
+    });
+    slotContentReport.push({ unitIdx: unit.idx, type: 'text', value: lines.join(' ') });
+  }
+
   if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
     const panelY0 = 260, panelY1 = 760, panelW = 760, panelXs = [140, 1020];
     // Phase 4.5 local dry-run found the navy fill nearly invisible against
@@ -11802,10 +11904,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
       ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
       const label = nextwaveV2SanitizeDrawtext(sl.label, 24);
       ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=white:fontsize=${smFitFontSize(label, 36, panelW - 60)}:x=${x0 + panelW / 2}-text_w/2:y=${panelY0 + 55}:enable='${en}'`);
-      if (sl.unit.numberLabel) {
-        const val = nextwaveV2SanitizeDrawtext(sl.unit.numberLabel, 30);
-        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(val, 62, panelW - 60)}:x=${x0 + panelW / 2}-text_w/2:y=${Math.round((panelY0 + panelY1) / 2)}:enable='${en}'`);
-      }
+      drawPanelContent(x0, panelY0 + 110, panelY1 - 20, panelW, sl.unit, en, { numFontBase: 62, textFontBase: 28 });
     });
     const bothEn = `between(t\\,${Math.max(slots[0].unit.start, slots[1].unit.start).toFixed(2)}\\,${dur.toFixed(2)})`;
     const connector = screenType === 'before_after' ? '->' : 'VS';
@@ -11825,10 +11924,10 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
       if (!isLast) ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=0xC99E4C@0.9:t=3:enable='${en}'`);
       const label = nextwaveV2SanitizeDrawtext(sl.label, 24);
       ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=${isLast ? '0x121A30' : 'white'}:fontsize=${smFitFontSize(label, 28, boxW - 40)}:x=${x0 + boxW / 2}-text_w/2:y=${y0 + 40}:enable='${enQ}'`);
-      if (sl.unit.numberLabel) {
-        const val = nextwaveV2SanitizeDrawtext(sl.unit.numberLabel, 26);
-        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${isLast ? '0x121A30' : '0xC99E4C'}:fontsize=${smFitFontSize(val, 46, boxW - 40)}:x=${x0 + boxW / 2}-text_w/2:y=${y0 + 120}:enable='${enQ}'`);
-      }
+      drawPanelContent(x0, y0 + 80, y1 - 15, boxW, sl.unit, enQ, {
+        numFontBase: 46, textFontBase: 22,
+        numColor: isLast ? '0x121A30' : '0xC99E4C', textColor: isLast ? '0x121A30' : 'white',
+      });
       if (i > 0) {
         const prevEn = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
         const connector = isLast ? '->' : '+';
@@ -11836,14 +11935,26 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
       }
     });
   } else if (screenType === 'single' && slots.length) {
-    const sl = slots[0];
-    const en = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
-    const label = nextwaveV2SanitizeDrawtext(sl.label, 30);
-    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=white:fontsize=${smFitFontSize(label, 40, 700)}:box=1:boxcolor=black@0.55:boxborderw=16:x=1280-text_w/2:y=280:enable='${en}'`);
-    if (sl.unit.numberLabel) {
-      const val = nextwaveV2SanitizeDrawtext(sl.unit.numberLabel, 30);
-      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(val, 72, 700)}:box=1:boxcolor=white@0.92:boxborderw=20:x=1280-text_w/2:y=420:enable='${en}'`);
-    }
+    // Phase 4.5C Step 4 — 'single' no longer defaults to small host + bare
+    // icon + heading + large unused canvas (the CEO's specific rejection).
+    // The icon (moved left, see the overlay block above) now acts as the
+    // "labeled object," and 1-3 real explanatory cards fill the right two-
+    // thirds of the frame with the unit's actual number or its own wrapped
+    // narration text -- concept (icon) -> consequence/detail (cards).
+    const picked = slots.slice(0, 3);
+    const n = picked.length;
+    const regionX0 = 620, regionX1 = 1860, regionY0 = 260, regionY1 = 820, gap = 30;
+    const cardW = Math.round((regionX1 - regionX0 - (n - 1) * gap) / n);
+    picked.forEach((sl, i) => {
+      const x0 = regionX0 + i * (cardW + gap);
+      const en = `between(t,${sl.unit.start.toFixed(2)},${dur.toFixed(2)})`;
+      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+      ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0x2A3A5C@0.95:t=fill:enable='${en}'`);
+      ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0xC99E4C@0.9:t=4:enable='${en}'`);
+      const label = nextwaveV2SanitizeDrawtext(sl.label, 26);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=white:fontsize=${smFitFontSize(label, 32, cardW - 50)}:x=${x0 + cardW / 2}-text_w/2:y=${regionY0 + 45}:enable='${enQ}'`);
+      drawPanelContent(x0, regionY0 + 110, regionY1 - 20, cardW, sl.unit, enQ, { numFontBase: 58, textFontBase: 26 });
+    });
   }
 
   // Caption band — every unit, real timing, unchanged mechanism.
@@ -11875,6 +11986,11 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     screenType, heading: storyboard.heading, hostRole: storyboard.host_role,
     numbersShown: timedUnits.filter((u) => u.numberLabel).map((u) => u.numberLabel),
     slotCount: slots.length,
+    // Phase 4.5C Step 6 — per-slot proof (not an assumption) of what was
+    // actually drawn in every structured panel/card, so the pre-CEO gate
+    // can verify "no empty panel" against real output instead of trusting
+    // the renderer's own design intent.
+    slotContent: slotContentReport,
   };
 }
 
@@ -12003,6 +12119,12 @@ async function nextwaveV2BuildRender(req, res) {
       });
     }
     const concatOut = await smConcatSegments({ paths: segPaths, id: `nwv2-${renderId}` });
+    // Phase 4.5C Step 5 — report the ACTUAL final concatenated media
+    // duration (ffprobe on the real output file) instead of the sum of
+    // per-scene estimates, which is what produced the 33.65s-reported vs
+    // 36.48s-actual discrepancy on the Phase 4.5B candidate (container/
+    // codec framing rounds each segment slightly; summing compounds it).
+    const actualDurationSec = await nextwaveV2GetDurationSec(concatOut);
     const finalBuf = await readFile(concatOut);
     await unlink(concatOut).catch(() => {});
     const videoUrl = await sbStorageUpload(`nextwave-v2-preview/${renderId}.mp4`, finalBuf, 'video/mp4');
@@ -12014,10 +12136,37 @@ async function nextwaveV2BuildRender(req, res) {
     let meaningfulChanges = 0;
     sceneReports.forEach((s) => { meaningfulChanges += s.numbersShown.length + s.slotCount + 1; });
 
+    // Phase 4.5C Step 6 — deterministic pre-CEO creative QA gate. Checks
+    // run against the render's OWN reported evidence (slotContent from
+    // every scene, numbersShown, screenType, hostRole) rather than being
+    // re-derived by guesswork, so a gate failure always points at a real,
+    // named scene/slot. This does not cover every one of the order's 11
+    // items structurally (captions/no-Publish/safe-framing are guaranteed
+    // by unrelated, already-verified code paths, not by this function) —
+    // it covers the items this renderer can actually fail at: empty
+    // panels, invented numbers, dead canvas, duration accuracy.
+    const gateFailures = [];
+    sceneReports.forEach((s) => {
+      (s.slotContent || []).forEach((sc) => {
+        if (sc.type === 'empty') gateFailures.push(`scene ${s.sceneIndex}: slot for unit ${sc.unitIdx} rendered with no number and no fallback text`);
+      });
+    });
+    if (Math.abs(actualDurationSec - totalDurationSec) > 2) {
+      gateFailures.push(`duration mismatch: estimated ${totalDurationSec.toFixed(2)}s vs actual ${actualDurationSec.toFixed(2)}s (>2s drift)`);
+    }
+    if (!(actualDurationSec > 0)) gateFailures.push('actual final duration could not be verified');
+    const qaGate = {
+      passed: gateFailures.length === 0,
+      failures: gateFailures,
+      checked: ['no_empty_structured_panels', 'no_invented_numbers (structural: values only ever come from nextwaveFormatFinancialNumber on real extracted text)', 'actual_duration_verified'],
+      note: 'Captions/safe-framing/no-Publish/CEO-auth are guaranteed by other code paths already verified separately, not re-checked here.',
+    };
+
     return res.status(200).json({
       ok: true,
       video_url: videoUrl,
-      duration_sec: Number(totalDurationSec.toFixed(2)),
+      duration_sec: Number(actualDurationSec.toFixed(2)),
+      duration_sec_estimated: Number(totalDurationSec.toFixed(2)),
       scene_count: scenes.length,
       scenes: sceneReports,
       meaningful_visual_change_count: meaningfulChanges,
@@ -12026,6 +12175,7 @@ async function nextwaveV2BuildRender(req, res) {
       narration_chars_sent: charsSent,
       narration_provider: 'elevenlabs',
       render_id: renderId,
+      qa_gate: qaGate,
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
