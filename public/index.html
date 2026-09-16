@@ -2139,6 +2139,7 @@ async function saveAppState(){
     srvFarsiRotationIdx:(typeof D.srvFarsiRotationIdx==='number')?D.srvFarsiRotationIdx:0, // v13.69.93 — RETIRED, backward compat only
     srvFarsiArtistIdx:(typeof D.srvFarsiArtistIdx==='number')?D.srvFarsiArtistIdx:0,     // v16.68.7 — artist rotation pointer
     srvFarsiMoodIdx:(typeof D.srvFarsiMoodIdx==='number')?D.srvFarsiMoodIdx:0,           // v16.68.7 — mood rotation pointer
+    srvFarsiAvatarIdx:(D.srvFarsiAvatarIdx&&typeof D.srvFarsiAvatarIdx==='object')?D.srvFarsiAvatarIdx:{}, // v16.68.11 — per-bucket (format.artist.mood) next-avatar-index pointer, full-pool rotation
     srvFarsiTaskSeq:(typeof D.srvFarsiTaskSeq==='number')?D.srvFarsiTaskSeq:0,           // v13.70.0 — 2S+1L format cycle counter
     srvFarsiShortDayIdx:(typeof D.srvFarsiShortDayIdx==='number')?D.srvFarsiShortDayIdx:0, // v13.70.0 — Sat(0)/Sun(1) alternator
     srvEnglishRotationIdx:(typeof D.srvEnglishRotationIdx==='number')?D.srvEnglishRotationIdx:0, // v13.74.0 — English rotation pointer
@@ -2258,6 +2259,7 @@ function financePayloadSnapshot(){
     srvFarsiRotationIdx:(typeof D.srvFarsiRotationIdx==='number')?D.srvFarsiRotationIdx:0,
     srvFarsiArtistIdx:(typeof D.srvFarsiArtistIdx==='number')?D.srvFarsiArtistIdx:0,
     srvFarsiMoodIdx:(typeof D.srvFarsiMoodIdx==='number')?D.srvFarsiMoodIdx:0,
+    srvFarsiAvatarIdx:(D.srvFarsiAvatarIdx&&typeof D.srvFarsiAvatarIdx==='object')?D.srvFarsiAvatarIdx:{},
     srvFarsiTaskSeq:(typeof D.srvFarsiTaskSeq==='number')?D.srvFarsiTaskSeq:0,
     srvFarsiShortDayIdx:(typeof D.srvFarsiShortDayIdx==='number')?D.srvFarsiShortDayIdx:0,
     srvEnglishRotationIdx:(typeof D.srvEnglishRotationIdx==='number')?D.srvEnglishRotationIdx:0,
@@ -2583,6 +2585,7 @@ function applyFinanceState(p){
   // v16.68.7 — restore independent artist/mood rotation pointers
   if(typeof p.srvFarsiArtistIdx==='number') D.srvFarsiArtistIdx=p.srvFarsiArtistIdx;
   if(typeof p.srvFarsiMoodIdx==='number') D.srvFarsiMoodIdx=p.srvFarsiMoodIdx;
+  if(p.srvFarsiAvatarIdx&&typeof p.srvFarsiAvatarIdx==='object') D.srvFarsiAvatarIdx=p.srvFarsiAvatarIdx;
   // v13.70.0 — restore format cycle + short-day alternator
   if(typeof p.srvFarsiTaskSeq==='number') D.srvFarsiTaskSeq=p.srvFarsiTaskSeq;
   if(typeof p.srvFarsiShortDayIdx==='number') D.srvFarsiShortDayIdx=p.srvFarsiShortDayIdx;
@@ -16622,19 +16625,23 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     // records what was already decided. SRV Farsi only; no other engine's code path is touched.
     pkg.artist=_fGroup==='duet'?'Duet':_fGroup==='male'?'Male':'Female';
 
-    // v2-phase2 — memory-aware face rotation: avoid repeating the same avatar photo
-    // this identity group last used, reusing the existing generation_memory mechanism
-    // (memory_type='visual_face') rather than a parallel tracking system.
-    function _farsiPickAvatar(pool){
+    // v16.68.11 — SRV Farsi avatar variety upgrade (real VA feedback: the old memory-based
+    // avoid-last-2 picker degenerated on a 2-photo pool — once both photos were "recent" the
+    // fresh-list emptied and it fell back to a random pick across the whole pool, which could
+    // repeat the same avatar twice in a row). Replaced with a deterministic, per-exact-bucket
+    // (format.artist.mood) next-index pointer, persisted in D.srvFarsiAvatarIdx via the existing
+    // saveAppState()/app_settings path (same mechanism as srvFarsiArtistIdx/MoodIdx) so it
+    // survives refresh/logout/new session. Guarantees: never the same avatar twice in a row
+    // (for pool.length>=2) and the full pool cycles before any reuse, for whatever pool size the
+    // avatarLibrary manifest holds — 2 today, transparently becomes 4-way once the bucket is
+    // expanded to 4 approved photos, no further code change needed. SRV Farsi only.
+    function _farsiPickAvatar(pool,bucketKey){
       if(!pool.length)return null;
       if(pool.length===1)return pool[0];
-      const _recent=(D._memoryItems||[])
-        .filter(function(m){return m.engine_id==='srv_farsi'&&m.memory_type==='visual_face';})
-        .sort(function(a,b){return new Date(b.created_at||0)-new Date(a.created_at||0);})
-        .slice(0,2).map(function(m){return m.value;});
-      const _fresh=pool.filter(function(u){return !_recent.includes(u);});
-      const _choices=_fresh.length?_fresh:pool;
-      return _choices[Math.floor(Math.random()*_choices.length)];
+      if(!D.srvFarsiAvatarIdx||typeof D.srvFarsiAvatarIdx!=='object')D.srvFarsiAvatarIdx={};
+      const _idx=(typeof D.srvFarsiAvatarIdx[bucketKey]==='number')?(D.srvFarsiAvatarIdx[bucketKey]%pool.length):0;
+      D.srvFarsiAvatarIdx[bucketKey]=(_idx+1)%pool.length;
+      return pool[_idx];
     }
     function _farsiPickMirror(){
       const _recent=(D._memoryItems||[])
@@ -16678,7 +16685,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       if(!_fPool.length){
         console.warn('[SRV Farsi] avatar library: no photos for '+_fFormatKey+'/'+_fGroup+'/'+_fMoodKey+' — check avatarLibrary manifest');
       }
-      _fAvUrlForRender=_farsiPickAvatar(_fPool);
+      _fAvUrlForRender=_farsiPickAvatar(_fPool,_fFormatKey+'.'+_fGroup+'.'+_fMoodKey);
     })();
 
     // Step 2: SHORT render (9:16) — only for Short tasks
