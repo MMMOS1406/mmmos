@@ -18003,7 +18003,13 @@ async function _nextWaveRunPublish(pkgId,taskId){
   // Phase 4.4A — hard safety guard: a NEXTWAVE V2 PREVIEW TEST package must
   // never actually reach YouTube, regardless of how the 'publish' stage was
   // entered. This is the real network-call boundary, not just a UI hint.
-  if(pkg.isTest){
+  // Phase 4.5A — also check the TASK's isTest (race-free source of truth —
+  // see the isNextWaveV2Preview comment in renderNextWaveLifecycleCard for
+  // why pkg.isTest alone can be transiently wiped by generatePackage()'s
+  // own detached background refetch) so this guard can't be silently lost
+  // to that same race.
+  const _pubTask=(D.tasks||[]).find(function(x){return String(x.id||'')===String(taskId)||String(x.taskId||'')===String(taskId);});
+  if(pkg.isTest||(_pubTask&&_pubTask.isTest)){
     if(statusEl){statusEl.style.color='#f59e0b';statusEl.innerHTML='🧪 NEXTWAVE V2 PREVIEW TEST — Publish is disabled for test packages. Review the rendered video in Build/Approve; this will not be uploaded to YouTube.';}
     _nextWaveSetStage(taskId,'approve');
     return;
@@ -18117,7 +18123,23 @@ function renderNextWaveLifecycleCard(task){
     // via nextwaveV2StartBuild. Real (non-preview) NextWave packages fall
     // through to the original HeyGen+Submagic state machine, byte-for-byte
     // unchanged, further below.
-    const isNextWaveV2Preview=!!(pkg&&pkg.isTest&&typeof pkg.workflowNotes==='string'&&pkg.workflowNotes.indexOf('NEXTWAVE_V2_PREVIEW_TEST')!==-1);
+    // Phase 4.5A — real root cause of a FRESH V2 preview task still falling
+    // through to this legacy branch: generatePackage() (the shared, legacy
+    // function every engine's Generate button calls, including
+    // _nextWaveGeneratePackage) does its own save, then fires a DETACHED,
+    // un-awaited setTimeout(...,800) that refetches D.packages from
+    // Supabase and replaces the whole array — independent of when
+    // generatePackage() itself returns. _nextWaveGeneratePackage stamps
+    // pkg.isTest + the marker AFTER generatePackage() resolves, then
+    // re-saves — if that stamp+resave takes longer than the detached 800ms
+    // timer, the refetch can win the race and silently overwrite D.packages
+    // with the PRE-stamp version, wiping isTest/marker back out from under
+    // the just-rendered UI. This is exactly why it was intermittent rather
+    // than always broken. task.isTest is set once at task creation and is
+    // never touched by that refetch (which only ever replaces D.packages),
+    // so it's the race-free source of truth — checked first, with the
+    // pkg-level check kept as a fallback for defense in depth.
+    const isNextWaveV2Preview=!!(task&&task.isTest) || !!(pkg&&pkg.isTest&&typeof pkg.workflowNotes==='string'&&pkg.workflowNotes.indexOf('NEXTWAVE_V2_PREVIEW_TEST')!==-1);
     if(isNextWaveV2Preview){
       // Phase 4.4E — traced end-to-end: _ceoAuthedFetch/requireCeoSession/
       // _ceoVerifySession have no domain/origin binding (pure HMAC, verified
@@ -18259,7 +18281,7 @@ function renderNextWaveLifecycleCard(task){
       body+=`<div style="margin-bottom:14px">
         <video src="${escHTML(videoUrl)}" controls style="width:100%;border-radius:10px;max-height:300px;background:#000"></video>
       </div>`;
-      if(pkg&&pkg.isTest){
+      if((task&&task.isTest)||(pkg&&pkg.isTest)){
         body+=`<div style="padding:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#f59e0b;font-size:12px;margin-bottom:10px">🧪 NEXTWAVE V2 PREVIEW TEST — Publish to YouTube is disabled for this task. This is a preview candidate for CEO visual/audio review only.</div>`;
       }else{
         body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
