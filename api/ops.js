@@ -11648,6 +11648,66 @@ async function nextwaveV2GetDurationSec(path) {
   }
 }
 
+// ── Phase 4.6 — ONE continuous narration synthesis per Short ───────────────
+// CEO rejection: narration sounded "broken/choppy... abrupt cadence resets."
+// Root-cause investigation (real audio, not assumption): downloaded and
+// waveform-compared (a) raw ElevenLabs output, (b) the same audio through
+// the exact production silenceremove filter, (c) a per-scene rendered
+// segment, (d) the final concatenated MP4. The raw ElevenLabs waveform
+// already has the same word-by-word amplitude-envelope shape as the
+// processed audio at this zoom level (normal for any speech, not itself
+// evidence of damage), and silenceremove only trimmed ~100ms on a real
+// sample with two borderline pauses, confirming it isn't the chopping
+// culprit either. Two REAL, confirmed problems: (1) the silenceremove
+// ffmpeg call had no explicit output bitrate, so libmp3lame silently
+// dropped from ElevenLabs' 128kbps down to a 64kbps default -- a real,
+// avoidable quality loss, fixed below with an explicit -b:a; (2) the
+// architecture itself: Phase 4.4-4.5D called ElevenLabs ONCE PER SCENE
+// (4 separate synthesis calls per Short), so each scene's prosody/pacing
+// was decided independently by the model with no knowledge it was
+// continuing a thought -- exactly what produces an audible cadence reset
+// at every scene cut, and exactly what the order's own hypothesis named.
+// Fixed generally, not per-script: synthesize the FULL approved script as
+// one continuous ElevenLabs call, trim once, then map every scene's
+// visual timing onto slices of this single real master track (see
+// nextwaveV2BuildRender) instead of re-synthesizing narration per scene.
+async function nextwaveV2SynthesizeMasterNarration(fullText, voiceId, renderId) {
+  const narration = await nextwaveSynthesizeNarrationElevenLabs(fullText, voiceId);
+  if (!narration.ok) throw new Error(`master narration failed: ${narration.error}`);
+
+  const rawPath = join(tmpdir(), `nwv2-${renderId}-master-raw.mp3`);
+  await writeFile(rawPath, narration.buffer);
+  await smAssertValidMediaFile(rawPath, 'master narration audio');
+
+  // Phase 4.6 — more conservative than the old per-scene pass (longer
+  // stop_duration, stricter/lower stop_threshold): with one continuous
+  // take there is far less need to trim aggressively, and the CEO
+  // explicitly warned against "damaging natural speech" / "artificial
+  // silence chopping." This only caps genuinely long embedded pauses
+  // (>=0.8s) down to a still-natural 0.6s, leaving normal speech rhythm
+  // (including any pause under 0.8s) completely untouched. Explicit
+  // -b:a preserves ElevenLabs' own 128kbps instead of silently dropping
+  // to libmp3lame's low default (the confirmed real quality-loss bug).
+  const trimmedPath = join(tmpdir(), `nwv2-${renderId}-master.mp3`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', rawPath,
+      '-af', 'silenceremove=stop_periods=-1:stop_duration=0.8:stop_threshold=-40dB:stop_silence=0.6',
+      '-b:a', '192k',
+      trimmedPath,
+    ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+    await smAssertValidMediaFile(trimmedPath, 'trimmed master narration audio');
+    await unlink(rawPath).catch(() => {});
+  } catch (e) {
+    // Safe fallback: never block a render on a pacing improvement -- fall
+    // back to the untouched real ElevenLabs audio if trimming fails.
+    await copyFile(rawPath, trimmedPath);
+    await unlink(rawPath).catch(() => {});
+  }
+  const durationSec = await nextwaveV2GetDurationSec(trimmedPath);
+  return { path: trimmedPath, durationSec };
+}
+
 // ── Phase 4.5 — narration-to-visual storyboard mapper ──────────────────────
 // CEO rejection: icon + mostly-empty background + tiny caption does not
 // TEACH the argument. Deriving "what should the viewer see to understand
@@ -11676,7 +11736,7 @@ async function nextwaveV2GenerateStoryboard(plan, scenes) {
     if (!u || !u.__hasNumber) return null;
     return nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text));
   };
-  const deterministicFallback = () => scenes.map((scene) => {
+  const deterministicFallback = () => scenes.map((scene, sceneIdx) => {
     const idxs = scene.units.map((u) => u.__idx);
     const numberIdxs = idxs.filter((i) => plan[i].__hasNumber);
     const joined = scene.units.map((u) => u.text).join(' ').toLowerCase();
@@ -11697,7 +11757,20 @@ async function nextwaveV2GenerateStoryboard(plan, scenes) {
     } else {
       slots = [{ unit_index: idxs[0], label: heading, primary_value: primaryForUnit(idxs[0]), secondary_value: null }];
     }
-    return { screen_type, heading, slots, host_role: numberIdxs.length ? 'beside_calculation' : 'intro', teaching_objective: '' };
+    // Phase 4.6 — the no-API fallback also varies host choreography by
+    // scene position instead of defaulting to the same small role every
+    // time: first scene gets a large hero intro, last scene gets a large
+    // outro, a comparison/before_after scene puts the host beside the
+    // contrast, a number-heavy scene puts it beside the calculation,
+    // otherwise a plain single scene goes data_only so the host isn't
+    // parked in every frame.
+    let host_role;
+    if (sceneIdx === 0) host_role = 'hero_intro';
+    else if (sceneIdx === scenes.length - 1) host_role = 'outro_host';
+    else if (screen_type === 'comparison' || screen_type === 'before_after') host_role = 'beside_comparison';
+    else if (screen_type === 'buildup') host_role = 'beside_calculation';
+    else host_role = numberIdxs.length ? 'reaction_emphasis' : 'data_only';
+    return { screen_type, heading, slots, host_role, teaching_objective: '' };
   });
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -11719,7 +11792,18 @@ For EACH scene, decide:
 - screen_type: one of "comparison" (contrasts two options/paths/amounts), "before_after" (contrasts an earlier state vs a later/eventual one), "buildup" (several factors accumulate toward one result, e.g. base + bonus + gains -> total), or "single" (explains one concept, no clear structural contrast).
 - heading: 2-6 words, ALL CAPS, a punchy question or statement capturing what the viewer should learn from this scene — never a restatement of the narration sentence itself. Base it ONLY on what the script actually says.
 - slots: 1-4 items, each {"unit_index": <a unit index from THIS scene>, "label": "1-4 word ALL CAPS label for what that slot represents, e.g. 'MARKET PRICE', 'BASE INCOME', 'BEFORE'", "primary_value": "...", "secondary_value": "..."}.
-- host_role: one of "intro" (host introduces/transitions), "point_at_comparison" (host gestures at a contrast), "beside_calculation" (host stands near a number/buildup), "step_back" (minimize the host — the data should be the whole story).
+- host_role: choose the one that actually matches this scene's moment, not a default — one of:
+  - "hero_intro" (host is LARGE and central — use for the opening hook/attention-grabbing scene)
+  - "presenter_large" (host is LARGE, actively presenting/explaining — use when the host IS the explanation, not just decoration)
+  - "point_left" (host gestures toward content on the left side of the frame)
+  - "point_right" (host gestures toward content on the right side of the frame)
+  - "beside_comparison" (host stands between/near a two-sided comparison)
+  - "beside_calculation" (host stands near a running calculation/buildup)
+  - "reaction_emphasis" (host has a brief, larger emphasis beat at the scene's key punchline moment)
+  - "data_only" (no host at all — the data/illustration deserves full, undivided attention)
+  - "outro_host" (host is LARGE for a closing/CTA scene)
+  - "intro" (small supporting host, only default when nothing else fits — do not use this as the automatic choice for every scene)
+  Vary this across the script's scenes — a real video does not use the same host size/position in every scene. At least one scene should use a LARGE role (hero_intro/presenter_large/outro_host) and at least one scene (if the script has 3+ scenes) should use data_only or reaction_emphasis. Never park the host in the same small corner scene after scene.
 - teaching_objective: one sentence — what the viewer should understand even with audio muted.
 
 EVIDENCE HIERARCHY — primary_value / secondary_value:
@@ -11762,7 +11846,9 @@ Respond with ONLY:
     const parsed = JSON.parse(m[1]);
     if (!parsed || !Array.isArray(parsed.scenes) || parsed.scenes.length !== scenes.length) return deterministicFallback();
     const validTypes = new Set(['comparison', 'before_after', 'buildup', 'single']);
-    const validRoles = new Set(['intro', 'point_at_comparison', 'beside_calculation', 'step_back']);
+    // Phase 4.6 — richer host choreography palette (legacy point_at_comparison/
+    // step_back kept as accepted synonyms so nothing already in flight breaks).
+    const validRoles = new Set(['hero_intro', 'presenter_large', 'point_left', 'point_right', 'beside_comparison', 'beside_calculation', 'reaction_emphasis', 'data_only', 'outro_host', 'intro', 'point_at_comparison', 'step_back']);
     const out = parsed.scenes.map((s, i) => {
       const validIdxs = new Set(scenes[i].units.map((u) => u.__idx));
       const slots = Array.isArray(s.slots) ? s.slots.filter((sl) => sl && validIdxs.has(sl.unit_index) && typeof sl.label === 'string').slice(0, 4).map((sl) => {
@@ -11896,61 +11982,22 @@ function nextwaveV2FitLabel(text, baseFontSize, maxWidthPx, minFontSize) {
   return { fontSize, lines: lines.length ? lines : [text] };
 }
 
-async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, storyboard) {
-  const sceneText = scene.units.map((u) => u.text).join(' ');
-  const narration = await nextwaveSynthesizeNarrationElevenLabs(sceneText, voiceId);
-  if (!narration.ok) throw new Error(`scene ${sceneIdx} narration failed: ${narration.error}`);
-
-  const rawAudioPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}-audio-raw.mp3`);
-  await writeFile(rawAudioPath, narration.buffer);
-  await smAssertValidMediaFile(rawAudioPath, `scene ${sceneIdx} narration audio`);
-
-  // Phase 4.5D — the real Phase 4.5C candidate had a confirmed ~4.5s dead-air
-  // stretch genuinely embedded in one scene's ElevenLabs narration (verified
-  // locally against the actual downloaded audio: silencedetect found two
-  // near-back-to-back gaps of 2.97s + 1.48s within an 8s scene). That is not
-  // scene/concat/timing logic on our side -- confirmed those already
-  // measure and assemble correctly -- so the fix is audio-side: cap any
-  // embedded silence stretch at ~1s (stop_duration 0.5 + stop_silence 0.5)
-  // rather than removing pauses entirely, which keeps natural sentence
-  // breaks intact (verified: a genuine 0.6s pause elsewhere in the same
-  // clip survived this exact filter untouched) without ever rushing speech.
-  // Eric/ElevenLabs unchanged -- this only post-processes the returned audio.
-  const audioPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}-audio.mp3`);
-  try {
-    await execFileAsync(ffmpegInstaller.path, [
-      '-y', '-i', rawAudioPath,
-      '-af', 'silenceremove=stop_periods=-1:stop_duration=0.5:stop_threshold=-35dB:stop_silence=0.5',
-      audioPath,
-    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 20 });
-    await smAssertValidMediaFile(audioPath, `scene ${sceneIdx} trimmed narration audio`);
-    await unlink(rawAudioPath).catch(() => {});
-  } catch (e) {
-    // Safe fallback: never block a render on a pacing improvement -- fall
-    // back to the untouched real ElevenLabs audio if trimming fails.
-    await copyFile(rawAudioPath, audioPath);
-    await unlink(rawAudioPath).catch(() => {});
-  }
-  const dur = await nextwaveV2GetDurationSec(audioPath);
-  // Phase 4.5D — real-candidate QA found a ~0.7s blank-canvas gap right at
-  // a scene boundary (heading/panel/host all absent) that a clean local
-  // reproduction of the exact concat filter + zoompan + enable-window
-  // pattern (same code, synthetic audio) did NOT reproduce, and confirmed
-  // via the same probe against the pre-4.5D candidate that no such gap
-  // existed there. The concat mechanism itself tests clean, so rather than
-  // guess at the exact interaction between the new silence-trim step and
-  // segment-boundary timing precision -- untestable locally since this
-  // machine's ffmpeg has no drawtext support at all -- every enable
-  // window's upper bound gets a small safety margin so an overlay can
-  // never silently end before the segment's true last frame, regardless
-  // of the exact source of any sub-second timing mismatch.
-  // Phase 4.5D — the 0.4s margin only shrank the observed gap (~0.7-0.8s
-  // down to ~0.4s) rather than closing it, proportionally confirming the
-  // mechanism while showing the real per-segment discrepancy is closer to
-  // ~0.7s. Raised to a 1.2s margin for comfortable headroom; the small
-  // downside (an overlay can persist very slightly past its own scene's
-  // last real content) is far preferable to a visible blank gap.
-  const durEnd = (dur + 1.2).toFixed(2);
+// Phase 4.6 — video-only per scene. Narration is no longer synthesized or
+// trimmed here at all: nextwaveV2BuildRender synthesizes ONE continuous
+// master narration for the whole script and computes each unit's GLOBAL
+// start/end as a proportional slice of that single real track, then
+// passes this scene's own [sceneStart, sceneEnd) window in. This is what
+// closes the CEO's "broken/choppy... abrupt cadence resets" rejection:
+// there is only ever one ElevenLabs call per Short now, so prosody never
+// resets at a scene cut. The master audio is muxed onto the final
+// concatenated video once, in nextwaveV2BuildRender — never per scene.
+async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard, sceneStart, sceneEnd) {
+  const dur = Math.max(0.1, sceneEnd - sceneStart);
+  // Frame-count rounding safety margin only (zoompan quantizes to whole
+  // frames at 25fps, ~20-40ms) — not the old 1.2s hack, which existed to
+  // paper over per-scene audio/video duration mismatches that no longer
+  // exist now that no audio is synthesized or muxed per scene.
+  const durEnd = (dur + 0.15).toFixed(2);
 
   // Phase 4.5D bugfix — real-candidate QA found "$135K" rendered under
   // BOTH a "30-YEAR INTEREST" and "15-YEAR INTEREST" slot despite the
@@ -11965,15 +12012,15 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
   // deterministic from the unit's own text); each SLOT's actual
   // numberLabel/secondaryLabel is attached below, per slot, from that
   // slot's own primary_value/secondary_value.
-  const totalChars = Math.max(1, sceneText.length);
-  let cursor = 0;
+  // Phase 4.6 — start/end are now each unit's GLOBAL time (from the
+  // master narration) minus this scene's own start, instead of being
+  // re-derived from a per-scene character-count split.
   const timedUnits = scene.units.map((u) => {
-    const uDur = dur * (u.text.length / totalChars);
-    const start = cursor;
-    cursor = Math.min(dur, cursor + uDur);
+    const start = Math.max(0, u.__start - sceneStart);
+    const end = Math.max(start, u.__end - sceneStart);
     const hasNumber = nextwaveHasDynamicNumbers(u.text);
     const rankedNumberLabel = hasNumber ? nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text)) : null;
-    return { idx: u.__idx, text: u.text, start, end: cursor, hasNumber, rankedNumberLabel };
+    return { idx: u.__idx, text: u.text, start, end, hasNumber, rankedNumberLabel };
   });
   const byIdx = {};
   timedUnits.forEach((u) => { byIdx[u.idx] = u; });
@@ -11992,21 +12039,35 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     return { ...sl, unit: { ...unit, numberLabel, secondaryLabel } };
   }).filter((sl) => sl && sl.unit);
 
-  const useHost = (sceneIdx % 2 === 0) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT;
   const W = 1920, H = 1080;
-  const includeHost = storyboard.host_role !== 'step_back';
+  const hostRole = storyboard.host_role;
+  // Phase 4.6 Step 3 — CEO rejection: host was "too small and mostly
+  // parked in a corner." data_only/step_back are the only roles that
+  // hide the host entirely (data/illustration earns full attention);
+  // every other role now has a genuinely distinct size/position instead
+  // of the old 2-role (point_at_comparison/beside_calculation) + tiny
+  // 'intro' default. The pointing-pose asset is used whenever the host
+  // is meant to gesture at something; the default pose otherwise —
+  // same two existing, original NextWave host images, no new assets.
+  const includeHost = hostRole !== 'step_back' && hostRole !== 'data_only';
+  const pointingRoles = new Set(['point_left', 'point_right', 'beside_comparison', 'point_at_comparison', 'beside_calculation']);
+  const useHost = pointingRoles.has(hostRole) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT;
   // Icons are now only used by the 'single' fallback layout — comparison/
   // before_after/buildup are built from drawbox panels + drawtext below,
   // which is what actually gives structure instead of a lone icon on an
-  // otherwise-empty frame (the exact CEO rejection).
-  const icons = (screenType === 'single' && slots.length) ? nextwaveV2SceneIcons(scene).slice(0, 1) : [];
+  // otherwise-empty frame (the exact CEO rejection). Phase 4.6 — suppressed
+  // when the host role is large (hero_intro/presenter_large/outro_host):
+  // the host itself is the visual anchor for that scene now, so a second
+  // decorative icon competing for the same "concept" role is clutter.
+  const largeHostRoles = new Set(['hero_intro', 'presenter_large', 'outro_host']);
+  const icons = (screenType === 'single' && slots.length && !largeHostRoles.has(storyboard.host_role)) ? nextwaveV2SceneIcons(scene).slice(0, 1) : [];
 
   const inputs = ['-loop', '1', '-i', NEXTWAVE_V2_BG];
   icons.forEach((p) => inputs.push('-i', p));
   const hostIdx = icons.length + 1;
   if (includeHost) inputs.push('-i', useHost);
-  const audioIdx = includeHost ? hostIdx + 1 : hostIdx;
-  inputs.push('-i', audioPath);
+  // Phase 4.6 — no audio input here at all: narration is muxed once onto
+  // the final concatenated video in nextwaveV2BuildRender, not per scene.
 
   const frames = Math.max(1, Math.round(dur * 25));
   const filters = [`[0:v]scale=${W}:${H},zoompan=z='min(zoom+0.0004,1.06)':d=${frames}:s=${W}x${H}:fps=25[bg]`];
@@ -12025,12 +12086,41 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
 
   if (includeHost) {
     let hx, hy, hh, hostWindows;
-    if (storyboard.host_role === 'point_at_comparison') {
-      hh = 250; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h-26`;
-      hostWindows = [{ start: 0, end: dur + 1.2 }];
-    } else if (storyboard.host_role === 'beside_calculation') {
-      hh = 230; hx = `${W}-overlay_w-40`; hy = `${H}-overlay_h-40`;
-      hostWindows = [{ start: 0, end: dur + 1.2 }];
+    const wholeScene = [{ start: 0, end: dur + 0.15 }];
+    // Phase 4.6 Step 3 — host choreography: size/position now follows the
+    // storyboard's own choice of role instead of one fixed small corner
+    // spot. Large roles (hero_intro/presenter_large/outro_host) are
+    // genuinely large (~45-50% of frame height) so the host visibly
+    // participates instead of decorating a corner; point_left/point_right
+    // anchor toward the side of the frame their content occupies;
+    // reaction_emphasis is a deliberately brief larger beat at this
+    // scene's own punchline (its last unit), not present for the whole
+    // scene, so it reads as emphasis rather than a static presence.
+    if (hostRole === 'hero_intro') {
+      hh = 520; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'presenter_large') {
+      hh = 460; hx = `${W}-overlay_w-30`; hy = `${H}-overlay_h`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'outro_host') {
+      hh = 500; hx = `${Math.round(W * 0.62)}-overlay_w/2`; hy = `${H}-overlay_h`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'point_left') {
+      hh = 300; hx = '50'; hy = `${H}-overlay_h-20`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'point_right') {
+      hh = 300; hx = `${W}-overlay_w-50`; hy = `${H}-overlay_h-20`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'beside_comparison' || hostRole === 'point_at_comparison') {
+      hh = 260; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h-26`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'beside_calculation') {
+      hh = 240; hx = `${W}-overlay_w-40`; hy = `${H}-overlay_h-40`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'reaction_emphasis') {
+      hh = 360; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h-20`;
+      const punchline = timedUnits[timedUnits.length - 1];
+      hostWindows = punchline ? [{ start: punchline.start, end: dur + 0.15 }] : [];
     } else { // 'intro' — visible only on units NOT carrying a hard number, matching the locked "character never defaults to the whole scene" rule
       hh = 210; hx = '40'; hy = `${H}-overlay_h-40`;
       hostWindows = timedUnits.filter((u) => !u.hasNumber).map((u) => ({ start: u.start, end: u.end }));
@@ -12162,6 +12252,19 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
         ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=white:fontsize=44:x=${x0 - gap / 2}-text_w/2:y=${Math.round((y0 + y1) / 2)}:enable='${prevEn}'`);
       }
     });
+  } else if (screenType === 'single' && slots.length && storyboard.host_role === 'outro_host') {
+    // Phase 4.6 Step 5 — CTA/outro correction: the CEO rejected the
+    // oversized static "HOUSING FINANCE"-style card as a large mostly-
+    // empty panel. Replaces it with a concise, host-forward composition:
+    // no drawbox panel at all, just a real (never invented) short line of
+    // script text placed high/left, since the host is now large in the
+    // lower-right (see the outro_host host-role window above).
+    const sl = slots[0];
+    const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
+    const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
+    const ctaX = 140, ctaW = 980;
+    const labelH = drawFittedLabel(ctaX, 300, ctaW, sl.label, enQ, { baseFontSize: 40, color: '0xC99E4C' });
+    drawPanelContent(ctaX, 300 + labelH + 20, 560, ctaW, sl.unit, enQ, { numFontBase: 56, textFontBase: 32 });
   } else if (screenType === 'single' && slots.length) {
     // Phase 4.5C Step 4 — 'single' no longer defaults to small host + bare
     // icon + heading + large unused canvas (the CEO's specific rejection).
@@ -12169,9 +12272,14 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     // "labeled object," and 1-3 real explanatory cards fill the right two-
     // thirds of the frame with the unit's actual number or its own wrapped
     // narration text -- concept (icon) -> consequence/detail (cards).
+    // Phase 4.6 — the card region shrinks vertically when this scene's
+    // host role is large (hero_intro/presenter_large), which now occupies
+    // real space in the lower part of the frame, so cards don't visually
+    // collide with the host.
     const picked = slots.slice(0, 3);
     const n = picked.length;
-    const regionX0 = 620, regionX1 = 1860, regionY0 = 260, regionY1 = 820, gap = 30;
+    const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
+    const regionX0 = 620, regionX1 = 1860, regionY0 = 260, regionY1 = isLargeHostScene ? 620 : 820, gap = 30;
     const cardW = Math.round((regionX1 - regionX0 - (n - 1) * gap) / n);
     picked.forEach((sl, i) => {
       const x0 = regionX0 + i * (cardW + gap);
@@ -12221,20 +12329,23 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
 
   const vf = filters.join(';') + (ov.length ? `;[${last}]` + ov.join(',') + '[vout]' : `;[${last}]null[vout]`);
 
+  // Phase 4.6 — video-only output: no audio track, no -shortest (nothing
+  // to match against); an explicit -t caps it at exactly this scene's
+  // real allotted duration since zoompan's own frame count already
+  // determines it precisely.
   const outPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}.mp4`);
   try {
     await execFileAsync(ffmpegInstaller.path, [
       '-y', ...inputs,
       '-filter_complex', vf,
-      '-map', '[vout]', '-map', `${audioIdx}:a`,
+      '-map', '[vout]',
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
-      '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-shortest',
+      '-t', dur.toFixed(2),
+      '-an',
       outPath,
     ], { timeout: 90000, maxBuffer: 1024 * 1024 * 40 });
   } catch (e) {
     throw new Error(`scene ${sceneIdx} ffmpeg failed: ${String((e && e.stderr) || e.message).slice(-500)}`);
-  } finally {
-    await unlink(audioPath).catch(() => {});
   }
   await smAssertValidMediaFile(outPath, `scene ${sceneIdx} segment`);
   return {
@@ -12368,6 +12479,51 @@ async function nextwaveV2DebugStoryboard(req, res) {
 // as nextwaveNarrationSynthesize — the caller (Build button) is responsible
 // for persisting the returned video_url onto the package row, exactly like
 // autoStartHeygenRender already does for pkg.videoUrl today.
+// Phase 4.6 — concatenates VIDEO-ONLY scene segments (no audio track in
+// any of them — see nextwaveV2BuildSceneSegment) into one continuous
+// video stream. Kept separate from muxing so the master narration audio
+// (synthesized once, untouched by any per-scene process) is combined
+// exactly once, at the very end, in nextwaveV2MuxMasterAudio.
+async function nextwaveV2ConcatVideoOnly({ paths, id }) {
+  for (let i = 0; i < paths.length; i++) {
+    await smAssertValidMediaFile(paths[i], `segment ${i + 1}/${paths.length} before concat`);
+  }
+  const outPath = join(tmpdir(), `nwv2-concat-${id}.mp4`);
+  const inputArgs = [];
+  paths.forEach((p) => { inputArgs.push('-i', p); });
+  const streamRefs = paths.map((_, i) => `[${i}:v:0]`).join('');
+  const filter = `${streamRefs}concat=n=${paths.length}:v=1:a=0[outv]`;
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filter,
+    '-map', '[outv]',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'concatenated video-only master');
+  return outPath;
+}
+
+// Phase 4.6 — muxes the ONE master narration track onto the fully
+// concatenated video, exactly once. -shortest trims to the shorter of
+// the two (they should already closely match, since every scene's video
+// length was itself derived from a slice of this same audio's real
+// duration). Explicit -b:a 192k is the confirmed real audio-quality fix
+// from the Step 2 investigation (the old per-scene silenceremove call had
+// no explicit bitrate and silently dropped to a 64kbps default).
+async function nextwaveV2MuxMasterAudio({ videoPath, audioPath, id }) {
+  const outPath = join(tmpdir(), `nwv2-final-${id}.mp4`);
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-i', videoPath, '-i', audioPath,
+    '-map', '0:v:0', '-map', '1:a:0',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '44100', '-ac', '2',
+    '-shortest',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'final muxed candidate');
+  return outPath;
+}
+
 async function nextwaveV2BuildRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -12402,31 +12558,62 @@ async function nextwaveV2BuildRender(req, res) {
   const storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
 
   const renderId = randomBytes(6).toString('hex');
+
+  // Phase 4.6 Step 2 — ONE continuous narration synthesis for the whole
+  // script, not one ElevenLabs call per scene (the confirmed real
+  // architectural cause of the CEO's "broken/choppy... abrupt cadence
+  // resets" rejection). See nextwaveV2SynthesizeMasterNarration.
+  const fullText = plan.map((u) => u.text).join(' ');
+  let master;
+  try {
+    master = await nextwaveV2SynthesizeMasterNarration(fullText, useVoiceId, renderId);
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `master narration failed: ${e.message}` });
+  }
+
+  // Global per-unit timing: a proportional slice of the ONE real master
+  // track's actual duration, in script order — the same technique
+  // previously applied per scene, now applied once across the whole
+  // script so every scene's visual timing maps onto real spoken time.
+  const totalChars = Math.max(1, plan.reduce((sum, u) => sum + u.text.length, 0));
+  let cursor = 0;
+  plan.forEach((u) => {
+    const uDur = master.durationSec * (u.text.length / totalChars);
+    u.__start = cursor;
+    cursor = Math.min(master.durationSec, cursor + uDur);
+    u.__end = cursor;
+  });
+
   const segPaths = [];
-  let totalDurationSec = 0;
   const sceneReports = [];
-  let charsSent = 0;
   try {
     for (let i = 0; i < scenes.length; i++) {
-      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, useVoiceId, renderId, storyboards[i]);
+      const sceneUnits = scenes[i].units;
+      const sceneStart = sceneUnits[0].__start;
+      const sceneEnd = sceneUnits[sceneUnits.length - 1].__end;
+      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, renderId, storyboards[i], sceneStart, sceneEnd);
       segPaths.push(seg.path);
-      totalDurationSec += seg.durationSec;
-      charsSent += scenes[i].units.map((u) => u.text).join(' ').length;
       sceneReports.push({
         sceneIndex: i, unitCount: scenes[i].units.length, durationSec: Number(seg.durationSec.toFixed(2)),
         screenType: seg.screenType, heading: seg.heading, hostRole: seg.hostRole,
         slotCount: seg.slotCount, numbersShown: seg.numbersShown,
+        // Phase 4.6 bugfix — slotContent was computed by every scene
+        // segment (nextwaveV2BuildSceneSegment already returns it) but
+        // was never actually copied onto sceneReports, so the
+        // "no_empty_structured_panels" gate check below was always
+        // iterating an empty array and could never fail on a real empty
+        // panel. Fixed by including it here.
+        slotContent: seg.slotContent,
       });
     }
-    const concatOut = await smConcatSegments({ paths: segPaths, id: `nwv2-${renderId}` });
-    // Phase 4.5C Step 5 — report the ACTUAL final concatenated media
-    // duration (ffprobe on the real output file) instead of the sum of
-    // per-scene estimates, which is what produced the 33.65s-reported vs
-    // 36.48s-actual discrepancy on the Phase 4.5B candidate (container/
-    // codec framing rounds each segment slightly; summing compounds it).
-    const actualDurationSec = await nextwaveV2GetDurationSec(concatOut);
-    const finalBuf = await readFile(concatOut);
-    await unlink(concatOut).catch(() => {});
+    const concatVideoOut = await nextwaveV2ConcatVideoOnly({ paths: segPaths, id: renderId });
+    const finalOut = await nextwaveV2MuxMasterAudio({ videoPath: concatVideoOut, audioPath: master.path, id: renderId });
+    await unlink(concatVideoOut).catch(() => {});
+    await unlink(master.path).catch(() => {});
+
+    const actualDurationSec = await nextwaveV2GetDurationSec(finalOut);
+    const finalBuf = await readFile(finalOut);
+    await unlink(finalOut).catch(() => {});
     const videoUrl = await sbStorageUpload(`nextwave-v2-preview/${renderId}.mp4`, finalBuf, 'video/mp4');
 
     // Meaningful-visual-change count (Step 9 QA metric): every number
@@ -12440,29 +12627,20 @@ async function nextwaveV2BuildRender(req, res) {
     // run against the render's OWN reported evidence (slotContent from
     // every scene, numbersShown, screenType, hostRole) rather than being
     // re-derived by guesswork, so a gate failure always points at a real,
-    // named scene/slot. This does not cover every one of the order's 11
-    // items structurally (captions/no-Publish/safe-framing are guaranteed
-    // by unrelated, already-verified code paths, not by this function) —
-    // it covers the items this renderer can actually fail at: empty
-    // panels, invented numbers, dead canvas, duration accuracy.
+    // named scene/slot.
     const gateFailures = [];
     sceneReports.forEach((s) => {
       (s.slotContent || []).forEach((sc) => {
         if (sc.type === 'empty') gateFailures.push(`scene ${s.sceneIndex}: slot for unit ${sc.unitIdx} rendered with no number and no fallback text`);
       });
     });
-    // Phase 4.5D — the per-scene estimate sums each scene's own trimmed-
-    // audio duration, but the real per-segment render (zoompan+concat
-    // re-encode) has an inherent small overhead per scene (confirmed via
-    // real-candidate measurement: roughly ~0.7s/scene), so a flat 2s
-    // tolerance produces false alarms on scripts with more scenes even
-    // though the ACTUAL reported duration_sec (ffprobe-verified) is
-    // correct either way. Scaling the tolerance with scene count keeps
-    // this check meaningful for a genuinely broken estimate while not
-    // flagging the normal per-scene accumulation as a defect.
-    const durationTolerance = Math.max(3, sceneReports.length * 1.5);
-    if (Math.abs(actualDurationSec - totalDurationSec) > durationTolerance) {
-      gateFailures.push(`duration mismatch: estimated ${totalDurationSec.toFixed(2)}s vs actual ${actualDurationSec.toFixed(2)}s (>${durationTolerance.toFixed(1)}s drift)`);
+    // Phase 4.6 — duration should now closely track the master
+    // narration's own real duration (each scene's video length is
+    // itself derived from a slice of it, and the only remaining audio
+    // step is a single final mux), so a tight tolerance is meaningful
+    // again instead of the old scene-count-scaled allowance.
+    if (Math.abs(actualDurationSec - master.durationSec) > 1.5) {
+      gateFailures.push(`duration mismatch: master narration ${master.durationSec.toFixed(2)}s vs final video ${actualDurationSec.toFixed(2)}s (>1.5s drift)`);
     }
     if (!(actualDurationSec > 0)) gateFailures.push('actual final duration could not be verified');
     const qaGate = {
@@ -12476,14 +12654,15 @@ async function nextwaveV2BuildRender(req, res) {
       ok: true,
       video_url: videoUrl,
       duration_sec: Number(actualDurationSec.toFixed(2)),
-      duration_sec_estimated: Number(totalDurationSec.toFixed(2)),
+      master_narration_duration_sec: Number(master.durationSec.toFixed(2)),
       scene_count: scenes.length,
       scenes: sceneReports,
       meaningful_visual_change_count: meaningfulChanges,
       placeholder_count: 0,
       voice_id_used: useVoiceId || ELEVENLABS_VOICE_ID,
-      narration_chars_sent: charsSent,
+      narration_chars_sent: fullText.length,
       narration_provider: 'elevenlabs',
+      narration_calls: 1,
       render_id: renderId,
       qa_gate: qaGate,
     });
@@ -12491,6 +12670,7 @@ async function nextwaveV2BuildRender(req, res) {
     return res.status(500).json({ ok: false, error: e.message });
   } finally {
     for (const p of segPaths) await unlink(p).catch(() => {});
+    await unlink(master.path).catch(() => {});
   }
 }
 
