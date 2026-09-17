@@ -12240,6 +12240,44 @@ async function nextwaveV2SetVoice(req, res) {
   return res.status(200).json({ ok: true, voice_id, name: name || '' });
 }
 
+// Phase 4.5D diagnostic — reproduces the exact plan/scene/storyboard data a
+// real Build would use (including the one real Claude storyboard call),
+// WITHOUT touching ElevenLabs or ffmpeg, so a scene-composition defect can
+// be inspected without spending on a full paid render. Read-only, no
+// video/audio produced, no package/task touched. Not CEO-gated (same
+// reasoning as nextwave_v2_plan_visuals — read-only, bounded token cost,
+// no secret or financial-account action).
+async function nextwaveV2DebugStoryboard(req, res) {
+  try {
+    const { script } = req.body || {};
+    if (!script || typeof script !== 'string' || !script.trim()) {
+      return res.status(400).json({ ok: false, error: 'script is required' });
+    }
+    const units = nextwaveSegmentMeaningUnits(script);
+    const plan = units.map((u, idx) => {
+      const tags = nextwaveClassifyVisualIntent(u.text);
+      const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+      const candidateValues = nextwaveExtractAllNumbers(u.text);
+      return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+    });
+    const scenes = nextwaveV2GroupScenes(plan);
+    const storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
+    return res.status(200).json({
+      ok: true,
+      unit_count: plan.length,
+      units: plan.map((u) => ({ idx: u.__idx, text: u.text, hasNumber: u.__hasNumber, candidateValues: u.__candidateValues })),
+      scene_count: scenes.length,
+      scenes: scenes.map((s, i) => ({
+        sceneIndex: i,
+        unit_indices: s.units.map((u) => u.__idx),
+        storyboard: storyboards[i],
+      })),
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
 // Main entry point: real approved package script -> V2 plan -> scenes ->
 // real ElevenLabs narration per scene -> composited segments -> concatenated
 // final MP4 -> uploaded to the same Supabase Storage path SMM video already
@@ -13579,6 +13617,7 @@ export default async function handler(req, res) {
     // NextWave V2 Phase 4: read/compute-only visual-planning (segment ->
     // classify -> resolve). Does not touch narration above in any way.
     if (action === 'nextwave_v2_plan_visuals')       return await nextwaveV2PlanVisuals(req, res);
+    if (action === 'nextwave_v2_debug_storyboard')   return await nextwaveV2DebugStoryboard(req, res);
     // NextWave V2 Phase 4.4 — Build-stage renderer (NextWave only, HeyGen/Submagic untouched)
     if (action === 'nextwave_list_elevenlabs_voices') return await nextwaveListElevenLabsVoices(req, res);
     if (action === 'nextwave_v2_get_voice')           return await nextwaveV2GetVoice(req, res);
