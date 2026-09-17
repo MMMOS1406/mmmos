@@ -12278,8 +12278,13 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
     const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
     const ctaX = 140, ctaW = 980;
-    const labelH = drawFittedLabel(ctaX, 300, ctaW, sl.label, enQ, { baseFontSize: 40, color: '0xC99E4C' });
-    drawPanelContent(ctaX, 300 + labelH + 20, 560, ctaW, sl.unit, enQ, { numFontBase: 56, textFontBase: 32 });
+    // Phase 4.6 Step 5 fix (post-candidate QA): the storyboard model's
+    // slot label for the CTA scene is a generic category tag (e.g. "CALL
+    // TO ACTION") rather than real content, which just repeated the
+    // scene heading and the CTA sentence a third time. The heading
+    // already carries the title, so drop the redundant label here and
+    // give the real CTA line the full content region.
+    drawPanelContent(ctaX, 300, 560, ctaW, sl.unit, enQ, { numFontBase: 56, textFontBase: 36 });
   } else if (screenType === 'single' && slots.length) {
     // Phase 4.5C Step 4 — 'single' no longer defaults to small host + bare
     // icon + heading + large unused canvas (the CEO's specific rejection).
