@@ -17756,17 +17756,34 @@ function _nextWaveGetStage(taskId){
   if(_pkgStage){if(!D.nextWaveLifecycleStages)D.nextWaveLifecycleStages={};D.nextWaveLifecycleStages[String(taskId)]=_pkgStage;}
   return _pkgStage||'generate';
 }
-function _nextWaveSetStage(taskId,stage){
+async function _nextWaveSetStage(taskId,stage){
   if(!D.nextWaveLifecycleStages)D.nextWaveLifecycleStages={};
   D.nextWaveLifecycleStages[String(taskId)]=stage;
   const _pkg=(D.packages||[]).find(function(p){return String(p.taskId||'')===String(taskId);});
-  if(_pkg){_pkg.lifecycleStage=stage;if(typeof savePackageToSupabase==='function')savePackageToSupabase(_pkg).catch(function(){});}
+  if(_pkg){
+    _pkg.lifecycleStage=stage;
+    if(typeof savePackageToSupabase==='function'){
+      // Phase 4.6A — savePackageToSupabase already resolves true/false (never
+      // rejects), but this caller used to fire-and-forget with a no-op
+      // .catch(), so a rejected durable write was indistinguishable from a
+      // successful one: the lifecycle stage still advanced and the UI still
+      // showed it as saved. Awaiting the real result and tagging the package
+      // with it lets the lifecycle card warn instead of silently masquerading
+      // a failed save as durable. Re-rendering after the await (below) is the
+      // only way the UI reflects that outcome, since every caller of this
+      // function already re-renders immediately/optimistically on its own.
+      const _durableOk=await savePackageToSupabase(_pkg).catch(function(){return false;});
+      _pkg._lifecycleStageDurable=!!_durableOk;
+      if(!_durableOk)console.error('[NextWave lifecycle] stage set to',stage,'for task',taskId,'but the durable save FAILED — this state exists only in the current session and will not survive a reload.');
+    }
+  }
   if(stage==='done'){
     // v15.7.0 — search by t.id first (canonical), then t.taskId fallback
     const _t=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId)||String(t.taskId||'')===String(taskId);});
     if(_t&&_t.status!=='done'){_t.status='done';_t.updatedAt=new Date().toISOString();}
   }
   if(typeof saveAppState==='function')saveAppState();
+  if(typeof renderTab==='function' && typeof currentTab!=='undefined')renderTab(currentTab);
 }
 function _nextWavePkgForTask(task){
   if(!task)return null;
@@ -18070,6 +18087,13 @@ function renderNextWaveLifecycleCard(task){
   const btnGreen='width:100%;padding:12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:10px';
   const btnRed='width:100%;padding:9px;background:transparent;border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;cursor:pointer;font-family:\'JetBrains Mono\',monospace;margin-top:8px';
   let body='';
+  // Phase 4.6A — a durable-save failure (e.g. a schema/constraint rejection)
+  // must be visible here, not just in the console, since this lifecycle
+  // stage's own button clicks re-render optimistically before the save's
+  // result is known. pkg._lifecycleStageDurable is set by _nextWaveSetStage.
+  if(pkg && pkg._lifecycleStageDurable===false){
+    body+=`<div style="padding:10px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;margin-bottom:12px">⚠ NOT DURABLY SAVED — this stage change did not persist to the database. It will be lost on reload. See console for the save error.</div>`;
+  }
   // ── GENERATE ──────────────────────────────────────────────────────────────
   if(stage==='generate'){
     const nextMode=_nextWavePeekNextMode();
