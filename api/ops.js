@@ -12226,7 +12226,15 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   }
 
   if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
-    const panelY0 = 260, panelY1 = 760, panelW = 760, panelXs = [140, 1020];
+    // Phase 4.6 fix (post-candidate QA): a large host role (hero_intro is
+    // centered, bottom-anchored, ~520px tall) visibly overlapped and
+    // clipped into the bottom corners of both side-by-side cards here —
+    // confirmed on a real rendered frame. Shrinks the panels' bottom edge
+    // above the host's top edge (the tightest of the three large roles)
+    // when this scene's host role is large, same mitigation already
+    // applied to the 'single' layout below.
+    const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
+    const panelY0 = 260, panelY1 = isLargeHostScene ? 545 : 760, panelW = 760, panelXs = [140, 1020];
     // Phase 4.5 local dry-run found the navy fill nearly invisible against
     // the (also navy) background — lightened + given a gold border so each
     // panel reads as a distinct card regardless of background proximity.
@@ -12248,7 +12256,14 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     const n = picked.length;
     const boxW = 360, gap = 40, totalW = n * boxW + (n - 1) * gap;
     const startX = Math.round((W - totalW) / 2);
-    const y0 = 430, y1 = 650;
+    // Phase 4.6 fix (post-candidate QA): a large host role's box (bottom-
+    // anchored, top edge as high as y=560) visibly clipped into the
+    // bottom of these cards when they sat at their default y0/y1 — same
+    // confirmed defect as the comparison/before_after layout above.
+    // Shifted the whole row up (same height, not compressed) so it clears
+    // every large role's top edge instead.
+    const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
+    const y0 = isLargeHostScene ? 230 : 430, y1 = isLargeHostScene ? 450 : 650;
     picked.forEach((sl, i) => {
       const x0 = startX + i * (boxW + gap);
       const isLast = i === n - 1;
@@ -12293,13 +12308,17 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // thirds of the frame with the unit's actual number or its own wrapped
     // narration text -- concept (icon) -> consequence/detail (cards).
     // Phase 4.6 — the card region shrinks vertically when this scene's
-    // host role is large (hero_intro/presenter_large), which now occupies
-    // real space in the lower part of the frame, so cards don't visually
-    // collide with the host.
+    // host role is large (hero_intro/presenter_large/outro_host), which
+    // now occupies real space in the lower part of the frame, so cards
+    // don't visually collide with the host. Threshold tightened from 620
+    // to 545 (post-candidate QA on a real render): 620 was flush with
+    // presenter_large's top edge but still overlapped hero_intro's
+    // (560) and outro_host's (580), which this region's x-span (620-1860)
+    // can horizontally reach.
     const picked = slots.slice(0, 3);
     const n = picked.length;
     const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
-    const regionX0 = 620, regionX1 = 1860, regionY0 = 260, regionY1 = isLargeHostScene ? 620 : 820, gap = 30;
+    const regionX0 = 620, regionX1 = 1860, regionY0 = 260, regionY1 = isLargeHostScene ? 545 : 820, gap = 30;
     const cardW = Math.round((regionX1 - regionX0 - (n - 1) * gap) / n);
     picked.forEach((sl, i) => {
       const x0 = regionX0 + i * (cardW + gap);
