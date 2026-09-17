@@ -11671,7 +11671,56 @@ async function nextwaveV2GetDurationSec(path) {
 // one continuous ElevenLabs call, trim once, then map every scene's
 // visual timing onto slices of this single real master track (see
 // nextwaveV2BuildRender) instead of re-synthesizing narration per scene.
+// ── Phase 4.7 — financial speech normalizer ─────────────────────────────
+// CEO rejection: "number narration is particularly unnatural." Root-cause
+// check: nothing between script text and the ElevenLabs call guarded
+// against compact display-style notation ($291K, $2.6M) reaching the
+// narration engine verbatim -- that's a chart/label convention, not a
+// prose convention (the real Wealth Logic benchmark's own captions spell
+// "$2.6 million" as words, never a letter suffix -- inspected directly,
+// not assumed). The display string and the spoken string are allowed to
+// diverge from one shared factual value: this only ever touches the text
+// sent to ElevenLabs, never the on-screen card text (nextwaveExtractAllNumbers
+// / nextwaveFormatFinancialNumber run on the pre-normalization unit text,
+// earlier in the pipeline, so visual number extraction is unaffected).
+function _nextwaveNumberToWords(n) {
+  n = Math.round(n);
+  if (n === 0) return 'zero';
+  const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+    'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  function threeDigits(x) {
+    let s = '';
+    if (x >= 100) { s += ones[Math.floor(x / 100)] + ' hundred'; x %= 100; if (x) s += ' '; }
+    if (x >= 20) { s += tens[Math.floor(x / 10)]; if (x % 10) s += '-' + ones[x % 10]; }
+    else if (x > 0) { s += ones[x]; }
+    return s;
+  }
+  const scales = [[1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
+  let parts = [];
+  for (const [scale, name] of scales) {
+    if (n >= scale) { parts.push(threeDigits(Math.floor(n / scale)) + ' ' + name); n %= scale; }
+  }
+  if (n > 0 || !parts.length) parts.push(threeDigits(n));
+  return parts.join(' ').trim();
+}
+// Handles dollars+thousands/millions/billions (the confirmed-risk case)
+// and digit multipliers ("3x" -> "three times"). Deliberately does NOT
+// touch plain "$3,477"-style comma-formatted amounts, bare percentages,
+// decimals, or "15-year" -- standard TTS already reads those naturally;
+// rewriting them would add risk without an observed problem to fix.
+function nextwaveV2NormalizeForSpeech(text) {
+  text = String(text || '');
+  text = text.replace(/\$\s?(\d+(?:\.\d+)?)\s?([kmb])\b/gi, (m, num, suffix) => {
+    const mult = { k: 1e3, m: 1e6, b: 1e9 }[suffix.toLowerCase()];
+    return _nextwaveNumberToWords(parseFloat(num) * mult) + ' dollars';
+  });
+  text = text.replace(/\b(\d+(?:\.\d+)?)\s?x\b/gi, (m, num) => _nextwaveNumberToWords(parseFloat(num)) + ' times');
+  return text;
+}
+
 async function nextwaveV2SynthesizeMasterNarration(fullText, voiceId, renderId) {
+  fullText = nextwaveV2NormalizeForSpeech(fullText);
   const narration = await nextwaveSynthesizeNarrationElevenLabs(fullText, voiceId);
   if (!narration.ok) throw new Error(`master narration failed: ${narration.error}`);
 
