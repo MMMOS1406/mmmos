@@ -11886,6 +11886,19 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     await unlink(rawAudioPath).catch(() => {});
   }
   const dur = await nextwaveV2GetDurationSec(audioPath);
+  // Phase 4.5D — real-candidate QA found a ~0.7s blank-canvas gap right at
+  // a scene boundary (heading/panel/host all absent) that a clean local
+  // reproduction of the exact concat filter + zoompan + enable-window
+  // pattern (same code, synthetic audio) did NOT reproduce, and confirmed
+  // via the same probe against the pre-4.5D candidate that no such gap
+  // existed there. The concat mechanism itself tests clean, so rather than
+  // guess at the exact interaction between the new silence-trim step and
+  // segment-boundary timing precision -- untestable locally since this
+  // machine's ffmpeg has no drawtext support at all -- every enable
+  // window's upper bound gets a small safety margin so an overlay can
+  // never silently end before the segment's true last frame, regardless
+  // of the exact source of any sub-second timing mismatch.
+  const durEnd = (dur + 0.4).toFixed(2);
 
   // Phase 4.5D — look up the storyboard's own load-bearing value choice
   // per unit (already validated against that unit's real candidate values
@@ -11947,7 +11960,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     // screen except the heading/caption, which was the exact CEO rejection).
     const iconH = 320, groundY = Math.round(H * 0.72);
     filters.push(`[1:v]scale=-1:${iconH}[ic0]`);
-    filters.push(`[${last}][ic0]overlay=x='300-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${dur.toFixed(2)})'[vic]`);
+    filters.push(`[${last}][ic0]overlay=x='300-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${durEnd})'[vic]`);
     last = 'vic';
   }
 
@@ -11955,10 +11968,10 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     let hx, hy, hh, hostWindows;
     if (storyboard.host_role === 'point_at_comparison') {
       hh = 250; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h-26`;
-      hostWindows = [{ start: 0, end: dur }];
+      hostWindows = [{ start: 0, end: dur + 0.4 }];
     } else if (storyboard.host_role === 'beside_calculation') {
       hh = 230; hx = `${W}-overlay_w-40`; hy = `${H}-overlay_h-40`;
-      hostWindows = [{ start: 0, end: dur }];
+      hostWindows = [{ start: 0, end: dur + 0.4 }];
     } else { // 'intro' — visible only on units NOT carrying a hard number, matching the locked "character never defaults to the whole scene" rule
       hh = 210; hx = '40'; hy = `${H}-overlay_h-40`;
       hostWindows = timedUnits.filter((u) => !u.hasNumber).map((u) => ({ start: u.start, end: u.end }));
@@ -11977,7 +11990,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
   // used for the caption band below). ──────────────────────────────────
   const ov = [];
   const headingSafe = nextwaveV2SanitizeDrawtext(storyboard.heading || 'THE KEY IDEA', 60);
-  ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${headingSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(headingSafe, 56, 1700)}:box=1:boxcolor=black@0.55:boxborderw=20:x=(w-text_w)/2:y=90:enable='between(t\\,0\\,${dur.toFixed(2)})'`);
+  ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${headingSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(headingSafe, 56, 1700)}:box=1:boxcolor=black@0.55:boxborderw=20:x=(w-text_w)/2:y=90:enable='between(t\\,0\\,${durEnd})'`);
 
   // Phase 4.5C Step 3 — a structured panel/card body may never render
   // empty. If the unit carries a real extracted number, show it (large,
@@ -12056,14 +12069,14 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     const fills = ['0x2A3A5C', '0x2E5A3A'];
     slots.slice(0, 2).forEach((sl, i) => {
       const x0 = panelXs[i];
-      const en = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
-      const enPlain = `between(t,${sl.unit.start.toFixed(2)},${dur.toFixed(2)})`;
+      const en = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
+      const enPlain = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
       ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
       ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
       const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: 36, color: 'white' });
       drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, en, { numFontBase: 62, textFontBase: 28 });
     });
-    const bothEn = `between(t\\,${Math.max(slots[0].unit.start, slots[1].unit.start).toFixed(2)}\\,${dur.toFixed(2)})`;
+    const bothEn = `between(t\\,${Math.max(slots[0].unit.start, slots[1].unit.start).toFixed(2)}\\,${durEnd})`;
     const connector = screenType === 'before_after' ? '->' : 'VS';
     ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=0xC99E4C:fontsize=48:box=1:boxcolor=black@0.7:boxborderw=14:x=(w-text_w)/2:y=${Math.round((panelY0 + panelY1) / 2) - 24}:enable='${bothEn}'`);
   } else if (screenType === 'buildup' && slots.length) {
@@ -12075,8 +12088,8 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     picked.forEach((sl, i) => {
       const x0 = startX + i * (boxW + gap);
       const isLast = i === n - 1;
-      const en = `between(t,${sl.unit.start.toFixed(2)},${dur.toFixed(2)})`;
-      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+      const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
       ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=${isLast ? '0xC99E4C' : '0x2A3A5C'}@0.95:t=fill:enable='${en}'`);
       if (!isLast) ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=0xC99E4C@0.9:t=3:enable='${en}'`);
       const labelH = drawFittedLabel(x0, y0 + 40, boxW, sl.label, enQ, { baseFontSize: 28, color: isLast ? '0x121A30' : 'white' });
@@ -12085,7 +12098,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
         numColor: isLast ? '0x121A30' : '0xC99E4C', textColor: isLast ? '0x121A30' : 'white',
       });
       if (i > 0) {
-        const prevEn = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+        const prevEn = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
         const connector = isLast ? '->' : '+';
         ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=white:fontsize=44:x=${x0 - gap / 2}-text_w/2:y=${Math.round((y0 + y1) / 2)}:enable='${prevEn}'`);
       }
@@ -12103,8 +12116,8 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     const cardW = Math.round((regionX1 - regionX0 - (n - 1) * gap) / n);
     picked.forEach((sl, i) => {
       const x0 = regionX0 + i * (cardW + gap);
-      const en = `between(t,${sl.unit.start.toFixed(2)},${dur.toFixed(2)})`;
-      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+      const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
       ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0x2A3A5C@0.95:t=fill:enable='${en}'`);
       ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0xC99E4C@0.9:t=4:enable='${en}'`);
       const labelH = drawFittedLabel(x0, regionY0 + 45, cardW, sl.label, enQ, { baseFontSize: 32, color: 'white' });
@@ -12124,18 +12137,23 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     // unusable) slots for this scene.
     const fx0 = 610, fw = 700, fy0 = 300, fy1 = 760;
     const fu = timedUnits[0];
-    const fen = `between(t,${fu.start.toFixed(2)},${dur.toFixed(2)})`;
-    const fenQ = `between(t\\,${fu.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+    const fen = `between(t,${fu.start.toFixed(2)},${durEnd})`;
+    const fenQ = `between(t\\,${fu.start.toFixed(2)}\\,${durEnd})`;
     ov.push(`drawbox=x=${fx0}:y=${fy0}:w=${fw}:h=${fy1 - fy0}:color=0x2A3A5C@0.95:t=fill:enable='${fen}'`);
     ov.push(`drawbox=x=${fx0}:y=${fy0}:w=${fw}:h=${fy1 - fy0}:color=0xC99E4C@0.9:t=4:enable='${fen}'`);
     const fLabelH = drawFittedLabel(fx0, fy0 + 45, fw, storyboard.heading || 'THE KEY IDEA', fenQ, { baseFontSize: 32, color: 'white' });
     drawPanelContent(fx0, fy0 + 45 + fLabelH + 15, fy1 - 20, fw, fu, fenQ, { numFontBase: 58, textFontBase: 26 });
   }
 
-  // Caption band — every unit, real timing, unchanged mechanism.
-  timedUnits.forEach((u) => {
+  // Caption band — every unit, real timing, unchanged mechanism. Only the
+  // LAST unit's end is extended to durEnd (Phase 4.5D) — captions are
+  // sequential by design, so widening every unit's window would overlap
+  // two captions at once; the last one has no following caption to clash
+  // with, so it safely gets the same end-of-segment safety margin.
+  timedUnits.forEach((u, idx) => {
     const capTxt = nextwaveV2SanitizeDrawtext(u.text, 110);
-    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${capTxt}':fontcolor=white:fontsize=${smFitFontSize(capTxt, 32, 1700)}:box=1:boxcolor=black@0.6:boxborderw=16:x=(w-text_w)/2:y=${H}-130:enable='between(t\\,${u.start.toFixed(2)}\\,${u.end.toFixed(2)})'`);
+    const endT = idx === timedUnits.length - 1 ? durEnd : u.end.toFixed(2);
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${capTxt}':fontcolor=white:fontsize=${smFitFontSize(capTxt, 32, 1700)}:box=1:boxcolor=black@0.6:boxborderw=16:x=(w-text_w)/2:y=${H}-130:enable='between(t\\,${u.start.toFixed(2)}\\,${endT})'`);
   });
 
   const vf = filters.join(';') + (ov.length ? `;[${last}]` + ov.join(',') + '[vout]' : `;[${last}]null[vout]`);
