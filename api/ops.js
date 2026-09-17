@@ -11780,6 +11780,51 @@ Respond with ONLY:
         const secondary_value = (typeof sl.secondary_value === 'string' && candidates.includes(sl.secondary_value) && sl.secondary_value !== primary_value) ? sl.secondary_value : null;
         return { unit_index: sl.unit_index, label: sl.label, primary_value, secondary_value };
       }) : [];
+      // Phase 4.5D — deterministic guard against value/label cross-wiring.
+      // A real candidate showed "$135K" under BOTH a "30-YEAR INTEREST"
+      // and a "15-YEAR INTEREST" label from the same unit (whose text
+      // genuinely contains "$291K... over 30 years versus $135K... over
+      // 15 years") -- the model occasionally pairs a real, verbatim value
+      // with the wrong slot, which the hallucination guard above can't
+      // catch since the value IS real. Two corrections, in order:
+      //
+      // 1. Proximity pairing: __candidateValues is already in the order
+      //    each value appears in the real sentence. If a slot's label
+      //    names a number that also appears in one of this unit's own
+      //    candidates (e.g. "30-YEAR" matching "30 YEARS"), the natural
+      //    "$AMOUNT ... over N years" phrasing means the money-like value
+      //    immediately BEFORE that duration in extraction order is
+      //    almost always its true pair (falling back to immediately
+      //    after, for phrasings that put the duration first) -- this
+      //    exactly corrects the real failure case above ("30 years"
+      //    pairs with the preceding "$291K", not the following "$135K").
+      // 2. Duplicate guard: if two differently-labeled slots on the same
+      //    unit still end up identical after (1), the duplicate is
+      //    reassigned to a different, unused, same-type candidate, or
+      //    nulled (safe Step-3 text fallback) if none exists.
+      const valType = (v) => /^\$/.test(v) ? 'dollar' : /%$/.test(v) ? 'percent' : /^\d+X$/.test(v) ? 'multiplier' : /(DAYS?|WEEKS?|MONTHS?|YEARS?)$/.test(v) ? 'duration' : 'other';
+      const moneyLike = (v) => valType(v) === 'dollar' || valType(v) === 'percent';
+      slots.forEach((sl) => {
+        const candidates = ((plan[sl.unit_index] || {}).__candidateValues) || [];
+        const labelNum = (sl.label.match(/\d+/) || [])[0];
+        if (!labelNum || candidates.length < 2) return;
+        const anchorIdx = candidates.findIndex((c) => c.includes(labelNum));
+        if (anchorIdx === -1) return;
+        const prev = candidates[anchorIdx - 1], next = candidates[anchorIdx + 1];
+        const pick = (prev && moneyLike(prev)) ? prev : (next && moneyLike(next)) ? next : null;
+        if (pick) sl.primary_value = pick;
+      });
+      const usedByUnit = {};
+      slots.forEach((sl) => {
+        if (!sl.primary_value) return;
+        const used = usedByUnit[sl.unit_index] || (usedByUnit[sl.unit_index] = new Set());
+        if (used.has(sl.primary_value)) {
+          const candidates = ((plan[sl.unit_index] || {}).__candidateValues) || [];
+          const wanted = valType(sl.primary_value);
+          sl.primary_value = candidates.find((c) => !used.has(c) && valType(c) === wanted) || candidates.find((c) => !used.has(c)) || null;
+        }
+        if (sl.primary_value) used.add(sl.primary_value);
+      });
       if (!slots.length) return deterministicFallback()[i];
       return {
         screen_type: validTypes.has(s.screen_type) ? s.screen_type : 'single',
