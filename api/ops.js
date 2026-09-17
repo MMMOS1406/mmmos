@@ -12522,6 +12522,162 @@ async function nextwaveV2SetVoice(req, res) {
   return res.status(200).json({ ok: true, voice_id, name: name || '' });
 }
 
+// ── Phase 4.7 — Ideogram adapter (host pose generation) ────────────────────
+// PM-authorized minimum vendor-isolated adapter for the NextWave V2 host-
+// pose gap (Wealth Logic benchmark forensics: the host has no gesture/
+// interaction poses, only two near-identical headshot crops). Investigation
+// confirmed no prior Ideogram integration exists anywhere reachable (git
+// history on every branch, Engineering Brain tasks/evidence, Supabase asset
+// tables, Vercel env) -- this is new, not a port. Reuses existing
+// infrastructure rather than building parallel systems: the credential
+// lives in the SAME ceo_auth_config table (RLS enabled, zero policies,
+// service-role-only) already proven for the CEO session secret and PIN
+// hash, under a new key rather than a new table; generated assets are
+// recorded in the EXISTING production_assets_library table rather than a
+// new one. The API key is never sent to the browser, logged, or returned
+// in any response -- only a boolean "configured" status is ever exposed
+// client-side, mirroring the ElevenLabs voice-config pattern.
+const IDEOGRAM_GENERATE_URL = 'https://api.ideogram.ai/v1/ideogram-v3/generate';
+// TURBO + character reference = $0.10/image (vs $0.15 DEFAULT / $0.20
+// QUALITY) -- cheapest tier that still gets character-consistent output,
+// appropriate for a bounded proof-scope of 2-3 poses.
+const IDEOGRAM_COST_PER_IMAGE_USD = 0.10;
+
+let _ideogramKeyCache = null;
+async function _ideogramLoadKey() {
+  if (_ideogramKeyCache) return _ideogramKeyCache;
+  const rows = await sbGetSafe(`ceo_auth_config?key=eq.ideogram_api_key_production&select=value&limit=1`);
+  const key = rows && rows[0] && rows[0].value;
+  if (!key) return null;
+  _ideogramKeyCache = key;
+  return key;
+}
+
+async function nextwaveV2IdeogramStatus(req, res) {
+  const key = await _ideogramLoadKey().catch(() => null);
+  return res.status(200).json({ ok: true, configured: !!key });
+}
+
+// CEO-gated, mirrors nextwaveV2SetVoice: the plaintext key is written
+// once, straight from the CEO's browser to this table, and is never
+// echoed back, logged, or included in any subsequent response.
+async function nextwaveV2SetIdeogramKey(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { api_key } = req.body || {};
+  if (!api_key || typeof api_key !== 'string' || api_key.length < 10) {
+    return res.status(400).json({ ok: false, error: 'api_key required' });
+  }
+  const existing = await sbGetSafe(`ceo_auth_config?key=eq.ideogram_api_key_production&select=key&limit=1`);
+  const body = { key: 'ideogram_api_key_production', value: api_key };
+  if (existing.length) await sbPatch('ceo_auth_config', `key=eq.ideogram_api_key_production`, body);
+  else await sbInsert('ceo_auth_config', body);
+  _ideogramKeyCache = null; // force re-fetch next call rather than trust the just-written value in-process
+  return res.status(200).json({ ok: true });
+}
+
+// Reuse-before-generate: checks the existing production_assets_library
+// table for an already-approved NextWave host pose with this exact role
+// tag before spending on a new Ideogram call. Nothing new is created here
+// -- same table every other engine's approved-asset lookups already use.
+async function _nextwaveV2FindExistingPose(poseRole) {
+  const rows = await sbGetSafe(
+    `production_assets_library?engine=eq.NextWave&asset_type=eq.host_pose&status=eq.approved&tags=cs.{role:${poseRole}}&select=id,asset_name,asset_url,tags&order=created_at.desc&limit=1`
+  );
+  return rows && rows[0] ? rows[0] : null;
+}
+
+// Real Ideogram v3 generate call (POST multipart/form-data, Api-Key header
+// -- verified against Ideogram's own current API reference, not guessed).
+// characterReferencePath, when given, is the existing host headshot so the
+// new pose keeps NextWave's real host identity instead of inventing a new
+// face -- this is the whole reason Character Reference exists as a field.
+async function nextwaveV2IdeogramCall({ prompt, characterReferencePath }) {
+  const key = await _ideogramLoadKey();
+  if (!key) return { ok: false, error: 'ideogram_not_configured' };
+  const form = new FormData();
+  form.append('prompt', prompt);
+  form.append('rendering_speed', 'TURBO');
+  form.append('aspect_ratio', '1x1');
+  if (characterReferencePath) {
+    const refBytes = await readFile(characterReferencePath);
+    form.append('character_reference_images', new Blob([refBytes], { type: 'image/png' }), 'host_reference.png');
+  }
+  const res = await fetch(IDEOGRAM_GENERATE_URL, {
+    method: 'POST',
+    headers: { 'Api-Key': key },
+    body: form,
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    return { ok: false, error: `ideogram_http_${res.status}: ${t.slice(0, 300)}` };
+  }
+  const data = await res.json();
+  const img = data && data.data && data.data[0];
+  if (!img || !img.url) return { ok: false, error: 'ideogram_no_image_returned' };
+  return { ok: true, url: img.url, seed: img.seed, resolution: img.resolution, cost_usd: IDEOGRAM_COST_PER_IMAGE_USD };
+}
+
+// Orchestrator: reuse if an approved pose with this role already exists,
+// otherwise generate via Ideogram (character-referenced against the
+// existing host headshot for identity continuity), download the
+// ephemeral Ideogram URL immediately (same reasoning as every other
+// vendor asset in this file -- those links expire), upload to permanent
+// Supabase Storage, and record it in production_assets_library so the
+// NEXT call for this same role reuses it instead of paying again.
+async function nextwaveV2IdeogramResolvePose(poseRole, promptText) {
+  const existing = await _nextwaveV2FindExistingPose(poseRole);
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, characterReferencePath: NEXTWAVE_V2_HOST_DEFAULT });
+  if (!gen.ok) return gen;
+
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const assetName = `nextwave_host_pose_${poseRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'host_pose',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'approved',
+    tags: [`role:${poseRole}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
+  });
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+// CEO-gated (real Ideogram spend when not already reused). Bounded to the
+// Phase 4.7 proof-scope pose roles only -- this is not a general-purpose
+// "generate anything" endpoint, matching "no parallel production lifecycle".
+const NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS = {
+  presenting_pointing: 'Flat 2D vector illustration, financial educator character, same identity as reference: short dark brown hair, tan skin, navy blazer over white collared shirt. Three-quarter body, standing, one arm raised and pointing to the right toward off-screen data, friendly confident expression, clean navy background, no text, no logo, professional explainer-video style, high detail flat illustration.',
+  holding_calculation: 'Flat 2D vector illustration, financial educator character, same identity as reference: short dark brown hair, tan skin, navy blazer over white collared shirt. Three-quarter body, standing, both hands holding up a plain blank ledger/notepad in front of chest as if showing a calculation to the viewer, engaged expression, clean navy background, no text, no logo, professional explainer-video style, high detail flat illustration.',
+  reaction_outro: 'Flat 2D vector illustration, financial educator character, same identity as reference: short dark brown hair, tan skin, navy blazer over white collared shirt. Three-quarter body, standing, one hand gesturing outward in a welcoming conclusive wrap-up gesture, warm confident smile, clean navy background, no text, no logo, professional explainer-video style, high detail flat illustration.',
+};
+async function nextwaveV2IdeogramGeneratePose(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { pose_role } = req.body || {};
+  const prompt = NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS[pose_role];
+  if (!prompt) return res.status(400).json({ ok: false, error: `unknown pose_role -- must be one of: ${Object.keys(NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS).join(', ')}` });
+  try {
+    const result = await nextwaveV2IdeogramResolvePose(pose_role, prompt);
+    if (!result.ok) return res.status(502).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
 // Phase 4.5D diagnostic — reproduces the exact plan/scene/storyboard data a
 // real Build would use (including the one real Claude storyboard call),
 // WITHOUT touching ElevenLabs or ffmpeg, so a scene-composition defect can
@@ -13983,6 +14139,9 @@ export default async function handler(req, res) {
     if (action === 'nextwave_list_elevenlabs_voices') return await nextwaveListElevenLabsVoices(req, res);
     if (action === 'nextwave_v2_get_voice')           return await nextwaveV2GetVoice(req, res);
     if (action === 'nextwave_v2_set_voice')           return await nextwaveV2SetVoice(req, res);
+    if (action === 'nextwave_v2_ideogram_status')     return await nextwaveV2IdeogramStatus(req, res);
+    if (action === 'nextwave_v2_set_ideogram_key')    return await nextwaveV2SetIdeogramKey(req, res);
+    if (action === 'nextwave_v2_ideogram_generate_pose') return await nextwaveV2IdeogramGeneratePose(req, res);
     if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0

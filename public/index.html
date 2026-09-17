@@ -15929,6 +15929,62 @@ async function _nextwaveV2ChooseVoice(taskId,voiceId,name){
     alert('Could not save voice selection: '+(d.error||'unknown'));
   }
 }
+// ── Phase 4.7 — Ideogram host-pose panel ────────────────────────────────
+// Mirrors the ElevenLabs voice panel exactly: a not-CEO-gated status read
+// (never returns the key itself, only whether one is configured) plus a
+// CEO-gated write. The key goes straight from this input to the server
+// action and is never stored in D/localStorage/pkg or logged.
+const NEXTWAVE_V2_IDEOGRAM_POSES=[
+  {role:'presenting_pointing',label:'Presenting / pointing'},
+  {role:'holding_calculation',label:'Holding a calculation'},
+  {role:'reaction_outro',label:'Reaction / outro'},
+];
+async function _nextwaveV2LoadIdeogramStatus(taskId){
+  const el=document.getElementById('nwv2-ideogram-status-'+taskId);
+  if(!el)return;
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_ideogram_status');
+    const d=await r.json();
+    const keyEl=document.getElementById('nwv2-ideogram-keyrow-'+taskId);
+    if(d.ok&&d.configured){
+      el.innerHTML='<span style="color:#22c55e">✓ Ideogram key configured</span>';
+      if(keyEl)keyEl.style.display='none';
+    }else{
+      el.innerHTML='<span style="color:#f59e0b">No Ideogram key configured yet.</span>';
+      if(keyEl)keyEl.style.display='block';
+    }
+  }catch(e){
+    el.innerHTML='<span style="color:var(--dim)">Could not check Ideogram status.</span>';
+  }
+}
+async function _nextwaveV2SetIdeogramKey(taskId){
+  const input=document.getElementById('nwv2-ideogram-keyinput-'+taskId);
+  if(!input||!input.value.trim()){alert('Enter an Ideogram API key first.');return;}
+  const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_set_ideogram_key',{api_key:input.value.trim()});
+  const d=await r.json();
+  input.value=''; // Phase 4.7 — never let the typed key linger in the DOM, same fix as the login PIN
+  if(d.ok){
+    await _nextwaveV2LoadIdeogramStatus(taskId);
+  }else{
+    alert('Could not save Ideogram key: '+(d.error||'unknown'));
+  }
+}
+async function _nextwaveV2GeneratePose(taskId,poseRole){
+  const statusEl=document.getElementById('nwv2-pose-status-'+poseRole+'-'+taskId);
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--dim)">Generating (Ideogram, ~10-20s)…</span>';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_ideogram_generate_pose',{pose_role:poseRole});
+    const d=await r.json();
+    if(d.ok){
+      const costNote=d.reused?'reused existing asset, $0':'$'+(d.cost_usd||0).toFixed(2);
+      if(statusEl)statusEl.innerHTML='<span style="color:#22c55e">✓ '+costNote+'</span><br><img src="'+escHTML(d.asset_url)+'" style="width:80px;height:80px;border-radius:8px;margin-top:6px;object-fit:cover">';
+    }else{
+      if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(d.error||'failed')+'</span>';
+    }
+  }catch(e){
+    if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(e.message)+'</span>';
+  }
+}
 // Real, synchronous (single request/response) render — no HeyGen-style
 // polling needed since ffmpeg + ElevenLabs both complete within this one
 // call. Stamps pkg.isTest + a readable workflowNotes marker (Step 10 —
@@ -18198,6 +18254,20 @@ function renderNextWaveLifecycleCard(task){
         <button style="width:100%;padding:9px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.3);border-radius:8px;color:#3b82f6;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="_nextwaveV2ListVoices('${taskId}')">🎙 List ElevenLabs Voices</button>
         <div id="nwv2-voice-list-${taskId}" style="margin-top:8px"></div>
       </div>`;
+      const _ideogramPanel=`<div style="border:1px solid rgba(201,158,76,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">IDEOGRAM HOST POSES (Phase 4.7)</div>
+        <div id="nwv2-ideogram-status-${taskId}" style="font-size:12px;color:#fff;margin-bottom:8px">checking…</div>
+        <div id="nwv2-ideogram-keyrow-${taskId}" style="display:none;margin-bottom:10px">
+          <input type="password" id="nwv2-ideogram-keyinput-${taskId}" placeholder="Ideogram API key" style="width:100%;padding:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;font-size:12px;margin-bottom:6px;box-sizing:border-box">
+          <button style="width:100%;padding:8px;background:rgba(201,158,76,0.12);border:1px solid rgba(201,158,76,0.4);border-radius:6px;color:#c99e4c;font-weight:700;font-size:11px;cursor:pointer" onclick="_nextwaveV2SetIdeogramKey('${taskId}')">Save Ideogram Key (CEO only)</button>
+        </div>
+        ${NEXTWAVE_V2_IDEOGRAM_POSES.map(function(p){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">'
+            +'<div><div style="font-size:12px;color:#fff">'+p.label+'</div><div id="nwv2-pose-status-'+p.role+'-'+taskId+'" style="font-size:11px;color:var(--dim);margin-top:4px"></div></div>'
+            +'<button style="padding:6px 10px;background:rgba(201,158,76,0.1);border:1px solid rgba(201,158,76,0.35);border-radius:6px;color:#c99e4c;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="_nextwaveV2GeneratePose(\''+taskId+'\',\''+p.role+'\')">Generate</button>'
+            +'</div>';
+        }).join('')}
+      </div>`;
       const _buildBtn=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Rendering (ElevenLabs + ffmpeg, ~1-2 min)…';const r=await nextwaveV2StartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{btn.textContent=(p.renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)');if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}})()">${renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)'}</button>`;
       if(renderStatus==='enhanced'&&pkg&&pkg.videoUrl){
         body+=`<div style="padding:20px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.50);border-radius:12px;text-align:center;margin-bottom:12px">
@@ -18222,10 +18292,12 @@ function renderNextWaveLifecycleCard(task){
         }
         body+=_ceoStatusPanel;
         body+=_voicePanel;
+        body+=_ideogramPanel;
         body+=_buildBtn;
       }
       setTimeout(function(){
         if(typeof _nextwaveV2LoadVoiceStatus==='function')_nextwaveV2LoadVoiceStatus(taskId);
+        if(typeof _nextwaveV2LoadIdeogramStatus==='function')_nextwaveV2LoadIdeogramStatus(taskId);
         if(typeof _nextwaveV2CheckCeoStatus==='function')_nextwaveV2CheckCeoStatus(taskId);
       },50);
       body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
