@@ -12110,12 +12110,24 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // hide the host entirely (data/illustration earns full attention);
   // every other role now has a genuinely distinct size/position instead
   // of the old 2-role (point_at_comparison/beside_calculation) + tiny
-  // 'intro' default. The pointing-pose asset is used whenever the host
-  // is meant to gesture at something; the default pose otherwise —
-  // same two existing, original NextWave host images, no new assets.
+  // 'intro' default.
   const includeHost = hostRole !== 'step_back' && hostRole !== 'data_only';
-  const pointingRoles = new Set(['point_left', 'point_right', 'beside_comparison', 'point_at_comparison', 'beside_calculation']);
-  const useHost = pointingRoles.has(hostRole) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT;
+  // Phase 4.7 — real gesture/interaction poses (Ideogram-generated,
+  // character-referenced against the original host so identity is
+  // preserved) replace the old two near-identical headshot crops for the
+  // roles the Wealth Logic benchmark forensics flagged as needing genuine
+  // host-object interaction, not just repositioning. Falls back to the
+  // original headshot crops (same as Phase 4.6) whenever a pose asset
+  // isn't available yet, so a render never fails or looks worse for it.
+  const pointingRoles = new Set(['point_left', 'point_right', 'beside_comparison', 'point_at_comparison']);
+  const calculationRoles = new Set(['beside_calculation', 'reaction_emphasis']);
+  let poseTag = null;
+  if (pointingRoles.has(hostRole)) poseTag = 'presenting_pointing';
+  else if (calculationRoles.has(hostRole)) poseTag = 'holding_calculation';
+  else if (hostRole === 'outro_host') poseTag = 'reaction_outro';
+  const useHost = poseTag
+    ? await nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, pointingRoles.has(hostRole) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT)
+    : NEXTWAVE_V2_HOST_DEFAULT;
   // Icons are now only used by the 'single' fallback layout — comparison/
   // before_after/buildup are built from drawbox panels + drawtext below,
   // which is what actually gives structure instead of a lone icon on an
@@ -12654,6 +12666,29 @@ async function nextwaveV2IdeogramResolvePose(poseRole, promptText) {
     tags: [`role:${poseRole}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
   });
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+// Downloads an approved Ideogram host pose to a per-render local file so
+// ffmpeg (which needs a real file path, not a remote URL) can composite
+// it exactly like the two original static host images. Never generates —
+// generation only happens through the explicit CEO-gated action above, so
+// a real render can never silently trigger new Ideogram spend. Falls back
+// to the given default local path if no approved asset exists yet or the
+// download fails, so a missing/broken pose degrades to Phase 4.6 behavior
+// rather than failing the render.
+async function nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, fallbackLocalPath) {
+  try {
+    const existing = await _nextwaveV2FindExistingPose(poseTag);
+    if (!existing || !existing.asset_url) return fallbackLocalPath;
+    const res = await fetch(existing.asset_url);
+    if (!res.ok) return fallbackLocalPath;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const localPath = join(tmpdir(), `nwv2-${renderId}-pose-${poseTag}.png`);
+    await writeFile(localPath, buf);
+    return localPath;
+  } catch (e) {
+    return fallbackLocalPath;
+  }
 }
 
 // CEO-gated (real Ideogram spend when not already reused). Bounded to the
