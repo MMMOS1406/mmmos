@@ -11952,14 +11952,19 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
   // last real content) is far preferable to a visible blank gap.
   const durEnd = (dur + 1.2).toFixed(2);
 
-  // Phase 4.5D — look up the storyboard's own load-bearing value choice
-  // per unit (already validated against that unit's real candidate values
-  // in nextwaveV2GenerateStoryboard) before building timedUnits, so a unit
-  // with multiple real quantities isn't silently reduced to whichever the
-  // single-best-guess ranking heuristic happened to keep.
-  const slotByUnitIdx = {};
-  (storyboard.slots || []).forEach((sl) => { slotByUnitIdx[sl.unit_index] = sl; });
-
+  // Phase 4.5D bugfix — real-candidate QA found "$135K" rendered under
+  // BOTH a "30-YEAR INTEREST" and "15-YEAR INTEREST" slot despite the
+  // storyboard's own (proximity-corrected) primary_value being different
+  // for each slot. Root cause: this used to key a lookup map by
+  // unit_index alone (slotByUnitIdx[sl.unit_index] = sl), so when TWO
+  // slots reference the SAME unit — exactly the case a single sentence
+  // comparing two figures produces — the second slot silently overwrote
+  // the first in that map, and both slots then inherited the SAME
+  // shared unit object's one numberLabel. timedUnits now only carries
+  // the unit-level fallback (rankedNumberLabel, safe to share since it's
+  // deterministic from the unit's own text); each SLOT's actual
+  // numberLabel/secondaryLabel is attached below, per slot, from that
+  // slot's own primary_value/secondary_value.
   const totalChars = Math.max(1, sceneText.length);
   let cursor = 0;
   const timedUnits = scene.units.map((u) => {
@@ -11967,23 +11972,25 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     const start = cursor;
     cursor = Math.min(dur, cursor + uDur);
     const hasNumber = nextwaveHasDynamicNumbers(u.text);
-    const slotForUnit = slotByUnitIdx[u.__idx];
-    let numberLabel = null, secondaryLabel = null;
-    if (slotForUnit && slotForUnit.primary_value) {
-      numberLabel = slotForUnit.primary_value;
-      secondaryLabel = slotForUnit.secondary_value || null;
-    } else if (hasNumber) {
-      numberLabel = nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text));
-    }
-    return { idx: u.__idx, text: u.text, start, end: cursor, hasNumber, numberLabel, secondaryLabel };
+    const rankedNumberLabel = hasNumber ? nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text)) : null;
+    return { idx: u.__idx, text: u.text, start, end: cursor, hasNumber, rankedNumberLabel };
   });
   const byIdx = {};
   timedUnits.forEach((u) => { byIdx[u.idx] = u; });
 
   const screenType = storyboard.screen_type;
-  // Real extracted number attached per slot from the proven Phase 4.1B
-  // extractor — never from the storyboard model's own generated text.
-  const slots = storyboard.slots.map((sl) => ({ ...sl, unit: byIdx[sl.unit_index] })).filter((sl) => sl.unit);
+  // Real extracted number attached per SLOT (never from the storyboard
+  // model's own generated text — primary_value was already validated
+  // against this unit's real candidate list in nextwaveV2GenerateStoryboard).
+  // Falls back to the unit's own single-best-ranked value only when this
+  // specific slot has no explicit primary_value.
+  const slots = storyboard.slots.map((sl) => {
+    const unit = byIdx[sl.unit_index];
+    if (!unit) return null;
+    const numberLabel = sl.primary_value || unit.rankedNumberLabel || null;
+    const secondaryLabel = sl.primary_value ? (sl.secondary_value || null) : null;
+    return { ...sl, unit: { ...unit, numberLabel, secondaryLabel } };
+  }).filter((sl) => sl && sl.unit);
 
   const useHost = (sceneIdx % 2 === 0) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT;
   const W = 1920, H = 1080;
@@ -12188,7 +12195,11 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     // first unit directly, independent of the storyboard's (already
     // unusable) slots for this scene.
     const fx0 = 610, fw = 700, fy0 = 300, fy1 = 760;
-    const fu = timedUnits[0];
+    // rankedNumberLabel -> numberLabel: this fallback has no slot of its
+    // own (that's exactly why it fired), so it uses the unit's
+    // single-best-ranked value directly rather than going through the
+    // slots array.
+    const fu = { ...timedUnits[0], numberLabel: timedUnits[0].rankedNumberLabel, secondaryLabel: null };
     const fen = `between(t,${fu.start.toFixed(2)},${durEnd})`;
     const fenQ = `between(t\\,${fu.start.toFixed(2)}\\,${durEnd})`;
     ov.push(`drawbox=x=${fx0}:y=${fy0}:w=${fw}:h=${fy1 - fy0}:color=0x2A3A5C@0.95:t=fill:enable='${fen}'`);
@@ -12229,7 +12240,9 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
   return {
     path: outPath, durationSec: dur,
     screenType, heading: storyboard.heading, hostRole: storyboard.host_role,
-    numbersShown: timedUnits.filter((u) => u.numberLabel).map((u) => u.numberLabel),
+    // Phase 4.5D — reflects what each SLOT actually rendered (accurate
+    // now that numbers are attached per slot, not collapsed per unit).
+    numbersShown: slots.filter((sl) => sl.unit.numberLabel).map((sl) => sl.unit.numberLabel),
     slotCount: slots.length,
     // Phase 4.5C Step 6 — per-slot proof (not an assumption) of what was
     // actually drawn in every structured panel/card, so the pre-CEO gate
