@@ -11912,11 +11912,26 @@ Respond with ONLY:
         if (sl.primary_value) used.add(sl.primary_value);
       });
       if (!slots.length) return deterministicFallback()[i];
+      let host_role = validRoles.has(s.host_role) ? s.host_role : 'intro';
+      // Phase 4.6 — the model's prompt-only compliance with the new host
+      // choreography roles proved unreliable in testing (it repeatedly
+      // chose "intro"/"point_at_comparison" for the first and last scenes
+      // even when explicitly instructed to use a large role there), which
+      // would have silently defeated both Step 3 (host prominence) and
+      // Step 5 (the outro_host-gated CTA redesign). The opening hook and
+      // closing CTA are structurally predictable regardless of script
+      // content, so they're deterministically enforced here rather than
+      // left to prompt compliance: the first scene always gets a large
+      // intro role, the last scene always gets outro_host, unless the
+      // model already chose an equally large role on its own.
+      const largeRoles = new Set(['hero_intro', 'presenter_large', 'outro_host']);
+      if (i === 0 && !largeRoles.has(host_role)) host_role = 'hero_intro';
+      else if (i === scenes.length - 1 && scenes.length > 1 && host_role !== 'outro_host') host_role = 'outro_host';
       return {
         screen_type: validTypes.has(s.screen_type) ? s.screen_type : 'single',
         heading: (typeof s.heading === 'string' && s.heading.trim()) ? s.heading.trim().slice(0, 60) : 'THE KEY IDEA',
         slots,
-        host_role: validRoles.has(s.host_role) ? s.host_role : 'intro',
+        host_role,
         teaching_objective: typeof s.teaching_objective === 'string' ? s.teaching_objective.slice(0, 200) : '',
       };
     });
