@@ -12110,6 +12110,26 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
       const labelH = drawFittedLabel(x0, regionY0 + 45, cardW, sl.label, enQ, { baseFontSize: 32, color: 'white' });
       drawPanelContent(x0, regionY0 + 45 + labelH + 15, regionY1 - 20, cardW, sl.unit, enQ, { numFontBase: 58, textFontBase: 26 });
     });
+  } else if (timedUnits.length) {
+    // Phase 4.5D — structural safety net found via real-candidate QA: a
+    // scene can be assigned e.g. screen_type "comparison" by the model
+    // while only having ONE unit available in that scene, so only one slot
+    // ever survives validation -- failing the ">= 2" comparison guard
+    // without matching buildup/single either, and falling through every
+    // branch above to a bare heading+host+caption on empty canvas (found
+    // on the real "WHAT DRIP LOOKS LIKE" scene, t=0-4s). Whatever the
+    // reason no branch above matched, the frame must never be left with
+    // nothing but a heading — render one real card from the scene's own
+    // first unit directly, independent of the storyboard's (already
+    // unusable) slots for this scene.
+    const fx0 = 610, fw = 700, fy0 = 300, fy1 = 760;
+    const fu = timedUnits[0];
+    const fen = `between(t,${fu.start.toFixed(2)},${dur.toFixed(2)})`;
+    const fenQ = `between(t\\,${fu.start.toFixed(2)}\\,${dur.toFixed(2)})`;
+    ov.push(`drawbox=x=${fx0}:y=${fy0}:w=${fw}:h=${fy1 - fy0}:color=0x2A3A5C@0.95:t=fill:enable='${fen}'`);
+    ov.push(`drawbox=x=${fx0}:y=${fy0}:w=${fw}:h=${fy1 - fy0}:color=0xC99E4C@0.9:t=4:enable='${fen}'`);
+    const fLabelH = drawFittedLabel(fx0, fy0 + 45, fw, storyboard.heading || 'THE KEY IDEA', fenQ, { baseFontSize: 32, color: 'white' });
+    drawPanelContent(fx0, fy0 + 45 + fLabelH + 15, fy1 - 20, fw, fu, fenQ, { numFontBase: 58, textFontBase: 26 });
   }
 
   // Caption band — every unit, real timing, unchanged mechanism.
