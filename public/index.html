@@ -4062,6 +4062,13 @@ async function tryLogin(){
       if(j.ok){
         _ceoSetSessionToken(j.ceo_session_token, j.expires_at);
         console.log('[v16.30.0] CEO login — server session established.');
+        // Phase 4.7 security fix — the failure branch below already
+        // cleared pinInput.value, but the success branch never did: the
+        // typed PIN sat readable in the hidden login DOM (loginScreen is
+        // only display:none'd, the input node and its value survive)
+        // for the rest of the session. Only the local `pin` var (already
+        // sent) was ever needed past this point.
+        document.getElementById('pinInput').value='';
         await _activateUser(selectedUser);
       }else{
         const el=document.getElementById('pinErr');
@@ -4079,6 +4086,7 @@ async function tryLogin(){
   }
   if(selectedUser&&selectedUser.pin===pin){
     console.log('[v14.9.0] Login — activating user and loading state...');
+    document.getElementById('pinInput').value=''; // Phase 4.7 security fix — see CEO branch above
     await _activateUser(selectedUser);
   }else{
     document.getElementById('pinErr').textContent='Wrong PIN. Try again.';
