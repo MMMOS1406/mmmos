@@ -10,7 +10,7 @@
 // intermediate files.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { writeFile, readFile, unlink, stat as fsStat } from 'node:fs/promises';
+import { writeFile, readFile, unlink, stat as fsStat, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
@@ -11430,6 +11430,28 @@ function nextwaveFormatFinancialNumber(phrase) {
   return String(phrase || '').toUpperCase();
 }
 
+// Phase 4.5D — evidence-hierarchy fix: nextwaveRankNumberPhrase collapses a
+// unit's text down to the SINGLE structurally-best-guess number, which is
+// exactly what silently dropped "68%"/"2%" in favor of "18 MONTHS" on the
+// real Phase 4.5C candidate whenever one unit's sentence carried more than
+// one real quantity. This instead returns EVERY distinct extracted value in
+// a unit (deduped, in order of appearance, already run through the same
+// proven formatter), so the storyboard mapper can be given genuine
+// visibility into all of a unit's evidence and choose which is load-bearing
+// -- never inventing a value, only selecting among ones this function
+// already proved exist in the real script text.
+function nextwaveExtractAllNumbers(text) {
+  text = String(text || '');
+  const re = new RegExp(NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, 'gi');
+  const seen = new Set();
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    const formatted = nextwaveFormatFinancialNumber(m[0].trim());
+    if (formatted && !seen.has(formatted)) { seen.add(formatted); out.push(formatted); }
+  }
+  return out;
+}
+
 // Generalized resolver: real dynamic financial figures resolve to
 // programmatic class B FIRST regardless of concept, then a genuinely
 // reusable COMPOSED SCENE (matched on the asset's `primary_concepts` when
@@ -11643,6 +11665,17 @@ async function nextwaveV2GetDurationSec(path) {
 // nextwaveRankNumberPhrase/nextwaveFormatFinancialNumber extractors Phase
 // 4.1B already validated, never from the model's own text.
 async function nextwaveV2GenerateStoryboard(plan, scenes) {
+  // Phase 4.5D — the deterministic fallback has no semantic understanding
+  // of which value is load-bearing, so it keeps the pre-4.5D behavior
+  // (the single structurally-best-ranked value) as primary_value, never a
+  // secondary one. This is a safe, unchanged default for the no-API path;
+  // the real evidence-hierarchy improvement is the model path below, which
+  // sees every candidate value and can pick two when both matter.
+  const primaryForUnit = (i) => {
+    const u = plan[i];
+    if (!u || !u.__hasNumber) return null;
+    return nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text));
+  };
   const deterministicFallback = () => scenes.map((scene) => {
     const idxs = scene.units.map((u) => u.__idx);
     const numberIdxs = idxs.filter((i) => plan[i].__hasNumber);
@@ -11657,12 +11690,12 @@ async function nextwaveV2GenerateStoryboard(plan, scenes) {
     if (screen_type === 'comparison' || screen_type === 'before_after') {
       const pick = (numberIdxs.length ? numberIdxs : idxs).slice(0, 2);
       const labels = screen_type === 'before_after' ? ['BEFORE', 'AFTER'] : ['OPTION A', 'OPTION B'];
-      slots = pick.map((i, k) => ({ unit_index: i, label: labels[k] || `POINT ${k + 1}` }));
+      slots = pick.map((i, k) => ({ unit_index: i, label: labels[k] || `POINT ${k + 1}`, primary_value: primaryForUnit(i), secondary_value: null }));
     } else if (screen_type === 'buildup') {
       const pick = numberIdxs.slice(0, 4);
-      slots = pick.map((i, k) => ({ unit_index: i, label: k === pick.length - 1 ? 'RESULT' : `FACTOR ${k + 1}` }));
+      slots = pick.map((i, k) => ({ unit_index: i, label: k === pick.length - 1 ? 'RESULT' : `FACTOR ${k + 1}`, primary_value: primaryForUnit(i), secondary_value: null }));
     } else {
-      slots = [{ unit_index: idxs[0], label: heading }];
+      slots = [{ unit_index: idxs[0], label: heading, primary_value: primaryForUnit(idxs[0]), secondary_value: null }];
     }
     return { screen_type, heading, slots, host_role: numberIdxs.length ? 'beside_calculation' : 'intro', teaching_objective: '' };
   });
@@ -11670,18 +11703,34 @@ async function nextwaveV2GenerateStoryboard(plan, scenes) {
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_API_KEY) return deterministicFallback();
 
-  const scriptUnitsBlock = plan.map((u, i) => `[${i}] ${u.text}`).join('\n');
+  // Phase 4.5D — each unit now lists every value this file's own extractor
+  // already proved is really in that unit's text, so the model can choose
+  // which is load-bearing to the teaching point instead of the renderer
+  // arbitrarily keeping only one (which is what silently dropped "68%" in
+  // favor of "18 MONTHS" on the real Phase 4.5C candidate).
+  const scriptUnitsBlock = plan.map((u, i) => {
+    const vals = (u.__candidateValues && u.__candidateValues.length) ? ` (values available: ${u.__candidateValues.join(', ')})` : '';
+    return `[${i}]${vals} ${u.text}`;
+  }).join('\n');
   const scenesBlock = scenes.map((s, i) => `Scene ${i}: units [${s.units.map((u) => u.__idx).join(',')}]`).join('\n');
   const prompt = `You are a visual storyboard planner for a short finance-explainer video. You will be given the full narration, split into numbered units, and a grouping of those units into SCENES (consecutive units that will share one visual scene).
 
 For EACH scene, decide:
 - screen_type: one of "comparison" (contrasts two options/paths/amounts), "before_after" (contrasts an earlier state vs a later/eventual one), "buildup" (several factors accumulate toward one result, e.g. base + bonus + gains -> total), or "single" (explains one concept, no clear structural contrast).
 - heading: 2-6 words, ALL CAPS, a punchy question or statement capturing what the viewer should learn from this scene — never a restatement of the narration sentence itself. Base it ONLY on what the script actually says.
-- slots: 1-4 items, each {"unit_index": <a unit index from THIS scene>, "label": "1-4 word ALL CAPS label for what that slot represents, e.g. 'MARKET PRICE', 'BASE INCOME', 'BEFORE'"}.
+- slots: 1-4 items, each {"unit_index": <a unit index from THIS scene>, "label": "1-4 word ALL CAPS label for what that slot represents, e.g. 'MARKET PRICE', 'BASE INCOME', 'BEFORE'", "primary_value": "...", "secondary_value": "..."}.
 - host_role: one of "intro" (host introduces/transitions), "point_at_comparison" (host gestures at a contrast), "beside_calculation" (host stands near a number/buildup), "step_back" (minimize the host — the data should be the whole story).
 - teaching_objective: one sentence — what the viewer should understand even with audio muted.
 
-Never invent a dollar amount, percentage, or fact not already in the script. Only choose structure/labels, never values.
+EVIDENCE HIERARCHY — primary_value / secondary_value:
+Some units list one or more "values available" — real quantities this unit's own text already contains. For each slot:
+- If its unit has values available, decide which is actually LOAD-BEARING to the teaching point (the evidence the conclusion depends on), not just whichever appears first or last. Copy that value's EXACT text into "primary_value".
+- Only set "secondary_value" (also copied exactly from that unit's list) when a SECOND value from the same list is also materially necessary to understand the point — e.g. a rate AND the time period it applies over. Do not set it just because a second value exists.
+- If a unit has no values available, or none are load-bearing enough to feature, set both to null.
+- NEVER write a value that is not verbatim in that unit's own "values available" list. NEVER invent a dollar amount, percentage, or fact not already in the script.
+- Do not try to display every value across the scene — pick the evidence that actually supports the conclusion, not number density.
+
+Only choose structure/labels/which-values-matter — never invent values.
 
 NARRATION UNITS:
 <script_units>
@@ -11695,7 +11744,7 @@ ${scenesBlock}
 
 Respond with ONLY:
 <storyboard>
-{"scenes":[{"screen_type":"...","heading":"...","slots":[{"unit_index":0,"label":"..."}],"host_role":"...","teaching_objective":"..."}]}
+{"scenes":[{"screen_type":"...","heading":"...","slots":[{"unit_index":0,"label":"...","primary_value":null,"secondary_value":null}],"host_role":"...","teaching_objective":"..."}]}
 </storyboard>`;
 
   try {
@@ -11715,7 +11764,21 @@ Respond with ONLY:
     const validRoles = new Set(['intro', 'point_at_comparison', 'beside_calculation', 'step_back']);
     const out = parsed.scenes.map((s, i) => {
       const validIdxs = new Set(scenes[i].units.map((u) => u.__idx));
-      const slots = Array.isArray(s.slots) ? s.slots.filter((sl) => sl && validIdxs.has(sl.unit_index) && typeof sl.label === 'string').slice(0, 4) : [];
+      const slots = Array.isArray(s.slots) ? s.slots.filter((sl) => sl && validIdxs.has(sl.unit_index) && typeof sl.label === 'string').slice(0, 4).map((sl) => {
+        // Phase 4.5D — the model chooses WHICH extracted value is
+        // load-bearing, but every value it names must already be verbatim
+        // in that unit's own real candidate list (computed straight from
+        // the script, never from the model). Anything that doesn't match
+        // — hallucinated, reformatted, or just absent — becomes null
+        // rather than being guessed at, which safely falls through to the
+        // Step-3 real-text panel fallback instead of ever inventing or
+        // silently substituting a different number.
+        const unit = plan[sl.unit_index];
+        const candidates = (unit && unit.__candidateValues) || [];
+        const primary_value = (typeof sl.primary_value === 'string' && candidates.includes(sl.primary_value)) ? sl.primary_value : null;
+        const secondary_value = (typeof sl.secondary_value === 'string' && candidates.includes(sl.secondary_value) && sl.secondary_value !== primary_value) ? sl.secondary_value : null;
+        return { unit_index: sl.unit_index, label: sl.label, primary_value, secondary_value };
+      }) : [];
       if (!slots.length) return deterministicFallback()[i];
       return {
         screen_type: validTypes.has(s.screen_type) ? s.screen_type : 'single',
@@ -11767,15 +11830,70 @@ function nextwaveV2WrapLines(text, fontSize, maxWidthPx, maxLines) {
   return lines.filter(Boolean);
 }
 
+// Phase 4.5D — dedicated fitter for NextWave V2 panel/card LABELS. The
+// shared smFitFontSize (also used by SMM — left untouched here) estimates
+// width at 0.56*fontSize per character, which undercounts a short, wide
+// ALL-CAPS phrase enough that "NO LIQUIDITY STAGING" clipped past its
+// 320px box edge on the real Phase 4.5C candidate. This uses a more
+// conservative per-character estimate and, if the label still doesn't fit
+// even at the font floor, wraps it onto a second line instead of ever
+// letting it clip.
+function nextwaveV2FitLabel(text, baseFontSize, maxWidthPx, minFontSize) {
+  minFontSize = minFontSize || Math.round(baseFontSize * 0.62);
+  const estWidth = (s, fs) => s.length * fs * 0.62;
+  let fontSize = baseFontSize;
+  if (estWidth(text, fontSize) > maxWidthPx) {
+    fontSize = Math.max(minFontSize, Math.floor(baseFontSize * (maxWidthPx / estWidth(text, baseFontSize))));
+  }
+  if (estWidth(text, fontSize) <= maxWidthPx) return { fontSize, lines: [text] };
+  const lines = nextwaveV2WrapLines(text, fontSize, maxWidthPx, 2);
+  return { fontSize, lines: lines.length ? lines : [text] };
+}
+
 async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, storyboard) {
   const sceneText = scene.units.map((u) => u.text).join(' ');
   const narration = await nextwaveSynthesizeNarrationElevenLabs(sceneText, voiceId);
   if (!narration.ok) throw new Error(`scene ${sceneIdx} narration failed: ${narration.error}`);
 
+  const rawAudioPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}-audio-raw.mp3`);
+  await writeFile(rawAudioPath, narration.buffer);
+  await smAssertValidMediaFile(rawAudioPath, `scene ${sceneIdx} narration audio`);
+
+  // Phase 4.5D — the real Phase 4.5C candidate had a confirmed ~4.5s dead-air
+  // stretch genuinely embedded in one scene's ElevenLabs narration (verified
+  // locally against the actual downloaded audio: silencedetect found two
+  // near-back-to-back gaps of 2.97s + 1.48s within an 8s scene). That is not
+  // scene/concat/timing logic on our side -- confirmed those already
+  // measure and assemble correctly -- so the fix is audio-side: cap any
+  // embedded silence stretch at ~1s (stop_duration 0.5 + stop_silence 0.5)
+  // rather than removing pauses entirely, which keeps natural sentence
+  // breaks intact (verified: a genuine 0.6s pause elsewhere in the same
+  // clip survived this exact filter untouched) without ever rushing speech.
+  // Eric/ElevenLabs unchanged -- this only post-processes the returned audio.
   const audioPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}-audio.mp3`);
-  await writeFile(audioPath, narration.buffer);
-  await smAssertValidMediaFile(audioPath, `scene ${sceneIdx} narration audio`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', rawAudioPath,
+      '-af', 'silenceremove=stop_periods=-1:stop_duration=0.5:stop_threshold=-35dB:stop_silence=0.5',
+      audioPath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 20 });
+    await smAssertValidMediaFile(audioPath, `scene ${sceneIdx} trimmed narration audio`);
+    await unlink(rawAudioPath).catch(() => {});
+  } catch (e) {
+    // Safe fallback: never block a render on a pacing improvement -- fall
+    // back to the untouched real ElevenLabs audio if trimming fails.
+    await copyFile(rawAudioPath, audioPath);
+    await unlink(rawAudioPath).catch(() => {});
+  }
   const dur = await nextwaveV2GetDurationSec(audioPath);
+
+  // Phase 4.5D — look up the storyboard's own load-bearing value choice
+  // per unit (already validated against that unit's real candidate values
+  // in nextwaveV2GenerateStoryboard) before building timedUnits, so a unit
+  // with multiple real quantities isn't silently reduced to whichever the
+  // single-best-guess ranking heuristic happened to keep.
+  const slotByUnitIdx = {};
+  (storyboard.slots || []).forEach((sl) => { slotByUnitIdx[sl.unit_index] = sl; });
 
   const totalChars = Math.max(1, sceneText.length);
   let cursor = 0;
@@ -11784,8 +11902,15 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     const start = cursor;
     cursor = Math.min(dur, cursor + uDur);
     const hasNumber = nextwaveHasDynamicNumbers(u.text);
-    const numberLabel = hasNumber ? nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text)) : null;
-    return { idx: u.__idx, text: u.text, start, end: cursor, hasNumber, numberLabel };
+    const slotForUnit = slotByUnitIdx[u.__idx];
+    let numberLabel = null, secondaryLabel = null;
+    if (slotForUnit && slotForUnit.primary_value) {
+      numberLabel = slotForUnit.primary_value;
+      secondaryLabel = slotForUnit.secondary_value || null;
+    } else if (hasNumber) {
+      numberLabel = nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text));
+    }
+    return { idx: u.__idx, text: u.text, start, end: cursor, hasNumber, numberLabel, secondaryLabel };
   });
   const byIdx = {};
   timedUnits.forEach((u) => { byIdx[u.idx] = u; });
@@ -11871,6 +11996,21 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     const textColor = opts.textColor || 'white';
     if (unit.numberLabel) {
       const val = nextwaveV2SanitizeDrawtext(unit.numberLabel, 30);
+      if (unit.secondaryLabel) {
+        // Phase 4.5D — evidence hierarchy: a second value is only ever set
+        // when the storyboard judged both materially necessary (e.g. a
+        // rate and the period it applies over), so it renders smaller,
+        // beneath the primary value — never a third value, never equal
+        // visual weight (that would just be number density again).
+        const secVal = nextwaveV2SanitizeDrawtext(unit.secondaryLabel, 30);
+        const secFontBase = Math.max(18, Math.round(numFontBase * 0.45));
+        const primY = Math.round((contentTop + contentBottom) / 2 - numFontBase * 0.5);
+        const secY = primY + Math.round(numFontBase * 0.95);
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${numColor}:fontsize=${smFitFontSize(val, numFontBase, panelWidth - 60)}:x=${x0 + panelWidth / 2}-text_w/2:y=${primY}:enable='${enableExpr}'`);
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${secVal}':fontcolor=${textColor}:fontsize=${smFitFontSize(secVal, secFontBase, panelWidth - 60)}:x=${x0 + panelWidth / 2}-text_w/2:y=${secY}:enable='${enableExpr}'`);
+        slotContentReport.push({ unitIdx: unit.idx, type: 'number', value: `${unit.numberLabel} + ${unit.secondaryLabel}` });
+        return;
+      }
       const cy = Math.round((contentTop + contentBottom) / 2);
       ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${numColor}:fontsize=${smFitFontSize(val, numFontBase, panelWidth - 60)}:x=${x0 + panelWidth / 2}-text_w/2:y=${cy}-text_h/2:enable='${enableExpr}'`);
       slotContentReport.push({ unitIdx: unit.idx, type: 'number', value: unit.numberLabel });
@@ -11890,6 +12030,24 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
     slotContentReport.push({ unitIdx: unit.idx, type: 'text', value: lines.join(' ') });
   }
 
+  // Phase 4.5D — Step 4: a card/panel label may never clip past its edge.
+  // Wraps onto a second line (via nextwaveV2FitLabel) when even the font
+  // floor doesn't fit, and returns the pixel height it consumed so the
+  // caller can push the content region below it down accordingly instead
+  // of a fixed offset that assumed a single line.
+  function drawFittedLabel(x0, topY, panelWidth, rawText, enableExpr, opts) {
+    opts = opts || {};
+    const baseFontSize = opts.baseFontSize || 32;
+    const color = opts.color || 'white';
+    const fit = nextwaveV2FitLabel(nextwaveV2SanitizeDrawtext(rawText, 40), baseFontSize, panelWidth - 50);
+    const lineH = Math.round(fit.fontSize * 1.2);
+    fit.lines.forEach((line, i) => {
+      const safe = nextwaveV2SanitizeDrawtext(line, 40);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${color}:fontsize=${fit.fontSize}:x=${x0 + panelWidth / 2}-text_w/2:y=${topY + i * lineH}:enable='${enableExpr}'`);
+    });
+    return fit.lines.length * lineH;
+  }
+
   if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
     const panelY0 = 260, panelY1 = 760, panelW = 760, panelXs = [140, 1020];
     // Phase 4.5 local dry-run found the navy fill nearly invisible against
@@ -11902,9 +12060,8 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
       const enPlain = `between(t,${sl.unit.start.toFixed(2)},${dur.toFixed(2)})`;
       ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
       ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
-      const label = nextwaveV2SanitizeDrawtext(sl.label, 24);
-      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=white:fontsize=${smFitFontSize(label, 36, panelW - 60)}:x=${x0 + panelW / 2}-text_w/2:y=${panelY0 + 55}:enable='${en}'`);
-      drawPanelContent(x0, panelY0 + 110, panelY1 - 20, panelW, sl.unit, en, { numFontBase: 62, textFontBase: 28 });
+      const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: 36, color: 'white' });
+      drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, en, { numFontBase: 62, textFontBase: 28 });
     });
     const bothEn = `between(t\\,${Math.max(slots[0].unit.start, slots[1].unit.start).toFixed(2)}\\,${dur.toFixed(2)})`;
     const connector = screenType === 'before_after' ? '->' : 'VS';
@@ -11922,9 +12079,8 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
       const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
       ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=${isLast ? '0xC99E4C' : '0x2A3A5C'}@0.95:t=fill:enable='${en}'`);
       if (!isLast) ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=0xC99E4C@0.9:t=3:enable='${en}'`);
-      const label = nextwaveV2SanitizeDrawtext(sl.label, 24);
-      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=${isLast ? '0x121A30' : 'white'}:fontsize=${smFitFontSize(label, 28, boxW - 40)}:x=${x0 + boxW / 2}-text_w/2:y=${y0 + 40}:enable='${enQ}'`);
-      drawPanelContent(x0, y0 + 80, y1 - 15, boxW, sl.unit, enQ, {
+      const labelH = drawFittedLabel(x0, y0 + 40, boxW, sl.label, enQ, { baseFontSize: 28, color: isLast ? '0x121A30' : 'white' });
+      drawPanelContent(x0, y0 + 40 + labelH + 15, y1 - 15, boxW, sl.unit, enQ, {
         numFontBase: 46, textFontBase: 22,
         numColor: isLast ? '0x121A30' : '0xC99E4C', textColor: isLast ? '0x121A30' : 'white',
       });
@@ -11951,9 +12107,8 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, voiceId, renderId, s
       const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${dur.toFixed(2)})`;
       ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0x2A3A5C@0.95:t=fill:enable='${en}'`);
       ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0xC99E4C@0.9:t=4:enable='${en}'`);
-      const label = nextwaveV2SanitizeDrawtext(sl.label, 26);
-      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${label}':fontcolor=white:fontsize=${smFitFontSize(label, 32, cardW - 50)}:x=${x0 + cardW / 2}-text_w/2:y=${regionY0 + 45}:enable='${enQ}'`);
-      drawPanelContent(x0, regionY0 + 110, regionY1 - 20, cardW, sl.unit, enQ, { numFontBase: 58, textFontBase: 26 });
+      const labelH = drawFittedLabel(x0, regionY0 + 45, cardW, sl.label, enQ, { baseFontSize: 32, color: 'white' });
+      drawPanelContent(x0, regionY0 + 45 + labelH + 15, regionY1 - 20, cardW, sl.unit, enQ, { numFontBase: 58, textFontBase: 26 });
     });
   }
 
@@ -12090,7 +12245,11 @@ async function nextwaveV2BuildRender(req, res) {
   const plan = units.map((u, idx) => {
     const tags = nextwaveClassifyVisualIntent(u.text);
     const fallback = nextwaveResolveFallbackConcept(u.section, tags);
-    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback };
+    // Phase 4.5D — every distinct real value in this unit's own text, not
+    // just the single structurally-ranked one, so the storyboard mapper can
+    // choose which is load-bearing instead of one being silently dropped.
+    const candidateValues = nextwaveExtractAllNumbers(u.text);
+    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
   });
   const scenes = nextwaveV2GroupScenes(plan);
   if (!scenes.length) return res.status(400).json({ ok: false, error: 'no meaning units resolved from script' });
