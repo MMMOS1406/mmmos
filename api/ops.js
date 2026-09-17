@@ -11729,8 +11729,9 @@ Some units list one or more "values available" — real quantities this unit's o
 - If a unit has no values available, or none are load-bearing enough to feature, set both to null.
 - NEVER write a value that is not verbatim in that unit's own "values available" list. NEVER invent a dollar amount, percentage, or fact not already in the script.
 - Do not try to display every value across the scene — pick the evidence that actually supports the conclusion, not number density.
+- CROSS-CHECK PAIRING: when two or more slots reference the SAME unit_index (e.g. one sentence like "X costs $A over N years versus $B over M years" split into a slot per side of the comparison), re-read that unit's actual sentence carefully and confirm each slot's primary_value is the value that TRUE sentence associates with THAT slot's own label — never assign a value to a label it doesn't actually go with, and never let two differently-labeled slots end up with the same value unless the sentence genuinely repeats it.
 
-Only choose structure/labels/which-values-matter — never invent values.
+Only choose structure/labels/which-values-matter — never invent values, and never mismatch a value to the wrong label.
 
 NARRATION UNITS:
 <script_units>
