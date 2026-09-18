@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { nextwaveV2BindEvidenceDeterministically } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2 — deterministic evidence/label binding, kept in its own zero-dependency module so it's testable without this file's ffmpeg dependency
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -11835,6 +11836,11 @@ async function nextwaveV2SynthesizeMasterNarration(fullText, voiceId, renderId) 
 // screen is still attached afterward from the same proven
 // nextwaveRankNumberPhrase/nextwaveFormatFinancialNumber extractors Phase
 // 4.1B already validated, never from the model's own text.
+// Phase 5.2 — nextwaveV2BindEvidenceDeterministically lives in
+// lib/nextwaveV2EvidenceBinding.mjs (imported at the top of this file,
+// not inline here) specifically so the evidence-integrity test matrix can
+// exercise it directly without importing this whole file (which pulls in
+// @ffmpeg-installer/ffmpeg at module load).
 async function nextwaveV2GenerateStoryboard(plan, scenes) {
   // Phase 4.5D — the deterministic fallback has no semantic understanding
   // of which value is load-bearing, so it keeps the pre-4.5D behavior
@@ -11977,6 +11983,14 @@ Respond with ONLY:
         const secondary_value = (typeof sl.secondary_value === 'string' && candidates.includes(sl.secondary_value) && sl.secondary_value !== primary_value) ? sl.secondary_value : null;
         return { unit_index: sl.unit_index, label: sl.label, primary_value, secondary_value };
       }) : [];
+      // Phase 5.2 — DETERMINISTIC EVIDENCE BINDING. See
+      // nextwaveV2BindEvidenceDeterministically (imported at the top of
+      // this file, from lib/nextwaveV2EvidenceBinding.mjs) for the full
+      // rationale and mechanism: the storyboard model may still choose
+      // scene structure, labels, and which units/values are load-bearing,
+      // but it no longer has final authority over WHICH unit a label's
+      // slot actually binds to, or which value that unit contributes.
+      nextwaveV2BindEvidenceDeterministically(slots, plan, validIdxs);
       // Phase 4.5D — deterministic guard against value/label cross-wiring.
       // A real candidate showed "$135K" under BOTH a "30-YEAR INTEREST"
       // and a "15-YEAR INTEREST" label from the same unit (whose text
