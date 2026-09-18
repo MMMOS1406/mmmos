@@ -11492,6 +11492,28 @@ function nextwaveExtractAllNumbers(text) {
   return out;
 }
 
+// Phase 5.1 Section 2/3 — chart grammar needs a real numeric MAGNITUDE, not
+// just the already-validated display string (numberLabel is always one of
+// nextwaveFormatFinancialNumber's own output shapes: "$135,000", "12%",
+// "3X", "10 YEARS"), so this only ever strips formatting back off a value
+// this file already validated against the script's real evidence -- it
+// never re-parses or re-derives a number from scratch. Returns null (not
+// 0) when nothing numeric is found, so callers can distinguish "no value"
+// from "value of zero" and fall back to the pre-chart card behavior.
+function _nextwaveV2ParseChartMagnitude(numberLabel) {
+  if (!numberLabel) return null;
+  const m = String(numberLabel).match(/-?[\d,]+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = parseFloat(m[0].replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+// Phase 5.1 Section 2/3 — a semantic (not per-script) signal for "this
+// buildup is a progression along TIME" (year 1/5/10, month 3, age 40...),
+// which reads better as a line chart's trajectory than a bar chart's
+// side-by-side magnitudes. Checked against the slot's own label AND its
+// unit's real narration text, never a fixed list of scripts.
+const NEXTWAVE_V2_TIME_SERIES_RE = /\b(year|yr|month|week|day|age)s?\s*\d+\b|\bby\s+(year|month|week|day|age)\s*\d+\b/i;
+
 // Generalized resolver: real dynamic financial figures resolve to
 // programmatic class B FIRST regardless of concept, then a genuinely
 // reusable COMPOSED SCENE (matched on the asset's `primary_concepts` when
@@ -12178,6 +12200,14 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     ? await nextwaveV2ResolveObjectLocalPath(characterObjectRole, renderId)
     : null;
   const useCharacterObjectForm = !!characterObjectLocalPath;
+  // Phase 5.1 Section 6 — sampled once per object per render (cheap, local
+  // ffmpeg call, no new vendor) so the object's own flat generation
+  // background can be keyed transparent at composite time instead of
+  // compositing as a visible rectangle. null when sampling fails, which
+  // degrades to the pre-Section-6 flat-square behavior.
+  const characterObjectKeyColor = characterObjectLocalPath
+    ? await _nextwaveV2SampleCornerColor(characterObjectLocalPath)
+    : null;
   // Phase 5 Section B — money/cause-effect concepts (the same set already
   // mapped to money_stack) get a left-to-right FLOW composition (object ->
   // arrow -> result) instead of the generic object-on-top/number-beneath
@@ -12196,12 +12226,22 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   const pointingRoles = new Set(['point_left', 'point_right', 'beside_comparison', 'point_at_comparison']);
   const calculationRoles = new Set(['beside_calculation', 'reaction_emphasis']);
   let poseTag = null;
-  if (useCharacterObjectForm) poseTag = 'presenting_pointing';
+  // Phase 5.1 Section 1 — character_object scenes now use the SAME
+  // holding_calculation pose (both hands holding a blank ledger/notepad in
+  // front of chest -- see NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS) already used
+  // for beside_calculation, instead of presenting_pointing. Pointing from
+  // across the frame at a separately-positioned object was exactly the
+  // Phase 5 gap this section exists to close; a holding pose lets the
+  // object composite directly where the held notepad already is (see the
+  // object-position override below) so the two read as one integrated
+  // "here's the evidence in my hands" composition instead of two unrelated
+  // regions of the frame.
+  if (useCharacterObjectForm) poseTag = 'holding_calculation';
   else if (pointingRoles.has(hostRole)) poseTag = 'presenting_pointing';
   else if (calculationRoles.has(hostRole)) poseTag = 'holding_calculation';
   else if (hostRole === 'outro_host') poseTag = 'reaction_outro';
   const useHost = poseTag
-    ? await nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, (pointingRoles.has(hostRole) || useCharacterObjectForm) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT)
+    ? await nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, pointingRoles.has(hostRole) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT)
     : NEXTWAVE_V2_HOST_DEFAULT;
   // Icons are now only used by the 'single' fallback layout — comparison/
   // before_after/buildup are built from drawbox panels + drawtext below,
@@ -12222,12 +12262,66 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // evidence-hierarchy label/number pairing established in Phase 4.5D-4.6,
   // which is untouched by this change.
   let comparisonObjectPaths = [null, null];
+  let comparisonObjectKeyColors = [null, null];
   if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
     for (let i = 0; i < 2; i++) {
       const sl = slots[i];
       if (!sl) continue;
       const role = _nextwaveV2ResolveObjectRole(sl.unit.concept_tags);
       comparisonObjectPaths[i] = role ? await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i) : null;
+      comparisonObjectKeyColors[i] = comparisonObjectPaths[i] ? await _nextwaveV2SampleCornerColor(comparisonObjectPaths[i]) : null;
+    }
+  }
+
+  // Phase 5.1 Sections 2/3 — real programmatic chart/diagram grammar,
+  // detected from this scene's own already-evidence-validated slot values
+  // (never invented, never a per-script rule): a buildup scene (3+ numeric
+  // units) becomes a BAR chart once at least two of its slots carry a
+  // parseable magnitude, or a LINE chart instead when those slots' own
+  // labels/text read as a time progression (year/month/week/day/age N --
+  // a semantic pattern, checked against every scene, not one script); a
+  // two-sided comparison/before_after becomes a DONUT allocation chart
+  // specifically when BOTH sides are percentages that sum close to 100 (a
+  // genuine allocation split, not just any two percentages). Any scene
+  // that doesn't match this falls through to the pre-existing card/panel
+  // rendering untouched below -- this can never break or regress a scene
+  // whose values don't support a real chart.
+  const isLargeHostSceneChart = largeHostRoles.has(storyboard.host_role);
+  let chartPlan = null;
+  if (screenType === 'buildup' && slots.length >= 2) {
+    const chartSlots = slots.slice(0, 4).map((sl) => ({ sl, magnitude: _nextwaveV2ParseChartMagnitude(sl.unit.numberLabel) }));
+    const usable = chartSlots.filter((c) => c.magnitude !== null);
+    if (usable.length >= 2) {
+      const isTimeSeries = chartSlots.some((c) =>
+        NEXTWAVE_V2_TIME_SERIES_RE.test(c.sl.label || '') || NEXTWAVE_V2_TIME_SERIES_RE.test(c.sl.unit.text || ''));
+      const chartX0 = 300, chartX1 = 1620;
+      const chartY0 = isLargeHostSceneChart ? 230 : 320, chartY1 = isLargeHostSceneChart ? 480 : 680;
+      const plotTop = chartY0 + 50, baseline = chartY1 - 70;
+      const maxVal = Math.max(...usable.map((c) => c.magnitude), 0.0001);
+      const minVal = Math.min(0, ...usable.map((c) => c.magnitude));
+      const valRange = Math.max(0.0001, maxVal - minVal);
+      const n = usable.length;
+      if (isTimeSeries) {
+        const marginX = 80;
+        const stepX = n > 1 ? (chartX1 - chartX0 - marginX * 2) / (n - 1) : 0;
+        const points = usable.map((c, i) => ({
+          x: chartX0 + marginX + i * stepX,
+          y: baseline - ((c.magnitude - minVal) / valRange) * (baseline - plotTop),
+          startT: c.sl.unit.start, magnitude: c.magnitude, numberLabel: c.sl.unit.numberLabel, label: c.sl.label,
+        }));
+        chartPlan = { type: 'line', points, chartX0, chartX1, chartY0, chartY1, baseline };
+      } else {
+        chartPlan = { type: 'bar', points: usable, chartX0, chartX1, chartY0, chartY1, baseline, plotTop, maxVal };
+      }
+    }
+  } else if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+    const magA = _nextwaveV2ParseChartMagnitude(slots[0].unit.numberLabel);
+    const magB = _nextwaveV2ParseChartMagnitude(slots[1].unit.numberLabel);
+    const isPercentA = /%\s*$/.test(String(slots[0].unit.numberLabel || '').trim());
+    const isPercentB = /%\s*$/.test(String(slots[1].unit.numberLabel || '').trim());
+    if (magA !== null && magB !== null && isPercentA && isPercentB && Math.abs((magA + magB) - 100) <= 8) {
+      const cx = 560, cy = isLargeHostSceneChart ? 400 : 500, outerR = isLargeHostSceneChart ? 170 : 220, innerR = isLargeHostSceneChart ? 95 : 125;
+      chartPlan = { type: 'donut', fracA: magA / (magA + magB), sl0: slots[0], sl1: slots[1], cx, cy, outerR, innerR };
     }
   }
 
@@ -12240,6 +12334,30 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   comparisonObjectPaths.forEach((p, i) => {
     if (p) { comparisonObjectIdx[i] = nextInputIdx; inputs.push('-i', p); nextInputIdx++; }
   });
+  // Phase 5.1 Section 2 — line-chart segments are real diagonal lines (a
+  // thin solid-color lavfi source rotated to each segment's own angle),
+  // not an approximation -- so each segment needs its own generated input,
+  // added here before the host input like every other compositing source.
+  let lineSegmentInputIdx = [];
+  if (chartPlan && chartPlan.type === 'line') {
+    for (let i = 0; i < chartPlan.points.length - 1; i++) {
+      const p0 = chartPlan.points[i], p1 = chartPlan.points[i + 1];
+      const len = Math.max(2, Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y)));
+      lineSegmentInputIdx.push(nextInputIdx);
+      inputs.push('-f', 'lavfi', '-i', `color=c=0xC99E4C:s=${len}x7`);
+      nextInputIdx++;
+    }
+  }
+  // Phase 5.1 Section 2 — the donut is generated per-pixel (geq, angle +
+  // radius test against this scene's own real allocation fraction) onto a
+  // transparent canvas input, same "no new vendor" constraint as the line
+  // segments above.
+  let donutInputIdx = -1;
+  if (chartPlan && chartPlan.type === 'donut') {
+    donutInputIdx = nextInputIdx;
+    inputs.push('-f', 'lavfi', '-i', `color=c=black@0.0:s=${chartPlan.outerR * 2}x${chartPlan.outerR * 2}`);
+    nextInputIdx++;
+  }
   const hostIdx = nextInputIdx;
   if (includeHost) inputs.push('-i', useHost);
   // Phase 4.6 — no audio input here at all: narration is muxed once onto
@@ -12261,17 +12379,27 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   }
 
   if (useCharacterObjectForm) {
-    // Phase 5 Section F — progressive reveal: the object anchors the scene
-    // from t=0, but the host and (further below) the number hold back a
-    // beat each so the scene assembles instead of appearing fully formed
-    // at once -- "object first, presenter enters, then the number lands."
-    const objectEnable = `between(t,0,${durEnd})`;
+    // Phase 5.1 Section 1 — reversed from Phase 5: the host (now holding a
+    // blank notepad, see poseTag above) is already standing there from
+    // t=0, then the object "arrives in their hands" 0.3s later -- reads as
+    // "here's the evidence" rather than an object appearing first with the
+    // host wandering in afterward. The number (further below) still holds
+    // back its own extra beat.
+    const objectEnable = useMoneyFlowForm ? `between(t,0,${durEnd})` : `between(t,${Math.min(0.3, dur * 0.3).toFixed(2)},${durEnd})`;
+    // Phase 5.1 Section 6 — key out the object's own flat generation
+    // background (verified via real-frame sampling: a colorkey against
+    // that image's own sampled corner color, generous similarity/blend to
+    // absorb the ~3/255 in-image noise found during sampling, cleanly
+    // removes the visible navy square without eating into the
+    // illustration's own dark shading) before scaling/compositing. Skips
+    // cleanly (old flat-square behavior) when sampling failed.
+    const objKeyPart = characterObjectKeyColor ? `format=rgba,colorkey=${characterObjectKeyColor}:0.15:0.08,` : '';
     if (useMoneyFlowForm) {
       // Section B — smaller object, pushed further left, to leave the
       // center-right open for the arrow -> result flow instead of a
       // number sitting directly beneath the object.
       const objH = 360, objCenterY = 520;
-      filters.push(`[${objectIdx}:v]scale=-1:${objH}[objimg]`);
+      filters.push(`[${objectIdx}:v]${objKeyPart}scale=-1:${objH}[objimg]`);
       filters.push(`[${last}][objimg]overlay=x='260-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='${objectEnable}'[vobj]`);
     } else {
       // The illustrated object IS the scene, not a decoration next to a
@@ -12282,13 +12410,13 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
       // leave a clear band below it (y 860-970) for the number/text, and
       // clear of the host's right-side column (x 1380+).
       const objH = 550, objCenterY = 560;
-      filters.push(`[${objectIdx}:v]scale=-1:${objH}[objimg]`);
+      filters.push(`[${objectIdx}:v]${objKeyPart}scale=-1:${objH}[objimg]`);
       filters.push(`[${last}][objimg]overlay=x='560-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='${objectEnable}'[vobj]`);
     }
     last = 'vobj';
   }
 
-  if (comparisonObjectIdx[0] !== -1 || comparisonObjectIdx[1] !== -1) {
+  if ((comparisonObjectIdx[0] !== -1 || comparisonObjectIdx[1] !== -1) && !(chartPlan && chartPlan.type === 'donut')) {
     // Phase 5 Section A — fills most of each panel with the resolved
     // illustrated object instead of a flat color; the label/legibility
     // scrim drawn later (in the comparison content branch below) sits on
@@ -12303,10 +12431,72 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
       const objH = (panelY1Cmp - panelY0Cmp) - cmpTextBandH - 20;
       const cx = panelXsCmp[i] + panelWCmp / 2;
       const en = `between(t,${slots[i].unit.start.toFixed(2)},${durEnd})`;
-      filters.push(`[${idx}:v]scale=-1:${objH}[cmpobj${i}]`);
+      // Phase 5.1 Section 6 — same per-image corner-sampled colorkey as the
+      // single-object composite above, applied per side independently.
+      const cmpKeyPart = comparisonObjectKeyColors[i] ? `format=rgba,colorkey=${comparisonObjectKeyColors[i]}:0.15:0.08,` : '';
+      filters.push(`[${idx}:v]${cmpKeyPart}scale=-1:${objH}[cmpobj${i}]`);
       filters.push(`[${last}][cmpobj${i}]overlay=x='${cx}-overlay_w/2':y='${panelY0Cmp + 15}':enable='${en}'[vcmp${i}]`);
       last = `vcmp${i}`;
     });
+  }
+
+  // Phase 5.1 Section 2 — line chart: each segment is a real solid-color
+  // rectangle rotated to that segment's own atan2 angle (verified against
+  // a real rendered test frame -- a clean diagonal line, not an
+  // approximation), overlaid at its own segment's narration timing so the
+  // line visibly draws itself point-by-point rather than appearing
+  // pre-drawn (Section 4's progressive-reveal principle applied here too).
+  if (chartPlan && chartPlan.type === 'line') {
+    chartPlan.points.forEach((p, i) => {
+      if (i === 0) return;
+      const p0 = chartPlan.points[i - 1];
+      const dx = p.x - p0.x, dy = p.y - p0.y;
+      const angleRad = Math.atan2(dy, dx).toFixed(5);
+      const midX = (p0.x + p.x) / 2, midY = (p0.y + p.y) / 2;
+      const idx = lineSegmentInputIdx[i - 1];
+      const en = `between(t,${p.startT.toFixed(2)},${durEnd})`;
+      filters.push(`[${idx}:v]format=rgba,rotate=${angleRad}:fillcolor=none:ow=rotw(${angleRad}):oh=roth(${angleRad})[lineseg${i}]`);
+      filters.push(`[${last}][lineseg${i}]overlay=x='${midX}-overlay_w/2':y='${midY}-overlay_h/2':enable='${en}'[vline${i}]`);
+      last = `vline${i}`;
+    });
+  }
+
+  // Phase 5.1 Section 2 — donut/pie: a real per-pixel angle+radius test
+  // (geq) against this scene's own validated allocation fraction, not a
+  // decorative icon -- verified against a real rendered test frame (a
+  // clean two-slice ring at the exact tested fraction). Starts at 12
+  // o'clock and sweeps clockwise, the conventional pie-chart reading
+  // direction. Slice A appears first (the primary/first-mentioned side),
+  // slice B fills the remainder a beat later so the split visibly forms.
+  if (chartPlan && chartPlan.type === 'donut') {
+    const { cx, cy, outerR, innerR, fracA } = chartPlan;
+    const lcx = outerR, lcy = outerR; // center within the generated square canvas
+    // Progressive reveal (Section 4 principle) happens on the OVERLAY's own
+    // enable window, matching every other composited element in this file
+    // (objects/host above) -- the ring itself is generated once, statically,
+    // and simply appears when the comparison's evidence begins.
+    const enA = `between(t,${chartPlan.sl0.unit.start.toFixed(2)},${durEnd})`;
+    const ring = `between(hypot(X-${lcx},Y-${lcy}),${innerR},${outerR})`;
+    const angleFrac = `mod(atan2(X-${lcx},-(Y-${lcy}))+2*PI,2*PI)/(2*PI)`;
+    const inSliceA = `lt(${angleFrac},${fracA.toFixed(4)})`;
+    // Gold (0xC99E4C) for slice A, muted green (0x2E5A3A, the same
+    // secondary comparison fill already used elsewhere in this file) for
+    // slice B -- brand palette, not arbitrary chart-library defaults.
+    // Verified locally against a real ffmpeg geq render (plain commas,
+    // each expression individually single-quoted -- no backslash-escaping
+    // needed here since these are semicolon-chained `filters` entries, not
+    // the comma-chained `ov` drawtext list, which is the only place this
+    // file's existing code needs the \, escape convention).
+    filters.push([
+      `[${donutInputIdx}:v]format=rgba,geq=`,
+      `r='if(${ring},if(${inSliceA},201,46),0)':`,
+      `g='if(${ring},if(${inSliceA},158,90),0)':`,
+      `b='if(${ring},if(${inSliceA},76,58),0)':`,
+      `a='if(${ring},255,0)'`,
+      `[donutimg]`,
+    ].join(''));
+    filters.push(`[${last}][donutimg]overlay=x='${cx - outerR}':y='${cy - outerR}':enable='${enA}'[vdonut]`);
+    last = 'vdonut';
   }
 
   if (includeHost) {
@@ -12321,14 +12511,23 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // reaction_emphasis is a deliberately brief larger beat at this
     // scene's own punchline (its last unit), not present for the whole
     // scene, so it reads as emphasis rather than a static presence.
-    if (useCharacterObjectForm) {
-      // Phase 5 — fixed right-side position regardless of hostRole (which
-      // may have been deterministically forced to hero_intro/outro_host by
-      // the first/last-scene override): the object owns the left/center of
-      // the frame, so the host must not use hero_intro's centered position,
-      // which would sit directly on top of it. Section F progressive
-      // reveal: enters 0.3s after the object rather than both appearing
-      // simultaneously at t=0.
+    if (useCharacterObjectForm && !useMoneyFlowForm) {
+      // Phase 5.1 Section 1 — moved in from the far-right corner (Phase 5)
+      // to stand directly adjacent to the object's right edge (object is
+      // ~550px tall centered at x=560, so its right edge sits around
+      // x=835) instead of pointing at it from across the frame. Combined
+      // with the reversed timing above (host present from t=0, object
+      // arrives into frame at their side 0.3s later) and the
+      // holding_calculation pose, this reads as one integrated
+      // "presenting the evidence" composition rather than two separate
+      // regions of the frame gesturing at each other.
+      hh = 480; hx = '820'; hy = `${H}-overlay_h`;
+      hostWindows = [{ start: 0, end: dur + 0.15 }];
+    } else if (useMoneyFlowForm) {
+      // Money-flow keeps the original far-right position: the flow's own
+      // arrow -> result content (drawn in the content branch below) needs
+      // the center-right of the frame clear, so the host stays out of it
+      // the way Phase 5 already placed it.
       hh = 480; hx = `${W}-overlay_w-60`; hy = `${H}-overlay_h`;
       hostWindows = [{ start: Math.min(0.3, dur * 0.3), end: dur + 0.15 }];
     } else if (hostRole === 'hero_intro') {
@@ -12445,7 +12644,29 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     return fit.lines.length * lineH;
   }
 
-  if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+  if (chartPlan && chartPlan.type === 'donut') {
+    // Phase 5.1 Section 2 — the ring itself is composited above (filters
+    // phase); this draws the legend: a colored swatch + label + this
+    // scene's own real percentage value per slice, staggered to each
+    // slice's own narration start so the split's two sides still read as
+    // a progressive reveal even though the ring geometry appears as a
+    // whole (Section 4 principle -- info develops, not just geometry).
+    const { cx, cy, outerR, sl0, sl1 } = chartPlan;
+    const legendX = Math.min(cx + outerR + 70, W - 620);
+    const rows = [
+      { sl: sl0, color: '0xC99E4C', y: cy - 110 },
+      { sl: sl1, color: '0x2E5A3A', y: cy + 20 },
+    ];
+    rows.forEach((row) => {
+      const en = `between(t,${row.sl.unit.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${row.sl.unit.start.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${legendX}:y=${row.y}:w=36:h=36:color=${row.color}@0.95:t=fill:enable='${en}'`);
+      const labelSafe = nextwaveV2SanitizeDrawtext(row.sl.label, 30);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${labelSafe}':fontcolor=white:fontsize=30:x=${legendX + 50}:y=${row.y - 4}:enable='${enQ}'`);
+      const valSafe = nextwaveV2SanitizeDrawtext(row.sl.unit.numberLabel || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${valSafe}':fontcolor=0xC99E4C:fontsize=44:x=${legendX + 50}:y=${row.y + 34}:enable='${enQ}'`);
+    });
+  } else if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
     // Phase 4.6 fix (post-candidate QA): a large host role (hero_intro is
     // centered, bottom-anchored, ~520px tall) visibly overlapped and
     // clipped into the bottom corners of both side-by-side cards here —
@@ -12460,10 +12681,24 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // the (also navy) background — lightened + given a gold border so each
     // panel reads as a distinct card regardless of background proximity.
     const fills = ['0x2A3A5C', '0x2E5A3A'];
+    // Phase 5.1 Section 4 — progressive comparison reveal. Real-frame QA on
+    // Phase 5 found both sides could appear together whenever their
+    // underlying units' narration timing happened to coincide (e.g. two
+    // slots split from the same sentence -- a real, common case per the
+    // Phase 4.5D evidence-hierarchy pairing). Side B is now FORCED to wait
+    // at least minGap after side A regardless of the units' own timing, and
+    // each side's own VALUE lands a further beat after that side's
+    // panel/label appears -- "A appears -> A's evidence -> B appears -> B's
+    // evidence -> difference emphasized", not two simultaneous reveals.
+    const minGap = Math.min(0.6, dur * 0.2);
+    const valueGap = Math.min(0.35, dur * 0.12);
+    const panelStarts = [slots[0].unit.start, Math.max(slots[1].unit.start, slots[0].unit.start + minGap)];
+    const valueStarts = panelStarts.map((s) => s + valueGap);
     slots.slice(0, 2).forEach((sl, i) => {
       const x0 = panelXs[i];
-      const en = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
-      const enPlain = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
+      const en = `between(t\\,${panelStarts[i].toFixed(2)}\\,${durEnd})`;
+      const enPlain = `between(t,${panelStarts[i].toFixed(2)},${durEnd})`;
+      const valueEnQ = `between(t\\,${valueStarts[i].toFixed(2)}\\,${durEnd})`;
       if (comparisonObjectIdx[i] !== -1) {
         // Phase 5 Section A — the object (composited above, filling the
         // top of this panel) IS the primary visual now; only a small
@@ -12472,17 +12707,55 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
         const bandY = panelY1 - cmpTextBandH;
         ov.push(`drawbox=x=${x0}:y=${bandY}:w=${panelW}:h=${cmpTextBandH}:color=0x0d1226@0.72:t=fill:enable='${enPlain}'`);
         const labelH = drawFittedLabel(x0, bandY + 12, panelW, sl.label, en, { baseFontSize: 30, color: '0xC99E4C' });
-        drawPanelContent(x0, bandY + 12 + labelH + 6, panelY1 - 10, panelW, sl.unit, en, { numFontBase: 44, textFontBase: 22 });
+        drawPanelContent(x0, bandY + 12 + labelH + 6, panelY1 - 10, panelW, sl.unit, valueEnQ, { numFontBase: 44, textFontBase: 22 });
       } else {
         ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
         ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
         const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: 36, color: 'white' });
-        drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, en, { numFontBase: 62, textFontBase: 28 });
+        drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, valueEnQ, { numFontBase: 62, textFontBase: 28 });
       }
     });
-    const bothEn = `between(t\\,${Math.max(slots[0].unit.start, slots[1].unit.start).toFixed(2)}\\,${durEnd})`;
+    const bothEn = `between(t\\,${Math.max(valueStarts[0], valueStarts[1]).toFixed(2)}\\,${durEnd})`;
     const connector = screenType === 'before_after' ? '->' : 'VS';
     ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=0xC99E4C:fontsize=48:box=1:boxcolor=black@0.7:boxborderw=14:x=(w-text_w)/2:y=${Math.round((panelY0 + panelY1) / 2) - 24}:enable='${bothEn}'`);
+  } else if (chartPlan && chartPlan.type === 'bar') {
+    // Phase 5.1 Sections 2/3 — real proportional bar chart from this
+    // scene's own validated magnitudes, replacing the old card-chain
+    // default for a buildup scene whose slots carry real comparable
+    // values. Each bar rises and its value lands at that slot's own
+    // narration start, matching the progressive-reveal pattern used
+    // everywhere else in this file.
+    const { points, chartX0, chartX1, baseline, plotTop, maxVal } = chartPlan;
+    const n = points.length, gap = 50;
+    const barW = Math.floor((chartX1 - chartX0 - (n - 1) * gap) / n);
+    points.forEach((c, i) => {
+      const bx = chartX0 + i * (barW + gap);
+      const barH = Math.max(8, Math.round((c.magnitude / maxVal) * (baseline - plotTop)));
+      const by = baseline - barH;
+      const en = `between(t,${c.sl.unit.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${c.sl.unit.start.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${bx}:y=${by}:w=${barW}:h=${barH}:color=0xC99E4C@0.92:t=fill:enable='${en}'`);
+      const valSafe = nextwaveV2SanitizeDrawtext(c.sl.unit.numberLabel || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${valSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(valSafe, 34, barW)}:x=${bx + barW / 2}-text_w/2:y=${by - 46}:enable='${enQ}'`);
+      drawFittedLabel(bx, baseline + 14, barW, c.sl.label, enQ, { baseFontSize: 24, color: 'white' });
+    });
+    ov.push(`drawbox=x=${chartX0}:y=${baseline}:w=${chartX1 - chartX0}:h=3:color=0xC99E4C@0.8:t=fill:enable='between(t,0,${durEnd})'`);
+  } else if (chartPlan && chartPlan.type === 'line') {
+    // Phase 5.1 Sections 2/3 — real line chart, segments already
+    // composited above (filters phase, each one a rotated solid bar at
+    // its own real slope); this draws the axis, point markers, and each
+    // point's own real value/time label, revealed as its segment arrives.
+    const { points, chartX0, chartX1, baseline } = chartPlan;
+    ov.push(`drawbox=x=${chartX0}:y=${baseline}:w=${chartX1 - chartX0}:h=3:color=0xC99E4C@0.5:t=fill:enable='between(t,0,${durEnd})'`);
+    points.forEach((p) => {
+      const en = `between(t,${p.startT.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${p.startT.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${p.x - 8}:y=${p.y - 8}:w=16:h=16:color=0xC99E4C@0.95:t=fill:enable='${en}'`);
+      const valSafe = nextwaveV2SanitizeDrawtext(p.numberLabel || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${valSafe}':fontcolor=0xC99E4C:fontsize=32:x=${p.x}-text_w/2:y=${p.y - 50}:enable='${enQ}'`);
+      const labelSafe = nextwaveV2SanitizeDrawtext(p.label || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${labelSafe}':fontcolor=white:fontsize=22:x=${p.x}-text_w/2:y=${baseline + 16}:enable='${enQ}'`);
+    });
   } else if (screenType === 'buildup' && slots.length) {
     const picked = slots.slice(0, 4);
     const n = picked.length;
@@ -12943,6 +13216,38 @@ async function nextwaveV2ResolveObjectLocalPath(objectRole, renderId) {
     const localPath = join(tmpdir(), `nwv2-${renderId}-object-${objectRole}.png`);
     await writeFile(localPath, buf);
     return localPath;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Phase 5.1 Section 6 — every Ideogram object is generated "isolated on a
+// plain dark navy background" (see NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS)
+// specifically so this works: the object's own corner is that flat
+// background color, not part of the illustration, so sampling one pixel
+// gives a reliable per-image key color without any new vendor/library.
+// Verified against a real 4x4px corner sample on all 5 generated objects:
+// variance within a single image was only ~3/255 (a flat fill, not a
+// gradient), but the fill color itself differs 20-30/255 between separate
+// generations -- so this must be sampled PER OBJECT IMAGE, never a single
+// hardcoded constant. Returns null (never throws) on any failure so a
+// composite always degrades to the old flat-square behavior instead of
+// breaking the render.
+async function _nextwaveV2SampleCornerColor(localPath) {
+  try {
+    const rawPath = join(tmpdir(), `nwv2-cornerpx-${Date.now()}-${Math.random().toString(36).slice(2)}.raw`);
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', localPath,
+      '-vf', 'crop=4:4:0:0,scale=1:1',
+      '-frames:v', '1',
+      '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+      rawPath,
+    ], { timeout: 15000 });
+    const buf = await readFile(rawPath);
+    unlink(rawPath).catch(() => {});
+    if (buf.length < 3) return null;
+    const hex = (n) => n.toString(16).padStart(2, '0');
+    return `0x${hex(buf[0])}${hex(buf[1])}${hex(buf[2])}`;
   } catch (e) {
     return null;
   }
