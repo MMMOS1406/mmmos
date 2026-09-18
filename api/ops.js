@@ -12100,7 +12100,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     const end = Math.max(start, u.__end - sceneStart);
     const hasNumber = nextwaveHasDynamicNumbers(u.text);
     const rankedNumberLabel = hasNumber ? nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text)) : null;
-    return { idx: u.__idx, text: u.text, start, end, hasNumber, rankedNumberLabel };
+    return { idx: u.__idx, text: u.text, start, end, hasNumber, rankedNumberLabel, concept_tags: u.concept_tags || [] };
   });
   const byIdx = {};
   timedUnits.forEach((u) => { byIdx[u.idx] = u; });
@@ -12156,6 +12156,13 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     ? await nextwaveV2ResolveObjectLocalPath(characterObjectRole, renderId)
     : null;
   const useCharacterObjectForm = !!characterObjectLocalPath;
+  // Phase 5 Section B — money/cause-effect concepts (the same set already
+  // mapped to money_stack) get a left-to-right FLOW composition (object ->
+  // arrow -> result) instead of the generic object-on-top/number-beneath
+  // layout: growth/accumulation/income are inherently about a value MOVING
+  // or becoming a result, which a flow communicates and a static object
+  // does not.
+  const useMoneyFlowForm = useCharacterObjectForm && characterObjectRole === 'money_stack';
 
   // Phase 4.7 — real gesture/interaction poses (Ideogram-generated,
   // character-referenced against the original host so identity is
@@ -12183,11 +12190,37 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // decorative icon competing for the same "concept" role is clutter.
   const icons = (screenType === 'single' && slots.length && !useCharacterObjectForm && !largeHostRoles.has(storyboard.host_role)) ? nextwaveV2SceneIcons(scene).slice(0, 1) : [];
 
+  // Phase 5 Section A — comparison/before_after sides get their OWN
+  // illustrated object (resolved from that SLOT's own unit concept_tags,
+  // not the scene's aggregate tags, since the two sides of a real
+  // comparison are usually two different concepts) instead of a plain
+  // color fill. Resolved per-slot, independently, so one side can have an
+  // object while the other falls back to the old color-fill treatment if
+  // its own concept isn't covered yet -- this never blocks or risks the
+  // evidence-hierarchy label/number pairing established in Phase 4.5D-4.6,
+  // which is untouched by this change.
+  let comparisonObjectPaths = [null, null];
+  if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+    for (let i = 0; i < 2; i++) {
+      const sl = slots[i];
+      if (!sl) continue;
+      const tags = sl.unit.concept_tags || [];
+      let role = null;
+      for (const tag of tags) { if (NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]) { role = NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]; break; } }
+      comparisonObjectPaths[i] = role ? await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i) : null;
+    }
+  }
+
   const inputs = ['-loop', '1', '-i', NEXTWAVE_V2_BG];
-  icons.forEach((p) => inputs.push('-i', p));
-  if (useCharacterObjectForm) inputs.push('-i', characterObjectLocalPath);
-  const objectIdx = useCharacterObjectForm ? icons.length + 1 : -1;
-  const hostIdx = icons.length + (useCharacterObjectForm ? 1 : 0) + 1;
+  let nextInputIdx = 1; // input [0] is the background
+  icons.forEach((p) => { inputs.push('-i', p); nextInputIdx++; });
+  const objectIdx = useCharacterObjectForm ? nextInputIdx : -1;
+  if (useCharacterObjectForm) { inputs.push('-i', characterObjectLocalPath); nextInputIdx++; }
+  const comparisonObjectIdx = [-1, -1];
+  comparisonObjectPaths.forEach((p, i) => {
+    if (p) { comparisonObjectIdx[i] = nextInputIdx; inputs.push('-i', p); nextInputIdx++; }
+  });
+  const hostIdx = nextInputIdx;
   if (includeHost) inputs.push('-i', useHost);
   // Phase 4.6 — no audio input here at all: narration is muxed once onto
   // the final concatenated video in nextwaveV2BuildRender, not per scene.
@@ -12208,17 +12241,52 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   }
 
   if (useCharacterObjectForm) {
-    // Phase 5 — the illustrated object IS the scene, not a decoration next
-    // to a card: large (~620px), left-of-center, roughly where Wealth
-    // Logic's own object compositions place the evidence, so the host
-    // (added below, right side, presenting_pointing) reads as gesturing
-    // toward it rather than the two elements sitting unrelated.
-    // Sized/positioned to leave a clear band below it (y 860-970) for the
-    // number/text, and clear of the host's right-side column (x 1380+).
-    const objH = 550, objCenterY = 560;
-    filters.push(`[${objectIdx}:v]scale=-1:${objH}[objimg]`);
-    filters.push(`[${last}][objimg]overlay=x='560-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='between(t,0,${durEnd})'[vobj]`);
+    // Phase 5 Section F — progressive reveal: the object anchors the scene
+    // from t=0, but the host and (further below) the number hold back a
+    // beat each so the scene assembles instead of appearing fully formed
+    // at once -- "object first, presenter enters, then the number lands."
+    const objectEnable = `between(t,0,${durEnd})`;
+    if (useMoneyFlowForm) {
+      // Section B — smaller object, pushed further left, to leave the
+      // center-right open for the arrow -> result flow instead of a
+      // number sitting directly beneath the object.
+      const objH = 360, objCenterY = 520;
+      filters.push(`[${objectIdx}:v]scale=-1:${objH}[objimg]`);
+      filters.push(`[${last}][objimg]overlay=x='260-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='${objectEnable}'[vobj]`);
+    } else {
+      // The illustrated object IS the scene, not a decoration next to a
+      // card: large (~550px), left-of-center, roughly where Wealth
+      // Logic's own object compositions place the evidence, so the host
+      // (added below, right side, presenting_pointing) reads as gesturing
+      // toward it rather than the two elements sitting unrelated. Sized to
+      // leave a clear band below it (y 860-970) for the number/text, and
+      // clear of the host's right-side column (x 1380+).
+      const objH = 550, objCenterY = 560;
+      filters.push(`[${objectIdx}:v]scale=-1:${objH}[objimg]`);
+      filters.push(`[${last}][objimg]overlay=x='560-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='${objectEnable}'[vobj]`);
+    }
     last = 'vobj';
+  }
+
+  if (comparisonObjectIdx[0] !== -1 || comparisonObjectIdx[1] !== -1) {
+    // Phase 5 Section A — fills most of each panel with the resolved
+    // illustrated object instead of a flat color; the label/legibility
+    // scrim drawn later (in the comparison content branch below) sits on
+    // top, on ONLY the text's own strip, not the whole panel.
+    const isLargeHostSceneCmp = largeHostRoles.has(storyboard.host_role);
+    const panelY0Cmp = 260, panelY1Cmp = isLargeHostSceneCmp ? 545 : 760, panelWCmp = 760, panelXsCmp = [140, 1020];
+    // Object takes the top ~62% of the panel; the bottom ~38% stays clear
+    // for the label/number band drawn in the content branch below.
+    const cmpTextBandH = Math.round((panelY1Cmp - panelY0Cmp) * 0.38);
+    comparisonObjectIdx.forEach((idx, i) => {
+      if (idx === -1) return;
+      const objH = (panelY1Cmp - panelY0Cmp) - cmpTextBandH - 20;
+      const cx = panelXsCmp[i] + panelWCmp / 2;
+      const en = `between(t,${slots[i].unit.start.toFixed(2)},${durEnd})`;
+      filters.push(`[${idx}:v]scale=-1:${objH}[cmpobj${i}]`);
+      filters.push(`[${last}][cmpobj${i}]overlay=x='${cx}-overlay_w/2':y='${panelY0Cmp + 15}':enable='${en}'[vcmp${i}]`);
+      last = `vcmp${i}`;
+    });
   }
 
   if (includeHost) {
@@ -12238,9 +12306,11 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
       // may have been deterministically forced to hero_intro/outro_host by
       // the first/last-scene override): the object owns the left/center of
       // the frame, so the host must not use hero_intro's centered position,
-      // which would sit directly on top of it.
+      // which would sit directly on top of it. Section F progressive
+      // reveal: enters 0.3s after the object rather than both appearing
+      // simultaneously at t=0.
       hh = 480; hx = `${W}-overlay_w-60`; hy = `${H}-overlay_h`;
-      hostWindows = wholeScene;
+      hostWindows = [{ start: Math.min(0.3, dur * 0.3), end: dur + 0.15 }];
     } else if (hostRole === 'hero_intro') {
       hh = 520; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h`;
       hostWindows = wholeScene;
@@ -12365,6 +12435,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // applied to the 'single' layout below.
     const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
     const panelY0 = 260, panelY1 = isLargeHostScene ? 545 : 760, panelW = 760, panelXs = [140, 1020];
+    const cmpTextBandH = Math.round((panelY1 - panelY0) * 0.38);
     // Phase 4.5 local dry-run found the navy fill nearly invisible against
     // the (also navy) background — lightened + given a gold border so each
     // panel reads as a distinct card regardless of background proximity.
@@ -12373,10 +12444,21 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
       const x0 = panelXs[i];
       const en = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
       const enPlain = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
-      ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
-      ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
-      const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: 36, color: 'white' });
-      drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, en, { numFontBase: 62, textFontBase: 28 });
+      if (comparisonObjectIdx[i] !== -1) {
+        // Phase 5 Section A — the object (composited above, filling the
+        // top of this panel) IS the primary visual now; only a small
+        // legibility scrim sits behind the label/number band beneath it,
+        // never a full-panel color fill or a generic rectangle "card".
+        const bandY = panelY1 - cmpTextBandH;
+        ov.push(`drawbox=x=${x0}:y=${bandY}:w=${panelW}:h=${cmpTextBandH}:color=0x0d1226@0.72:t=fill:enable='${enPlain}'`);
+        const labelH = drawFittedLabel(x0, bandY + 12, panelW, sl.label, en, { baseFontSize: 30, color: '0xC99E4C' });
+        drawPanelContent(x0, bandY + 12 + labelH + 6, panelY1 - 10, panelW, sl.unit, en, { numFontBase: 44, textFontBase: 22 });
+      } else {
+        ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
+        ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
+        const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: 36, color: 'white' });
+        drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, en, { numFontBase: 62, textFontBase: 28 });
+      }
     });
     const bothEn = `between(t\\,${Math.max(slots[0].unit.start, slots[1].unit.start).toFixed(2)}\\,${durEnd})`;
     const connector = screenType === 'before_after' ? '->' : 'VS';
@@ -12412,6 +12494,21 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
         ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=white:fontsize=44:x=${x0 - gap / 2}-text_w/2:y=${Math.round((y0 + y1) / 2)}:enable='${prevEn}'`);
       }
     });
+  } else if (useMoneyFlowForm && slots.length) {
+    // Phase 5 Section B — object -> arrow -> result FLOW instead of
+    // object-on-top/number-beneath: growth/accumulation/income concepts
+    // are inherently about a value moving or becoming a result, which a
+    // left-to-right flow communicates directly. Section F progressive
+    // reveal: arrow and result each hold back an extra beat so the flow
+    // visibly happens rather than appearing pre-assembled.
+    const sl = slots[0];
+    const baseStart = sl.unit.start;
+    const arrowStart = baseStart + Math.min(0.3, dur * 0.15);
+    const resultStart = baseStart + Math.min(0.6, dur * 0.3);
+    const arrowEnQ = `between(t\\,${arrowStart.toFixed(2)}\\,${durEnd})`;
+    const resultEnQ = `between(t\\,${resultStart.toFixed(2)}\\,${durEnd})`;
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='→':fontcolor=0xC99E4C:fontsize=64:x=480:y=490:enable='${arrowEnQ}'`);
+    drawPanelContent(560, 400, 640, 700, sl.unit, resultEnQ, { numFontBase: 72, textFontBase: 34 });
   } else if (useCharacterObjectForm && slots.length) {
     // Phase 5 — the illustrated object (composited above, left-of-center)
     // is the visual anchor; the host (right side, presenting_pointing)
@@ -12419,10 +12516,11 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // object instead of in a bordered card -- no drawbox panel at all,
     // matching the benchmark's own "object + label beneath it" pattern
     // (Wealth Logic's folder/calendar/coin-stack scenes never wrap their
-    // objects in a UI panel).
+    // objects in a UI panel). Section F progressive reveal: the number
+    // holds back until just after the host enters (see hostWindows above).
     const sl = slots[0];
-    const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
-    const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
+    const numberStart = sl.unit.start + Math.min(0.6, dur * 0.3);
+    const enQ = `between(t\\,${numberStart.toFixed(2)}\\,${durEnd})`;
     drawPanelContent(220, 860, 970, 680, sl.unit, enQ, { numFontBase: 56, textFontBase: 30 });
   } else if (screenType === 'single' && slots.length && storyboard.host_role === 'outro_host') {
     // Phase 4.6 Step 5 — CTA/outro correction: the CEO rejected the
