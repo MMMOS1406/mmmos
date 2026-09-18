@@ -12507,7 +12507,11 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     const resultStart = baseStart + Math.min(0.6, dur * 0.3);
     const arrowEnQ = `between(t\\,${arrowStart.toFixed(2)}\\,${durEnd})`;
     const resultEnQ = `between(t\\,${resultStart.toFixed(2)}\\,${durEnd})`;
-    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='→':fontcolor=0xC99E4C:fontsize=64:x=480:y=490:enable='${arrowEnQ}'`);
+    // '->' not a unicode arrow glyph -- verified against a real rendered
+    // frame that the unicode arrow silently doesn't render at all with
+    // this font (the font has no glyph for it), matching why every other
+    // connector in this file already uses the plain-ASCII form.
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='->':fontcolor=0xC99E4C:fontsize=64:x=470:y=490:enable='${arrowEnQ}'`);
     drawPanelContent(560, 400, 640, 700, sl.unit, resultEnQ, { numFontBase: 72, textFontBase: 34 });
   } else if (useCharacterObjectForm && slots.length) {
     // Phase 5 — the illustrated object (composited above, left-of-center)
@@ -12519,9 +12523,17 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // objects in a UI panel). Section F progressive reveal: the number
     // holds back until just after the host enters (see hostWindows above).
     const sl = slots[0];
-    const numberStart = sl.unit.start + Math.min(0.6, dur * 0.3);
-    const enQ = `between(t\\,${numberStart.toFixed(2)}\\,${durEnd})`;
-    drawPanelContent(220, 860, 970, 680, sl.unit, enQ, { numFontBase: 56, textFontBase: 30 });
+    // Real-frame QA found a duplicate-text defect: when the unit has no
+    // number, drawPanelContent's text-fallback path wrapped the SAME
+    // sentence already shown in the caption bar directly on top of it,
+    // stacked and overlapping. The caption already carries that text --
+    // only draw this band when there's an actual number to show, which is
+    // the only case a number/label beneath the object adds anything.
+    if (sl.unit.numberLabel) {
+      const numberStart = sl.unit.start + Math.min(0.6, dur * 0.3);
+      const enQ = `between(t\\,${numberStart.toFixed(2)}\\,${durEnd})`;
+      drawPanelContent(220, 860, 970, 680, sl.unit, enQ, { numFontBase: 56, textFontBase: 30 });
+    }
   } else if (screenType === 'single' && slots.length && storyboard.host_role === 'outro_host') {
     // Phase 4.6 Step 5 — CTA/outro correction: the CEO rejected the
     // oversized static "HOUSING FINANCE"-style card as a large mostly-
