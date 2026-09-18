@@ -12591,11 +12591,14 @@ async function nextwaveV2SetIdeogramKey(req, res) {
 // table for an already-approved NextWave host pose with this exact role
 // tag before spending on a new Ideogram call. Nothing new is created here
 // -- same table every other engine's approved-asset lookups already use.
-async function _nextwaveV2FindExistingPose(poseRole) {
+async function _nextwaveV2FindExistingAsset(assetType, roleTag) {
   const rows = await sbGetSafe(
-    `production_assets_library?engine=eq.NextWave&asset_type=eq.host_pose&status=eq.approved&tags=cs.{role:${poseRole}}&select=id,asset_name,asset_url,tags&order=created_at.desc&limit=1`
+    `production_assets_library?engine=eq.NextWave&asset_type=eq.${assetType}&status=eq.approved&tags=cs.{role:${roleTag}}&select=id,asset_name,asset_url,tags&order=created_at.desc&limit=1`
   );
   return rows && rows[0] ? rows[0] : null;
+}
+async function _nextwaveV2FindExistingPose(poseRole) {
+  return _nextwaveV2FindExistingAsset('host_pose', poseRole);
 }
 
 // Real Ideogram v3 generate call (POST multipart/form-data, Api-Key header
@@ -12626,7 +12629,11 @@ async function nextwaveV2IdeogramCall({ prompt, characterReferencePath }) {
   const data = await res.json();
   const img = data && data.data && data.data[0];
   if (!img || !img.url) return { ok: false, error: 'ideogram_no_image_returned' };
-  return { ok: true, url: img.url, seed: img.seed, resolution: img.resolution, cost_usd: IDEOGRAM_COST_PER_IMAGE_USD };
+  // TURBO is $0.03/image normally, $0.10 with a character reference attached
+  // (Ideogram's own character-reference pricing tier) -- tracked per call so
+  // "cumulative spend" is exact rather than a flat assumed rate.
+  const cost = characterReferencePath ? IDEOGRAM_COST_PER_IMAGE_USD : 0.03;
+  return { ok: true, url: img.url, seed: img.seed, resolution: img.resolution, cost_usd: cost };
 }
 
 // Orchestrator: reuse if an approved pose with this role already exists,
@@ -12666,6 +12673,92 @@ async function nextwaveV2IdeogramResolvePose(poseRole, promptText) {
     tags: [`role:${poseRole}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
   });
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+// ── Phase 5 — illustrated OBJECT generation (not character poses) ──────────
+// CEO rejection of Phase 4.7: adding host poses to a card-first renderer
+// didn't change the mechanism. Benchmark forensics (Wealth Logic: folder,
+// pie chart, calendar, coin stack, bank statement, signpost) show the
+// actual gap is a missing library of concept-matched illustrated OBJECTS
+// that replace cards as the default. The old api/assets/nextwave-v2/icon_*
+// files were checked and are too simplistic (flat single-color silhouette
+// clip-art, no shading/detail) to read as part of the same illustrated
+// scene as the host -- reusing them as-is would not close the gap the CEO
+// identified, so these are new assets, not a port. No character reference
+// is used here (objects don't need identity consistency the way the host
+// does); a consistent style descriptor is baked into every prompt instead
+// so objects read as one coherent illustrated world together.
+async function _nextwaveV2FindExistingObject(objectRole) {
+  return _nextwaveV2FindExistingAsset('illustrated_object', objectRole);
+}
+async function nextwaveV2IdeogramResolveObject(objectRole, promptText) {
+  const existing = await _nextwaveV2FindExistingObject(objectRole);
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText }); // no character reference for objects
+  if (!gen.ok) return gen;
+
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const assetName = `nextwave_object_${objectRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'illustrated_object',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'approved',
+    tags: [`role:${objectRole}`, 'model:ideogram-v3-turbo', `cost_usd:${gen.cost_usd}`],
+  });
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+async function nextwaveV2ResolveObjectLocalPath(objectRole, renderId) {
+  try {
+    const existing = await _nextwaveV2FindExistingObject(objectRole);
+    if (!existing || !existing.asset_url) return null;
+    const res = await fetch(existing.asset_url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const localPath = join(tmpdir(), `nwv2-${renderId}-object-${objectRole}.png`);
+    await writeFile(localPath, buf);
+    return localPath;
+  } catch (e) {
+    return null;
+  }
+}
+// Bounded to the Phase 5 five-scene proof's object roles. Style descriptor
+// ("flat 2D vector illustration... navy and gold accent palette, clean
+// outlines, soft shading") is repeated in every prompt so objects read as
+// one coherent illustrated world together, matching the existing host art.
+const NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS = {
+  house: 'Flat 2D vector illustration of a single-family house, three-quarter angle, navy blue roof, warm beige walls, gold front door, soft shading, clean bold outlines, no text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  money_stack: 'Flat 2D vector illustration of a neat stack of gold coins beside a bound stack of dollar bills, soft shading, clean bold outlines, gold and cream color palette, no text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  document_folder: 'Flat 2D vector illustration of a manila folder holding a financial statement with a visible dollar sign on the paper, soft shading, clean bold outlines, tan and white color palette with a gold accent, no readable text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  calendar_time: 'Flat 2D vector illustration of a desk calendar with a bold number visible on the page and a small clock beside it, soft shading, clean bold outlines, cream and gold color palette, no readable text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  decision_signpost: 'Flat 2D vector illustration of a wooden signpost at a fork in a dirt road, two arrow signs pointing in opposite directions, soft shading, clean bold outlines, brown and gold color palette, no text on the signs, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+};
+async function nextwaveV2IdeogramGenerateObject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { object_role } = req.body || {};
+  const prompt = NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS[object_role];
+  if (!prompt) return res.status(400).json({ ok: false, error: `unknown object_role -- must be one of: ${Object.keys(NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS).join(', ')}` });
+  try {
+    const result = await nextwaveV2IdeogramResolveObject(object_role, prompt);
+    if (!result.ok) return res.status(502).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
 }
 
 // Downloads an approved Ideogram host pose to a per-render local file so
@@ -14177,6 +14270,7 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_ideogram_status')     return await nextwaveV2IdeogramStatus(req, res);
     if (action === 'nextwave_v2_set_ideogram_key')    return await nextwaveV2SetIdeogramKey(req, res);
     if (action === 'nextwave_v2_ideogram_generate_pose') return await nextwaveV2IdeogramGeneratePose(req, res);
+    if (action === 'nextwave_v2_ideogram_generate_object') return await nextwaveV2IdeogramGenerateObject(req, res);
     if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
