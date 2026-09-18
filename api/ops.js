@@ -11193,6 +11193,22 @@ async function nextwaveNarrationSynthesize(req, res) {
 // nextwaveNarrationSynthesize above, or SMM's smSynthesizeNarration* --
 // narration stays exactly as it already exists in this file.
 
+// Phase 5 — maps an existing concept tag to one of the 5 Ideogram-generated
+// illustrated objects (see NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS below).
+// Deliberately reuses the concept vocabulary already proven by
+// nextwaveClassifyVisualIntent instead of inventing a second taxonomy.
+const NEXTWAVE_V2_CONCEPT_TO_OBJECT = {
+  home: 'house', car: 'house',
+  growth: 'money_stack', accumulation: 'money_stack', income: 'money_stack',
+  opportunity_cost: 'money_stack', cash_flow: 'money_stack', compounding: 'money_stack',
+  market_movement: 'money_stack', goal_progress: 'money_stack',
+  tax: 'document_folder', retirement: 'document_folder', savings: 'document_folder',
+  bills: 'document_folder', bank_account: 'document_folder', credit_card: 'document_folder',
+  time: 'calendar_time', delay: 'calendar_time',
+  decision: 'decision_signpost', risk: 'decision_signpost', tradeoff: 'decision_signpost',
+  control: 'decision_signpost', loss: 'decision_signpost', debt: 'decision_signpost',
+};
+
 const NEXTWAVE_V2_CONCEPT_KEYWORDS = {
   debt: ['debt', 'owe', 'balance', 'loan', 'borrowed'],
   credit_card: ['credit card', 'minimum payment', 'interest rate on your card'],
@@ -12112,6 +12128,35 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // of the old 2-role (point_at_comparison/beside_calculation) + tiny
   // 'intro' default.
   const includeHost = hostRole !== 'step_back' && hostRole !== 'data_only';
+  const largeHostRoles = new Set(['hero_intro', 'presenter_large', 'outro_host']);
+  // ── Phase 5 — CEO rejection of Phase 4.7: "adding host poses to a card-
+  // first renderer does not solve the problem." A 'single' scene (one
+  // concept, no structural comparison/buildup) is exactly the case that
+  // used to fall through to a bare card -- the CEO's most specific
+  // complaint. Before deciding to render cards at all, check whether this
+  // scene's own concept tags map to a real generated illustrated object
+  // (house/money_stack/document_folder/calendar_time/decision_signpost);
+  // if one exists, this scene uses the new character_object branch below
+  // instead -- the object becomes the visual anchor, the host gestures at
+  // it, and the number/text sits near the object rather than in a card.
+  // Deterministic (not dependent on the storyboard model choosing
+  // correctly), and gracefully degrades to the original card behavior
+  // whenever no object is available yet, so this can never break a render.
+  // Computed BEFORE host-pose selection below so a character_object scene
+  // can force the presenting_pointing pose regardless of its assigned
+  // host_role -- the object is what's being pointed at now.
+  const sceneConceptTags = [...new Set(scene.units.flatMap((u) => u.concept_tags || []))];
+  let characterObjectRole = null;
+  if (screenType === 'single' && slots.length === 1) {
+    for (const tag of sceneConceptTags) {
+      if (NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]) { characterObjectRole = NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]; break; }
+    }
+  }
+  const characterObjectLocalPath = characterObjectRole
+    ? await nextwaveV2ResolveObjectLocalPath(characterObjectRole, renderId)
+    : null;
+  const useCharacterObjectForm = !!characterObjectLocalPath;
+
   // Phase 4.7 — real gesture/interaction poses (Ideogram-generated,
   // character-referenced against the original host so identity is
   // preserved) replace the old two near-identical headshot crops for the
@@ -12122,11 +12167,12 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   const pointingRoles = new Set(['point_left', 'point_right', 'beside_comparison', 'point_at_comparison']);
   const calculationRoles = new Set(['beside_calculation', 'reaction_emphasis']);
   let poseTag = null;
-  if (pointingRoles.has(hostRole)) poseTag = 'presenting_pointing';
+  if (useCharacterObjectForm) poseTag = 'presenting_pointing';
+  else if (pointingRoles.has(hostRole)) poseTag = 'presenting_pointing';
   else if (calculationRoles.has(hostRole)) poseTag = 'holding_calculation';
   else if (hostRole === 'outro_host') poseTag = 'reaction_outro';
   const useHost = poseTag
-    ? await nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, pointingRoles.has(hostRole) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT)
+    ? await nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, (pointingRoles.has(hostRole) || useCharacterObjectForm) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT)
     : NEXTWAVE_V2_HOST_DEFAULT;
   // Icons are now only used by the 'single' fallback layout — comparison/
   // before_after/buildup are built from drawbox panels + drawtext below,
@@ -12135,12 +12181,13 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // when the host role is large (hero_intro/presenter_large/outro_host):
   // the host itself is the visual anchor for that scene now, so a second
   // decorative icon competing for the same "concept" role is clutter.
-  const largeHostRoles = new Set(['hero_intro', 'presenter_large', 'outro_host']);
-  const icons = (screenType === 'single' && slots.length && !largeHostRoles.has(storyboard.host_role)) ? nextwaveV2SceneIcons(scene).slice(0, 1) : [];
+  const icons = (screenType === 'single' && slots.length && !useCharacterObjectForm && !largeHostRoles.has(storyboard.host_role)) ? nextwaveV2SceneIcons(scene).slice(0, 1) : [];
 
   const inputs = ['-loop', '1', '-i', NEXTWAVE_V2_BG];
   icons.forEach((p) => inputs.push('-i', p));
-  const hostIdx = icons.length + 1;
+  if (useCharacterObjectForm) inputs.push('-i', characterObjectLocalPath);
+  const objectIdx = useCharacterObjectForm ? icons.length + 1 : -1;
+  const hostIdx = icons.length + (useCharacterObjectForm ? 1 : 0) + 1;
   if (includeHost) inputs.push('-i', useHost);
   // Phase 4.6 — no audio input here at all: narration is muxed once onto
   // the final concatenated video in nextwaveV2BuildRender, not per scene.
@@ -12160,6 +12207,20 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     last = 'vic';
   }
 
+  if (useCharacterObjectForm) {
+    // Phase 5 — the illustrated object IS the scene, not a decoration next
+    // to a card: large (~620px), left-of-center, roughly where Wealth
+    // Logic's own object compositions place the evidence, so the host
+    // (added below, right side, presenting_pointing) reads as gesturing
+    // toward it rather than the two elements sitting unrelated.
+    // Sized/positioned to leave a clear band below it (y 860-970) for the
+    // number/text, and clear of the host's right-side column (x 1380+).
+    const objH = 550, objCenterY = 560;
+    filters.push(`[${objectIdx}:v]scale=-1:${objH}[objimg]`);
+    filters.push(`[${last}][objimg]overlay=x='560-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='between(t,0,${durEnd})'[vobj]`);
+    last = 'vobj';
+  }
+
   if (includeHost) {
     let hx, hy, hh, hostWindows;
     const wholeScene = [{ start: 0, end: dur + 0.15 }];
@@ -12172,7 +12233,15 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // reaction_emphasis is a deliberately brief larger beat at this
     // scene's own punchline (its last unit), not present for the whole
     // scene, so it reads as emphasis rather than a static presence.
-    if (hostRole === 'hero_intro') {
+    if (useCharacterObjectForm) {
+      // Phase 5 — fixed right-side position regardless of hostRole (which
+      // may have been deterministically forced to hero_intro/outro_host by
+      // the first/last-scene override): the object owns the left/center of
+      // the frame, so the host must not use hero_intro's centered position,
+      // which would sit directly on top of it.
+      hh = 480; hx = `${W}-overlay_w-60`; hy = `${H}-overlay_h`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'hero_intro') {
       hh = 520; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h`;
       hostWindows = wholeScene;
     } else if (hostRole === 'presenter_large') {
@@ -12343,6 +12412,18 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
         ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=white:fontsize=44:x=${x0 - gap / 2}-text_w/2:y=${Math.round((y0 + y1) / 2)}:enable='${prevEn}'`);
       }
     });
+  } else if (useCharacterObjectForm && slots.length) {
+    // Phase 5 — the illustrated object (composited above, left-of-center)
+    // is the visual anchor; the host (right side, presenting_pointing)
+    // gestures toward it. The unit's number/text sits directly under the
+    // object instead of in a bordered card -- no drawbox panel at all,
+    // matching the benchmark's own "object + label beneath it" pattern
+    // (Wealth Logic's folder/calendar/coin-stack scenes never wrap their
+    // objects in a UI panel).
+    const sl = slots[0];
+    const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
+    const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
+    drawPanelContent(220, 860, 970, 680, sl.unit, enQ, { numFontBase: 56, textFontBase: 30 });
   } else if (screenType === 'single' && slots.length && storyboard.host_role === 'outro_host') {
     // Phase 4.6 Step 5 — CTA/outro correction: the CEO rejected the
     // oversized static "HOUSING FINANCE"-style card as a large mostly-
