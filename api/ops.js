@@ -11358,7 +11358,23 @@ const NEXTWAVE_V2_DYNAMIC_NUMBER_RE = new RegExp(
   // Phase 4.5C: the unit-word alternation widened from dollars?/percent to
   // also include duration words and "times", so "six months" and "three
   // times" are recognized the same way "seven percent" already was.
-  '(?:(?!\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b)[^.!?]){0,15}' +
+  // Phase 5.2 — real-candidate QA found "one hundred fifty dollars a
+  // month" extracted as "151 MONTHS": the GREEDY {0,15} gap skipped right
+  // past the first valid unit word ("dollars") to grab a LATER, wrong one
+  // ("month") within the 15-char window, and "dollars a" then got
+  // mis-parsed as extra number-words (_nextwaveWordsToNumber has no
+  // "dollars"/"a" tokens of its own, but the stray "a" reads as the
+  // number-word "a" = 1, corrupting 150 into 151). Made LAZY ({0,15}?) so
+  // the gap stops at the FIRST valid unit word it reaches instead of the
+  // furthest one within range -- verified against a real regex test: "one
+  // hundred fifty dollars a month" now correctly stops at "...dollars",
+  // and a second latent case this same bug would have hit ("ten thousand
+  // dollars a year" -> would have read as a duration) is fixed the same
+  // way. The negative-lookahead behavior Phase 4.1B needed (never cross
+  // into a NEW number word) is unaffected -- lazy vs. greedy only changes
+  // which valid unit word wins when more than one appears in range, and
+  // the nearest one is always the correct one.
+  '(?:(?!\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b)[^.!?]){0,15}?' +
   '\\b(?:dollars?|percent|days?|weeks?|months?|years?|times)\\b',
   'i',
 );
