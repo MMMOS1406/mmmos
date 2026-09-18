@@ -11208,6 +11208,30 @@ const NEXTWAVE_V2_CONCEPT_TO_OBJECT = {
   decision: 'decision_signpost', risk: 'decision_signpost', tradeoff: 'decision_signpost',
   control: 'decision_signpost', loss: 'decision_signpost', debt: 'decision_signpost',
 };
+// Phase 5.1 Section 5 — real-frame QA found `nextwaveClassifyVisualIntent`'s
+// hit-count ranking sometimes ranked growth/compounding ahead of time/delay
+// on a sentence that was semantically ABOUT a time span ("...over time").
+// Object resolution now checks tags in this fixed semantic-specificity
+// order rather than the classifier's generic ranking -- decision/time
+// concepts are usually the actual point of a sentence when present at all,
+// while the growth/money family co-occurs with almost everything financial
+// and should only win when nothing more specific is present. Generalizable
+// (a fixed priority over the existing tag vocabulary, not a per-script
+// rule) -- applies to every script, not just the one that surfaced this.
+const NEXTWAVE_V2_OBJECT_TAG_PRIORITY = [
+  'decision', 'risk', 'tradeoff', 'control', 'loss', 'debt',
+  'time', 'delay',
+  'tax', 'retirement', 'savings', 'bills', 'bank_account', 'credit_card',
+  'home', 'car',
+  'growth', 'accumulation', 'income', 'opportunity_cost', 'cash_flow', 'compounding', 'market_movement', 'goal_progress',
+];
+function _nextwaveV2ResolveObjectRole(tags) {
+  const tagSet = new Set(tags || []);
+  for (const tag of NEXTWAVE_V2_OBJECT_TAG_PRIORITY) {
+    if (tagSet.has(tag)) return NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag];
+  }
+  return null;
+}
 
 const NEXTWAVE_V2_CONCEPT_KEYWORDS = {
   debt: ['debt', 'owe', 'balance', 'loan', 'borrowed'],
@@ -12148,9 +12172,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   const sceneConceptTags = [...new Set(scene.units.flatMap((u) => u.concept_tags || []))];
   let characterObjectRole = null;
   if (screenType === 'single' && slots.length === 1) {
-    for (const tag of sceneConceptTags) {
-      if (NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]) { characterObjectRole = NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]; break; }
-    }
+    characterObjectRole = _nextwaveV2ResolveObjectRole(sceneConceptTags);
   }
   const characterObjectLocalPath = characterObjectRole
     ? await nextwaveV2ResolveObjectLocalPath(characterObjectRole, renderId)
@@ -12204,9 +12226,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     for (let i = 0; i < 2; i++) {
       const sl = slots[i];
       if (!sl) continue;
-      const tags = sl.unit.concept_tags || [];
-      let role = null;
-      for (const tag of tags) { if (NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]) { role = NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag]; break; } }
+      const role = _nextwaveV2ResolveObjectRole(sl.unit.concept_tags);
       comparisonObjectPaths[i] = role ? await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i) : null;
     }
   }
