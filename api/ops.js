@@ -12301,13 +12301,26 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
       const minVal = Math.min(0, ...usable.map((c) => c.magnitude));
       const valRange = Math.max(0.0001, maxVal - minVal);
       const n = usable.length;
+      // Phase 5.1 Section 4 principle applied to charts too — real-frame QA
+      // found every bar/point landing together whenever a buildup scene's
+      // slots share one narration unit (a real, common case: "$1,200 in
+      // rent, $300 in utilities, and $150 in insurance" is naturally ONE
+      // sentence/unit split into 3 slots). Forces each point to wait at
+      // least a minimum gap after the previous one regardless of the
+      // underlying units' own timing, so the chart visibly builds instead
+      // of appearing all at once.
+      const chartMinGap = Math.min(0.5, dur * 0.15);
+      usable.forEach((c, i) => {
+        const raw = c.sl.unit.start;
+        c.startT = i === 0 ? raw : Math.max(raw, usable[i - 1].startT + chartMinGap);
+      });
       if (isTimeSeries) {
         const marginX = 80;
         const stepX = n > 1 ? (chartX1 - chartX0 - marginX * 2) / (n - 1) : 0;
         const points = usable.map((c, i) => ({
           x: chartX0 + marginX + i * stepX,
           y: baseline - ((c.magnitude - minVal) / valRange) * (baseline - plotTop),
-          startT: c.sl.unit.start, magnitude: c.magnitude, numberLabel: c.sl.unit.numberLabel, label: c.sl.label,
+          startT: c.startT, magnitude: c.magnitude, numberLabel: c.sl.unit.numberLabel, label: c.sl.label,
         }));
         chartPlan = { type: 'line', points, chartX0, chartX1, chartY0, chartY1, baseline };
       } else {
@@ -12653,13 +12666,21 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // whole (Section 4 principle -- info develops, not just geometry).
     const { cx, cy, outerR, sl0, sl1 } = chartPlan;
     const legendX = Math.min(cx + outerR + 70, W - 620);
+    // Phase 5.1 Section 4 — same forced-minimum-gap fix as the card
+    // comparison branch: real-frame QA on this exact scene type found both
+    // legend rows landing together when sl0/sl1 share one narration unit
+    // (a real, common case -- a single sentence like "60% to X versus 40%
+    // to Y" is one unit split into two slots), which is precisely the
+    // "not simultaneously" defect this section exists to fix.
+    const donutMinGap = Math.min(0.6, dur * 0.2);
+    const legendStarts = [sl0.unit.start, Math.max(sl1.unit.start, sl0.unit.start + donutMinGap)];
     const rows = [
-      { sl: sl0, color: '0xC99E4C', y: cy - 110 },
-      { sl: sl1, color: '0x2E5A3A', y: cy + 20 },
+      { sl: sl0, color: '0xC99E4C', y: cy - 110, start: legendStarts[0] },
+      { sl: sl1, color: '0x2E5A3A', y: cy + 20, start: legendStarts[1] },
     ];
     rows.forEach((row) => {
-      const en = `between(t,${row.sl.unit.start.toFixed(2)},${durEnd})`;
-      const enQ = `between(t\\,${row.sl.unit.start.toFixed(2)}\\,${durEnd})`;
+      const en = `between(t,${row.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${row.start.toFixed(2)}\\,${durEnd})`;
       ov.push(`drawbox=x=${legendX}:y=${row.y}:w=36:h=36:color=${row.color}@0.95:t=fill:enable='${en}'`);
       const labelSafe = nextwaveV2SanitizeDrawtext(row.sl.label, 30);
       ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${labelSafe}':fontcolor=white:fontsize=30:x=${legendX + 50}:y=${row.y - 4}:enable='${enQ}'`);
@@ -12732,8 +12753,8 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
       const bx = chartX0 + i * (barW + gap);
       const barH = Math.max(8, Math.round((c.magnitude / maxVal) * (baseline - plotTop)));
       const by = baseline - barH;
-      const en = `between(t,${c.sl.unit.start.toFixed(2)},${durEnd})`;
-      const enQ = `between(t\\,${c.sl.unit.start.toFixed(2)}\\,${durEnd})`;
+      const en = `between(t,${c.startT.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${c.startT.toFixed(2)}\\,${durEnd})`;
       ov.push(`drawbox=x=${bx}:y=${by}:w=${barW}:h=${barH}:color=0xC99E4C@0.92:t=fill:enable='${en}'`);
       const valSafe = nextwaveV2SanitizeDrawtext(c.sl.unit.numberLabel || '', 20);
       ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${valSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(valSafe, 34, barW)}:x=${bx + barW / 2}-text_w/2:y=${by - 46}:enable='${enQ}'`);
