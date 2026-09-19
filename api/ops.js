@@ -12361,9 +12361,27 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
       const sl = slots[i];
       if (!sl) continue;
       const isDurationValue = /^\d+\s+(DAYS?|WEEKS?|MONTHS?|YEARS?)$/i.test(sl.unit.numberLabel || '');
-      const role = isDurationValue
-        ? 'calendar_time'
-        : _nextwaveV2ResolveObjectRole(sl.unit.concept_tags, i === 1 ? firstRole : null);
+      let role;
+      if (isDurationValue) {
+        role = 'calendar_time';
+      } else {
+        role = _nextwaveV2ResolveObjectRole(sl.unit.concept_tags, i === 1 ? firstRole : null);
+        // Phase 5.2A — a slot created by nextwaveV2RecoverComparisonSecondSide
+        // has no real narration text of its own to pull concept tags from
+        // (its label is derived purely from its value's type, e.g.
+        // "AMOUNT"), so the generic tag resolver above always returns null
+        // for it and it would otherwise fall back to a bare card -- exactly
+        // the outcome this recovery exists to avoid. A dollar or percent
+        // value is still a real, generalizable money concept even with no
+        // descriptive text attached, so it gets money_stack as a
+        // deterministic value-type fallback (never for a normal
+        // model-authored slot, which keeps its existing card fallback
+        // exactly as before).
+        if (!role && sl.__recovered) {
+          const v = sl.unit.numberLabel || '';
+          if ((/^\$/.test(v) || /%$/.test(v) || /^\d+X$/i.test(v)) && firstRole !== 'money_stack') role = 'money_stack';
+        }
+      }
       if (i === 0) firstRole = role;
       comparisonObjectPaths[i] = role ? await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i) : null;
       comparisonObjectKeyColors[i] = comparisonObjectPaths[i] ? await _nextwaveV2SampleCornerColor(comparisonObjectPaths[i]) : null;
