@@ -11226,10 +11226,22 @@ const NEXTWAVE_V2_OBJECT_TAG_PRIORITY = [
   'home', 'car',
   'growth', 'accumulation', 'income', 'opportunity_cost', 'cash_flow', 'compounding', 'market_movement', 'goal_progress',
 ];
-function _nextwaveV2ResolveObjectRole(tags) {
+// `excludeRole` (Phase 5.2 real-candidate QA) lets a second comparison
+// side skip a role its counterpart already claimed -- see the
+// comparisonObjectPaths loop below for why this is needed: two slots can
+// share one unit_index (one sentence expressing both comparison values),
+// which means they share the exact same concept_tags array, so without
+// this a shared incidental tag ("payoff time... saving $5,000 in
+// interest" both being on the SAME unit) silently gave both sides the
+// identical object -- a real defect found on a real rendered frame.
+function _nextwaveV2ResolveObjectRole(tags, excludeRole) {
   const tagSet = new Set(tags || []);
   for (const tag of NEXTWAVE_V2_OBJECT_TAG_PRIORITY) {
-    if (tagSet.has(tag)) return NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag];
+    if (tagSet.has(tag)) {
+      const role = NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag];
+      if (excludeRole && role === excludeRole) continue;
+      return role;
+    }
   }
   return null;
 }
@@ -12309,23 +12321,33 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   let comparisonObjectPaths = [null, null];
   let comparisonObjectKeyColors = [null, null];
   if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+    // Phase 5.2 real-candidate QA — a real render showed BOTH sides of a
+    // comparison resolving to the same object twice, from two different
+    // causes: (1) one side's unit mentioned "balance" -- a debt-tag hit --
+    // purely as an incidental callback, not because that side was
+    // actually about debt; (2) two slots sharing ONE unit_index (a single
+    // sentence expressing both comparison values, e.g. "that payoff time
+    // drops to four years, saving $5,000 in interest") share the exact
+    // same concept_tags array, so the generic resolver always returns the
+    // identical role for both. Both defeat "comparisons visually tell the
+    // comparison." Fixed two ways below: a slot whose own displayed value
+    // is already a duration (its numberLabel is "N YEARS"/"N MONTHS"/etc,
+    // the same real, already-validated value it renders on screen) is
+    // unambiguously about time regardless of incidental tags and takes
+    // calendar_time outright; and the second side is never allowed to
+    // silently duplicate whatever role the first side already claimed --
+    // it re-resolves excluding that role, falling back to a plain card
+    // for just that side if nothing else in its own tags fits, which is
+    // still strictly better than showing the wrong duplicate object.
+    let firstRole = null;
     for (let i = 0; i < 2; i++) {
       const sl = slots[i];
       if (!sl) continue;
-      // Phase 5.2 real-candidate QA — a real render showed BOTH sides of a
-      // comparison resolving to the same decision_signpost object (one
-      // side's unit mentioned "balance" -- a debt-tag hit -- purely as an
-      // incidental callback, not because that side was actually ABOUT
-      // debt), defeating "comparisons visually tell the comparison." When
-      // a slot's own displayed value is already a duration (its
-      // numberLabel is "N YEARS"/"N MONTHS"/etc, the same real,
-      // already-validated value this slot renders on screen), that slot
-      // is unambiguously about time regardless of which concept tags an
-      // incidental word elsewhere in its sentence also triggered -- this
-      // is a stronger, more specific signal than the generic tag-priority
-      // resolver and takes precedence over it for comparison sides only.
       const isDurationValue = /^\d+\s+(DAYS?|WEEKS?|MONTHS?|YEARS?)$/i.test(sl.unit.numberLabel || '');
-      const role = isDurationValue ? 'calendar_time' : _nextwaveV2ResolveObjectRole(sl.unit.concept_tags);
+      const role = isDurationValue
+        ? 'calendar_time'
+        : _nextwaveV2ResolveObjectRole(sl.unit.concept_tags, i === 1 ? firstRole : null);
+      if (i === 0) firstRole = role;
       comparisonObjectPaths[i] = role ? await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i) : null;
       comparisonObjectKeyColors[i] = comparisonObjectPaths[i] ? await _nextwaveV2SampleCornerColor(comparisonObjectPaths[i]) : null;
     }
@@ -12894,18 +12916,30 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // (Wealth Logic's folder/calendar/coin-stack scenes never wrap their
     // objects in a UI panel). Section F progressive reveal: the number
     // holds back until just after the host enters (see hostWindows above).
-    const sl = slots[0];
-    // Real-frame QA found a duplicate-text defect: when the unit has no
+    // Real-frame QA found a duplicate-text defect: when a unit has no
     // number, drawPanelContent's text-fallback path wrapped the SAME
     // sentence already shown in the caption bar directly on top of it,
     // stacked and overlapping. The caption already carries that text --
     // only draw this band when there's an actual number to show, which is
     // the only case a number/label beneath the object adds anything.
-    if (sl.unit.numberLabel) {
-      const numberStart = sl.unit.start + Math.min(0.6, dur * 0.3);
-      const enQ = `between(t\\,${numberStart.toFixed(2)}\\,${durEnd})`;
-      drawPanelContent(220, 860, 970, 680, sl.unit, enQ, { numFontBase: 56, textFontBase: 30 });
-    }
+    //
+    // Phase 5.2 real-candidate QA — this used to draw ONLY slots[0]'s
+    // number, enabled for the whole scene. A character-object scene can
+    // span several narration units (the object/host anchor the scene as a
+    // structural whole -- a legitimate, intentional persistence -- but a
+    // real render showed the number band frozen on the first unit for the
+    // scene's full ~15-21s while later units' real numbers never
+    // appeared at all). Iterates every timed unit instead, matching the
+    // caption band's own granularity, so each unit's own real number
+    // lands in sequence as its narration plays.
+    timedUnits.forEach((u, i) => {
+      if (!u.rankedNumberLabel) return;
+      const endT = i < timedUnits.length - 1 ? timedUnits[i + 1].start.toFixed(2) : durEnd;
+      const numberStart = i === 0 ? u.start + Math.min(0.6, dur * 0.3) : u.start;
+      const enQ = `between(t\\,${numberStart.toFixed(2)}\\,${endT})`;
+      const unitForContent = { idx: u.idx, text: u.text, numberLabel: u.rankedNumberLabel, secondaryLabel: null };
+      drawPanelContent(220, 860, 970, 680, unitForContent, enQ, { numFontBase: 56, textFontBase: 30 });
+    });
   } else if (screenType === 'single' && slots.length && storyboard.host_role === 'outro_host') {
     // Phase 4.6 Step 5 — CTA/outro correction: the CEO rejected the
     // oversized static "HOUSING FINANCE"-style card as a large mostly-
@@ -12915,22 +12949,32 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // lower-right (see the outro_host host-role window above).
     const ctaX = 140, ctaW = 980;
     // Phase 5.2 real-candidate QA — this branch used to draw ONLY
-    // slots[0], enabled for the whole scene duration. That's fine for a
-    // short single-sentence CTA scene, but a real candidate's closing
-    // scene can genuinely span several units (disclaimer + metaphor + CTA
-    // all landing in one final outro_host scene) -- when it does, the
-    // text sat frozen on slots[0]'s content for the entire scene (in one
-    // real render, 21 of 44.7 seconds) while the caption band kept
-    // advancing underneath it. Now cycles through every slot, each with
-    // its own sequential, non-overlapping window (ending at the next
-    // slot's start, or durEnd for the last one) -- the same
-    // never-overlapping pattern the caption band below already uses, so
-    // the content visibly advances alongside the narration instead of
-    // freezing after the first sentence.
-    slots.forEach((sl, i) => {
-      const endT = i < slots.length - 1 ? slots[i + 1].unit.start.toFixed(2) : durEnd;
-      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${endT})`;
-      drawPanelContent(ctaX, 300, 560, ctaW, sl.unit, enQ, { numFontBase: 56, textFontBase: 36 });
+    // slots[0], enabled for the whole scene duration. A real candidate's
+    // closing scene can genuinely span several narration UNITS (disclaimer
+    // + metaphor + CTA all landing in one final outro_host scene, a
+    // legitimate storyboard grouping) while the storyboard names only ONE
+    // (or few) load-bearing evidence SLOT for that scene -- slots track
+    // evidence, not narration granularity. Iterating slots alone still
+    // froze on one unit's content while later units' captions kept
+    // advancing underneath (confirmed on a real render: content froze at
+    // unit 6 while captions correctly advanced through units 6 and 7).
+    // Iterates every TIMED UNIT in the scene instead -- exactly the same
+    // set the caption band below advances through -- so the content card
+    // always tracks the same granularity captions do, showing that unit's
+    // own real number when it has one (never invented -- same
+    // rankedNumberLabel extractor used everywhere else) or its own
+    // wrapped text otherwise.
+    timedUnits.forEach((u, i) => {
+      // Same duplicate-text guard already established for the
+      // character-object branch above: a text-only unit's wrapped
+      // sentence would just repeat what the caption band already shows
+      // directly underneath it. Only draw this band when the unit has a
+      // real number to show, which is the only case it adds anything.
+      if (!u.rankedNumberLabel) return;
+      const endT = i < timedUnits.length - 1 ? timedUnits[i + 1].start.toFixed(2) : durEnd;
+      const enQ = `between(t\\,${u.start.toFixed(2)}\\,${endT})`;
+      const unitForContent = { idx: u.idx, text: u.text, numberLabel: u.rankedNumberLabel, secondaryLabel: null };
+      drawPanelContent(ctaX, 300, 560, ctaW, unitForContent, enQ, { numFontBase: 56, textFontBase: 36 });
     });
   } else if (screenType === 'single' && slots.length) {
     // Phase 4.5C Step 4 — 'single' no longer defaults to small host + bare
