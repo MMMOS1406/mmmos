@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
-import { nextwaveV2BindEvidenceDeterministically } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2 — deterministic evidence/label binding, kept in its own zero-dependency module so it's testable without this file's ffmpeg dependency
+import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -12080,6 +12080,23 @@ Respond with ONLY:
         if (sl.primary_value) used.add(sl.primary_value);
       });
       if (!slots.length) return deterministicFallback()[i];
+      // Phase 5.2A — a scene the model itself called "comparison"/
+      // "before_after" that only has ONE usable slot after validation
+      // would otherwise fall through the >= 2 comparison guard in
+      // nextwaveV2BuildSceneSegment entirely and land on the generic
+      // bordered-card structural safety net -- the rejected card-first
+      // look. Attempts deterministic recovery of a genuine second side
+      // from evidence already extracted from THIS scene's own real units
+      // (see nextwaveV2RecoverComparisonSecondSide) before falling back;
+      // if recovery still can't find a real second value, this scene has
+      // exactly one real fact and is downgraded to 'single' so it renders
+      // through the tested illustrated-object/chart path instead of a
+      // forced two-sided layout or a bare card.
+      let effectiveScreenType = validTypes.has(s.screen_type) ? s.screen_type : 'single';
+      if (effectiveScreenType === 'comparison' || effectiveScreenType === 'before_after') {
+        nextwaveV2RecoverComparisonSecondSide(slots, effectiveScreenType, scenes[i], plan);
+        if (slots.length < 2) effectiveScreenType = 'single';
+      }
       let host_role = validRoles.has(s.host_role) ? s.host_role : 'intro';
       // Phase 4.6 — the model's prompt-only compliance with the new host
       // choreography roles proved unreliable in testing (it repeatedly
@@ -12096,7 +12113,7 @@ Respond with ONLY:
       if (i === 0 && !largeRoles.has(host_role)) host_role = 'hero_intro';
       else if (i === scenes.length - 1 && scenes.length > 1 && host_role !== 'outro_host') host_role = 'outro_host';
       return {
-        screen_type: validTypes.has(s.screen_type) ? s.screen_type : 'single',
+        screen_type: effectiveScreenType,
         heading: (typeof s.heading === 'string' && s.heading.trim()) ? s.heading.trim().slice(0, 60) : 'THE KEY IDEA',
         slots,
         host_role,

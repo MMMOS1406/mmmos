@@ -11,7 +11,7 @@
 //
 // Run: node test_nextwave_v2_evidence_integrity.mjs
 
-import { nextwaveV2BindEvidenceDeterministically } from './lib/nextwaveV2EvidenceBinding.mjs';
+import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from './lib/nextwaveV2EvidenceBinding.mjs';
 
 let passCount = 0;
 let failCount = 0;
@@ -244,6 +244,68 @@ run('9. value-format coverage ($, %, K/M/B-style, commas, durations)', {
     { label: 'TOTAL RETURN', unit_index: 13, primary_value: '$1,200,000' },
     { label: 'TIME TO COMPOUND', unit_index: 14, primary_value: '18 MONTHS' },
   ],
+});
+
+// ── 10-12. ONE-SLOT COMPARISON RECOVERY (Phase 5.2A) ─────────────────────
+function runRecovery(name, { plan, scene, screenType, slots, expectedLen, expectedScreenType }) {
+  const planByIdx = {};
+  plan.forEach((u) => { planByIdx[u.__idx] = u; });
+  const result = nextwaveV2RecoverComparisonSecondSide(slots, screenType, scene, planByIdx);
+  let effectiveScreenType = screenType;
+  if ((effectiveScreenType === 'comparison' || effectiveScreenType === 'before_after') && result.length < 2) {
+    effectiveScreenType = 'single';
+  }
+  const ok = result.length === expectedLen && effectiveScreenType === expectedScreenType;
+  if (ok) {
+    passCount++;
+    console.log(`PASS  ${name}`);
+  } else {
+    failCount++;
+    failures.push({ name, actual: { len: result.length, screenType: effectiveScreenType, slots: result }, expected: { len: expectedLen, screenType: expectedScreenType } });
+    console.log(`FAIL  ${name}`);
+    console.log('      actual:  ', JSON.stringify({ len: result.length, screenType: effectiveScreenType, slots: result }));
+    console.log('      expected:', JSON.stringify({ len: expectedLen, screenType: expectedScreenType }));
+  }
+}
+
+// 10. Recovery A — a different real unit in the same scene has its own
+// real value the model never turned into a second slot.
+runRecovery('10. one-slot comparison recovery A (different unit in scene)', {
+  plan: [
+    unit(4, 'That payoff time drops to about four years.', ['4 YEARS']),
+    unit(5, 'You would save five thousand dollars in interest.', ['$5,000']),
+  ],
+  scene: { units: [{ __idx: 4 }, { __idx: 5 }] },
+  screenType: 'comparison',
+  slots: [{ unit_index: 4, label: 'NEW PAYOFF TIME', primary_value: '4 YEARS', secondary_value: null }],
+  expectedLen: 2,
+  expectedScreenType: 'comparison',
+});
+
+// 11. Recovery B — the SAME unit already carries a second real value the
+// model collapsed into one slot.
+runRecovery('11. one-slot comparison recovery B (second value, same unit)', {
+  plan: [
+    unit(4, 'That payoff time drops to about four years, saving five thousand dollars in interest.', ['4 YEARS', '$5,000']),
+  ],
+  scene: { units: [{ __idx: 4 }] },
+  screenType: 'comparison',
+  slots: [{ unit_index: 4, label: 'NEW PAYOFF TIME', primary_value: '4 YEARS', secondary_value: null }],
+  expectedLen: 2,
+  expectedScreenType: 'comparison',
+});
+
+// 12. No recoverable second value anywhere -> downgrade to 'single'
+// (never a forced two-sided layout, never a bare card).
+runRecovery("12. one-slot comparison with no recoverable second value -> downgrades to 'single'", {
+  plan: [
+    unit(4, 'That payoff time drops to about four years.', ['4 YEARS']),
+  ],
+  scene: { units: [{ __idx: 4 }] },
+  screenType: 'comparison',
+  slots: [{ unit_index: 4, label: 'NEW PAYOFF TIME', primary_value: '4 YEARS', secondary_value: null }],
+  expectedLen: 1,
+  expectedScreenType: 'single',
 });
 
 console.log('');
