@@ -11243,7 +11243,16 @@ const NEXTWAVE_V2_CONCEPT_KEYWORDS = {
   loss: ['lose', 'lost', 'losing', 'leak', 'drain', 'gone', 'disappear'],
   comparison: ['versus', ' vs ', 'compare', 'compared', 'comparing', 'compares',
     'which one', 'side by side', 'two paths', 'two options'],
-  time: ['years from now', 'over time', 'eventually', 'someday'],
+  // Phase 5.2 real-candidate QA — "that payoff time drops to about four
+  // years" carried no concept tag at all under the original keyword list
+  // (none of these phrases matched), so its comparison slot fell through
+  // to a plain color-fill card instead of the calendar_time illustration
+  // -- exactly the card-first regression this whole architecture exists
+  // to prevent. "years"/"months" alone are common enough duration words
+  // in finance narration (loan terms, payoff time, retirement horizons)
+  // that they're a reliable generalizable signal here, not a per-script
+  // keyword.
+  time: ['years from now', 'over time', 'eventually', 'someday', 'payoff time', 'years', 'months'],
   delay: ['wait', 'delay', 'later', 'put off', 'procrastinate'],
   retirement: ['retire', 'retirement', '401k', '401(k)', 'ira'],
   home: ['home', 'house', 'mortgage', 'rent'],
@@ -11256,7 +11265,13 @@ const NEXTWAVE_V2_CONCEPT_KEYWORDS = {
   opportunity_cost: ['instead of', 'opportunity cost', 'what you give up'],
   market_movement: ['market', 'stock price', 'index', 'portfolio value'],
   goal_progress: ['goal', 'progress', 'on track', 'milestone'],
-  cash_flow: ['cash flow', 'money in', 'money out', 'spend', 'spending'],
+  // Phase 5.2 real-candidate QA — "paying one hundred fifty dollars a
+  // month" carried no concept tag either (no keyword here matched
+  // "pay"/"paying"/"payment"), so this comparison slot also fell through
+  // to a plain card. A recurring payment amount is a real cash-flow
+  // concept (money moving out each period), which already maps to
+  // money_stack.
+  cash_flow: ['cash flow', 'money in', 'money out', 'spend', 'spending', 'pay', 'paying', 'payment', 'payments'],
   control: ['control', 'bracket', 'in your hands', 'decide how much'],
   tradeoff: ['tradeoff', 'trade-off', 'give up', 'sacrifice'],
   accumulation: ['stack up', 'pile up', 'add up', 'build up'],
@@ -12297,7 +12312,20 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     for (let i = 0; i < 2; i++) {
       const sl = slots[i];
       if (!sl) continue;
-      const role = _nextwaveV2ResolveObjectRole(sl.unit.concept_tags);
+      // Phase 5.2 real-candidate QA — a real render showed BOTH sides of a
+      // comparison resolving to the same decision_signpost object (one
+      // side's unit mentioned "balance" -- a debt-tag hit -- purely as an
+      // incidental callback, not because that side was actually ABOUT
+      // debt), defeating "comparisons visually tell the comparison." When
+      // a slot's own displayed value is already a duration (its
+      // numberLabel is "N YEARS"/"N MONTHS"/etc, the same real,
+      // already-validated value this slot renders on screen), that slot
+      // is unambiguously about time regardless of which concept tags an
+      // incidental word elsewhere in its sentence also triggered -- this
+      // is a stronger, more specific signal than the generic tag-priority
+      // resolver and takes precedence over it for comparison sides only.
+      const isDurationValue = /^\d+\s+(DAYS?|WEEKS?|MONTHS?|YEARS?)$/i.test(sl.unit.numberLabel || '');
+      const role = isDurationValue ? 'calendar_time' : _nextwaveV2ResolveObjectRole(sl.unit.concept_tags);
       comparisonObjectPaths[i] = role ? await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i) : null;
       comparisonObjectKeyColors[i] = comparisonObjectPaths[i] ? await _nextwaveV2SampleCornerColor(comparisonObjectPaths[i]) : null;
     }
@@ -12885,17 +12913,25 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // no drawbox panel at all, just a real (never invented) short line of
     // script text placed high/left, since the host is now large in the
     // lower-right (see the outro_host host-role window above).
-    const sl = slots[0];
-    const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
-    const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
     const ctaX = 140, ctaW = 980;
-    // Phase 4.6 Step 5 fix (post-candidate QA): the storyboard model's
-    // slot label for the CTA scene is a generic category tag (e.g. "CALL
-    // TO ACTION") rather than real content, which just repeated the
-    // scene heading and the CTA sentence a third time. The heading
-    // already carries the title, so drop the redundant label here and
-    // give the real CTA line the full content region.
-    drawPanelContent(ctaX, 300, 560, ctaW, sl.unit, enQ, { numFontBase: 56, textFontBase: 36 });
+    // Phase 5.2 real-candidate QA — this branch used to draw ONLY
+    // slots[0], enabled for the whole scene duration. That's fine for a
+    // short single-sentence CTA scene, but a real candidate's closing
+    // scene can genuinely span several units (disclaimer + metaphor + CTA
+    // all landing in one final outro_host scene) -- when it does, the
+    // text sat frozen on slots[0]'s content for the entire scene (in one
+    // real render, 21 of 44.7 seconds) while the caption band kept
+    // advancing underneath it. Now cycles through every slot, each with
+    // its own sequential, non-overlapping window (ending at the next
+    // slot's start, or durEnd for the last one) -- the same
+    // never-overlapping pattern the caption band below already uses, so
+    // the content visibly advances alongside the narration instead of
+    // freezing after the first sentence.
+    slots.forEach((sl, i) => {
+      const endT = i < slots.length - 1 ? slots[i + 1].unit.start.toFixed(2) : durEnd;
+      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${endT})`;
+      drawPanelContent(ctaX, 300, 560, ctaW, sl.unit, enQ, { numFontBase: 56, textFontBase: 36 });
+    });
   } else if (screenType === 'single' && slots.length) {
     // Phase 4.5C Step 4 — 'single' no longer defaults to small host + bare
     // icon + heading + large unused canvas (the CEO's specific rejection).
