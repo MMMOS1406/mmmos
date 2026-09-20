@@ -15985,6 +15985,46 @@ async function _nextwaveV2GeneratePose(taskId,poseRole){
     if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(e.message)+'</span>';
   }
 }
+// Phase 5.3 — GENERATE-stage: produces and persists the full automatic
+// scene/storyboard package (segmentation, evidence binding, chart/host/
+// object plan) BEFORE any render spend, so it's reviewable ahead of Build
+// and so Build renders exactly what was reviewed instead of silently
+// recomputing from the raw script. Not CEO-gated server-side (no vendor
+// spend at this stage — see nextwaveV2GenerateScenePackageAction), but
+// only reachable from the isTest preview panel already gated to CEO login.
+async function nextwaveV2GenerateStoryboardPackage(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_generate_scene_package',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({script:pkg.script}),
+    });
+    const data=await r.json();
+    if(data.ok&&data.scene_package){
+      pkg.nextwaveV2ScenePackage=data.scene_package;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      return{ok:true,scene_package:data.scene_package};
+    }
+    return{ok:false,reason:'nextwave_v2_generate_error',detail:data.error};
+  }catch(e){
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+// UI wrapper for the button below — mirrors the existing pose-generation
+// button's status-element/error-handling pattern in this same file.
+async function _nextwaveV2GenerateStoryboardUI(taskId,pkgId){
+  const statusEl=document.getElementById('nwv2-storyboard-status-'+taskId);
+  const p=(D.packages||[]).find(function(q){return String(q.id||'')===String(pkgId);});
+  if(!p){alert('Package not found');return;}
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--dim)">Generating storyboard (segmentation + evidence binding + scene plan, ~5-15s)…</span>';
+  const r=await nextwaveV2GenerateStoryboardPackage(p);
+  if(r.ok){
+    if(typeof saveAppState==='function')saveAppState();
+    if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+  }else{
+    if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(r.detail||r.reason||'failed')+'</span>';
+  }
+}
 // Real, synchronous (single request/response) render — no HeyGen-style
 // polling needed since ffmpeg + ElevenLabs both complete within this one
 // call. Stamps pkg.isTest + a readable workflowNotes marker (Step 10 —
@@ -16012,7 +16052,12 @@ async function nextwaveV2StartBuild(pkg){
     return{ok:false,reason:'voice_check_failed',detail:pkg.renderError};
   }
   try{
-    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_build_render',{script:pkg.script});
+    // Phase 5.3 — pass the reviewed GENERATE-stage scene package, when one
+    // exists, so Build renders exactly that storyboard instead of silently
+    // recomputing a fresh one from the raw script.
+    const buildBody={script:pkg.script};
+    if(pkg.nextwaveV2ScenePackage)buildBody.scene_package=pkg.nextwaveV2ScenePackage;
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_build_render',buildBody);
     const data=await r.json();
     if(data.ok&&data.video_url){
       pkg.videoUrl=data.video_url;
@@ -16021,7 +16066,7 @@ async function nextwaveV2StartBuild(pkg){
       pkg.renderStartedAt=new Date().toISOString();
       pkg.isTest=true; // NEXTWAVE_V2_PREVIEW_TEST — existing convention, keeps this out of real production consumption
       pkg.workflowNotes=(pkg.workflowNotes?pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST — Phase 4.4 build renderer, voice='+(data.voice_id_used||'default');
-      pkg.nextwaveV2RenderMeta={sceneCount:data.scene_count,scenes:data.scenes,meaningfulVisualChangeCount:data.meaningful_visual_change_count,placeholderCount:data.placeholder_count,narrationCharsSent:data.narration_chars_sent,renderId:data.render_id};
+      pkg.nextwaveV2RenderMeta={sceneCount:data.scene_count,scenes:data.scenes,meaningfulVisualChangeCount:data.meaningful_visual_change_count,placeholderCount:data.placeholder_count,narrationCharsSent:data.narration_chars_sent,renderId:data.render_id,usedPregeneratedScenePackage:data.used_pregenerated_scene_package,dynamicIllustrationsGenerated:data.dynamic_illustrations_generated,dynamicIllustrationSpendUsd:data.dynamic_illustration_spend_usd};
       try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
       console.log('[NextWave V2 Build] rendered:',data.render_id,'duration:',data.duration_sec+'s','scenes:',data.scene_count);
       return{ok:true,video_url:data.video_url};
@@ -18293,6 +18338,35 @@ function renderNextWaveLifecycleCard(task){
         body+=_ceoStatusPanel;
         body+=_voicePanel;
         body+=_ideogramPanel;
+        // Phase 5.3 — GENERATE-stage scene package: the automatic storyboard
+        // (screen types, host roles, illustrated-object concepts, chart
+        // requirements, evidence values per scene) is now a reviewable
+        // artifact before Build spends anything, instead of only existing
+        // transiently inside the render call.
+        if(pkg&&pkg.nextwaveV2ScenePackage){
+          const sp=pkg.nextwaveV2ScenePackage;
+          const sceneRows=(sp.scenes||[]).map(function(s){
+            const sb=s.storyboard||{};
+            const slotsTxt=(sb.slots||[]).map(function(sl){return escHTML(sl.label+': '+(sl.primary_value||'—')+(sl.secondary_value?' / '+sl.secondary_value:''));}).join(' · ');
+            return '<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">'
+              +'<div style="font-size:11px;color:#c99e4c;font-weight:700;font-family:\'JetBrains Mono\',monospace">SCENE '+(s.sceneIndex+1)+' · '+escHTML(sb.screen_type||'—')+' · '+escHTML(sb.scene_purpose||'—')+'</div>'
+              +'<div style="font-size:12px;color:#fff;margin-top:3px">'+escHTML(sb.heading||'')+'</div>'
+              +'<div style="font-size:11px;color:var(--dim);margin-top:3px">host: '+escHTML(sb.host_role||'—')+' · illustrates: '+escHTML(sb.illustration_concept||'none')+' · chart: '+escHTML(sb.chart_required?sb.chart_type_hint:'none')+' · motion: '+escHTML(sb.motion_intent||'—')+'</div>'
+              +(slotsTxt?'<div style="font-size:11px;color:#9fb3d8;margin-top:3px">'+slotsTxt+'</div>':'')
+              +'</div>';
+          }).join('');
+          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">GENERATED STORYBOARD — ${sp.scene_count} scene(s), ${sp.unit_count} unit(s)</div>
+            ${sceneRows}
+            <button style="width:100%;padding:8px;margin-top:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:11px;cursor:pointer" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">↻ Regenerate storyboard</button>
+          </div>`;
+        }else{
+          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">GENERATE STORYBOARD (Phase 5.3)</div>
+            <div id="nwv2-storyboard-status-${taskId}" style="font-size:12px;color:var(--dim);margin-bottom:8px">Not generated yet — Build will compute one on the fly if skipped, but generating first lets you review the automatic scene plan before spending on a render.</div>
+            <button style="width:100%;padding:9px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">🧩 Generate Storyboard</button>
+          </div>`;
+        }
         body+=_buildBtn;
       }
       setTimeout(function(){

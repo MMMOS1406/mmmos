@@ -11906,6 +11906,15 @@ async function nextwaveV2GenerateStoryboard(plan, scenes) {
     else if (numberIdxs.length >= 3) screen_type = 'buildup';
     const topConcept = [...scene.conceptSet].filter((c) => c !== 'none_detected')[0] || 'the numbers';
     const heading = topConcept.replace(/_/g, ' ').toUpperCase();
+    // Phase 5.3 — deterministic defaults for the new declared-storyboard
+    // fields (scene_purpose/illustration_concept/chart_required/
+    // progressive_reveal/motion_intent/text_hierarchy_primary_slot/
+    // safe_framing), so the no-API fallback path never leaves them
+    // undefined -- BUILD reads all seven unconditionally.
+    const scene_purpose = sceneIdx === 0 ? 'hook' : (sceneIdx === scenes.length - 1 ? 'resolve' : (screen_type === 'comparison' || screen_type === 'before_after') ? 'contrast' : (screen_type === 'buildup' ? 'build_tension' : 'reveal_evidence'));
+    const illustration_concept = topConcept === 'the numbers' ? null : topConcept;
+    const chart_required = screen_type === 'buildup' && numberIdxs.length >= 2;
+    const motion_intent = sceneIdx === 0 ? 'push_in' : (sceneIdx === scenes.length - 1 ? 'push_out' : 'push_in');
     let slots;
     if (screen_type === 'comparison' || screen_type === 'before_after') {
       const pick = (numberIdxs.length ? numberIdxs : idxs).slice(0, 2);
@@ -11930,7 +11939,15 @@ async function nextwaveV2GenerateStoryboard(plan, scenes) {
     else if (screen_type === 'comparison' || screen_type === 'before_after') host_role = 'beside_comparison';
     else if (screen_type === 'buildup') host_role = 'beside_calculation';
     else host_role = numberIdxs.length ? 'reaction_emphasis' : 'data_only';
-    return { screen_type, heading, slots, host_role, teaching_objective: '' };
+    return {
+      screen_type, heading, slots, host_role, teaching_objective: '',
+      scene_purpose, illustration_concept, chart_required,
+      chart_type_hint: chart_required ? 'bar' : 'none',
+      progressive_reveal: numberIdxs.length >= 2,
+      motion_intent,
+      text_hierarchy_primary_slot: slots.length ? 0 : null,
+      safe_framing: 'standard',
+    };
   });
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -11965,6 +11982,14 @@ For EACH scene, decide:
   - "intro" (small supporting host, only default when nothing else fits — do not use this as the automatic choice for every scene)
   Vary this across the script's scenes — a real video does not use the same host size/position in every scene. At least one scene should use a LARGE role (hero_intro/presenter_large/outro_host) and at least one scene (if the script has 3+ scenes) should use data_only or reaction_emphasis. Never park the host in the same small corner scene after scene.
 - teaching_objective: one sentence — what the viewer should understand even with audio muted.
+- scene_purpose: one of "hook" (opens the video, earns attention), "build_tension" (accumulates factors toward a result), "contrast" (sets two things against each other), "reveal_evidence" (lands one concrete fact), "resolve" (closes the video's argument or gives the takeaway/CTA). Pick the one that actually describes this scene's job in the argument, not just its screen_type.
+- illustration_concept: 2-4 words naming the ONE concrete thing that should be illustrated behind/beside the host for this scene (e.g. "credit card debt", "house purchase", "retirement savings", "a fork in the road decision") — grounded in what this scene's own units are actually about, never generic ("finance", "money" alone). Set to null only when the scene is purely transitional with nothing concrete to illustrate.
+- chart_required: true only when this scene's own numeric evidence is best shown as a real chart (a buildup of 2+ comparable magnitudes, a value changing over time, or a percentage split that sums near 100) rather than as plain text/cards. false otherwise — do not force a chart onto a scene with only one number or non-comparable values.
+- chart_type_hint: when chart_required is true, one of "bar" (2-4 comparable magnitudes), "line" (a value across a time progression), "donut" (a two-way percentage split); "none" when chart_required is false.
+- progressive_reveal: true when this scene's evidence should build up piece by piece as the narration reaches each one (almost always true for buildup/comparison scenes with 2+ real values); false when the scene makes one single point that should appear all at once.
+- motion_intent: one of "push_in" (slow zoom in — use for most scenes, and always for the opening hook), "push_out" (slow zoom out — reserved for a closing/resolving scene so the frame visibly settles/widens), "static" (no zoom — use only when a chart or fine detail needs a still frame to stay readable).
+- text_hierarchy_primary_slot: the 0-based index into THIS scene's own slots array naming which single slot is the most important evidence to visually emphasize (larger/first) — null if slots is empty.
+- safe_framing: "standard" for a normal scene, or "tight" only when this scene already has a large host role (hero_intro/presenter_large/outro_host) AND 2+ slots, since that combination is the one real case where the frame gets crowded and needs extra edge margin.
 
 EVIDENCE HIERARCHY — primary_value / secondary_value:
 Some units list one or more "values available" — real quantities this unit's own text already contains. For each slot:
@@ -11989,7 +12014,7 @@ ${scenesBlock}
 
 Respond with ONLY:
 <storyboard>
-{"scenes":[{"screen_type":"...","heading":"...","slots":[{"unit_index":0,"label":"...","primary_value":null,"secondary_value":null}],"host_role":"...","teaching_objective":"..."}]}
+{"scenes":[{"screen_type":"...","heading":"...","slots":[{"unit_index":0,"label":"...","primary_value":null,"secondary_value":null}],"host_role":"...","teaching_objective":"...","scene_purpose":"...","illustration_concept":"...","chart_required":false,"chart_type_hint":"none","progressive_reveal":true,"motion_intent":"push_in","text_hierarchy_primary_slot":0,"safe_framing":"standard"}]}
 </storyboard>`;
 
   try {
@@ -12112,12 +12137,32 @@ Respond with ONLY:
       const largeRoles = new Set(['hero_intro', 'presenter_large', 'outro_host']);
       if (i === 0 && !largeRoles.has(host_role)) host_role = 'hero_intro';
       else if (i === scenes.length - 1 && scenes.length > 1 && host_role !== 'outro_host') host_role = 'outro_host';
+      // Phase 5.3 — validate the new declared fields exactly like every
+      // other model-authored field above: never trust the model's own
+      // string/type outright, fall back to a deterministic, generalizable
+      // default (never a value the model invented for THIS script) when
+      // it's missing, malformed, or outside the allowed vocabulary.
+      const validPurposes = new Set(['hook', 'build_tension', 'contrast', 'reveal_evidence', 'resolve']);
+      const scene_purpose = validPurposes.has(s.scene_purpose) ? s.scene_purpose
+        : (i === 0 ? 'hook' : (i === scenes.length - 1 ? 'resolve' : (effectiveScreenType === 'comparison' || effectiveScreenType === 'before_after') ? 'contrast' : (effectiveScreenType === 'buildup' ? 'build_tension' : 'reveal_evidence')));
+      const illustration_concept = (typeof s.illustration_concept === 'string' && s.illustration_concept.trim() && s.illustration_concept.trim().toLowerCase() !== 'null')
+        ? s.illustration_concept.trim().toLowerCase().slice(0, 40) : null;
+      const chart_required = typeof s.chart_required === 'boolean' ? s.chart_required : (effectiveScreenType === 'buildup' && slots.length >= 2);
+      const validChartHints = new Set(['bar', 'line', 'donut', 'none']);
+      const chart_type_hint = chart_required && validChartHints.has(s.chart_type_hint) && s.chart_type_hint !== 'none' ? s.chart_type_hint : (chart_required ? 'bar' : 'none');
+      const progressive_reveal = typeof s.progressive_reveal === 'boolean' ? s.progressive_reveal : (slots.filter((sl) => sl.primary_value).length >= 2);
+      const validMotion = new Set(['push_in', 'push_out', 'static']);
+      const motion_intent = validMotion.has(s.motion_intent) ? s.motion_intent : (i === scenes.length - 1 && scenes.length > 1 ? 'push_out' : 'push_in');
+      const text_hierarchy_primary_slot = (Number.isInteger(s.text_hierarchy_primary_slot) && s.text_hierarchy_primary_slot >= 0 && s.text_hierarchy_primary_slot < slots.length) ? s.text_hierarchy_primary_slot : (slots.length ? 0 : null);
+      const safe_framing = (s.safe_framing === 'tight' && largeRoles.has(host_role) && slots.length >= 2) ? 'tight' : 'standard';
       return {
         screen_type: effectiveScreenType,
         heading: (typeof s.heading === 'string' && s.heading.trim()) ? s.heading.trim().slice(0, 60) : 'THE KEY IDEA',
         slots,
         host_role,
         teaching_objective: typeof s.teaching_objective === 'string' ? s.teaching_objective.slice(0, 200) : '',
+        scene_purpose, illustration_concept, chart_required, chart_type_hint,
+        progressive_reveal, motion_intent, text_hierarchy_primary_slot, safe_framing,
       };
     });
     return out;
@@ -12191,7 +12236,15 @@ function nextwaveV2FitLabel(text, baseFontSize, maxWidthPx, minFontSize) {
 // there is only ever one ElevenLabs call per Short now, so prosody never
 // resets at a scene cut. The master audio is muxed onto the final
 // concatenated video once, in nextwaveV2BuildRender — never per scene.
-async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard, sceneStart, sceneEnd) {
+async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard, sceneStart, sceneEnd, ideogramBudget) {
+  // Phase 5.3 — ideogramBudget is a mutable {remaining, spent_usd, generated}
+  // object shared across every scene of ONE render (owned/created by
+  // nextwaveV2BuildRender), so a per-render dynamic-illustration cost
+  // ceiling is enforced across the whole video, not reset per scene.
+  // Optional (defaults to a single-generation allowance) so any other
+  // caller of this function — nextwaveV2DebugStoryboard, tests — keeps
+  // working unchanged without passing one.
+  ideogramBudget = ideogramBudget || { remaining: 1, spent_usd: 0, generated: [] };
   const dur = Math.max(0.1, sceneEnd - sceneStart);
   // Frame-count rounding safety margin only (zoompan quantizes to whole
   // frames at 25fps, ~20-40ms) — not the old 1.2s hack, which existed to
@@ -12267,12 +12320,20 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // host_role -- the object is what's being pointed at now.
   const sceneConceptTags = [...new Set(scene.units.flatMap((u) => u.concept_tags || []))];
   let characterObjectRole = null;
+  let characterObjectLocalPath = null;
   if (screenType === 'single' && slots.length === 1) {
     characterObjectRole = _nextwaveV2ResolveObjectRole(sceneConceptTags);
+    if (characterObjectRole) {
+      characterObjectLocalPath = await nextwaveV2ResolveObjectLocalPath(characterObjectRole, renderId);
+    } else if (storyboard.illustration_concept) {
+      // Phase 5.3 — none of the 5 fixed roles matched this scene's tags,
+      // but the storyboard model named a concrete concept to illustrate.
+      // Generate (or reuse a prior script's banked asset for) a
+      // topic-specific object instead of falling through to a bare card.
+      const dyn = await nextwaveV2ResolveOrGenerateIllustratedObject(storyboard.illustration_concept, ideogramBudget);
+      if (dyn) { characterObjectRole = dyn.role; characterObjectLocalPath = dyn.path; }
+    }
   }
-  const characterObjectLocalPath = characterObjectRole
-    ? await nextwaveV2ResolveObjectLocalPath(characterObjectRole, renderId)
-    : null;
   const useCharacterObjectForm = !!characterObjectLocalPath;
   // Phase 5.1 Section 6 — sampled once per object per render (cheap, local
   // ffmpeg call, no new vendor) so the object's own flat generation
@@ -12383,7 +12444,16 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
         }
       }
       if (i === 0) firstRole = role;
-      comparisonObjectPaths[i] = role ? await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i) : null;
+      if (role) {
+        comparisonObjectPaths[i] = await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i);
+      } else if (!sl.__recovered && storyboard.illustration_concept && i === 0) {
+        // Phase 5.3 — only the first (real-narration) side gets a dynamic
+        // topic-specific object attempt; a recovered/synthetic second side
+        // has no real concept of its own to name and keeps its existing
+        // card fallback rather than misusing the scene's overall concept.
+        const dyn = await nextwaveV2ResolveOrGenerateIllustratedObject(storyboard.illustration_concept, ideogramBudget);
+        if (dyn) { comparisonObjectPaths[i] = dyn.path; firstRole = dyn.role; }
+      }
       comparisonObjectKeyColors[i] = comparisonObjectPaths[i] ? await _nextwaveV2SampleCornerColor(comparisonObjectPaths[i]) : null;
     }
   }
@@ -12403,11 +12473,26 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // whose values don't support a real chart.
   const isLargeHostSceneChart = largeHostRoles.has(storyboard.host_role);
   let chartPlan = null;
-  if (screenType === 'buildup' && slots.length >= 2) {
+  // Phase 5.3 — chart_required is a declared storyboard field, but the
+  // renderer keeps its own real value-shape validation as the final
+  // authority (never draw a chart from data that doesn't actually support
+  // one, regardless of what the model said). chart_required===false is
+  // still respected as an explicit downgrade: when the model has decided
+  // this scene's numbers don't deserve a chart, skip detection outright
+  // even if the shapes would technically qualify.
+  const chartAllowed = storyboard.chart_required !== false;
+  if (chartAllowed && screenType === 'buildup' && slots.length >= 2) {
     const chartSlots = slots.slice(0, 4).map((sl) => ({ sl, magnitude: _nextwaveV2ParseChartMagnitude(sl.unit.numberLabel) }));
     const usable = chartSlots.filter((c) => c.magnitude !== null);
     if (usable.length >= 2) {
-      const isTimeSeries = chartSlots.some((c) =>
+      // chart_type_hint==='line' biases a genuinely ambiguous buildup
+      // toward the time-series interpretation the model saw in the real
+      // narration text (e.g. "year 1... year 3... year 5" phrased loosely
+      // enough to miss the regex) — the underlying magnitude/usable-count
+      // validation above is unchanged, so this can only pick which real,
+      // already-qualified chart type to draw, never force a chart onto
+      // data that doesn't support one.
+      const isTimeSeries = (storyboard.chart_type_hint === 'line') || chartSlots.some((c) =>
         NEXTWAVE_V2_TIME_SERIES_RE.test(c.sl.label || '') || NEXTWAVE_V2_TIME_SERIES_RE.test(c.sl.unit.text || ''));
       const chartX0 = 300, chartX1 = 1620;
       const chartY0 = isLargeHostSceneChart ? 230 : 320, chartY1 = isLargeHostSceneChart ? 480 : 680;
@@ -12442,7 +12527,7 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
         chartPlan = { type: 'bar', points: usable, chartX0, chartX1, chartY0, chartY1, baseline, plotTop, maxVal };
       }
     }
-  } else if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+  } else if (chartAllowed && (screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
     const magA = _nextwaveV2ParseChartMagnitude(slots[0].unit.numberLabel);
     const magB = _nextwaveV2ParseChartMagnitude(slots[1].unit.numberLabel);
     const isPercentA = /%\s*$/.test(String(slots[0].unit.numberLabel || '').trim());
@@ -12492,7 +12577,23 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
   // the final concatenated video in nextwaveV2BuildRender, not per scene.
 
   const frames = Math.max(1, Math.round(dur * 25));
-  const filters = [`[0:v]scale=${W}:${H},zoompan=z='min(zoom+0.0004,1.06)':d=${frames}:s=${W}x${H}:fps=25[bg]`];
+  // Phase 5.3 — motion_intent is now a declared storyboard field (see
+  // nextwaveV2GenerateStoryboard) instead of one hardcoded constant for
+  // every scene in every script. "push_in" keeps the exact original Ken
+  // Burns expression unchanged (zero regression for the default/most-common
+  // case); "push_out" starts at the same 1.06 ceiling and counts back down
+  // to 1.0 so a closing/resolving scene visibly widens instead of
+  // tightening; "static" skips zoompan's per-frame recompute entirely
+  // (a still, unmoving background) for a chart/fine-detail scene that
+  // needs to stay perfectly readable.
+  const motionIntent = storyboard.motion_intent === 'push_out' ? 'push_out' : (storyboard.motion_intent === 'static' ? 'static' : 'push_in');
+  const zoomExpr = motionIntent === 'push_out' ? `if(eq(on,1),1.06,max(zoom-0.0004,1.0))`
+    : motionIntent === 'static' ? '1.0'
+    : `min(zoom+0.0004,1.06)`;
+  const bgFilter = motionIntent === 'static'
+    ? `[0:v]scale=${W}:${H}[bg]`
+    : `[0:v]scale=${W}:${H},zoompan=z='${zoomExpr}':d=${frames}:s=${W}x${H}:fps=25[bg]`;
+  const filters = [bgFilter];
   let last = 'bg';
 
   if (icons.length) {
@@ -12811,7 +12912,14 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     // when this scene's host role is large, same mitigation already
     // applied to the 'single' layout below.
     const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
-    const panelY0 = 260, panelY1 = isLargeHostScene ? 545 : 760, panelW = 760, panelXs = [140, 1020];
+    // Phase 5.3 — safe_framing is a declared field naming the one real case
+    // this file already had to hand-fix above (a large host role sharing
+    // the frame with 2+ evidence panels): 'tight' pulls both panels in from
+    // the outer edges and narrows them slightly for extra clearance,
+    // 'standard' (the default) keeps the exact original layout unchanged.
+    const isTightFraming = storyboard.safe_framing === 'tight';
+    const panelY0 = 260, panelY1 = isLargeHostScene ? 545 : 760;
+    const panelW = isTightFraming ? 700 : 760, panelXs = isTightFraming ? [170, 1050] : [140, 1020];
     const cmpTextBandH = Math.round((panelY1 - panelY0) * 0.38);
     // Phase 4.5 local dry-run found the navy fill nearly invisible against
     // the (also navy) background — lightened + given a gold border so each
@@ -12830,11 +12938,22 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
     const valueGap = Math.min(0.35, dur * 0.12);
     const panelStarts = [slots[0].unit.start, Math.max(slots[1].unit.start, slots[0].unit.start + minGap)];
     const valueStarts = panelStarts.map((s) => s + valueGap);
+    // Phase 5.3 — text_hierarchy_primary_slot is a declared field naming
+    // which slot is the load-bearing evidence for this scene; the primary
+    // side's value gets a real size boost (not just a color/order cue) so
+    // hierarchy is visible even muted, the secondary side steps down
+    // slightly so the two never compete as equals when the model has
+    // explicitly named one as more important. Defaults to a 1.0x/1.0x
+    // no-op when the field is absent or points elsewhere, matching the
+    // exact original sizes on both sides.
+    const hierarchyIdx = storyboard.text_hierarchy_primary_slot;
+    const emphasisScale = (i) => hierarchyIdx === 0 || hierarchyIdx === 1 ? (i === hierarchyIdx ? 1.12 : 0.92) : 1.0;
     slots.slice(0, 2).forEach((sl, i) => {
       const x0 = panelXs[i];
       const en = `between(t\\,${panelStarts[i].toFixed(2)}\\,${durEnd})`;
       const enPlain = `between(t,${panelStarts[i].toFixed(2)},${durEnd})`;
       const valueEnQ = `between(t\\,${valueStarts[i].toFixed(2)}\\,${durEnd})`;
+      const sc = emphasisScale(i);
       if (comparisonObjectIdx[i] !== -1) {
         // Phase 5 Section A — the object (composited above, filling the
         // top of this panel) IS the primary visual now; only a small
@@ -12842,13 +12961,13 @@ async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard
         // never a full-panel color fill or a generic rectangle "card".
         const bandY = panelY1 - cmpTextBandH;
         ov.push(`drawbox=x=${x0}:y=${bandY}:w=${panelW}:h=${cmpTextBandH}:color=0x0d1226@0.72:t=fill:enable='${enPlain}'`);
-        const labelH = drawFittedLabel(x0, bandY + 12, panelW, sl.label, en, { baseFontSize: 30, color: '0xC99E4C' });
-        drawPanelContent(x0, bandY + 12 + labelH + 6, panelY1 - 10, panelW, sl.unit, valueEnQ, { numFontBase: 44, textFontBase: 22 });
+        const labelH = drawFittedLabel(x0, bandY + 12, panelW, sl.label, en, { baseFontSize: Math.round(30 * sc), color: '0xC99E4C' });
+        drawPanelContent(x0, bandY + 12 + labelH + 6, panelY1 - 10, panelW, sl.unit, valueEnQ, { numFontBase: Math.round(44 * sc), textFontBase: Math.round(22 * sc) });
       } else {
         ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
         ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
-        const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: 36, color: 'white' });
-        drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, valueEnQ, { numFontBase: 62, textFontBase: 28 });
+        const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: Math.round(36 * sc), color: 'white' });
+        drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, valueEnQ, { numFontBase: Math.round(62 * sc), textFontBase: Math.round(28 * sc) });
       }
     });
     const bothEn = `between(t\\,${Math.max(valueStarts[0], valueStarts[1]).toFixed(2)}\\,${durEnd})`;
@@ -13204,6 +13323,13 @@ const IDEOGRAM_GENERATE_URL = 'https://api.ideogram.ai/v1/ideogram-v3/generate';
 // QUALITY) -- cheapest tier that still gets character-consistent output,
 // appropriate for a bounded proof-scope of 2-3 poses.
 const IDEOGRAM_COST_PER_IMAGE_USD = 0.10;
+// Phase 5.3 — per-render ceiling on brand-new dynamic illustrated-object
+// generations (nextwaveV2ResolveOrGenerateIllustratedObject). Reused
+// (already-banked) assets never count against this. At $0.03/image
+// (no character reference — objects don't use one), 3 new generations is
+// $0.09/render worst case, well inside the already-approved Ideogram
+// ceiling for this proof scope; raise only with explicit CEO authorization.
+const NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING = 3;
 
 let _ideogramKeyCache = null;
 async function _ideogramLoadKey() {
@@ -13387,6 +13513,53 @@ async function nextwaveV2ResolveObjectLocalPath(objectRole, renderId) {
   }
 }
 
+// Phase 5.3 — GENERALIZED topic-specific illustrated-object resolution.
+// The fixed NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS/CONCEPT_TO_OBJECT map (5
+// roles: house/money_stack/document_folder/calendar_time/decision_signpost)
+// stays exactly as-is and is always tried FIRST — this function only fires
+// when a scene's own storyboard-declared `illustration_concept` names a
+// real, concrete thing that doesn't map to any of those 5 fixed roles.
+// Same reuse-first/generate-and-bank pattern as nextwaveV2IdeogramResolveObject
+// (which this calls unchanged, not a copy of it): the new role is a
+// deterministic slug of the concept text itself, so the SECOND script that
+// ever mentions e.g. "car loan" reuses the exact same banked asset the
+// first script generated — the illustrated-object vocabulary grows with
+// real content instead of staying capped at 5 forever, without a human
+// ever hand-adding a new prompt to a fixed dictionary.
+//
+// Cost control (per the Phase 5.3 order): bounded by a per-render counter
+// the caller owns (see `budget` param) so one script can never trigger
+// unbounded new Ideogram spend — once the cap is hit this returns null
+// (never throws), which degrades that scene to the existing card/chart
+// fallback exactly like "no object available yet" already does today.
+function _nextwaveV2SlugifyConcept(concept) {
+  return String(concept || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || null;
+}
+async function nextwaveV2ResolveOrGenerateIllustratedObject(illustrationConcept, budget) {
+  const role = _nextwaveV2SlugifyConcept(illustrationConcept);
+  if (!role) return null;
+  // Reuse-first: an approved asset already banked under this exact concept
+  // slug (from ANY prior script, not just this render) costs nothing.
+  const existing = await _nextwaveV2FindExistingObject(role);
+  if (existing && existing.asset_url) {
+    return { role, path: await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`), reused: true, cost_usd: 0 };
+  }
+  if (!budget || budget.remaining <= 0) return null; // cost ceiling reached — degrade gracefully, never block the render
+  const prompt = `Flat 2D vector illustration representing the concept of "${illustrationConcept.replace(/["\n]/g, ' ').slice(0, 60)}" in a personal-finance context, soft shading, clean bold outlines, navy and gold accent color palette, no text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style, single clear central subject.`;
+  try {
+    const gen = await nextwaveV2IdeogramResolveObject(role, prompt);
+    if (!gen.ok) return null;
+    budget.remaining -= 1;
+    budget.spent_usd = (budget.spent_usd || 0) + (gen.cost_usd || 0);
+    (budget.generated || (budget.generated = [])).push({ role, concept: illustrationConcept, cost_usd: gen.cost_usd || 0, reused: !!gen.reused });
+    const localPath = await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`);
+    return localPath ? { role, path: localPath, reused: !!gen.reused, cost_usd: gen.cost_usd || 0 } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Phase 5.1 Section 6 — every Ideogram object is generated "isolated on a
 // plain dark navy background" (see NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS)
 // specifically so this works: the object's own corner is that flat
@@ -13526,6 +13699,92 @@ async function nextwaveV2DebugStoryboard(req, res) {
   }
 }
 
+// ── Phase 5.3 — GENERATE-stage scene package (persisted, reviewable) ──────
+// Promotes the exact same segmentation -> classification -> grouping ->
+// storyboard(+evidence-binding) computation nextwaveV2DebugStoryboard
+// already reproduces read-only, into a standing GENERATE-stage artifact:
+// this is what makes the automatic storyboard a first-class, reviewable
+// object instead of a value that only ever existed transiently inside one
+// BUILD call. Spends nothing but one Anthropic call (same budget/path
+// nextwaveV2GenerateStoryboard already uses) — no Ideogram, no ElevenLabs,
+// no ffmpeg — so it is safe to run at GENERATE time, before a human has
+// approved anything for BUILD to spend real render cost on.
+async function nextwaveV2GenerateScenePackage(script) {
+  const units = nextwaveSegmentMeaningUnits(script);
+  const plan = units.map((u, idx) => {
+    const tags = nextwaveClassifyVisualIntent(u.text);
+    const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+    const candidateValues = nextwaveExtractAllNumbers(u.text);
+    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+  });
+  const scenes = nextwaveV2GroupScenes(plan);
+  if (!scenes.length) throw new Error('no meaning units resolved from script');
+  const storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
+  return {
+    script,
+    generated_at: new Date().toISOString(),
+    unit_count: plan.length,
+    units: plan.map((u) => ({
+      idx: u.__idx, text: u.text, section: u.section, hasNumber: u.__hasNumber,
+      candidateValues: u.__candidateValues, concept_tags: u.concept_tags, fallback_concept: u.fallback_concept,
+    })),
+    scene_count: scenes.length,
+    scenes: scenes.map((s, i) => ({
+      sceneIndex: i,
+      unit_indices: s.units.map((u) => u.__idx),
+      storyboard: storyboards[i],
+    })),
+  };
+}
+// Not CEO-gated — same reasoning as nextwave_v2_debug_storyboard/
+// nextwave_v2_plan_visuals (read/compute-only, one bounded Anthropic call,
+// no vendor spend, no secret or financial-account action).
+async function nextwaveV2GenerateScenePackageAction(req, res) {
+  try {
+    const { script } = req.body || {};
+    if (!script || typeof script !== 'string' || !script.trim()) {
+      return res.status(400).json({ ok: false, error: 'script is required' });
+    }
+    if (script.length > 3000) {
+      return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 3000 characters)' });
+    }
+    const pkg = await nextwaveV2GenerateScenePackage(script);
+    return res.status(200).json({ ok: true, scene_package: pkg });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+// Rebuilds the exact {plan, scenes, storyboards} shape nextwaveV2BuildRender
+// needs, from a previously-generated (and possibly human-reviewed) scene
+// package, WITHOUT re-running segmentation/classification/the Claude
+// storyboard call. Returns null (never throws) on any structural mismatch
+// so the caller can safely fall back to a fresh recompute rather than
+// rendering from a corrupt/foreign package. Guarantees BUILD renders
+// EXACTLY the scenes/evidence that were reviewed in GENERATE — no silent
+// re-derivation from the raw script at render time.
+function _nextwaveV2ReconstructFromScenePackage(pkg) {
+  try {
+    if (!pkg || !Array.isArray(pkg.units) || !Array.isArray(pkg.scenes) || !pkg.units.length || !pkg.scenes.length) return null;
+    const plan = pkg.units.map((u) => ({
+      text: u.text, section: u.section,
+      __idx: u.idx, __hasNumber: !!u.hasNumber,
+      concept_tags: Array.isArray(u.concept_tags) ? u.concept_tags : [],
+      fallback_concept: u.fallback_concept,
+      __candidateValues: Array.isArray(u.candidateValues) ? u.candidateValues : [],
+    }));
+    if (plan.some((u) => typeof u.__idx !== 'number' || !plan[u.__idx])) return null;
+    const scenes = pkg.scenes.map((s) => ({
+      units: (s.unit_indices || []).map((i) => plan[i]).filter(Boolean),
+    }));
+    if (scenes.some((s) => !s.units.length)) return null;
+    const storyboards = pkg.scenes.map((s) => s.storyboard);
+    if (storyboards.some((s) => !s || !Array.isArray(s.slots))) return null;
+    return { plan, scenes, storyboards };
+  } catch (e) {
+    return null;
+  }
+}
+
 // Main entry point: real approved package script -> V2 plan -> scenes ->
 // real ElevenLabs narration per scene -> composited segments -> concatenated
 // final MP4 -> uploaded to the same Supabase Storage path SMM video already
@@ -13581,7 +13840,7 @@ async function nextwaveV2MuxMasterAudio({ videoPath, audioPath, id }) {
 async function nextwaveV2BuildRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { script, voice_id } = req.body || {};
+  const { script, voice_id, scene_package } = req.body || {};
   if (!script || typeof script !== 'string' || !script.trim()) {
     return res.status(400).json({ ok: false, error: 'script is required' });
   }
@@ -13592,24 +13851,46 @@ async function nextwaveV2BuildRender(req, res) {
   const savedVoice = await nextwaveV2GetVoiceConfig();
   const useVoiceId = voice_id || savedVoice.voice_id || null; // null -> nextwaveSynthesizeNarrationElevenLabs's own default
 
-  const units = nextwaveSegmentMeaningUnits(script);
-  const plan = units.map((u, idx) => {
-    const tags = nextwaveClassifyVisualIntent(u.text);
-    const fallback = nextwaveResolveFallbackConcept(u.section, tags);
-    // Phase 4.5D — every distinct real value in this unit's own text, not
-    // just the single structurally-ranked one, so the storyboard mapper can
-    // choose which is load-bearing instead of one being silently dropped.
-    const candidateValues = nextwaveExtractAllNumbers(u.text);
-    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
-  });
-  const scenes = nextwaveV2GroupScenes(plan);
-  if (!scenes.length) return res.status(400).json({ ok: false, error: 'no meaning units resolved from script' });
+  // Phase 5.3 — if the caller passed a GENERATE-stage scene_package (from
+  // nextwave_v2_generate_scene_package, possibly reviewed/approved in the
+  // interim), BUILD renders EXACTLY that reviewed storyboard rather than
+  // silently recomputing a fresh one from the raw script — approve-then-
+  // build integrity: what was reviewed is what gets rendered. Falls back
+  // to the original recompute-from-script behavior whenever no package is
+  // given or it fails structural reconstruction, so every existing caller
+  // (including nextwaveV2DebugStoryboard callers and any in-flight
+  // package without a scene_package field) keeps working unchanged.
+  const reconstructed = scene_package ? _nextwaveV2ReconstructFromScenePackage(scene_package) : null;
+  let plan, scenes, storyboards, usedPregenerated = false;
+  if (reconstructed) {
+    ({ plan, scenes, storyboards } = reconstructed);
+    usedPregenerated = true;
+  } else {
+    const units = nextwaveSegmentMeaningUnits(script);
+    plan = units.map((u, idx) => {
+      const tags = nextwaveClassifyVisualIntent(u.text);
+      const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+      // Phase 4.5D — every distinct real value in this unit's own text, not
+      // just the single structurally-ranked one, so the storyboard mapper can
+      // choose which is load-bearing instead of one being silently dropped.
+      const candidateValues = nextwaveExtractAllNumbers(u.text);
+      return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+    });
+    scenes = nextwaveV2GroupScenes(plan);
+    if (!scenes.length) return res.status(400).json({ ok: false, error: 'no meaning units resolved from script' });
+    // Phase 4.5 — one storyboard-mapping call for the whole script (not
+    // per-scene) so the model can see full context; deterministic, keyword-
+    // based fallback inside nextwaveV2GenerateStoryboard if this fails for
+    // any reason, so a render never blocks on it.
+    storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
+  }
 
-  // Phase 4.5 — one storyboard-mapping call for the whole script (not
-  // per-scene) so the model can see full context; deterministic, keyword-
-  // based fallback inside nextwaveV2GenerateStoryboard if this fails for
-  // any reason, so a render never blocks on it.
-  const storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
+  // Phase 5.3 — one Ideogram spend ceiling for the WHOLE render (shared
+  // across every scene's dynamic topic-specific illustration attempt), not
+  // per-scene, so a many-scene script can't multiply new-asset spend.
+  // Reuse (existing banked assets) is always free and uncapped; this only
+  // limits genuinely NEW generations. See nextwaveV2ResolveOrGenerateIllustratedObject.
+  const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
 
   const renderId = randomBytes(6).toString('hex');
 
@@ -13645,7 +13926,7 @@ async function nextwaveV2BuildRender(req, res) {
       const sceneUnits = scenes[i].units;
       const sceneStart = sceneUnits[0].__start;
       const sceneEnd = sceneUnits[sceneUnits.length - 1].__end;
-      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, renderId, storyboards[i], sceneStart, sceneEnd);
+      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, renderId, storyboards[i], sceneStart, sceneEnd, ideogramBudget);
       segPaths.push(seg.path);
       sceneReports.push({
         sceneIndex: i, unitCount: scenes[i].units.length, durationSec: Number(seg.durationSec.toFixed(2)),
@@ -13658,6 +13939,17 @@ async function nextwaveV2BuildRender(req, res) {
         // iterating an empty array and could never fail on a real empty
         // panel. Fixed by including it here.
         slotContent: seg.slotContent,
+        // Phase 5.3 — surface the declared storyboard fields on the same
+        // report a reviewer/QA pass already reads, so "what was the
+        // automatic mechanism's own plan for this scene" is inspectable
+        // from the render response itself, not just from re-reading the
+        // GENERATE-stage package separately.
+        scenePurpose: storyboards[i].scene_purpose,
+        illustrationConcept: storyboards[i].illustration_concept,
+        chartRequired: storyboards[i].chart_required,
+        chartTypeHint: storyboards[i].chart_type_hint,
+        motionIntent: storyboards[i].motion_intent,
+        safeFraming: storyboards[i].safe_framing,
       });
     }
     const concatVideoOut = await nextwaveV2ConcatVideoOnly({ paths: segPaths, id: renderId });
@@ -13719,6 +14011,10 @@ async function nextwaveV2BuildRender(req, res) {
       narration_calls: 1,
       render_id: renderId,
       qa_gate: qaGate,
+      used_pregenerated_scene_package: usedPregenerated,
+      dynamic_illustration_ceiling: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -14945,6 +15241,10 @@ export default async function handler(req, res) {
     // classify -> resolve). Does not touch narration above in any way.
     if (action === 'nextwave_v2_plan_visuals')       return await nextwaveV2PlanVisuals(req, res);
     if (action === 'nextwave_v2_debug_storyboard')   return await nextwaveV2DebugStoryboard(req, res);
+    // Phase 5.3 — GENERATE-stage persisted scene package (segmentation ->
+    // classification -> grouping -> storyboard incl. the new declared
+    // fields + evidence binding), read/compute-only like the two above.
+    if (action === 'nextwave_v2_generate_scene_package') return await nextwaveV2GenerateScenePackageAction(req, res);
     // NextWave V2 Phase 4.4 — Build-stage renderer (NextWave only, HeyGen/Submagic untouched)
     if (action === 'nextwave_list_elevenlabs_voices') return await nextwaveListElevenLabsVoices(req, res);
     if (action === 'nextwave_v2_get_voice')           return await nextwaveV2GetVoice(req, res);
