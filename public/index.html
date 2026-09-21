@@ -13073,6 +13073,27 @@ async function _pollHeygenRenders(){
         // v13.52.0 — chain into Submagic enhancement automatically (P2A Sprint 1).
         // v13.84.0 — AI Studio lifecycle: auto-trigger _aiStudioSendToSubmagic (raw HeyGen → Submagic,
         //            canvas removed). Both Short and Long use same direct path.
+        // NextWave V2 Production Architecture Freeze — checked FIRST, ahead of the
+        // generic pkg.lifecycleStage fallback below: a hybrid NextWave V2 package
+        // also carries pkg.lifecycleStage (set by _nextWaveSetStage, same as every
+        // NextWave lifecycle stage), which would otherwise misroute it into
+        // _aiStudioSendToSubmagic — a different engine's post-process path that
+        // knows nothing about this package's visual plan/targeted items.
+        if(pkg.nextwaveV2Hybrid){
+          const _pkgId=String(pkg.id);
+          setTimeout(function(){
+            if(typeof nextwaveV2StartHybridSubmagic==='function'){
+              console.log('[NextWave V2 Hybrid] HeyGen complete — starting hybrid Submagic for pkg',_pkgId);
+              nextwaveV2StartHybridSubmagic(pkg,data.durationSec||pkg.renderDurationSec||0).then(function(r){
+                if(r&&r.ok){ console.log('[NextWave V2 Hybrid] Submagic project started for pkg',_pkgId,'· projectId:',r.projectId); }
+                else { console.warn('[NextWave V2 Hybrid] Submagic auto-start failed:',r&&r.detail); }
+                try{ if(typeof saveAppState==='function') saveAppState(); }catch(_){}
+                try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+              });
+            }
+          },1500);
+          continue; // skip the generic branches below entirely for hybrid packages
+        }
         const _isAIStudioLifecycle = (D.aiStudioLifecycleStages && typeof D.aiStudioLifecycleStages==='object'
           && pkg.taskId && D.aiStudioLifecycleStages[String(pkg.taskId)])
           || !!(pkg.lifecycleStage); // v13.75.9 — fallback: pkg.lifecycleStage is Supabase-persisted; handles Brave refresh where aiStudioLifecycleStages may be empty
@@ -16081,6 +16102,163 @@ async function nextwaveV2StartBuild(pkg){
     return{ok:false,reason:'network_error',detail:e.message};
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// NextWave V2 PRODUCTION ARCHITECTURE FREEZE — hybrid HeyGen+Submagic path.
+// Replaces the Phase 5.3 custom illustrated renderer (nextwaveV2StartBuild
+// above, kept only for A/B reference — not called by this path) with the
+// CEO-frozen architecture: HeyGen native avatar+voice for the base video,
+// Submagic for captions/auto-B-roll/targeted ai-broll, NextWave's own
+// segmentation+evidence intelligence deciding WHAT Submagic should insert
+// and WHEN. No ElevenLabs anywhere in this path.
+// ══════════════════════════════════════════════════════════════════════
+
+// GENERATE stage — persists the reviewable visual plan (screen types
+// retired; this is visual_treatment/broll_prompt/emphasis_values per beat,
+// see nextwaveV2GenerateVisualPlan in ops.js). Spends nothing.
+async function nextwaveV2GenerateHybridVisualPlan(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_generate_visual_plan',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({script:pkg.script}),
+    });
+    const data=await r.json();
+    if(data.ok&&data.visual_plan_package){
+      pkg.nextwaveV2VisualPlan=data.visual_plan_package;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      return{ok:true,visual_plan_package:data.visual_plan_package};
+    }
+    return{ok:false,reason:'nextwave_v2_visual_plan_error',detail:data.error};
+  }catch(e){
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// Validated NextWave presenter config (Two-Tool Architecture Validation —
+// scale 1.4 confirmed to avoid both frame-domination and the rejected
+// tiny-corner look; voice_id is HeyGen's own native catalog, no ElevenLabs).
+const NEXTWAVE_V2_HYBRID_AVATAR_ID='Raul_Sitting_businesssofa_front_close';
+const NEXTWAVE_V2_HYBRID_VOICE_ID='40ad2901346b43a099cf179dbca89351'; // "Octavio — Firm & Measured"
+const NEXTWAVE_V2_HYBRID_BG_COLOR='#1a1a24';
+const NEXTWAVE_V2_HYBRID_SCALE=1.4;
+
+// BUILD step 1 — starts the HeyGen presenter render from the REVIEWED
+// visual plan's own script (approve-then-build integrity: this refuses to
+// run without a plan already generated in this stage, matching the CEO's
+// "BUILD must consume the reviewed package" requirement). Relies on the
+// EXISTING, already-running _pollHeygenRenders poller (started globally at
+// app init) to pick up completion — no new polling loop needed.
+async function nextwaveV2StartHybridBuild(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  if(!pkg.nextwaveV2VisualPlan)return{ok:false,reason:'missing_visual_plan',detail:'Generate the visual plan before starting Build.'};
+  const cleanScript=_cleanScriptForRender(pkg.script);
+  if(!cleanScript)return{ok:false,reason:'empty_script'};
+  try{
+    const r=await fetch('/api/ops?action=heygen_start_render',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
+        voice_id:NEXTWAVE_V2_HYBRID_VOICE_ID,
+        script:cleanScript,
+        background:{type:'color',value:NEXTWAVE_V2_HYBRID_BG_COLOR},
+        dimension:{width:1080,height:1920},
+        scale:NEXTWAVE_V2_HYBRID_SCALE,
+        test:false,
+      }),
+    });
+    const data=await r.json();
+    if(data.ok&&data.videoId){
+      pkg.heygenJobId=data.videoId;
+      pkg.renderStatus='rendering';
+      pkg.renderStartedAt=new Date().toISOString();
+      pkg.renderError=null;
+      pkg.nextwaveV2Hybrid=true; // marks this package for the hybrid Submagic branch in _pollHeygenRenders
+      pkg.isTest=true; // NEXTWAVE_V2_PREVIEW_TEST convention — same as the Phase 5.3 path
+      pkg.workflowNotes=(pkg.workflowNotes?pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST — hybrid HeyGen+Submagic architecture';
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Hybrid] HeyGen render started · jobId:',data.videoId);
+      return{ok:true,jobId:data.videoId};
+    }
+    pkg.renderStatus='failed';
+    pkg.renderError=(data.raw&&data.raw.error&&data.raw.error.message)||data.error||('HTTP '+(data.status||'?'));
+    return{ok:false,reason:'heygen_error',detail:pkg.renderError};
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// BUILD step 2 — called automatically by _pollHeygenRenders once the
+// HeyGen base video is ready (see the nextwaveV2Hybrid branch added to
+// that function below). Computes each beat's real start/end from the
+// REAL HeyGen duration (proportional to narration character count, same
+// technique already used throughout this file, now anchored to actual
+// output length instead of an estimate), builds Submagic's `items` array
+// ONLY for "targeted_broll" beats (never for "exact_evidence" — the CEO's
+// explicit rule that generative B-roll must never be asked to depict
+// exact financial numbers), and creates the Submagic project. Leaves
+// pkg.renderStatus='enhancing' so the EXISTING _pollSubmagicProjects
+// poller (unmodified) picks it up exactly like every other engine.
+async function nextwaveV2StartHybridSubmagic(pkg,realDurationSec){
+  const vp=pkg.nextwaveV2VisualPlan;
+  if(!vp||!Array.isArray(vp.beats)||!vp.beats.length){
+    pkg.submagicError='missing_visual_plan_at_submagic_stage';
+    return{ok:false,reason:'missing_visual_plan'};
+  }
+  const totalChars=Math.max(1,vp.units.reduce(function(sum,u){return sum+String(u.text||'').length;},0));
+  let cursor=0;
+  const items=[];
+  vp.beats.forEach(function(b){
+    const beatChars=b.unit_texts.reduce(function(sum,t){return sum+String(t||'').length;},0);
+    const beatDur=realDurationSec*(beatChars/totalChars);
+    const start=cursor;
+    const end=Math.min(realDurationSec,cursor+beatDur);
+    cursor=end;
+    if(b.visual&&b.visual.visual_treatment==='targeted_broll'&&b.visual.broll_prompt){
+      // Submagic ai-broll items: max 12s each, cannot overlap — beats are
+      // already sequential/non-overlapping by construction above.
+      const itemEnd=Math.min(end,start+12);
+      if(itemEnd-start>=1){
+        items.push({type:'ai-broll',startTime:Number(start.toFixed(2)),endTime:Number(itemEnd.toFixed(2)),prompt:b.visual.broll_prompt});
+      }
+    }
+  });
+  try{
+    const r=await fetch('/api/ops?action=submagic_create_project',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        title:'NextWave V2 Hybrid — '+(pkg.id||''),
+        language:'en',
+        videoUrl:pkg.heygenRawUrl||pkg.videoUrl,
+        templateName:'Hormozi 2',
+        magicZooms:true,
+        magicBrolls:true,
+        magicBrollsPercentage:50,
+        items:items,
+      }),
+    });
+    const data=await r.json();
+    if(data.ok&&data.projectId){
+      pkg.submagicProjectId=data.projectId;
+      pkg.renderStatus='enhancing';
+      pkg.submagicStartedAt=new Date().toISOString();
+      pkg.submagicError=null;
+      pkg.nextwaveV2TargetedItemsSent=items; // kept for QA/review — exactly what was requested and when
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Hybrid] Submagic project created:',data.projectId,'· targeted items:',items.length);
+      return{ok:true,projectId:data.projectId};
+    }
+    const errMsg=(data.raw&&(data.raw.error||data.raw.message))||data.error||('HTTP '+data.status);
+    pkg.submagicError=String(errMsg).slice(0,300);
+    return{ok:false,reason:'submagic_error',detail:pkg.submagicError};
+  }catch(e){
+    pkg.submagicError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
 function _srvEnglishCancelTask(taskId){
   if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
   const t=D.tasks.find(function(x){return String(x.id)===String(taskId);});
@@ -18315,16 +18493,17 @@ function renderNextWaveLifecycleCard(task){
       </div>`;
       const _buildBtn=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Rendering (ElevenLabs + ffmpeg, ~1-2 min)…';const r=await nextwaveV2StartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{btn.textContent=(p.renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)');if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}})()">${renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)'}</button>`;
       if(renderStatus==='enhanced'&&pkg&&pkg.videoUrl){
+        const _isHybrid=!!(pkg&&pkg.nextwaveV2Hybrid);
         body+=`<div style="padding:20px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.50);border-radius:12px;text-align:center;margin-bottom:12px">
           <div style="font-size:32px;margin-bottom:12px">🎬</div>
           <div style="font-size:16px;font-weight:800;color:#22c55e;margin-bottom:8px">NextWave V2 video ready</div>
-          <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">duration: ${escHTML(String(pkg.renderDurationSec||'—'))}s · ElevenLabs narration · original environment/icons</div>
+          <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">${_isHybrid?'HeyGen native avatar+voice · Submagic captions/B-roll/targeted-broll — frozen architecture':'ElevenLabs narration · original environment/icons — Phase 5.3 legacy renderer'} · duration: ${escHTML(String(pkg.renderDurationSec||pkg.submagicDurationSec||'—'))}s</div>
           <video src="${escHTML(pkg.videoUrl)}" controls style="width:100%;border-radius:10px;max-height:280px;background:#000;margin-top:8px"></video>
         </div>`;
         body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>`;
       }else{
-        if(renderStatus==='failed'){
-          const _errRaw=pkg&&pkg.renderError||'unknown';
+        if(renderStatus==='failed'||renderStatus==='enhance_failed'){
+          const _errRaw=pkg&&(pkg.renderError||pkg.submagicError)||'unknown';
           const _errFailed=escHTML((typeof _errRaw==='object'?(_errRaw.message||_errRaw.code||JSON.stringify(_errRaw)):String(_errRaw)).slice(0,250));
           const _isAuthErr=/ceo_authorization_required/i.test(String(_errRaw));
           body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
@@ -18332,42 +18511,66 @@ function renderNextWaveLifecycleCard(task){
             <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
             ${_isAuthErr?`<div style="margin-top:10px;font-size:11px;color:#f59e0b">Check the CEO SESSION status below. This usually means the active browser profile is not a completed CEO/Admin PIN login (e.g. it's on VA or Family, or Admin was never fully logged in this tab) — log out, select the Admin/CEO profile, and enter your PIN. This does not touch HeyGen and will not consume any HeyGen/Submagic quota.</div>`:''}
           </div>`;
+        }else if(renderStatus==='rendering'||renderStatus==='enhancing'){
+          body+=`<div style="padding:16px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.35);border-radius:12px;text-align:center;margin-bottom:12px">
+            <div style="font-size:12px;color:#fbbf24;font-weight:700">⏳ ${renderStatus==='rendering'?'HeyGen rendering presenter…':'Submagic applying captions/B-roll/targeted visuals…'}</div>
+            <div style="font-size:10px;color:var(--dim);margin-top:4px;font-family:'JetBrains Mono',monospace">Polls automatically every ${renderStatus==='rendering'?'45':'30'}s — no action needed.</div>
+          </div>`;
         }else{
-          body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">NextWave V2 renders the video directly — original environment + programmatic finance visuals + real ElevenLabs narration. No HeyGen, no Submagic.</div>`;
+          body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">Frozen architecture: HeyGen native avatar + native voice for the base video, Submagic for captions/auto-B-roll/targeted concept B-roll. No ElevenLabs, no custom renderer.</div>`;
         }
         body+=_ceoStatusPanel;
         body+=_voicePanel;
-        body+=_ideogramPanel;
-        // Phase 5.3 — GENERATE-stage scene package: the automatic storyboard
-        // (screen types, host roles, illustrated-object concepts, chart
-        // requirements, evidence values per scene) is now a reviewable
-        // artifact before Build spends anything, instead of only existing
-        // transiently inside the render call.
+        // NextWave V2 Production Architecture Freeze — GENERATE-stage hybrid
+        // visual plan (visual_treatment/broll_prompt/emphasis_values per beat,
+        // including any unsupported-precise-evidence flags) is now the primary
+        // reviewable artifact before Build spends anything on this frozen path.
+        if(pkg&&pkg.nextwaveV2VisualPlan){
+          const vp=pkg.nextwaveV2VisualPlan;
+          const treatColor={host:'#3b82f6',auto_broll:'#8b8b8b',targeted_broll:'#c99e4c',exact_evidence:'#22c55e'};
+          const beatRows=(vp.beats||[]).map(function(b){
+            const v=b.visual||{};
+            const tc=treatColor[v.visual_treatment]||'#8b8b8b';
+            return '<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">'
+              +'<div style="font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+tc+'">BEAT '+(b.beatIndex+1)+' · '+escHTML((v.visual_treatment||'—').toUpperCase())+(v.unsupported_precise?' · ⚠ UNSUPPORTED PRECISE VISUAL':'')+'</div>'
+              +'<div style="font-size:11px;color:#fff;margin-top:3px">'+escHTML((b.unit_texts||[]).join(' ').slice(0,140))+'</div>'
+              +(v.broll_prompt?'<div style="font-size:11px;color:#c99e4c;margin-top:3px">broll prompt: '+escHTML(v.broll_prompt)+'</div>':'')
+              +((v.emphasis_values||[]).length?'<div style="font-size:11px;color:#9fb3d8;margin-top:3px">exact evidence: '+escHTML(v.emphasis_values.join(' · '))+'</div>':'')
+              +(v.unsupported_reason?'<div style="font-size:10px;color:#f59e0b;margin-top:3px">'+escHTML(v.unsupported_reason)+'</div>':'')
+              +'</div>';
+          }).join('');
+          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">VISUAL PLAN — ${vp.beat_count} beat(s), ${vp.unit_count} unit(s)</div>
+            ${beatRows}
+            <button style="width:100%;padding:8px;margin-top:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:11px;cursor:pointer" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;event.target.textContent='Regenerating…';const r=await nextwaveV2GenerateHybridVisualPlan(p);if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Regenerate visual plan</button>
+          </div>`;
+          body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Starting HeyGen render…';const r=await nextwaveV2StartHybridBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('Build failed to start: '+(r&&(r.detail||r.reason)||'unknown'));btn.textContent='⚡ Start Build (HeyGen + Submagic)';if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}})()">⚡ Start Build (HeyGen + Submagic)</button>`;
+        }else{
+          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">GENERATE VISUAL PLAN</div>
+            <div id="nwv2-visualplan-status-${taskId}" style="font-size:12px;color:var(--dim);margin-bottom:8px">Analyzes the script into meaning units and decides, per beat: stay on the HeyGen presenter, let Submagic auto-match B-roll, request a targeted concept B-roll at a specific moment, or preserve exact evidence through captions. Required before Build.</div>
+            <button style="width:100%;padding:9px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;const st=document.getElementById('nwv2-visualplan-status-${taskId}');if(st)st.innerHTML='<span style=\\'color:var(--dim)\\'>Generating visual plan (~5-15s)…</span>';const r=await nextwaveV2GenerateHybridVisualPlan(p);if(r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else if(st){st.innerHTML='<span style=\\'color:#ef4444\\'>'+escHTML(r.detail||r.reason||'failed')+'</span>';}})()">🧩 Generate Visual Plan</button>
+          </div>`;
+        }
+        // Phase 5.3 legacy custom renderer — kept for reference/comparison only,
+        // not the frozen default. Collapsed below the hybrid path so it's never
+        // the first/easiest button to click.
+        body+=`<details style="margin-top:14px;margin-bottom:8px">
+          <summary style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;cursor:pointer">LEGACY — Phase 5.3 custom illustrated renderer (rejected, not the frozen architecture)</summary>
+          <div style="margin-top:10px">${_ideogramPanel}</div>`;
         if(pkg&&pkg.nextwaveV2ScenePackage){
           const sp=pkg.nextwaveV2ScenePackage;
           const sceneRows=(sp.scenes||[]).map(function(s){
             const sb=s.storyboard||{};
-            const slotsTxt=(sb.slots||[]).map(function(sl){return escHTML(sl.label+': '+(sl.primary_value||'—')+(sl.secondary_value?' / '+sl.secondary_value:''));}).join(' · ');
-            return '<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">'
-              +'<div style="font-size:11px;color:#c99e4c;font-weight:700;font-family:\'JetBrains Mono\',monospace">SCENE '+(s.sceneIndex+1)+' · '+escHTML(sb.screen_type||'—')+' · '+escHTML(sb.scene_purpose||'—')+'</div>'
-              +'<div style="font-size:12px;color:#fff;margin-top:3px">'+escHTML(sb.heading||'')+'</div>'
-              +'<div style="font-size:11px;color:var(--dim);margin-top:3px">host: '+escHTML(sb.host_role||'—')+' · illustrates: '+escHTML(sb.illustration_concept||'none')+' · chart: '+escHTML(sb.chart_required?sb.chart_type_hint:'none')+' · motion: '+escHTML(sb.motion_intent||'—')+'</div>'
-              +(slotsTxt?'<div style="font-size:11px;color:#9fb3d8;margin-top:3px">'+slotsTxt+'</div>':'')
-              +'</div>';
+            return '<div style="padding:6px 0;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:var(--dim)">SCENE '+(s.sceneIndex+1)+' · '+escHTML(sb.screen_type||'—')+' · '+escHTML(sb.heading||'')+'</div>';
           }).join('');
-          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
-            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">GENERATED STORYBOARD — ${sp.scene_count} scene(s), ${sp.unit_count} unit(s)</div>
-            ${sceneRows}
-            <button style="width:100%;padding:8px;margin-top:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:11px;cursor:pointer" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">↻ Regenerate storyboard</button>
+          body+=`<div style="border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px;margin-top:8px">${sceneRows}
+            <button style="width:100%;padding:6px;margin-top:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">↻ Regenerate legacy storyboard</button>
           </div>`;
         }else{
-          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
-            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">GENERATE STORYBOARD (Phase 5.3)</div>
-            <div id="nwv2-storyboard-status-${taskId}" style="font-size:12px;color:var(--dim);margin-bottom:8px">Not generated yet — Build will compute one on the fly if skipped, but generating first lets you review the automatic scene plan before spending on a render.</div>
-            <button style="width:100%;padding:9px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">🧩 Generate Storyboard</button>
-          </div>`;
+          body+=`<button style="width:100%;padding:8px;margin-top:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:11px;cursor:pointer" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">Generate legacy storyboard</button>`;
         }
-        body+=_buildBtn;
+        body+=`<div style="margin-top:8px">${_buildBtn}</div></details>`;
       }
       setTimeout(function(){
         if(typeof _nextwaveV2LoadVoiceStatus==='function')_nextwaveV2LoadVoiceStatus(taskId);

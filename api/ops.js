@@ -6663,7 +6663,7 @@ async function submagicCreateProject(req, res) {
   if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { videoUrl, title, language, templateName, magicZooms, magicBrolls, magicBrollsPercentage, dictionary, webhookUrl, music } = body;
+  const { videoUrl, title, language, templateName, magicZooms, magicBrolls, magicBrollsPercentage, dictionary, webhookUrl, music, items } = body;
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'missing_video_url' });
   // v13.52.0 — defaults dialed for short-form publishable output. Hormozi 2 is the
   // viral burn-in caption style. magicBrolls + magicZooms = the P2A requirements.
@@ -6679,6 +6679,12 @@ async function submagicCreateProject(req, res) {
   };
   if (dictionary && Array.isArray(dictionary)) projectBody.dictionary = dictionary;
   if (webhookUrl) projectBody.webhookUrl = webhookUrl;
+  // NextWave V2 hybrid architecture — targeted ai-broll/user-media insertions at
+  // Brain-planned timestamps, passed straight through to Submagic's own documented
+  // `items` field (proven working in the Two-Tool Architecture Validation phase).
+  // Only forwarded when the caller actually supplies a non-empty array — every
+  // existing caller that omits this keeps working exactly as before.
+  if (Array.isArray(items) && items.length) projectBody.items = items;
   // v13.85.1 — background music: { userMediaId, volume, fade }
   if (music && music.userMediaId) projectBody.music = { userMediaId: music.userMediaId, volume: music.volume || 20, fade: music.fade !== false, startFromTime: music.startFromTime || 0 };
   const r = await _submagicFetch('/v1/projects', { method: 'POST', body: projectBody });
@@ -12236,6 +12242,121 @@ Respond with ONLY:
   }
 }
 
+// ── NextWave V2 Production Architecture Freeze — hybrid visual-routing plan ──
+// Replaces nextwaveV2GenerateStoryboard as the BUILD-facing plan for the
+// frozen HeyGen+Submagic architecture. Reuses the exact same proven inputs
+// (segmentation, classification, evidence extraction — all untouched) and
+// the exact same "model chooses structure, code enforces values" pattern,
+// but the OUTPUT schema is now what nextwaveV2BuildHybridRender actually
+// needs: which beats stay on the HeyGen presenter, which get Submagic's
+// automatic B-roll, which get a targeted ai-broll prompt at a planned
+// timestamp, and which carry exact financial evidence that must go through
+// caption/emphasis rather than ever being asked of generative B-roll.
+//
+// The "never fabricate/approximate precise evidence" rule is enforced in
+// CODE, not just prompted: any beat with 2+ real comparable values is
+// deterministically forced to 'exact_evidence' + unsupported_precise=true
+// regardless of what the model chose, exactly mirroring how
+// nextwaveV2BindEvidenceDeterministically already overrides the model on
+// evidence questions elsewhere in this file.
+async function nextwaveV2GenerateVisualPlan(plan, scenes) {
+  const deterministicFallback = () => scenes.map((scene, i) => {
+    const idxs = scene.units.map((u) => u.__idx);
+    const numberIdxs = idxs.filter((k) => plan[k].__hasNumber);
+    const realValues = numberIdxs.flatMap((k) => plan[k].__candidateValues || []);
+    const topConcept = [...scene.conceptSet].filter((c) => c !== 'none_detected')[0] || null;
+    const unsupported_precise = realValues.length >= 2;
+    let visual_treatment;
+    if (unsupported_precise) visual_treatment = 'exact_evidence';
+    else if (realValues.length === 1) visual_treatment = topConcept ? 'targeted_broll' : 'exact_evidence';
+    else if (topConcept) visual_treatment = (i === 0 || i === scenes.length - 1) ? 'host' : 'targeted_broll';
+    else visual_treatment = 'host';
+    return {
+      visual_treatment,
+      broll_prompt: (visual_treatment === 'targeted_broll' && topConcept)
+        ? `a real, professional photo/video shot illustrating the financial concept of ${topConcept.replace(/_/g, ' ')}, no on-screen text, no logos, natural lighting`
+        : null,
+      emphasis_values: realValues,
+      unsupported_precise,
+      unsupported_reason: unsupported_precise ? `${realValues.length} comparable values in this beat are best shown as a chart; the current architecture has no reliable precise-chart mechanism, so exact values are shown via caption emphasis instead.` : null,
+    };
+  });
+
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return deterministicFallback();
+
+  const scriptUnitsBlock = plan.map((u, i) => {
+    const vals = (u.__candidateValues && u.__candidateValues.length) ? ` (values available: ${u.__candidateValues.join(', ')})` : '';
+    return `[${i}]${vals} ${u.text}`;
+  }).join('\n');
+  const scenesBlock = scenes.map((s, i) => {
+    const idxs = s.units.map((u) => u.__idx);
+    const realValueCount = idxs.reduce((sum, k) => sum + ((plan[k].__candidateValues || []).length), 0);
+    return `Beat ${i}: units [${idxs.join(',')}]${realValueCount >= 2 ? ' (2+ real values present — visual_treatment MUST be "exact_evidence")' : ''}`;
+  }).join('\n');
+  const prompt = `You are planning the visual treatment for a short finance-explainer video. The video is produced by: a HeyGen presenter avatar speaking the full narration (always available as the base video), and Submagic (which adds captions, automatic transcript-matched B-roll, and can insert a TARGETED B-roll clip you describe with a text prompt at a specific beat).
+
+You are given the full narration split into numbered units, grouped into BEATS (consecutive units sharing one visual treatment). For EACH beat, decide "visual_treatment" — exactly one of:
+- "host": the presenter carries this beat with no special visual — use for hooks, thesis statements, direct address, disclaimers, calls to action. Real narration importance, not decoration, is what earns this.
+- "auto_broll": let Submagic's own automatic transcript-matched B-roll handle it — use for ordinary connective narrative with no single strong concept or number worth targeting deliberately.
+- "targeted_broll": this beat is clearly ABOUT one concrete, illustratable concept (a house, a credit card, a decision, a calendar/timeline, a specific financial instrument) and deserves a deliberately-chosen visual, not whatever automatic matching finds. If you choose this, also write "broll_prompt": a single concrete visual description (one sentence, describing a real photo/video shot — no on-screen text, no logos, no invented numbers) of that concept.
+- "exact_evidence": this beat's job is to land a specific number/fact and the number itself is the point — captions/emphasis carry it, not B-roll.
+
+CRITICAL RULE: any beat marked "(2+ real values present...)" below MUST use visual_treatment "exact_evidence" — never ask a targeted B-roll prompt to depict comparative numbers, a generated clip cannot reliably render exact financial figures.
+
+NARRATION UNITS:
+<script_units>
+${scriptUnitsBlock}
+</script_units>
+
+BEATS:
+<beats>
+${scenesBlock}
+</beats>
+
+Respond with ONLY:
+<visualplan>
+{"beats":[{"visual_treatment":"host","broll_prompt":null}]}
+</visualplan>`;
+
+  try {
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!claudeRes.ok) return deterministicFallback();
+    const d = await claudeRes.json();
+    const text = (d.content && d.content[0] && d.content[0].text) || '';
+    const m = text.match(/<visualplan>([\s\S]*?)<\/visualplan>/);
+    if (!m) return deterministicFallback();
+    const parsed = JSON.parse(m[1]);
+    if (!parsed || !Array.isArray(parsed.beats) || parsed.beats.length !== scenes.length) return deterministicFallback();
+    const validTreatments = new Set(['host', 'auto_broll', 'targeted_broll', 'exact_evidence']);
+    const fb = deterministicFallback();
+    return parsed.beats.map((b, i) => {
+      const idxs = scenes[i].units.map((u) => u.__idx);
+      const realValues = idxs.flatMap((k) => (plan[k].__candidateValues || []));
+      // Deterministic override — never trust the model on the precise-evidence
+      // rule, exactly like every other evidence decision in this file.
+      const unsupported_precise = realValues.length >= 2;
+      let visual_treatment = validTreatments.has(b.visual_treatment) ? b.visual_treatment : fb[i].visual_treatment;
+      if (unsupported_precise) visual_treatment = 'exact_evidence';
+      const broll_prompt = (visual_treatment === 'targeted_broll' && typeof b.broll_prompt === 'string' && b.broll_prompt.trim())
+        ? b.broll_prompt.trim().slice(0, 400) : (visual_treatment === 'targeted_broll' ? fb[i].broll_prompt : null);
+      return {
+        visual_treatment,
+        broll_prompt,
+        emphasis_values: realValues,
+        unsupported_precise,
+        unsupported_reason: unsupported_precise ? fb[i].unsupported_reason : null,
+      };
+    });
+  } catch (e) {
+    return deterministicFallback();
+  }
+}
+
 // Builds one scene's MP4 segment: branded environment + a storyboard-driven
 // EXPLANATORY SCREEN (comparison / before-after / buildup / single, per
 // nextwaveV2GenerateStoryboard) + the recurring host positioned/sized per
@@ -13850,6 +13971,58 @@ function _nextwaveV2ReconstructFromScenePackage(pkg) {
   }
 }
 
+// ── NextWave V2 Production Architecture Freeze — GENERATE-stage hybrid
+// visual plan (persisted, reviewable, approve-then-build). Same reuse-first
+// shape as nextwaveV2GenerateScenePackage above (segmentation ->
+// classification -> grouping -> one planning call), producing the NEW
+// visual_treatment/broll_prompt/emphasis_values schema instead of the
+// retired full-scene storyboard. Spends nothing but one Anthropic call —
+// no HeyGen, no Submagic, no Ideogram — safe to run before BUILD spend.
+async function nextwaveV2GenerateVisualPlanPackage(script) {
+  const units = nextwaveSegmentMeaningUnits(script);
+  const plan = units.map((u, idx) => {
+    const tags = nextwaveClassifyVisualIntent(u.text);
+    const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+    const candidateValues = nextwaveExtractAllNumbers(u.text);
+    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+  });
+  const scenes = nextwaveV2GroupScenes(plan);
+  if (!scenes.length) throw new Error('no meaning units resolved from script');
+  const beats = await nextwaveV2GenerateVisualPlan(plan, scenes);
+  return {
+    script,
+    architecture: 'heygen_submagic_hybrid_v1',
+    generated_at: new Date().toISOString(),
+    unit_count: plan.length,
+    units: plan.map((u) => ({
+      idx: u.__idx, text: u.text, section: u.section, hasNumber: u.__hasNumber,
+      candidateValues: u.__candidateValues, concept_tags: u.concept_tags, fallback_concept: u.fallback_concept,
+    })),
+    beat_count: scenes.length,
+    beats: scenes.map((s, i) => ({
+      beatIndex: i,
+      unit_indices: s.units.map((u) => u.__idx),
+      unit_texts: s.units.map((u) => u.text),
+      visual: beats[i],
+    })),
+  };
+}
+async function nextwaveV2GenerateVisualPlanPackageAction(req, res) {
+  try {
+    const { script } = req.body || {};
+    if (!script || typeof script !== 'string' || !script.trim()) {
+      return res.status(400).json({ ok: false, error: 'script is required' });
+    }
+    if (script.length > 3000) {
+      return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 3000 characters)' });
+    }
+    const pkg = await nextwaveV2GenerateVisualPlanPackage(script);
+    return res.status(200).json({ ok: true, visual_plan_package: pkg });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
 // Main entry point: real approved package script -> V2 plan -> scenes ->
 // real ElevenLabs narration per scene -> composited segments -> concatenated
 // final MP4 -> uploaded to the same Supabase Storage path SMM video already
@@ -15310,6 +15483,10 @@ export default async function handler(req, res) {
     // classification -> grouping -> storyboard incl. the new declared
     // fields + evidence binding), read/compute-only like the two above.
     if (action === 'nextwave_v2_generate_scene_package') return await nextwaveV2GenerateScenePackageAction(req, res);
+    // NextWave V2 Production Architecture Freeze — GENERATE-stage hybrid
+    // visual plan (HeyGen+Submagic architecture). Read/compute-only, same
+    // reasoning as the scene-package action above.
+    if (action === 'nextwave_v2_generate_visual_plan') return await nextwaveV2GenerateVisualPlanPackageAction(req, res);
     // NextWave V2 Phase 4.4 — Build-stage renderer (NextWave only, HeyGen/Submagic untouched)
     if (action === 'nextwave_list_elevenlabs_voices') return await nextwaveListElevenLabsVoices(req, res);
     if (action === 'nextwave_v2_get_voice')           return await nextwaveV2GetVoice(req, res);
