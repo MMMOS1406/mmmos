@@ -6749,6 +6749,42 @@ async function submagicCreateMedia(req, res) {
     error: r.error || null,
   });
 }
+// Two-Tool Architecture Validation — Submagic's purpose-built direct-file
+// upload endpoint (POST /v1/user-media/upload, multipart/form-data),
+// distinct from the URL-based /v1/user-media above (which this file's own
+// history notes was only ever exercised for audio). Fetches the given URL
+// server-side and re-uploads the bytes as multipart form data — the exact
+// same "fetch external asset, re-host via multipart" shape already proven
+// elsewhere in this file for Ideogram asset banking, not a new pattern.
+async function submagicUploadMediaFromUrl(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { url, filename } = body;
+  if (!url) return res.status(400).json({ ok: false, error: 'missing_url' });
+  try {
+    const srcRes = await fetch(url);
+    if (!srcRes.ok) return res.status(502).json({ ok: false, error: `source_fetch_failed_${srcRes.status}` });
+    const buf = Buffer.from(await srcRes.arrayBuffer());
+    const contentType = srcRes.headers.get('content-type') || 'application/octet-stream';
+    const form = new FormData();
+    form.append('file', new Blob([buf], { type: contentType }), filename || 'asset.png');
+    const upRes = await fetch(SUBMAGIC_BASE + '/v1/user-media/upload', {
+      method: 'POST',
+      headers: { 'x-api-key': SUBMAGIC_API_KEY },
+      body: form,
+    });
+    const text = await upRes.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (_) { data = { raw: text }; }
+    return res.status(upRes.ok ? 200 : (upRes.status || 502)).json({
+      ok: upRes.ok, status: upRes.status, userMediaId: (data && data.userMediaId) || null, raw: data,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
 async function submagicListMedia(req, res) {
   if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
   const type  = (req.query && req.query.type)  || 'AUDIO'; // VIDEO | AUDIO | IMAGE
@@ -15368,6 +15404,7 @@ export default async function handler(req, res) {
     // Two-Tool Architecture Validation — items-array custom-media/ai-broll insertion capability proof
     if (action === 'submagic_update_project')    return await submagicUpdateProject(req, res);
     if (action === 'submagic_export_project')    return await submagicExportProject(req, res);
+    if (action === 'submagic_upload_media_from_url') return await submagicUploadMediaFromUrl(req, res);
     if (action === 'submagic_probe_video')       return await submagicProbeVideo(req, res);       // v13.86.1 EVL video verification
     if (action === 'submagic_video_redirect')    return await submagicVideoRedirect(req, res);    // v13.86.1 EVL browser playback
     // v13.54.0 — P5 / Sprint 3 YouTube auto-upload
