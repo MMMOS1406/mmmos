@@ -6766,6 +6766,35 @@ async function submagicListMedia(req, res) {
   });
 }
 
+// ── Two-Tool Architecture Validation — Submagic custom-media/AI-broll
+// insertion. Purely additive: exposes Submagic's own documented `items`
+// (PUT /v1/projects/:id) and export (POST /v1/projects/:id/export)
+// endpoints through the same _submagicFetch/CEO-gating pattern every other
+// Submagic action here already uses. Does not change submagicCreateProject
+// or any existing behavior — this is capability validation, not a renderer.
+// CEO-gated: writes to a real project and can trigger a real re-export.
+async function submagicUpdateProject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
+  if (req.method !== 'POST' && req.method !== 'PUT') return res.status(405).json({ ok: false, error: 'post_or_put_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { project_id, items } = body;
+  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ ok: false, error: 'missing_items_array' });
+  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id), { method: 'PUT', body: { items } });
+  return res.status(r.ok ? 200 : (r.status || 502)).json({ ok: r.ok, status: r.status, raw: r.data, error: r.error || null });
+}
+async function submagicExportProject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { project_id } = body;
+  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
+  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id) + '/export', { method: 'POST', body: {} });
+  return res.status(r.ok ? 200 : (r.status || 502)).json({ ok: r.ok, status: r.status, raw: r.data, error: r.error || null });
+}
+
 // v13.86.1 — EVL video verification helpers
 // submagicProbeVideo: server-side HEAD + partial fetch to verify video is accessible
 // and extract basic metadata (content-type, content-length, byte sniff for valid MP4)
@@ -15336,6 +15365,9 @@ export default async function handler(req, res) {
     if (action === 'submagic_list_templates')    return await submagicListTemplates(req, res);
     if (action === 'submagic_create_media')      return await submagicCreateMedia(req, res);      // v13.85.1 upload audio from URL
     if (action === 'submagic_list_media')        return await submagicListMedia(req, res);        // v13.85.0 probe
+    // Two-Tool Architecture Validation — items-array custom-media/ai-broll insertion capability proof
+    if (action === 'submagic_update_project')    return await submagicUpdateProject(req, res);
+    if (action === 'submagic_export_project')    return await submagicExportProject(req, res);
     if (action === 'submagic_probe_video')       return await submagicProbeVideo(req, res);       // v13.86.1 EVL video verification
     if (action === 'submagic_video_redirect')    return await submagicVideoRedirect(req, res);    // v13.86.1 EVL browser playback
     // v13.54.0 — P5 / Sprint 3 YouTube auto-upload
