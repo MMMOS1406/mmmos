@@ -16155,9 +16155,10 @@ async function nextwaveV2StartHybridBuild(pkg){
   const cleanScript=_cleanScriptForRender(pkg.script);
   if(!cleanScript)return{ok:false,reason:'empty_script'};
   try{
-    const r=await fetch('/api/ops?action=heygen_start_render',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
+    // CEO-gated action — must go through _ceoAuthedFetch (attaches
+    // ceo_session_token) exactly like every other CEO-gated NextWave V2
+    // call in this file. A plain fetch() here always 401s.
+    const r=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
         avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
         voice_id:NEXTWAVE_V2_HYBRID_VOICE_ID,
         script:cleanScript,
@@ -16165,7 +16166,6 @@ async function nextwaveV2StartHybridBuild(pkg){
         dimension:{width:1080,height:1920},
         scale:NEXTWAVE_V2_HYBRID_SCALE,
         test:false,
-      }),
     });
     const data=await r.json();
     if(data.ok&&data.videoId){
@@ -16226,9 +16226,11 @@ async function nextwaveV2StartHybridSubmagic(pkg,realDurationSec){
     }
   });
   try{
-    const r=await fetch('/api/ops?action=submagic_create_project',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
+    // CEO-gated action, same as heygen_start_render above — this function
+    // runs from the automatic poller (not a direct button click), but
+    // _ceoAuthedFetch reads the token from sessionStorage at call time,
+    // which is populated as long as the CEO is still logged in this tab.
+    const r=await _ceoAuthedFetch('/api/ops?action=submagic_create_project',{
         title:'NextWave V2 Hybrid — '+(pkg.id||''),
         language:'en',
         videoUrl:pkg.heygenRawUrl||pkg.videoUrl,
@@ -16237,7 +16239,6 @@ async function nextwaveV2StartHybridSubmagic(pkg,realDurationSec){
         magicBrolls:true,
         magicBrollsPercentage:50,
         items:items,
-      }),
     });
     const data=await r.json();
     if(data.ok&&data.projectId){
