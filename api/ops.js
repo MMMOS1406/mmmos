@@ -14165,38 +14165,26 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     filters.push(`[${lastBg}]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=0x1c2030@0.92:t=fill[bgE0]`);
     filters.push(`[bgE0]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[bgE1]`);
     lastBg = 'bgE1';
-    // Phase: Visual Composition Correction QA fix (round 2) — the
-    // previous fix (one drawtext call per wrapped line, chained through
-    // successive filter outputs) STILL silently dropped every line but
-    // the last on a real render, even with just 2 chained filters — the
-    // chaining itself is the risk, not the text content or line count.
-    // Now a genuinely single drawtext invocation: one value per real
-    // ffmpeg newline (drawtext natively supports \n inside its own text
-    // argument), no second filter node at all. Comma-preserving (the
-    // default nextwaveV2SanitizeDrawtext strips commas, correct for
-    // plain captions but wrong for dollar amounts like "$60,000").
+    // Phase: Visual Composition Correction QA fix (round 3) — two prior
+    // attempts (chained bracket-labeled drawtext nodes; a single
+    // multi-line drawtext node) both rendered blank/wrong on real
+    // renders despite ffmpeg exiting 0. This file's OWN proven working
+    // pattern (see drawPanelContent/ov.join(',') a few hundred lines
+    // below) never uses bracket-labeled multi-stage text nodes — it
+    // comma-chains plain drawtext filters onto one carried-over stream,
+    // exactly the ffmpeg idiom for "several filters, no branching."
+    // Copying that exact proven shape here instead of inventing a new one.
     const values = (beat.visual.emphasis_values || []).slice(0, 4);
     if (values.length) {
       const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24));
-      // A literal newline BYTE embedded inside the shared -filter_complex
-      // string (which itself uses ';' to separate every OTHER filter node)
-      // rendered as a blank evidence zone on a real test — plausibly
-      // confusing the filtergraph's own line-oriented parsing even though
-      // ffmpeg exited 0. Using drawtext's own two-character "\n" escape
-      // (literal backslash + n, converted to a line break internally by
-      // drawtext's text parser) keeps the outer filtergraph string on one
-      // real line throughout.
-      const multiline = safeValues.join('\\n');
-      const lineH = 84;
+      const lineH = 90;
       const blockH = safeValues.length * lineH;
       const startY = Math.round(z.y + (z.h - blockH) / 2);
-      // text_align is NOT supported by the bundled static ffmpeg build
-      // (confirmed via a real "Option 'text_align' not found" filter-init
-      // error on a live render) — the bounding-box horizontal centering
-      // below (x=(zone_w-text_w)/2) still centers the whole multi-line
-      // block; individual short lines (percentages/dollar amounts) read
-      // fine left-aligned within that centered block.
-      filters.push(`[${lastBg}]drawtext=fontfile=${SMM_FONT_PATH}:text='${multiline}':fontcolor=white:fontsize=68:line_spacing=16:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${startY}[bgVals]`);
+      const textOv = safeValues.map((val, vi) => {
+        const y = startY + vi * lineH;
+        return `drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=white:fontsize=68:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${y}`;
+      });
+      filters.push(`[${lastBg}]${textOv.join(',')}[bgVals]`);
       lastBg = 'bgVals';
     }
   }
