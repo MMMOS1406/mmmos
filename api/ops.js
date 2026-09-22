@@ -14302,6 +14302,209 @@ async function nextwaveV2CompositeCanvasRender(req, res) {
   }
 }
 
+// ============================================================================
+// CEO Creative Rejection / Visual Architecture Correction phase — the
+// split-screen/evidence-zone design above (nextwaveV2CompositeCanvasRender)
+// was rejected for still reading as a presenter+evidence split rather than
+// one true full-frame 9:16 composition. This is a CHEAP, STANDALONE proof
+// of a different mechanism: one continuous full-frame canvas where the
+// avatar, a card, and an illustration each take the WHOLE frame in turn,
+// entering/holding/exiting via a fade-to-the-canvas's-own-navy-color trick
+// (confirmed via a live `ffmpeg -h filter=fade` probe that the bundled
+// ~2018 static build supports fade's `color` option) rather than any real
+// alpha-channel compositing — sidesteps every unverified-option risk that
+// burned three separate deploy cycles in the prior phase (text_align,
+// text_expansion, drawtext's %/%% escape all turned out unsupported on
+// this exact build). Deliberately NOT wired into the package/task/
+// lifecycle system — this is an internal PM/Creative gate, not a candidate.
+const NWV2_PROOF_HOOK_DUR = 2.2;
+const NWV2_PROOF_CARD_DUR = 4.4;
+const NWV2_PROOF_ILLU_DUR = 4.0;
+const NWV2_PROOF_CLOSE_DUR = 2.4;
+
+function nwv2ProofBrandMarkFilter(input, output) {
+  return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NEXTWAVE_V2_CANVAS_ACCENT}@0.55:fontsize=30:x=${NEXTWAVE_V2_CANVAS_W}-tw-30:y=${NEXTWAVE_V2_CANVAS_H}-th-30[${output}]`;
+}
+
+// Avatar segment: the HeyGen source already renders at exactly 1080x1920
+// (confirmed via ffprobe on the same cached source used throughout this
+// project), so the avatar fills the true full 9:16 frame with no crop —
+// intentional full-canvas presenter time, not the "no permanent split"
+// evidence zone the CEO rejected. Fades to the canvas's own navy at
+// whichever end borders a non-avatar segment, so the concat cut reads as
+// a dissolve into the persistent background rather than a hard swap.
+async function nwv2ProofBuildAvatarSegment({ heygenLocalPath, seekSec, dur, fadeEdge, outPath }) {
+  const filters = [];
+  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[av0]`);
+  filters.push(nwv2ProofBrandMarkFilter('av0', 'av1'));
+  const fadeArg = fadeEdge === 'in'
+    ? `fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+    : fadeEdge === 'out'
+      ? `fade=t=out:st=${(dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+      : null;
+  if (fadeArg) filters.push(`[av1]${fadeArg}[outv]`);
+  const lastLabel = fadeArg ? 'outv' : 'av1';
+  const filterComplex = filters.join(';') + (fadeArg ? '' : `;[${lastLabel}]null[outv]`);
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'proof avatar segment');
+  return outPath;
+}
+
+// Card segment: sandwiched fade in/out to navy on both ends (no avatar, no
+// separate overlay compositing needed). Evidence values reveal one at a
+// time (progressive development, not a static slide) via staggered
+// drawtext `enable` timeline windows on the same persistent canvas.
+async function nwv2ProofBuildCardSegment({ title, values, dur, outPath }) {
+  const boxW = 820, boxH = 900;
+  const boxX = Math.round((NEXTWAVE_V2_CANVAS_W - boxW) / 2);
+  const boxY = Math.round((NEXTWAVE_V2_CANVAS_H - boxH) / 2);
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[c0]`);
+  filters.push(`[c0]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=0x1c2030@0.95:t=fill[c1]`);
+  filters.push(`[c1]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[c2]`);
+  let last = 'c2', idx = 3;
+  const safeTitle = String(title || '').replace(/['":\\\[\],;%]/g, '').slice(0, 40);
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NEXTWAVE_V2_CANVAS_ACCENT}:fontsize=44:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 70}:enable='gte(t,0.5)'[c${idx}]`);
+  last = `c${idx}`; idx++;
+  const lineH = 130;
+  const startY = boxY + 260;
+  const safeValues = (values || []).slice(0, 3).map((v) => String(v).replace(/['":\\\[\],;%]/g, '').slice(0, 30));
+  safeValues.forEach((val, vi) => {
+    const y = startY + vi * lineH;
+    const revealAt = (1.0 + vi * 0.8).toFixed(2);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=white:fontsize=58:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${y}:enable='gte(t,${revealAt})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  });
+  filters.push(nwv2ProofBrandMarkFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG},fade=t=out:st=${(dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y',
+    '-f', 'lavfi', '-i', `anullsrc=r=48000:cl=stereo`,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'proof card segment');
+  return outPath;
+}
+
+// Illustration segment: same sandwiched fade, a different visual element
+// (Ideogram illustration) taking over the SAME canvas the card just
+// vacated — contain-fit, colorkeyed against its own sampled corner color
+// (same proven technique as the persistent-canvas compositor), never
+// cropped.
+async function nwv2ProofBuildIllustrationSegment({ illustrationPath, keyColor, dur, outPath }) {
+  const zoneW = 900, zoneH = 1100;
+  const zoneX = Math.round((NEXTWAVE_V2_CANVAS_W - zoneW) / 2);
+  const zoneY = Math.round((NEXTWAVE_V2_CANVAS_H - zoneH) / 2);
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.18:blend=0.06` : '';
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[i0]`);
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[img]`);
+  filters.push(`[i0][img]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[i1]`);
+  filters.push(nwv2ProofBrandMarkFilter('i1', 'i2'));
+  filters.push(`[i2]fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG},fade=t=out:st=${(dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y',
+    '-f', 'lavfi', '-i', `anullsrc=r=48000:cl=stereo`,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'proof illustration segment');
+  return outPath;
+}
+
+// CEO-gated. Self-contained: takes only a HeyGen source URL, reuses the
+// existing illustrated-object cache/generator, never touches
+// D.packages/D.tasks or any lifecycle stage — this is explicitly an
+// internal PM/Creative architecture gate, not a candidate.
+async function nextwaveV2CompositionProofRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, close_seek_sec } = body;
+  if (!heygen_video_url) return res.status(400).json({ ok: false, error: 'missing_heygen_video_url' });
+  const proofId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2proof-src-${proofId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject('a hand placing a coin into a glass jar labeled savings, retirement growth', ideogramBudget);
+    if (!illustration || !illustration.path) return res.status(500).json({ ok: false, error: 'illustration_resolve_failed' });
+    const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+
+    const seg1 = join(tmpdir(), `nwv2proof-seg1-${proofId}.mp4`);
+    const seg2 = join(tmpdir(), `nwv2proof-seg2-${proofId}.mp4`);
+    const seg3 = join(tmpdir(), `nwv2proof-seg3-${proofId}.mp4`);
+    const seg4 = join(tmpdir(), `nwv2proof-seg4-${proofId}.mp4`);
+
+    await nwv2ProofBuildAvatarSegment({ heygenLocalPath, seekSec: 0, dur: NWV2_PROOF_HOOK_DUR, fadeEdge: 'out', outPath: seg1 });
+    segPaths.push(seg1);
+    await nwv2ProofBuildCardSegment({
+      title: 'YOUR 401K MATCH',
+      values: ['50 PCT EMPLOYER MATCH', '$60,000 SALARY', '$1,800 PER YEAR FREE'],
+      dur: NWV2_PROOF_CARD_DUR,
+      outPath: seg2,
+    });
+    segPaths.push(seg2);
+    await nwv2ProofBuildIllustrationSegment({ illustrationPath: illustration.path, keyColor, dur: NWV2_PROOF_ILLU_DUR, outPath: seg3 });
+    segPaths.push(seg3);
+    const closeSeek = Number.isFinite(close_seek_sec) ? close_seek_sec : 30;
+    await nwv2ProofBuildAvatarSegment({ heygenLocalPath, seekSec: closeSeek, dur: NWV2_PROOF_CLOSE_DUR, fadeEdge: 'in', outPath: seg4 });
+    segPaths.push(seg4);
+
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: proofId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/proof-${proofId}.mp4`, finalBuf, 'video/mp4');
+
+    let t = 0;
+    const timeline = [];
+    timeline.push({ segment: 'hook_avatar', start: t, end: t + NWV2_PROOF_HOOK_DUR, detail: 'full-frame avatar, fades to canvas navy over final 0.4s' }); t += NWV2_PROOF_HOOK_DUR;
+    timeline.push({ segment: 'evidence_card', start: t, end: t + NWV2_PROOF_CARD_DUR, detail: 'fades in from navy (0.4s), title at +0.5s, 3 values staggered at +1.0/1.8/2.6s, fades out to navy over final 0.4s' }); t += NWV2_PROOF_CARD_DUR;
+    timeline.push({ segment: 'illustration', start: t, end: t + NWV2_PROOF_ILLU_DUR, detail: 'fades in from navy (0.4s), contain-fit colorkeyed illustration holds, fades out to navy over final 0.4s' }); t += NWV2_PROOF_ILLU_DUR;
+    timeline.push({ segment: 'closing_avatar', start: t, end: t + NWV2_PROOF_CLOSE_DUR, detail: 'full-frame avatar fades in from canvas navy over first 0.4s' }); t += NWV2_PROOF_CLOSE_DUR;
+
+    return res.status(200).json({
+      ok: true,
+      proof_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      timeline,
+      illustration_reused: !!illustration.reused,
+      illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      proof_id: proofId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
 async function nextwaveV2BuildRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -15726,29 +15929,11 @@ export default async function handler(req, res) {
     // Visual Composition Correction — persistent-canvas compositor (presenter
     // window + evidence zone), Submagic reduced to captions-only downstream.
     if (action === 'nextwave_v2_composite_canvas')    return await nextwaveV2CompositeCanvasRender(req, res);
-    // TEMP DEBUG — CEO Creative Rejection / Architecture Correction phase.
-    // Queries the bundled ffmpeg binary's actual filter option support
-    // (fade's alpha option, colorchannelmixer's time-varying eval, drawtext
-    // enable) via `ffmpeg -h filter=X` before writing the animated-proof
-    // compositor, instead of guessing and finding out through a full
-    // render — the prior phase burned three deploy cycles on exactly that
-    // (text_align, text_expansion, and the %/%% drawtext parser all being
-    // absent from this ~2018 static build despite being standard elsewhere).
-    // Remove once the animated-proof mechanism is implemented.
-    if (action === 'nextwave_v2_debug_ffmpeg_filters') {
-      if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
-      const names = ['fade', 'overlay', 'drawtext', 'colorchannelmixer', 'format'];
-      const out = {};
-      for (const n of names) {
-        try {
-          const r = await execFileAsync(ffmpegInstaller.path, ['-h', `filter=${n}`], { timeout: 10000 });
-          out[n] = (r.stdout || '') + (r.stderr || '');
-        } catch (e) {
-          out[n] = 'ERROR: ' + ((e && e.stdout) || (e && e.message) || String(e));
-        }
-      }
-      return res.status(200).json({ ok: true, ffmpeg_filter_help: out });
-    }
+    // CEO Creative Rejection / Visual Architecture Correction — cheap
+    // standalone full-frame animated-composition proof (avatar/card/
+    // illustration each own the whole 9:16 canvas in turn). Explicitly not
+    // wired into the package/lifecycle system — internal PM gate only.
+    if (action === 'nextwave_v2_composition_proof')   return await nextwaveV2CompositionProofRender(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
