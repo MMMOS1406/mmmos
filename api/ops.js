@@ -14585,9 +14585,18 @@ async function nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec, dur, fadeE
 // gold) — the "important result emphasized" step the CEO's calculation
 // example calls for.
 async function nwv2FullFrameCardSegment({ heygenLocalPath, seekSec, title, values, dur, fadeIn, fadeOut, outPath }) {
-  const boxW = 860, boxH = 900;
+  // Fix E (caption safe zone), round 2 — a real render showed Submagic's
+  // Hormozi 2 captions landing right on the card's own visible border
+  // (~y=1130-1420 observed on real frames), unlike the illustration
+  // segment which never collided because contain-fit content sits well
+  // inside its zone with natural clear space below. The card's drawn
+  // border is what's visually present at its full boxH, so it needs to
+  // stay clear of that band explicitly rather than just be numerically
+  // centered on the canvas — boxH shrunk and boxY biased upward so the
+  // bottom edge lands at 920, comfortably above the observed caption band.
+  const boxW = 860, boxH = 680;
   const boxX = Math.round((NEXTWAVE_V2_CANVAS_W - boxW) / 2);
-  const boxY = Math.round((NEXTWAVE_V2_CANVAS_H - boxH) / 2);
+  const boxY = 240;
   const filters = [];
   filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[c0]`);
   filters.push(`[c0]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=0x1c2030@0.95:t=fill[c1]`);
