@@ -14936,9 +14936,25 @@ async function nwv2WhiteBuildCalcCardSegment({ heygenLocalPath, seekSec, title, 
   filters.push(`[k2]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[k3]`);
   filters.push(`[k3]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.6:t=3[k4]`);
   let last = 'k4', idx = 5;
-  const safeTitle = nwv2WhiteSanitize(title, 40).replace(/[,;]/g, '');
+  // Dynamic fontsize by text length — a real render showed a 27-char value
+  // ("8 PCT AVG RETURN (ASSUMED)") overflowing the card's right edge at a
+  // fixed 50px fontsize (~780px usable width only fits ~18-20 chars at that
+  // size). A second real render then showed the SAME class of overflow on
+  // the title text (moving "(ASSUMED)" there made it 40 chars at a fixed
+  // 40px fontsize) — so this scaling applies to title AND values, not just
+  // the one value string that failed first. Scales down proportionally
+  // past the given char threshold, floored so text never becomes
+  // illegibly small.
+  const nwv2FitFontsize = (text, base, threshold) => {
+    const len = text.length;
+    const t = threshold || 18;
+    if (len <= t) return base;
+    return Math.max(Math.round(base * (t / len)), Math.round(base * 0.62));
+  };
+  const safeTitle = nwv2WhiteSanitize(title, 46).replace(/[,;]/g, '');
   if (safeTitle) {
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=40:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 56}:enable='gte(t,0.35)'[k${idx}]`);
+    const titleFs = nwv2FitFontsize(safeTitle, 40, 26);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=${titleFs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 56}:enable='gte(t,0.35)'[k${idx}]`);
     last = `k${idx}`; idx++;
   }
   const safeValues = (values || []).slice(0, 4).map((v) => nwv2WhiteSanitize(v, 28));
@@ -14946,16 +14962,6 @@ async function nwv2WhiteBuildCalcCardSegment({ heygenLocalPath, seekSec, title, 
   const blockH = safeValues.length * lineH;
   const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 40 : 0);
   const revealSpan = Math.max(0.55, (dur - 1.4) / Math.max(1, safeValues.length));
-  // Dynamic fontsize by text length — a real render showed a 27-char value
-  // ("8 PCT AVG RETURN (ASSUMED)") overflowing the card's right edge at a
-  // fixed 50px fontsize (~780px usable width only fits ~18-20 chars at that
-  // size). Scales down proportionally past 18 chars, floored so it never
-  // becomes illegibly small.
-  const nwv2FitFontsize = (text, base) => {
-    const len = text.length;
-    if (len <= 18) return base;
-    return Math.max(Math.round(base * (18 / len)), Math.round(base * 0.62));
-  };
   safeValues.forEach((val, vi) => {
     const targetY = startY + vi * lineH;
     const revealAt = 0.5 + vi * revealSpan;
