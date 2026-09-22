@@ -15726,6 +15726,29 @@ export default async function handler(req, res) {
     // Visual Composition Correction — persistent-canvas compositor (presenter
     // window + evidence zone), Submagic reduced to captions-only downstream.
     if (action === 'nextwave_v2_composite_canvas')    return await nextwaveV2CompositeCanvasRender(req, res);
+    // TEMP DEBUG — CEO Creative Rejection / Architecture Correction phase.
+    // Queries the bundled ffmpeg binary's actual filter option support
+    // (fade's alpha option, colorchannelmixer's time-varying eval, drawtext
+    // enable) via `ffmpeg -h filter=X` before writing the animated-proof
+    // compositor, instead of guessing and finding out through a full
+    // render — the prior phase burned three deploy cycles on exactly that
+    // (text_align, text_expansion, and the %/%% drawtext parser all being
+    // absent from this ~2018 static build despite being standard elsewhere).
+    // Remove once the animated-proof mechanism is implemented.
+    if (action === 'nextwave_v2_debug_ffmpeg_filters') {
+      if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+      const names = ['fade', 'overlay', 'drawtext', 'colorchannelmixer', 'format'];
+      const out = {};
+      for (const n of names) {
+        try {
+          const r = await execFileAsync(ffmpegInstaller.path, ['-h', `filter=${n}`], { timeout: 10000 });
+          out[n] = (r.stdout || '') + (r.stderr || '');
+        } catch (e) {
+          out[n] = 'ERROR: ' + ((e && e.stdout) || (e && e.message) || String(e));
+        }
+      }
+      return res.status(200).json({ ok: true, ffmpeg_filter_help: out });
+    }
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
