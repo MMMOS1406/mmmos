@@ -13082,11 +13082,15 @@ async function _pollHeygenRenders(){
         if(pkg.nextwaveV2Hybrid){
           const _pkgId=String(pkg.id);
           setTimeout(function(){
-            if(typeof nextwaveV2StartHybridSubmagic==='function'){
-              console.log('[NextWave V2 Hybrid] HeyGen complete — starting hybrid Submagic for pkg',_pkgId);
-              nextwaveV2StartHybridSubmagic(pkg,data.durationSec||pkg.renderDurationSec||0).then(function(r){
-                if(r&&r.ok){ console.log('[NextWave V2 Hybrid] Submagic project started for pkg',_pkgId,'· projectId:',r.projectId); }
-                else { console.warn('[NextWave V2 Hybrid] Submagic auto-start failed:',r&&r.detail); }
+            // Visual Composition Correction — composite the persistent-canvas
+            // video FIRST, then hand it to Submagic in captions-only mode.
+            // (nextwaveV2StartHybridSubmagic, the old direct-to-Submagic-with-
+            // items path, is kept in this file but no longer called here.)
+            if(typeof nextwaveV2StartCanvasComposite==='function'){
+              console.log('[NextWave V2 Canvas] HeyGen complete — starting canvas composite for pkg',_pkgId);
+              nextwaveV2StartCanvasComposite(pkg,data.durationSec||pkg.renderDurationSec||0).then(function(r){
+                if(r&&r.ok){ console.log('[NextWave V2 Canvas] Submagic (captions-only) started for pkg',_pkgId,'· projectId:',r.projectId); }
+                else { console.warn('[NextWave V2 Canvas] composite/Submagic chain failed:',r&&r.detail); }
                 try{ if(typeof saveAppState==='function') saveAppState(); }catch(_){}
                 try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
               });
@@ -16190,7 +16194,19 @@ async function nextwaveV2StartHybridBuild(pkg){
   }
 }
 
-// BUILD step 2 — called automatically by _pollHeygenRenders once the
+// ══════════════════════════════════════════════════════════════════════
+// Visual Composition Correction — CEO rejected the version below
+// (nextwaveV2StartHybridSubmagic, kept only as inert reference, no
+// longer called) because Submagic's own B-roll/items insertion replaces
+// the ENTIRE frame on every cutaway. Composition now happens in a small
+// deterministic ffmpeg layer (nextwave_v2_composite_canvas, ops.js)
+// BEFORE Submagic ever sees the video; Submagic's role shrinks to
+// captions only. See nextwaveV2StartCanvasComposite/
+// nextwaveV2StartCaptionsOnlySubmagic below — THESE are what the poller
+// branch actually calls now.
+// ══════════════════════════════════════════════════════════════════════
+
+// BUILD step 2 (superseded) — called automatically by _pollHeygenRenders once the
 // HeyGen base video is ready (see the nextwaveV2Hybrid branch added to
 // that function below). Computes each beat's real start/end from the
 // REAL HeyGen duration (proportional to narration character count, same
@@ -16249,6 +16265,92 @@ async function nextwaveV2StartHybridSubmagic(pkg,realDurationSec){
       pkg.nextwaveV2TargetedItemsSent=items; // kept for QA/review — exactly what was requested and when
       try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
       console.log('[NextWave V2 Hybrid] Submagic project created:',data.projectId,'· targeted items:',items.length);
+      return{ok:true,projectId:data.projectId};
+    }
+    const errMsg=(data.raw&&(data.raw.error||data.raw.message))||data.error||('HTTP '+data.status);
+    pkg.submagicError=String(errMsg).slice(0,300);
+    return{ok:false,reason:'submagic_error',detail:pkg.submagicError};
+  }catch(e){
+    pkg.submagicError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// BUILD step 2 (current) — called automatically by _pollHeygenRenders once
+// the HeyGen presenter video is ready. Runs the deterministic ffmpeg
+// compositor (nextwave_v2_composite_canvas, ops.js): trims the HeyGen
+// video per beat, places it in a large-or-small bordered presenter window
+// on a persistent NextWave canvas, and for non-host beats adds a large
+// evidence zone (a contain-fit Ideogram illustration for targeted_broll,
+// or a big fitted evidence-number treatment for exact_evidence) — never a
+// full-frame B-roll replacement. Real ffmpeg + possible Ideogram spend,
+// so this can take longer than the old direct-to-Submagic path; the UI
+// shows a distinct "compositing" status for it (see the lifecycle panel).
+async function nextwaveV2StartCanvasComposite(pkg,realDurationSec){
+  const vp=pkg.nextwaveV2VisualPlan;
+  if(!vp||!Array.isArray(vp.beats)||!vp.beats.length){
+    pkg.submagicError='missing_visual_plan_at_composite_stage';
+    return{ok:false,reason:'missing_visual_plan'};
+  }
+  pkg.renderStatus='compositing';
+  try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+  try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_canvas',{
+      heygen_video_url:pkg.heygenRawUrl||pkg.videoUrl,
+      visual_plan_package:vp,
+      real_duration_sec:realDurationSec,
+    });
+    const data=await r.json();
+    if(data.ok&&data.composited_video_url){
+      pkg.nextwaveV2CanvasVideoUrl=data.composited_video_url;
+      pkg.nextwaveV2CanvasBeats=data.beats;
+      pkg.nextwaveV2CanvasDurationSec=data.duration_sec;
+      pkg.nextwaveV2CanvasDynamicIllustrations=data.dynamic_illustrations_generated;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Canvas] composite ready:',data.composited_video_url,'· duration:',data.duration_sec+'s');
+      return await nextwaveV2StartCaptionsOnlySubmagic(pkg);
+    }
+    pkg.renderStatus='failed';
+    pkg.renderError='canvas_composite_error: '+(data.error||('HTTP '+data.status));
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'canvas_composite_error',detail:pkg.renderError};
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='canvas_composite_network_error: '+e.message;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// BUILD step 3 — Submagic now only ever sees the ALREADY-composited canvas
+// video. magicBrolls/magicZooms are both OFF and no items are sent — the
+// composition (what's on screen and where) is entirely ours by this point;
+// Submagic's only job is transcription + burned-in captions + emphasis,
+// exactly the parts the CEO confirmed passed review.
+async function nextwaveV2StartCaptionsOnlySubmagic(pkg){
+  const sourceUrl=pkg.nextwaveV2CanvasVideoUrl;
+  if(!sourceUrl){
+    pkg.submagicError='missing_composited_video_at_submagic_stage';
+    return{ok:false,reason:'missing_composited_video'};
+  }
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=submagic_create_project',{
+        title:'NextWave V2 Canvas — '+(pkg.id||''),
+        language:'en',
+        videoUrl:sourceUrl,
+        templateName:'Hormozi 2',
+        magicZooms:false,
+        magicBrolls:false,
+    });
+    const data=await r.json();
+    if(data.ok&&data.projectId){
+      pkg.submagicProjectId=data.projectId;
+      pkg.renderStatus='enhancing';
+      pkg.submagicStartedAt=new Date().toISOString();
+      pkg.submagicError=null;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Canvas] Submagic (captions-only) project created:',data.projectId);
       return{ok:true,projectId:data.projectId};
     }
     const errMsg=(data.raw&&(data.raw.error||data.raw.message))||data.error||('HTTP '+data.status);
@@ -18498,7 +18600,7 @@ function renderNextWaveLifecycleCard(task){
         body+=`<div style="padding:20px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.50);border-radius:12px;text-align:center;margin-bottom:12px">
           <div style="font-size:32px;margin-bottom:12px">🎬</div>
           <div style="font-size:16px;font-weight:800;color:#22c55e;margin-bottom:8px">NextWave V2 video ready</div>
-          <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">${_isHybrid?'HeyGen native avatar+voice · Submagic captions/B-roll/targeted-broll — frozen architecture':'ElevenLabs narration · original environment/icons — Phase 5.3 legacy renderer'} · duration: ${escHTML(String(pkg.renderDurationSec||pkg.submagicDurationSec||'—'))}s</div>
+          <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">${_isHybrid?'HeyGen native avatar+voice · persistent-canvas composite (presenter window + evidence zone) · Submagic captions-only':'ElevenLabs narration · original environment/icons — Phase 5.3 legacy renderer'} · duration: ${escHTML(String(pkg.renderDurationSec||pkg.submagicDurationSec||'—'))}s</div>
           <video src="${escHTML(pkg.videoUrl)}" controls style="width:100%;border-radius:10px;max-height:280px;background:#000;margin-top:8px"></video>
         </div>`;
         body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>`;
@@ -18512,13 +18614,14 @@ function renderNextWaveLifecycleCard(task){
             <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
             ${_isAuthErr?`<div style="margin-top:10px;font-size:11px;color:#f59e0b">Check the CEO SESSION status below. This usually means the active browser profile is not a completed CEO/Admin PIN login (e.g. it's on VA or Family, or Admin was never fully logged in this tab) — log out, select the Admin/CEO profile, and enter your PIN. This does not touch HeyGen and will not consume any HeyGen/Submagic quota.</div>`:''}
           </div>`;
-        }else if(renderStatus==='rendering'||renderStatus==='enhancing'){
+        }else if(renderStatus==='rendering'||renderStatus==='compositing'||renderStatus==='enhancing'){
+          const _statusLabel=renderStatus==='rendering'?'HeyGen rendering presenter…':(renderStatus==='compositing'?'Compositing persistent-canvas video (presenter window + evidence zone)…':'Submagic applying captions (composition-only, no B-roll)…');
           body+=`<div style="padding:16px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.35);border-radius:12px;text-align:center;margin-bottom:12px">
-            <div style="font-size:12px;color:#fbbf24;font-weight:700">⏳ ${renderStatus==='rendering'?'HeyGen rendering presenter…':'Submagic applying captions/B-roll/targeted visuals…'}</div>
-            <div style="font-size:10px;color:var(--dim);margin-top:4px;font-family:'JetBrains Mono',monospace">Polls automatically every ${renderStatus==='rendering'?'45':'30'}s — no action needed.</div>
+            <div style="font-size:12px;color:#fbbf24;font-weight:700">⏳ ${_statusLabel}</div>
+            <div style="font-size:10px;color:var(--dim);margin-top:4px;font-family:'JetBrains Mono',monospace">${renderStatus==='compositing'?'Real ffmpeg work — can take longer than the other steps. ':''}Polls automatically every ${renderStatus==='rendering'?'45':'30'}s — no action needed.</div>
           </div>`;
         }else{
-          body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">Frozen architecture: HeyGen native avatar + native voice for the base video, Submagic for captions/auto-B-roll/targeted concept B-roll. No ElevenLabs, no custom renderer.</div>`;
+          body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">Frozen architecture: HeyGen native avatar + native voice for the base video, composited into a persistent NextWave canvas (presenter window + evidence zone), then Submagic for captions only. No ElevenLabs, no full-screen auto-B-roll, no custom renderer.</div>`;
         }
         body+=_ceoStatusPanel;
         body+=_voicePanel;

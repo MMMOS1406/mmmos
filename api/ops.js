@@ -14075,6 +14075,216 @@ async function nextwaveV2MuxMasterAudio({ videoPath, audioPath, id }) {
   return outPath;
 }
 
+// ── NextWave V2 Visual Composition Correction ──────────────────────────────
+// CEO rejection of the hybrid pipeline's first candidate: Submagic's B-roll
+// (automatic AND targeted) replaces the ENTIRE frame on every cutaway, which
+// reads as unrelated stock clips stitched together, not one designed video.
+// Root cause: Submagic's `items`/`magicBrolls` are edit-level operations
+// (replace the shot for a time range) — there is no Submagic parameter that
+// keeps a persistent background/presenter-window while a supporting visual
+// plays in a smaller region. That is spatial compositing, a different
+// capability than anything Submagic's documented API exposes. Per the CEO's
+// own instruction ("if Submagic cannot provide the required composition
+// control, do not force it"), composition moves to a small, deterministic
+// ffmpeg layer — reusing the EXACT proven techniques from the retired
+// Phase 5.3 renderer (safe-framed text fitting, Ideogram corner-color
+// keying, segment+concat assembly) applied to completely different content:
+// a real HeyGen presenter video positioned/scaled within a defined window,
+// not static illustrated poses. Submagic's role shrinks to captions only —
+// magicBrolls/magicZooms both off, no items — exactly the parts the CEO
+// confirmed passed (captions, emphasis, transcript timing).
+//
+// Persistent canvas: 1080x1920, deep navy background + a thin gold top/
+// bottom brand bar that never changes for the whole video — the "one
+// designed video" identity the CEO asked for. Two layout states (not the
+// full 6 described in the order — an honest, smaller scope for this pass,
+// documented in the checkpoint):
+//   - "host" beats: presenter window LARGE and centered (contain-fit, the
+//     full HeyGen frame visible, never cropped).
+//   - "targeted_broll"/"exact_evidence" beats: presenter window shrinks to
+//     a bordered panel (bottom-left, ~40% width — a real window, not a tiny
+//     corner icon) and a large evidence zone (top-right, most of the frame)
+//     shows either a contain-fit Ideogram illustration (targeted_broll) or
+//     a big fitted evidence-number treatment (exact_evidence), reusing the
+//     same nextwaveV2FitLabel/nextwaveV2WrapLines text-fitting already
+//     proven in Phase 5.
+const NEXTWAVE_V2_CANVAS_BG = '0x12141c';
+const NEXTWAVE_V2_CANVAS_ACCENT = '0xc99e4c';
+const NEXTWAVE_V2_CANVAS_W = 1080;
+const NEXTWAVE_V2_CANVAS_H = 1920;
+// Presenter window geometry (large/host vs small/evidence-sharing).
+const NEXTWAVE_V2_PRESENTER_LARGE = { x: 90, y: 300, w: 900, h: 1200 };
+const NEXTWAVE_V2_PRESENTER_SMALL = { x: 50, y: 1280, w: 460, h: 580 };
+// Evidence zone geometry (only used on non-host beats).
+const NEXTWAVE_V2_EVIDENCE_ZONE = { x: 40, y: 300, w: 1000, h: 940 };
+
+async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, beatEnd, renderId, beatIdx, ideogramBudget) {
+  const dur = Math.max(0.3, beatEnd - beatStart);
+  const outPath = join(tmpdir(), `nwv2canvas-seg-${renderId}-${beatIdx}.mp4`);
+  const treatment = (beat.visual && beat.visual.visual_treatment) || 'host';
+  const isLarge = treatment === 'host';
+  const pWin = isLarge ? NEXTWAVE_V2_PRESENTER_LARGE : NEXTWAVE_V2_PRESENTER_SMALL;
+
+  // Evidence-zone content resolution (only for non-host beats).
+  let evidenceImagePath = null;
+  if (!isLarge && treatment === 'targeted_broll' && beat.visual.broll_prompt) {
+    const concept = beat.visual.broll_prompt.split(/[,.]/)[0].slice(0, 40); // short concept slug source
+    const dyn = await nextwaveV2ResolveOrGenerateIllustratedObject(concept, ideogramBudget);
+    if (dyn && dyn.path) evidenceImagePath = dyn.path;
+  }
+  let evidenceKeyColor = null;
+  if (evidenceImagePath) evidenceKeyColor = await _nextwaveV2SampleCornerColor(evidenceImagePath);
+
+  const inputs = ['-y', '-ss', String(beatStart.toFixed(2)), '-i', heygenLocalPath];
+  let nextIdx = 1;
+  const presenterIdx = 0; // input 0 is the trimmed heygen segment itself (seek applied to input)
+  let evidenceIdx = -1;
+  if (evidenceImagePath) { inputs.push('-i', evidenceImagePath); evidenceIdx = nextIdx; nextIdx++; }
+
+  const filters = [];
+  // Persistent canvas background + brand bars — identical on every beat.
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[bg0]`);
+  let lastBg = 'bg0';
+  filters.push(`[${lastBg}]drawbox=x=0:y=0:w=${NEXTWAVE_V2_CANVAS_W}:h=10:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.9:t=fill[bg1]`);
+  filters.push(`[bg1]drawbox=x=0:y=${NEXTWAVE_V2_CANVAS_H - 10}:w=${NEXTWAVE_V2_CANVAS_W}:h=10:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.9:t=fill[bg2]`);
+  lastBg = 'bg2';
+
+  // Evidence zone (drawn BEFORE the presenter window so the presenter window
+  // always sits visually on top, consistent stacking every beat).
+  if (evidenceIdx !== -1) {
+    const z = NEXTWAVE_V2_EVIDENCE_ZONE;
+    filters.push(`[${lastBg}]drawbox=x=${z.x - 6}:y=${z.y - 6}:w=${z.w + 12}:h=${z.h + 12}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.6:t=4[bg3]`);
+    lastBg = 'bg3';
+    // contain-fit: scale to fit inside the zone without cropping, pad the rest transparent-ish via the zone's own box.
+    const keyOpt = evidenceKeyColor ? `,colorkey=color=${evidenceKeyColor}:similarity=0.18:blend=0.06` : '';
+    filters.push(`[${evidenceIdx}:v]scale=${z.w}:${z.h}:force_original_aspect_ratio=decrease${keyOpt}[evimg]`);
+    filters.push(`[${lastBg}][evimg]overlay=x=${z.x}+(${z.w}-overlay_w)/2:y=${z.y}+(${z.h}-overlay_h)/2:enable='between(t,0,${dur.toFixed(2)})'[bg4]`);
+    lastBg = 'bg4';
+  } else if (!isLarge && treatment === 'exact_evidence') {
+    const z = NEXTWAVE_V2_EVIDENCE_ZONE;
+    filters.push(`[${lastBg}]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=0x1c2030@0.92:t=fill[bgE0]`);
+    filters.push(`[bgE0]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[bgE1]`);
+    lastBg = 'bgE1';
+    const values = (beat.visual.emphasis_values || []).slice(0, 3);
+    let vy = z.y + 80;
+    values.forEach((val, vi) => {
+      const safeVal = nextwaveV2SanitizeDrawtext(String(val), 24);
+      const fit = nextwaveV2FitLabel(safeVal, 96, z.w - 100, 56);
+      filters.push(`[${lastBg}]drawtext=fontfile=${SMM_FONT_PATH}:text='${fit.lines[0]}':fontcolor=white:fontsize=${fit.fontSize}:box=0:x=${z.x + 50}:y=${vy}[bgV${vi}]`);
+      lastBg = `bgV${vi}`;
+      vy += fit.fontSize + 50;
+    });
+  }
+
+  // Presenter window: bordered frame + the trimmed HeyGen segment, contain-fit
+  // (scaled to fit the WHOLE frame inside the window, never cropped).
+  filters.push(`[${lastBg}]drawbox=x=${pWin.x - 5}:y=${pWin.y - 5}:w=${pWin.w + 10}:h=${pWin.h + 10}:color=${NEXTWAVE_V2_CANVAS_ACCENT}:t=5[bgP0]`);
+  filters.push(`[${presenterIdx}:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS,scale=${pWin.w}:${pWin.h}:force_original_aspect_ratio=decrease[pvid]`);
+  filters.push(`[bgP0][pvid]overlay=x=${pWin.x}+(${pWin.w}-overlay_w)/2:y=${pWin.y}+(${pWin.h}-overlay_h)/2:shortest=1[outv]`);
+
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    ...inputs,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]',
+    '-map', `${presenterIdx}:a?`,
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, `canvas segment ${beatIdx}`);
+  return outPath;
+}
+
+// Concats beat segments preserving BOTH video and audio this time — unlike
+// nextwaveV2ConcatVideoOnly (which deliberately dropped audio because Phase
+// 5.3 muxed one separate master track at the very end), each canvas segment
+// already carries its own correct trimmed slice of the ONE continuous HeyGen
+// narration track, so concatenating both streams together reproduces the
+// original continuous voice with no separate mux step needed.
+async function nextwaveV2ConcatCanvasSegments({ paths, id }) {
+  for (let i = 0; i < paths.length; i++) {
+    await smAssertValidMediaFile(paths[i], `canvas segment ${i + 1}/${paths.length} before concat`);
+  }
+  const outPath = join(tmpdir(), `nwv2canvas-concat-${id}.mp4`);
+  const inputArgs = [];
+  paths.forEach((p) => { inputArgs.push('-i', p); });
+  const streamRefs = paths.map((_, i) => `[${i}:v:0][${i}:a:0]`).join('');
+  const filter = `${streamRefs}concat=n=${paths.length}:v=1:a=1[outv][outa]`;
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filter,
+    '-map', '[outv]', '-map', '[outa]',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 90000, maxBuffer: 1024 * 1024 * 60 });
+  await smAssertValidMediaFile(outPath, 'concatenated canvas master');
+  return outPath;
+}
+
+// BUILD step — composites the persistent-canvas video from the already-
+// completed HeyGen render + the reviewed visual plan, uploads it, and
+// returns its URL for the caller (the frontend) to hand to Submagic in
+// captions-only mode. CEO-gated (real ffmpeg + Ideogram spend possible).
+async function nextwaveV2CompositeCanvasRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, visual_plan_package, real_duration_sec } = body;
+  if (!heygen_video_url || !visual_plan_package || !real_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_visual_plan_package_or_real_duration_sec' });
+  }
+  const vp = visual_plan_package;
+  if (!Array.isArray(vp.beats) || !vp.beats.length || !Array.isArray(vp.units) || !vp.units.length) {
+    return res.status(400).json({ ok: false, error: 'invalid_visual_plan_package' });
+  }
+  const renderId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2canvas-src-${renderId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const totalChars = Math.max(1, vp.units.reduce((sum, u) => sum + String(u.text || '').length, 0));
+    let cursor = 0;
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const beatReports = [];
+    for (let i = 0; i < vp.beats.length; i++) {
+      const beat = vp.beats[i];
+      const beatChars = (beat.unit_texts || []).reduce((sum, t) => sum + String(t || '').length, 0);
+      const beatDur = real_duration_sec * (beatChars / totalChars);
+      const start = cursor;
+      const end = Math.min(real_duration_sec, cursor + beatDur);
+      cursor = end;
+      const segPath = await nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, start, end, renderId, i, ideogramBudget);
+      segPaths.push(segPath);
+      beatReports.push({ beatIndex: i, treatment: beat.visual && beat.visual.visual_treatment, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+    }
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/canvas-${renderId}.mp4`, finalBuf, 'video/mp4');
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      beat_count: vp.beats.length,
+      beats: beatReports,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      render_id: renderId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
 async function nextwaveV2BuildRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
@@ -15496,6 +15706,9 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_ideogram_generate_pose') return await nextwaveV2IdeogramGeneratePose(req, res);
     if (action === 'nextwave_v2_ideogram_generate_object') return await nextwaveV2IdeogramGenerateObject(req, res);
     if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
+    // Visual Composition Correction — persistent-canvas compositor (presenter
+    // window + evidence zone), Submagic reduced to captions-only downstream.
+    if (action === 'nextwave_v2_composite_canvas')    return await nextwaveV2CompositeCanvasRender(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
