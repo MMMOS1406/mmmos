@@ -15065,6 +15065,453 @@ async function nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec, dur, outPa
   return outPath;
 }
 
+// ============================================================================
+// LONG-FORMAT LANDSCAPE VALIDATION — 1920x1080 16:9. Reuses the Short's
+// white-canvas color system and fade-to-white transition mechanism, adds:
+// a persistent TOP-LEFT NextWave logo lockup (the Short used a small
+// bottom-right corner mark; this format's own requirement is top-left), and
+// two new visual treatments — comparison and timeline — so the body of a
+// long video isn't just calc-card-after-calc-card ("slideshow of cards" is
+// exactly what this phase's order forbids).
+//
+// Avatar design note: the proven HeyGen source stays PORTRAIT (1080x1920,
+// scale 2.0 — the exact settings already validated) rather than requesting
+// a landscape render from HeyGen itself (untested, and this avatar's own
+// footage is inherently a tall seated-portrait composition, so forcing
+// HeyGen to output 16:9 risks either cropping the subject or a same-result
+// pillarbox HeyGen would produce internally anyway). Instead the portrait
+// footage is contain-fit into a bordered zone on ONE side of the 16:9
+// canvas, and the OTHER side carries real semantic content — the hook
+// question or the CTA line — rather than empty brand-colored space. This
+// is deliberately NOT the "half avatar / half visualization" split screen
+// the CEO has repeatedly rejected: that rule was about two competing video
+// sources side by side; here one side is the presenter and the other is
+// the actual narration text for that exact beat, same persistent canvas,
+// same single visual idea per beat.
+const NWV2L_W = 1920;
+const NWV2L_H = 1080;
+
+function nwv2LongLogoFilter(input, output) {
+  const mid = `${output}_lgm`;
+  return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NWV2_NAVY}:fontsize=34:x=48:y=42[${mid}];[${mid}]drawbox=x=48:y=84:w=150:h=4:color=${NWV2_GOLD}:t=fill[${output}]`;
+}
+
+// Avatar + text panel — used for both the opening hook (headline) and the
+// closing CTA (cta text), the ONLY two beats where the avatar appears at
+// all, per the CEO's sparing-avatar policy for this Long proof.
+async function nwv2LongAvatarPanelSegment({ heygenLocalPath, seekSec, dur, text, isCta, fadeEdge, outPath }) {
+  const avatarColW = 760, avatarColX = NWV2L_W - avatarColW - 60;
+  const textColW = avatarColX - 100;
+  const lines = nwv2ProofWrapText(text, 24);
+  const lineH = 78;
+  const blockH = lines.length * lineH;
+  const startY = Math.round((NWV2L_H - blockH) / 2);
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[a0]`);
+  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS,scale=${avatarColW}:${NWV2L_H}:force_original_aspect_ratio=decrease[avid]`);
+  filters.push(`[a0][avid]overlay=x=${avatarColX}+(${avatarColW}-overlay_w)/2:y=(${NWV2L_H}-overlay_h)/2[a1]`);
+  filters.push(`[a1]drawbox=x=${avatarColX - 6}:y=40:w=${avatarColW + 12}:h=${NWV2L_H - 80}:color=${NWV2_GOLD}@0.5:t=3[a2]`);
+  let last = 'a2', idx = 3;
+  const textColor = isCta ? NWV2_GOLD_DARK : NWV2_NAVY;
+  lines.forEach((line, li) => {
+    const safe = line.replace(/['":\\\[\],;%]/g, '');
+    const y0 = startY + li * lineH;
+    const yExpr = `if(lt(t,0.5),${y0}+22*(1-t/0.5),${y0})`;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${textColor}:fontsize=54:box=0:x=70:y='${yExpr}'[a${idx}]`);
+    last = `a${idx}`; idx++;
+  });
+  if (isCta) {
+    filters.push(`[${last}]drawbox=x=70:y=${startY + blockH + 34}:w=140:h=5:color=${NWV2_GOLD}:t=fill:enable='gte(t,0.6)'[a${idx}]`);
+    last = `a${idx}`; idx++;
+  }
+  filters.push(nwv2LongLogoFilter(last, `a${idx}`));
+  last = `a${idx}`; idx++;
+  const fadeArg = fadeEdge === 'in'
+    ? `fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`
+    : fadeEdge === 'out'
+      ? `fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`
+      : null;
+  filters.push(fadeArg ? `[${last}]${fadeArg}[outv]` : `[${last}]null[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long avatar panel segment');
+  return outPath;
+}
+
+// Comparison scene — two panels slide in from opposite sides (left panel
+// from the left, right panel from the right), each with a method name and
+// one-line definition. Genuinely different visual grammar from a calc
+// card, not a reskin of it.
+async function nwv2LongComparisonSegment({ heygenLocalPath, seekSec, dur, leftTitle, leftBody, rightTitle, rightBody, outPath }) {
+  const panelW = 780, panelH = 560, panelY = 260, gap = 60;
+  const leftX = NWV2L_W / 2 - gap / 2 - panelW;
+  const rightX = NWV2L_W / 2 + gap / 2;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[c0]`);
+  const leftXExpr = `if(lt(t,0.5),${leftX}-160*(1-t/0.5),${leftX})`;
+  const rightXExpr = `if(lt(t,0.5),${rightX}+160*(1-t/0.5),${rightX})`;
+  filters.push(`[c0]drawbox=x=${leftX + 8}:y=${panelY + 8}:w=${panelW}:h=${panelH}:color=${NWV2_SHADOW}:t=fill[c1]`);
+  filters.push(`[c1]boxblur=10:2[c2]`);
+  filters.push(`[c2]drawbox=x='${leftXExpr}':y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_WHITE_CARD}:t=fill[c3]`);
+  filters.push(`[c3]drawbox=x='${leftXExpr}':y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_NAVY}@0.5:t=3[c4]`);
+  filters.push(`[c4]drawbox=x=${rightX - 8}:y=${panelY + 8}:w=${panelW}:h=${panelH}:color=${NWV2_SHADOW}:t=fill[c5]`);
+  filters.push(`[c5]boxblur=10:2[c6]`);
+  filters.push(`[c6]drawbox=x='${rightXExpr}':y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_GOLD}@0.92:t=fill[c7]`);
+  let last = 'c7', idx = 8;
+  const safeLT = nwv2WhiteSanitize(leftTitle, 26).replace(/[,;]/g, '');
+  const safeLB = nwv2WhiteSanitize(leftBody, 34).replace(/[,;]/g, '');
+  const safeRT = nwv2WhiteSanitize(rightTitle, 26).replace(/[,;]/g, '');
+  const safeRB = nwv2WhiteSanitize(rightBody, 34).replace(/[,;]/g, '');
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLT}':fontcolor=${NWV2_NAVY}:fontsize=48:box=0:x='${leftXExpr}'+(${panelW}-text_w)/2:y=${panelY + 90}:enable='gte(t,0.4)'[c${idx}]`);
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLB}':fontcolor=${NWV2_NAVY}@0.8:fontsize=34:box=0:x='${leftXExpr}'+(${panelW}-text_w)/2:y=${panelY + 220}:enable='gte(t,0.7)'[c${idx + 1}]`);
+  last = `c${idx + 1}`; idx += 2;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeRT}':fontcolor=white:fontsize=48:box=0:x='${rightXExpr}'+(${panelW}-text_w)/2:y=${panelY + 90}:enable='gte(t,0.4)'[c${idx}]`);
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeRB}':fontcolor=white@0.9:fontsize=34:box=0:x='${rightXExpr}'+(${panelW}-text_w)/2:y=${panelY + 220}:enable='gte(t,0.7)'[c${idx + 1}]`);
+  last = `c${idx + 1}`; idx += 2;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='VS':fontcolor=${NWV2_NAVY}:fontsize=44:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + panelH / 2 - 26}[c${idx}]`);
+  last = `c${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long comparison segment');
+  return outPath;
+}
+
+// Calculation card — landscape-sized version of the Short's proven card
+// (same shadow/fontsize-fit techniques), positioned to leave the bottom
+// ~230px clear for captions.
+async function nwv2LongCalcCardSegment({ heygenLocalPath, seekSec, title, values, dur, outPath }) {
+  const boxW = 1040, boxH = 620;
+  const boxX = Math.round((NWV2L_W - boxW) / 2);
+  const boxY = 160;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[k0]`);
+  filters.push(`[k0]drawbox=x=${boxX + 10}:y=${boxY + 10}:w=${boxW}:h=${boxH}:color=${NWV2_SHADOW}:t=fill[k1]`);
+  filters.push(`[k1]boxblur=10:2[k2]`);
+  filters.push(`[k2]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[k3]`);
+  filters.push(`[k3]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.6:t=3[k4]`);
+  let last = 'k4', idx = 5;
+  const nwv2FitFontsizeL = (text, base, threshold) => {
+    const len = text.length; const t = threshold || 20;
+    if (len <= t) return base;
+    return Math.max(Math.round(base * (t / len)), Math.round(base * 0.62));
+  };
+  const safeTitle = nwv2WhiteSanitize(title, 50).replace(/[,;]/g, '');
+  if (safeTitle) {
+    const fs = nwv2FitFontsizeL(safeTitle, 42, 30);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=${fs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 56}:enable='gte(t,0.35)'[k${idx}]`);
+    last = `k${idx}`; idx++;
+  }
+  const safeValues = (values || []).slice(0, 4).map((v) => nwv2WhiteSanitize(v, 30));
+  const lineH = 108;
+  const blockH = safeValues.length * lineH;
+  const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 40 : 0);
+  const revealSpan = Math.max(0.5, (dur - 1.4) / Math.max(1, safeValues.length));
+  safeValues.forEach((val, vi) => {
+    const targetY = startY + vi * lineH;
+    const revealAt = 0.5 + vi * revealSpan;
+    const isLast = vi === safeValues.length - 1;
+    const yExpr = `if(lt(t,${revealAt.toFixed(2)}+0.22),${targetY}+16*(1-(t-${revealAt.toFixed(2)})/0.22),${targetY})`;
+    if (!isLast) {
+      const fs = nwv2FitFontsizeL(val, 46, 20);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=${fs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+    } else {
+      const fs1 = nwv2FitFontsizeL(val, 48, 20);
+      const fs2 = nwv2FitFontsizeL(val, 56, 20);
+      const popAt = (revealAt + 0.15).toFixed(2);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs1}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs2}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
+      last = `k${idx + 1}`; idx += 2;
+    }
+  });
+  filters.push(nwv2LongLogoFilter(last, `k${idx}`));
+  last = `k${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long calc card segment');
+  return outPath;
+}
+
+// Illustration — same Ken-Burns zoompan mechanism as the Short, resized
+// for the wider canvas.
+async function nwv2LongIllustrationSegment({ heygenLocalPath, seekSec, illustrationPath, keyColor, dur, outPath }) {
+  const zoneW = 820, zoneH = 780;
+  const zoneX = Math.round((NWV2L_W - zoneW) / 2);
+  const zoneY = 150;
+  const fps = 25;
+  const totalFrames = Math.max(1, Math.round(dur * fps));
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.26:blend=0.12` : '';
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[l0]`);
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[limg0]`);
+  filters.push(`[limg0]zoompan=z='min(zoom+0.0009,1.06)':d=${totalFrames}:s=${zoneW}x${zoneH}:fps=${fps}[limg]`);
+  filters.push(`[l0][limg]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[l1]`);
+  filters.push(nwv2LongLogoFilter('l1', 'l2'));
+  filters.push(`[l2]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long illustration segment');
+  return outPath;
+}
+
+// Timeline scene — a genuinely different visual grammar again: a
+// horizontal line draws itself in (width-animated drawbox), then two
+// labeled point markers pop in at their positions along it as the
+// narration reaches them. Real "diagram construction" motion, not a card.
+async function nwv2LongTimelineSegment({ heygenLocalPath, seekSec, title, points, dur, outPath }) {
+  const lineY = 560, lineX0 = 280, lineX1 = 1640, lineW = lineX1 - lineX0;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[t0]`);
+  let last = 't0', idx = 1;
+  const safeTitle = nwv2WhiteSanitize(title, 50).replace(/[,;]/g, '');
+  if (safeTitle) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=46:box=0:x=(${NWV2L_W}-text_w)/2:y=150:enable='gte(t,0.2)'[t${idx}]`);
+    last = `t${idx}`; idx++;
+  }
+  // Progressive line draw over the first 1.0s.
+  filters.push(`[${last}]drawbox=x=${lineX0}:y=${lineY}:w='min(${lineW},${lineW}*t/1.0)':h=6:color=${NWV2_GOLD}:t=fill:enable='gte(t,0.5)'[t${idx}]`);
+  last = `t${idx}`; idx++;
+  const pts = (points || []).slice(0, 3);
+  pts.forEach((p, pi) => {
+    const pxFinal = pts.length === 1 ? Math.round(lineX0 + lineW / 2) : Math.round(lineX0 + (lineW * pi) / (pts.length - 1));
+    const revealAt = 1.2 + pi * 1.0;
+    const safeLabel = nwv2WhiteSanitize(p.label || '', 22).replace(/[,;]/g, '');
+    const safeSub = nwv2WhiteSanitize(p.sub || '', 26).replace(/[,;]/g, '');
+    filters.push(`[${last}]drawbox=x=${pxFinal - 13}:y=${lineY - 13}:w=26:h=26:color=${NWV2_GOLD_DARK}:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${NWV2_NAVY}:fontsize=36:box=0:x=${pxFinal}-text_w/2:y=${lineY - 90}:enable='gte(t,${revealAt.toFixed(2)})'[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeSub) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeSub}':fontcolor=${NWV2_NAVY}@0.75:fontsize=26:box=0:x=${pxFinal}-text_w/2:y=${lineY + 40}:enable='gte(t,${revealAt.toFixed(2)})'[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+  });
+  filters.push(nwv2LongLogoFilter(last, `t${idx}`));
+  last = `t${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long timeline segment');
+  return outPath;
+}
+
+// CEO-gated orchestrator for the Long-format landscape candidate. Explicit
+// `beats` array (same reasoning as the Short's white-motion orchestrator —
+// precise control over which single beat carries the avatar).
+async function nextwaveV2CompositeLongRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, beats, real_duration_sec } = body;
+  if (!heygen_video_url || !Array.isArray(beats) || !beats.length || !real_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_beats_or_real_duration_sec' });
+  }
+  const renderId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2long-src-${renderId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const totalChars = Math.max(1, beats.reduce((sum, b) => sum + String(b.text || '').length, 0));
+    let cursor = 0;
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const timeline = [];
+
+    for (let i = 0; i < beats.length; i++) {
+      const beat = beats[i];
+      const beatChars = String(beat.text || '').length;
+      const beatDur = real_duration_sec * (beatChars / totalChars);
+      const start = cursor;
+      const end = Math.min(real_duration_sec, cursor + beatDur);
+      cursor = end;
+      const dur = end - start;
+      const isFirst = i === 0;
+      const segPath = join(tmpdir(), `nwv2long-seg-${renderId}-${i}.mp4`);
+
+      if (beat.treatment === 'avatar_panel') {
+        await nwv2LongAvatarPanelSegment({
+          heygenLocalPath, seekSec: start, dur, text: beat.text2 || beat.text, isCta: !!beat.isCta,
+          fadeEdge: isFirst ? null : 'in', outPath: segPath,
+        });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'avatar_panel', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+      } else if (beat.treatment === 'comparison') {
+        await nwv2LongComparisonSegment({
+          heygenLocalPath, seekSec: start, dur,
+          leftTitle: beat.leftTitle, leftBody: beat.leftBody, rightTitle: beat.rightTitle, rightBody: beat.rightBody,
+          outPath: segPath,
+        });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'comparison', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+      } else if (beat.treatment === 'timeline') {
+        await nwv2LongTimelineSegment({ heygenLocalPath, seekSec: start, title: beat.title, points: beat.points, dur, outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'timeline', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+      } else if (beat.treatment === 'illustration' && beat.concept) {
+        const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
+        if (illustration && illustration.path) {
+          const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+          await nwv2LongIllustrationSegment({ heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor, dur, outPath: segPath });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'illustration', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), concept: beat.concept });
+        } else {
+          await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.text, values: beat.values || [], dur, outPath: segPath });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'calc_card_fallback', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+        }
+      } else {
+        await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.title || beat.text, values: beat.values || [], dur, outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'calc_card', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), values: beat.values || [] });
+      }
+    }
+
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/long-${renderId}.mp4`, finalBuf, 'video/mp4');
+
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      timeline,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      render_id: renderId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// Long-format thumbnail — true 1280x720 16:9. Same deterministic-composition
+// principle as the Short's thumbnail (headline + contrast boxes), sized and
+// laid out for landscape instead of stretching the portrait design.
+async function nextwaveV2GenerateLongThumbnail(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { headline, fromValue, fromLabel, toValue, toLabel } = body;
+  if (!headline || !fromValue || !toValue) return res.status(400).json({ ok: false, error: 'missing_headline_or_values' });
+  const W = 1280, H = 720;
+  const renderId = randomBytes(6).toString('hex');
+  const outPath = join(tmpdir(), `nwv2longthumb-${renderId}.png`);
+  try {
+    const lines = nwv2ProofWrapText(headline, 24);
+    const lineH = 62;
+    const blockH = lines.length * lineH;
+    const startY = 90;
+    const filters = [];
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${W}x${H}:d=1[t0]`);
+    let last = 't0', idx = 1;
+    lines.forEach((line, li) => {
+      const safe = line.replace(/['":\\\[\],;%]/g, '');
+      const y = startY + li * lineH;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${NWV2_NAVY}:fontsize=48:box=0:x=(${W}-text_w)/2:y=${y}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    });
+    const boxW = 300, boxH = 220, gap = 34;
+    const totalW = boxW * 2 + gap;
+    const boxesX = Math.round((W - totalW) / 2);
+    const boxesY = startY + blockH + 60;
+    const fromX = boxesX, toX = boxesX + boxW + gap;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_NAVY}@0.4:t=3[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${toX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.92:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    const safeFromVal = nwv2WhiteSanitize(fromValue, 18);
+    const safeFromLabel = nwv2WhiteSanitize(fromLabel || '', 22).replace(/[,;]/g, '');
+    const safeToVal = nwv2WhiteSanitize(toValue, 18);
+    const safeToLabel = nwv2WhiteSanitize(toLabel || '', 22).replace(/[,;]/g, '');
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromVal}':fontcolor=${NWV2_NAVY}:fontsize=42:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 58}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeFromLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=24:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 130}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToVal}':fontcolor=white:fontsize=42:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 58}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeToLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToLabel}':fontcolor=white@0.85:fontsize=24:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 130}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='>>':fontcolor=${NWV2_GOLD_DARK}:fontsize=40:box=0:x=${fromX + boxW}+(${gap}-text_w)/2:y=${boxesY + boxH / 2 - 22}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NWV2_NAVY}:fontsize=30:x=40:y=36[t${idx}]`);
+    last = `t${idx}`;
+    const filterComplex = filters.join(';');
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-filter_complex', filterComplex,
+      '-map', `[${last}]`,
+      '-frames:v', '1',
+      outPath,
+    ], { timeout: 20000 });
+    const buf = await readFile(outPath);
+    const thumbUrl = await sbStorageUpload(`nextwave-v2-preview/longthumb-${renderId}.png`, buf, 'image/png');
+    return res.status(200).json({ ok: true, thumbnail_url: thumbUrl, render_id: renderId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(outPath).catch(() => {});
+  }
+}
+
 // CEO-gated orchestrator. Takes an explicit `beats` array (NOT the
 // automatic visual-plan classifier) because the classifier's own grouping
 // merges hook/close sentences into neighboring evidence beats (confirmed
@@ -16675,6 +17122,10 @@ export default async function handler(req, res) {
     // illustration. See file comment above nextwaveV2CompositeWhiteMotionRender.
     if (action === 'nextwave_v2_composite_white_motion') return await nextwaveV2CompositeWhiteMotionRender(req, res);
     if (action === 'nextwave_v2_generate_thumbnail')  return await nextwaveV2GenerateThumbnail(req, res);
+    // Long-Format Landscape Validation — 1920x1080, sparse avatar (open/close
+    // panels only), comparison/timeline treatments for real visual variety.
+    if (action === 'nextwave_v2_composite_long')      return await nextwaveV2CompositeLongRender(req, res);
+    if (action === 'nextwave_v2_generate_long_thumbnail') return await nextwaveV2GenerateLongThumbnail(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
