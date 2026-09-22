@@ -14165,22 +14165,22 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     filters.push(`[${lastBg}]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=0x1c2030@0.92:t=fill[bgE0]`);
     filters.push(`[bgE0]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[bgE1]`);
     lastBg = 'bgE1';
-    // Phase: Visual Composition Correction QA fix (round 5, root cause
-    // confirmed) — round 4's text_expansion=none diagnosis was right
-    // (drawtext defaults to text_expansion=normal, which treats a bare
-    // '%' as the start of a strftime/%{...} macro sequence and silently
-    // mangles literal '%' text — confirmed via real frame extraction:
-    // "50%"/"6%" vanished, "$60,000"/"$1,800" rendered fine) but the FIX
-    // was wrong for this bundled ffmpeg build: a real render came back
-    // with "Option 'text_expansion' not found" — the same ~2018 static
-    // build that already rejected text_align. That build predates the
-    // text_expansion option entirely, so expansion can't be disabled —
-    // it must be escaped instead. FFmpeg drawtext's own long-documented
-    // escape for a literal '%' under normal expansion is '%%', so that's
-    // applied here rather than any option this build doesn't have.
+    // Phase: Visual Composition Correction QA fix (round 6, root cause
+    // confirmed via ffmpeg stderr capture) — rounds 4 and 5 both correctly
+    // identified drawtext's %-expansion as the culprit ("50%"/"6%" missing,
+    // "$60,000"/"$1,800" fine) but both fix attempts (text_expansion=none,
+    // then the standard '%%' escape) failed: a captured real stderr showed
+    // "[Parsed_drawtext_5] Stray % near '%'" for BOTH the bare '%' and the
+    // '%%'-escaped version — this ~2018 static ffmpeg build's drawtext
+    // %-parser doesn't honor the documented escape at all, on any '%'
+    // count. The only build-proof fix is to never hand it a literal '%'.
+    // Font glyph check (fonttools) confirmed smm-font.ttf has no fullwidth/
+    // lookalike percent glyph (only 103 basic-Latin glyphs), ruling out a
+    // Unicode-substitute trick, so '%' is spelled out as ' PCT' instead —
+    // ASCII-only, every needed glyph confirmed present in the font.
     const values = (beat.visual.emphasis_values || []).slice(0, 4);
     if (values.length) {
-      const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24).replace(/%/g, '%%'));
+      const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24).replace(/%/g, ' PCT'));
       const lineH = 90;
       const blockH = safeValues.length * lineH;
       const startY = Math.round(z.y + (z.h - blockH) / 2);
@@ -14200,17 +14200,7 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
   filters.push(`[bgP0][pvid]overlay=x=${pWin.x}+(${pWin.w}-overlay_w)/2:y=${pWin.y}+(${pWin.h}-overlay_h)/2:shortest=1[outv]`);
 
   const filterComplex = filters.join(';');
-  // TEMP DEBUG (round 6 diagnosis) — dump the exact deployed filter string
-  // for beat 0 without running ffmpeg, to rule out a stale-deploy false
-  // positive after two rounds produced byte-identical output despite a
-  // real code change. Remove once the evidence-text bug is confirmed
-  // fixed end-to-end.
-  if (beat.__nwv2DebugDumpFilter) {
-    const err = new Error('DEBUG_FILTER_DUMP: ' + filterComplex);
-    err.__debugDump = true;
-    throw err;
-  }
-  const ffArgs = [
+  await execFileAsync(ffmpegInstaller.path, [
     ...inputs,
     '-filter_complex', filterComplex,
     '-map', '[outv]',
@@ -14219,20 +14209,7 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
     '-c:a', 'aac', '-b:a', '192k',
     outPath,
-  ];
-  if (beat.__nwv2DebugCaptureStderr) {
-    let stderrOut = '';
-    try {
-      const r = await execFileAsync(ffmpegInstaller.path, ffArgs, { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
-      stderrOut = r.stderr || '';
-    } catch (e) {
-      stderrOut = (e && e.stderr) || (e && e.message) || String(e);
-    }
-    const err = new Error('DEBUG_STDERR_DUMP: ' + stderrOut);
-    err.__debugDump = true;
-    throw err;
-  }
-  await execFileAsync(ffmpegInstaller.path, ffArgs, { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
   await smAssertValidMediaFile(outPath, `canvas segment ${beatIdx}`);
   return outPath;
 }
