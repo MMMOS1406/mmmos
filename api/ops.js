@@ -13732,7 +13732,20 @@ async function nextwaveV2ResolveOrGenerateIllustratedObject(illustrationConcept,
     return { role, path: await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`), reused: true, cost_usd: 0 };
   }
   if (!budget || budget.remaining <= 0) return null; // cost ceiling reached — degrade gracefully, never block the render
-  const prompt = `Flat 2D vector illustration representing the concept of "${illustrationConcept.replace(/["\n]/g, ' ').slice(0, 60)}" in a personal-finance context, soft shading, clean bold outlines, navy and gold accent color palette, no text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style, single clear central subject.`;
+  // Full-Frame Production Candidate fix C — Ideogram does not reliably obey a
+  // simple "no text" instruction when the CONCEPT phrase itself implies a
+  // labeled/inscribed object (confirmed on a real render: "jar labeled
+  // savings" came back with genuine, truncated on-image text, "SAVINGS,
+  // RETI…"). Strip any label-implying wording from the concept before it
+  // reaches the prompt, and make the negative instruction explicit and
+  // repeated rather than a single "no text" clause. Deterministic overlay
+  // text is applied separately by the compositor when a beat needs one —
+  // this illustration itself must never be asked to carry load-bearing text.
+  const deLabeled = illustrationConcept
+    .replace(/\b(labeled|labelled|that says|with the words?|with a (sign|label|tag) (that says|reading)|reading)\b[^,.]*/gi, '')
+    .replace(/["\n]/g, ' ')
+    .slice(0, 60);
+  const prompt = `Flat 2D vector illustration representing the concept of "${deLabeled}" in a personal-finance context, soft shading, clean bold outlines, navy and gold accent color palette, isolated on a plain dark navy background, professional financial-explainer illustration style, single clear central subject. Absolutely no text, no words, no letters, no numbers, no labels, no signage, no typography of any kind anywhere in the image — a pure wordless visual metaphor only. No people.`;
   try {
     const gen = await nextwaveV2IdeogramResolveObject(role, prompt);
     if (!gen.ok) return null;
@@ -14496,6 +14509,292 @@ async function nextwaveV2CompositionProofRender(req, res) {
       illustration_reused: !!illustration.reused,
       illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
       proof_id: proofId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// ============================================================================
+// FULL-FRAME PRODUCTION CANDIDATE — generalizes the accepted 13s mechanism
+// proof onto real beat data (from nextwaveV2GenerateVisualPlanPackage) with
+// real synchronized narration audio throughout, and applies all 5 defects
+// the CEO ordered fixed before any real candidate:
+//  A. HeyGen scale reverted to 2.0 (the value this exact avatar family was
+//     already proven to need for full-frame — 1.4 was chosen specifically
+//     for the now-rejected small bordered presenter window).
+//  B. wider colorkey tolerance on illustrations (softer edge, less seam).
+//  C. illustration prompt strips label-implying phrasing and repeats the
+//     no-text instruction — see nextwaveV2ResolveOrGenerateIllustratedObject.
+//  D. comma-preserving, percent-safe value sanitizer (matches the fix
+//     already proven correct in the split-screen compositor — the proof's
+//     own sanitizer over-stripped commas, e.g. "$60,000" -> "$60000").
+//  E. caption safe zone re-verified against this full-frame layout
+//     specifically (checked via real frames after Submagic, not assumed).
+//
+// Design note on avatar placement: the real visual-plan classifier groups
+// the hook/closing sentences INTO the neighboring exact_evidence beat
+// (confirmed empirically — asking it to isolate them as separate "host"
+// beats fights its own merge heuristics). Rather than fight the classifier,
+// beat 0 and the LAST beat are each split in two: an avatar segment for the
+// hook/closing portion of that beat's own narration, then the evidence
+// card for the rest of it — same fade-to-navy transition proven in the
+// mechanism proof, just now carrying that beat's REAL audio slice instead
+// of the whole beat's audio going to one visual.
+const NWV2_FULLFRAME_HOOK_DUR = 2.0;
+const NWV2_FULLFRAME_CLOSE_DUR = 2.0;
+const NWV2_FULLFRAME_HEYGEN_SCALE = 2.0;
+
+function nwv2FullFrameSanitizeValue(v) {
+  return String(v).replace(/['":\\\[\]]/g, '').slice(0, 30).replace(/%/g, ' PCT');
+}
+
+// Full-frame avatar segment — identical mechanism to the accepted proof
+// (nwv2ProofBuildAvatarSegment), duplicated rather than shared so the proof
+// path stays untouched/reproducible while this one evolves independently.
+async function nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec, dur, fadeEdge, outPath }) {
+  const filters = [];
+  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[av0]`);
+  filters.push(nwv2ProofBrandMarkFilter('av0', 'av1'));
+  const fadeArg = fadeEdge === 'in'
+    ? `fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+    : fadeEdge === 'out'
+      ? `fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+      : null;
+  if (fadeArg) filters.push(`[av1]${fadeArg}[outv]`);
+  const filterComplex = filters.join(';') + (fadeArg ? '' : `;[av1]null[outv]`);
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'full-frame avatar segment');
+  return outPath;
+}
+
+// Full-frame evidence card — carries REAL narration audio (trimmed from the
+// same continuous HeyGen source at this beat's own offset), unlike the
+// proof's silent anullsrc card. Final value is visually emphasized (larger,
+// gold) — the "important result emphasized" step the CEO's calculation
+// example calls for.
+async function nwv2FullFrameCardSegment({ heygenLocalPath, seekSec, title, values, dur, fadeIn, fadeOut, outPath }) {
+  const boxW = 860, boxH = 900;
+  const boxX = Math.round((NEXTWAVE_V2_CANVAS_W - boxW) / 2);
+  const boxY = Math.round((NEXTWAVE_V2_CANVAS_H - boxH) / 2);
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[c0]`);
+  filters.push(`[c0]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=0x1c2030@0.95:t=fill[c1]`);
+  filters.push(`[c1]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[c2]`);
+  let last = 'c2', idx = 3;
+  const safeTitle = String(title || '').replace(/['":\\\[\],;%]/g, '').slice(0, 40);
+  if (safeTitle) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NEXTWAVE_V2_CANVAS_ACCENT}:fontsize=42:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 66}:enable='gte(t,0.4)'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
+  const safeValues = (values || []).slice(0, 4).map(nwv2FullFrameSanitizeValue);
+  const lineH = 128;
+  const blockH = safeValues.length * lineH;
+  const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 60 : 0);
+  const revealSpan = Math.max(0.6, (dur - 1.6) / Math.max(1, safeValues.length));
+  safeValues.forEach((val, vi) => {
+    const y = startY + vi * lineH;
+    const revealAt = (0.6 + vi * revealSpan).toFixed(2);
+    const isLast = vi === safeValues.length - 1;
+    const fontsize = isLast ? 66 : 54;
+    const color = isLast ? NEXTWAVE_V2_CANVAS_ACCENT : 'white';
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${color}:fontsize=${fontsize}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${y}:enable='gte(t,${revealAt})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  });
+  filters.push(nwv2ProofBrandMarkFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeParts.length) {
+    filters.push(`[${last}]${fadeParts.join(',')}[outv]`);
+  } else {
+    filters.push(`[${last}]null[outv]`);
+  }
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'full-frame card segment');
+  return outPath;
+}
+
+// Full-frame illustration — same real-audio pattern as the card. Wider
+// colorkey tolerance (fix B) than the split-screen compositor's original
+// 0.18/0.06 to reduce the visible background seam observed on the proof.
+async function nwv2FullFrameIllustrationSegment({ heygenLocalPath, seekSec, illustrationPath, keyColor, dur, fadeIn, fadeOut, outPath }) {
+  const zoneW = 880, zoneH = 1080;
+  const zoneX = Math.round((NEXTWAVE_V2_CANVAS_W - zoneW) / 2);
+  const zoneY = Math.round((NEXTWAVE_V2_CANVAS_H - zoneH) / 2);
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.26:blend=0.12` : '';
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[i0]`);
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[img]`);
+  filters.push(`[i0][img]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[i1]`);
+  filters.push(nwv2ProofBrandMarkFilter('i1', 'i2'));
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeParts.length) {
+    filters.push(`[i2]${fadeParts.join(',')}[outv]`);
+  } else {
+    filters.push(`[i2]null[outv]`);
+  }
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'full-frame illustration segment');
+  return outPath;
+}
+
+// CEO-gated. Mirrors nextwaveV2CompositeCanvasRender's interface
+// (heygen_video_url, visual_plan_package, real_duration_sec) so the
+// existing frontend BUILD-stage wiring pattern carries over unchanged.
+async function nextwaveV2CompositeFullFrameRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, visual_plan_package, real_duration_sec } = body;
+  if (!heygen_video_url || !visual_plan_package || !real_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_visual_plan_package_or_real_duration_sec' });
+  }
+  const vp = visual_plan_package;
+  if (!Array.isArray(vp.beats) || !vp.beats.length || !Array.isArray(vp.units) || !vp.units.length) {
+    return res.status(400).json({ ok: false, error: 'invalid_visual_plan_package' });
+  }
+  const renderId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2ff-src-${renderId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const totalChars = Math.max(1, vp.units.reduce((sum, u) => sum + String(u.text || '').length, 0));
+    let cursor = 0;
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const timeline = [];
+
+    for (let i = 0; i < vp.beats.length; i++) {
+      const beat = vp.beats[i];
+      const beatChars = (beat.unit_texts || []).reduce((sum, t) => sum + String(t || '').length, 0);
+      const beatDur = real_duration_sec * (beatChars / totalChars);
+      const start = cursor;
+      const end = Math.min(real_duration_sec, cursor + beatDur);
+      cursor = end;
+      const dur = end - start;
+      const treatment = (beat.visual && beat.visual.visual_treatment) || 'exact_evidence';
+      const isFirst = i === 0;
+      const isLast = i === vp.beats.length - 1;
+
+      if (treatment === 'host') {
+        const segPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}.mp4`);
+        await nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec: start, dur, fadeEdge: isFirst ? null : (isLast ? null : null), outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'host_avatar', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+        continue;
+      }
+
+      if (treatment === 'targeted_broll' && beat.visual && beat.visual.broll_prompt) {
+        const concept = beat.visual.broll_prompt.split(/[,.]/)[0].slice(0, 60);
+        const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(concept, ideogramBudget);
+        if (illustration && illustration.path) {
+          const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+          const segPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}.mp4`);
+          await nwv2FullFrameIllustrationSegment({
+            heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor,
+            dur, fadeIn: true, fadeOut: true, outPath: segPath,
+          });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'illustration', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), concept });
+          continue;
+        }
+        // falls through to card treatment if illustration resolve failed — never blocks the render
+      }
+
+      // exact_evidence (default) — split beat 0 / last beat so the avatar
+      // gets its hook/closing moment from that beat's own real narration
+      // before/after the evidence card, rather than inventing a separate
+      // beat the classifier didn't produce (see file-header note above).
+      const values = (beat.visual && beat.visual.emphasis_values) || [];
+      const title = (beat.unit_texts && beat.unit_texts[0]) ? beat.unit_texts[0].replace(/[^A-Za-z0-9 ]/g, '').slice(0, 30).toUpperCase() : '';
+      if (isFirst && dur > NWV2_FULLFRAME_HOOK_DUR + 1.5) {
+        const hookDur = NWV2_FULLFRAME_HOOK_DUR;
+        const cardDur = dur - hookDur;
+        const hookPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}a.mp4`);
+        const cardPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}b.mp4`);
+        await nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec: start, dur: hookDur, fadeEdge: 'out', outPath: hookPath });
+        segPaths.push(hookPath);
+        timeline.push({ beatIndex: i, segment: 'hook_avatar', start: Number(start.toFixed(2)), end: Number((start + hookDur).toFixed(2)) });
+        await nwv2FullFrameCardSegment({
+          heygenLocalPath, seekSec: start + hookDur, title, values, dur: cardDur,
+          fadeIn: true, fadeOut: !isLast, outPath: cardPath,
+        });
+        segPaths.push(cardPath);
+        timeline.push({ beatIndex: i, segment: 'evidence_card', start: Number((start + hookDur).toFixed(2)), end: Number(end.toFixed(2)), values });
+      } else if (isLast && dur > NWV2_FULLFRAME_CLOSE_DUR + 1.5) {
+        const closeDur = NWV2_FULLFRAME_CLOSE_DUR;
+        const cardDur = dur - closeDur;
+        const cardPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}a.mp4`);
+        const closePath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}b.mp4`);
+        await nwv2FullFrameCardSegment({
+          heygenLocalPath, seekSec: start, title, values, dur: cardDur,
+          fadeIn: !isFirst, fadeOut: true, outPath: cardPath,
+        });
+        segPaths.push(cardPath);
+        timeline.push({ beatIndex: i, segment: 'evidence_card', start: Number(start.toFixed(2)), end: Number((start + cardDur).toFixed(2)), values });
+        await nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec: start + cardDur, dur: closeDur, fadeEdge: 'in', outPath: closePath });
+        segPaths.push(closePath);
+        timeline.push({ beatIndex: i, segment: 'closing_avatar', start: Number((start + cardDur).toFixed(2)), end: Number(end.toFixed(2)) });
+      } else {
+        const segPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}.mp4`);
+        await nwv2FullFrameCardSegment({
+          heygenLocalPath, seekSec: start, title, values, dur,
+          fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
+        });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'evidence_card', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), values });
+      }
+    }
+
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/fullframe-${renderId}.mp4`, finalBuf, 'video/mp4');
+
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      timeline,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      render_id: renderId,
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -15934,6 +16233,9 @@ export default async function handler(req, res) {
     // illustration each own the whole 9:16 canvas in turn). Explicitly not
     // wired into the package/lifecycle system — internal PM gate only.
     if (action === 'nextwave_v2_composition_proof')   return await nextwaveV2CompositionProofRender(req, res);
+    // Full-Frame Production Candidate — generalizes the accepted proof
+    // mechanism onto real beat data with real synchronized narration audio.
+    if (action === 'nextwave_v2_composite_fullframe') return await nextwaveV2CompositeFullFrameRender(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
