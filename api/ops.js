@@ -13722,8 +13722,15 @@ function _nextwaveV2SlugifyConcept(concept) {
   return String(concept || '').toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || null;
 }
-async function nextwaveV2ResolveOrGenerateIllustratedObject(illustrationConcept, budget) {
-  const role = _nextwaveV2SlugifyConcept(illustrationConcept);
+// White-Canvas Motion Structure phase — bgStyle lets a caller request a
+// 'white' background variant for the new light-canvas compositor, distinct
+// from the default 'navy' variant the dark-canvas compositors use. The role
+// slug is tagged per bgStyle so the reuse-first cache never returns a
+// navy-background image into a white-canvas render (or vice versa) — the
+// colorkey sampling in either compositor assumes its own matching bg color.
+async function nextwaveV2ResolveOrGenerateIllustratedObject(illustrationConcept, budget, bgStyle) {
+  const style = bgStyle === 'white' ? 'white' : 'navy';
+  const role = _nextwaveV2SlugifyConcept(illustrationConcept + (style === 'white' ? ' whitebg' : ''));
   if (!role) return null;
   // Reuse-first: an approved asset already banked under this exact concept
   // slug (from ANY prior script, not just this render) costs nothing.
@@ -13745,7 +13752,10 @@ async function nextwaveV2ResolveOrGenerateIllustratedObject(illustrationConcept,
     .replace(/\b(labeled|labelled|that says|with the words?|with a (sign|label|tag) (that says|reading)|reading)\b[^,.]*/gi, '')
     .replace(/["\n]/g, ' ')
     .slice(0, 60);
-  const prompt = `Flat 2D vector illustration representing the concept of "${deLabeled}" in a personal-finance context, soft shading, clean bold outlines, navy and gold accent color palette, isolated on a plain dark navy background, professional financial-explainer illustration style, single clear central subject. Absolutely no text, no words, no letters, no numbers, no labels, no signage, no typography of any kind anywhere in the image — a pure wordless visual metaphor only. No people.`;
+  const bgClause = style === 'white'
+    ? 'isolated on a plain white background'
+    : 'isolated on a plain dark navy background';
+  const prompt = `Flat 2D vector illustration representing the concept of "${deLabeled}" in a personal-finance context, soft shading, clean bold outlines, navy and gold accent color palette, ${bgClause}, professional financial-explainer illustration style, single clear central subject. Absolutely no text, no words, no letters, no numbers, no labels, no signage, no typography of any kind anywhere in the image — a pure wordless visual metaphor only. No people.`;
   try {
     const gen = await nextwaveV2IdeogramResolveObject(role, prompt);
     if (!gen.ok) return null;
@@ -14810,6 +14820,402 @@ async function nextwaveV2CompositeFullFrameRender(req, res) {
   } finally {
     await unlink(heygenLocalPath).catch(() => {});
     for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// ============================================================================
+// WHITE-CANVAS MOTION STRUCTURE — CEO-approved Short visual structure V1.
+// Replaces the dark navy full-frame canvas with a persistent white/light
+// canvas, moves the avatar from hook+close to CLOSE ONLY, and adds real
+// motion (zoompan Ken-Burns on illustrations, slide+settle entrances and a
+// discrete size-pop emphasis on card values) instead of hard appear/
+// disappear cuts. zoompan and boxblur confirmed supported on the bundled
+// ~2018 static ffmpeg build via a live `ffmpeg -h filter=X` probe before
+// this was written (see the removed debug action in the dispatch table's
+// history) — the same discipline that avoided a repeat of the text_align/
+// text_expansion/drawtext-%-escape surprises from earlier phases.
+const NWV2_WHITE_BG = '0xf7f4ee';
+const NWV2_WHITE_CARD = '0xffffff';
+const NWV2_NAVY = '0x1a2744';
+const NWV2_GOLD = '0xc99e4c';
+const NWV2_GOLD_DARK = '0xa67c2e';
+const NWV2_SHADOW = '0x1a2744@0.16';
+
+function nwv2WhiteBrandMarkFilter(input, output) {
+  return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NWV2_NAVY}@0.45:fontsize=28:x=${NEXTWAVE_V2_CANVAS_W}-tw-30:y=${NEXTWAVE_V2_CANVAS_H}-th-30[${output}]`;
+}
+
+function nwv2WhiteSanitize(v, maxLen) {
+  return String(v).replace(/['":\\\[\]]/g, '').slice(0, maxLen || 40).replace(/%/g, ' PCT');
+}
+
+// HOOK segment — headline directly on the white canvas (no card/box), a
+// gold highlight rect behind the emphasized phrase, thin gold underline.
+// Slide+settle entrance. No avatar. This replaces the old design's avatar
+// hook entirely, per the CEO's locked avatar rule (close only).
+async function nwv2WhiteBuildHookSegment({ heygenLocalPath, seekSec, headline, emphasisWord, dur, outPath }) {
+  const lines = nwv2ProofWrapText(headline, 22);
+  const lineH = 92;
+  const blockH = lines.length * lineH;
+  const startY = Math.round((NEXTWAVE_V2_CANVAS_H - blockH) / 2) - 80;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[h0]`);
+  let last = 'h0', idx = 1;
+  // Gold highlight box behind the emphasis word — placed under the LAST
+  // line (matches the reference design's "COSTING YOU" highlight), sized
+  // generously since exact text_w isn't known at filter-build time.
+  const lastLine = lines[lines.length - 1] || '';
+  const hlW = Math.min(1000, lastLine.length * 44 + 40);
+  const hlX = Math.round((NEXTWAVE_V2_CANVAS_W - hlW) / 2);
+  const hlY = startY + (lines.length - 1) * lineH - 14;
+  filters.push(`[${last}]drawbox=x=${hlX}:y=${hlY}:w=${hlW}:h=96:color=${NWV2_GOLD}@0.9:t=fill:enable='gte(t,0.15)'[h${idx}]`);
+  last = `h${idx}`; idx++;
+  lines.forEach((line, li) => {
+    const safe = line.replace(/['":\\\[\],;%]/g, '');
+    const y0 = startY + li * lineH;
+    const yExpr = `if(lt(t,0.5),${y0}+24*(1-t/0.5),${y0})`;
+    const color = li === lines.length - 1 ? NWV2_NAVY : NWV2_NAVY;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${color}:fontsize=68:box=0:x=(${NEXTWAVE_V2_CANVAS_W}-text_w)/2:y='${yExpr}'[h${idx}]`);
+    last = `h${idx}`; idx++;
+  });
+  // Thin gold underline beneath the whole headline block.
+  const ulY = startY + blockH + 30;
+  filters.push(`[${last}]drawbox=x=${Math.round(NEXTWAVE_V2_CANVAS_W / 2 - 90)}:y=${ulY}:w=180:h=6:color=${NWV2_GOLD}:t=fill:enable='gte(t,0.6)'[h${idx}]`);
+  last = `h${idx}`; idx++;
+  filters.push(nwv2WhiteBrandMarkFilter(last, `h${idx}`));
+  last = `h${idx}`; idx++;
+  filters.push(`[${last}]fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white hook segment');
+  return outPath;
+}
+
+// Simple greedy word-wrap for headline text — SMM_FONT_PATH has no metrics
+// API exposed here, so this wraps by character-count heuristic (matches
+// the font's roughly-monospace-at-this-size behavior closely enough for a
+// 2-3 line headline; safe-margined by the generous highlight-box sizing).
+function nwv2ProofWrapText(text, maxCharsPerLine) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const next = cur ? cur + ' ' + w : w;
+    if (next.length > maxCharsPerLine && cur) { lines.push(cur); cur = w; }
+    else cur = next;
+  }
+  if (cur) lines.push(cur);
+  return lines.slice(0, 3);
+}
+
+// Calculation card — white card, soft blurred shadow, navy title, values
+// slide+settle into place one at a time, final value gets a discrete
+// size-pop (two drawtext instances swapping at reveal+0.15s) as the
+// "development: subtle push, number emphasis" motion the CEO ordered.
+async function nwv2WhiteBuildCalcCardSegment({ heygenLocalPath, seekSec, title, values, dur, fadeIn, fadeOut, outPath }) {
+  const boxW = 860, boxH = 620;
+  const boxX = Math.round((NEXTWAVE_V2_CANVAS_W - boxW) / 2);
+  const boxY = 500;
+  const shadowOff = 10;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[k0]`);
+  // Soft shadow: draw offset dark box, blur JUST this layer, THEN draw the
+  // crisp white card on top unblurred — boxblur applies to the whole
+  // stream at the point it's inserted, so ordering here is what keeps the
+  // card itself sharp while the shadow beneath it reads as soft.
+  filters.push(`[k0]drawbox=x=${boxX + shadowOff}:y=${boxY + shadowOff}:w=${boxW}:h=${boxH}:color=${NWV2_SHADOW}:t=fill[k1]`);
+  filters.push(`[k1]boxblur=10:2[k2]`);
+  filters.push(`[k2]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[k3]`);
+  filters.push(`[k3]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.6:t=3[k4]`);
+  let last = 'k4', idx = 5;
+  const safeTitle = nwv2WhiteSanitize(title, 40).replace(/[,;]/g, '');
+  if (safeTitle) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=40:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 56}:enable='gte(t,0.35)'[k${idx}]`);
+    last = `k${idx}`; idx++;
+  }
+  const safeValues = (values || []).slice(0, 4).map((v) => nwv2WhiteSanitize(v, 28));
+  const lineH = 118;
+  const blockH = safeValues.length * lineH;
+  const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 40 : 0);
+  const revealSpan = Math.max(0.55, (dur - 1.4) / Math.max(1, safeValues.length));
+  safeValues.forEach((val, vi) => {
+    const targetY = startY + vi * lineH;
+    const revealAt = 0.5 + vi * revealSpan;
+    const isLast = vi === safeValues.length - 1;
+    const yExpr = `if(lt(t,${revealAt.toFixed(2)}+0.22),${targetY}+16*(1-(t-${revealAt.toFixed(2)})/0.22),${targetY})`;
+    if (!isLast) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=50:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+    } else {
+      // Size-pop emphasis: smaller instance shows briefly, then a larger
+      // gold instance takes over at the same target position — a discrete
+      // 100% -> ~112% scale step standing in for a smooth zoom on text
+      // (drawtext has no continuous scale parameter on this ffmpeg build).
+      const popAt = (revealAt + 0.15).toFixed(2);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=52:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=60:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
+      last = `k${idx + 1}`; idx += 2;
+    }
+  });
+  filters.push(nwv2WhiteBrandMarkFilter(last, `k${idx}`));
+  last = `k${idx}`; idx++;
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`);
+  filters.push(fadeParts.length ? `[${last}]${fadeParts.join(',')}[outv]` : `[${last}]null[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white calc card segment');
+  return outPath;
+}
+
+// Illustration segment — real Ken-Burns zoompan motion (1.0 -> ~1.06 zoom
+// across the full segment), white-background illustration (matching the
+// white canvas, requested via bgStyle:'white' at resolve time) so no
+// colorkey seam is visible even where sampling isn't pixel-perfect.
+async function nwv2WhiteBuildIllustrationSegment({ heygenLocalPath, seekSec, illustrationPath, keyColor, dur, fadeIn, fadeOut, outPath }) {
+  const zoneW = 860, zoneH = 1000;
+  const zoneX = Math.round((NEXTWAVE_V2_CANVAS_W - zoneW) / 2);
+  const zoneY = 480;
+  const fps = 25;
+  const totalFrames = Math.max(1, Math.round(dur * fps));
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.26:blend=0.12` : '';
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[l0]`);
+  // zoompan on the static illustration image: continuous slow zoom across
+  // this whole clip's own frame count (the standard documented pattern for
+  // applying zoompan to one looped image rather than a multi-shot video).
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[limg0]`);
+  filters.push(`[limg0]zoompan=z='min(zoom+0.0009,1.06)':d=${totalFrames}:s=${zoneW}x${zoneH}:fps=${fps}[limg]`);
+  filters.push(`[l0][limg]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[l1]`);
+  filters.push(nwv2WhiteBrandMarkFilter('l1', 'l2'));
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`);
+  filters.push(fadeParts.length ? `[l2]${fadeParts.join(',')}[outv]` : `[l2]null[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white illustration segment');
+  return outPath;
+}
+
+// Close segment — the ONLY beat where the avatar appears, per the CEO's
+// locked avatar rule. Full-frame, fades in from the white canvas.
+async function nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec, dur, outPath }) {
+  const filters = [];
+  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[c0]`);
+  filters.push(nwv2WhiteBrandMarkFilter('c0', 'c1'));
+  filters.push(`[c1]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white close segment');
+  return outPath;
+}
+
+// CEO-gated orchestrator. Takes an explicit `beats` array (NOT the
+// automatic visual-plan classifier) because the classifier's own grouping
+// merges hook/close sentences into neighboring evidence beats (confirmed
+// empirically in the prior phase) — this structure needs precise control
+// over which single beat is HOOK (card, never avatar) and which single
+// beat is CLOSE (avatar, never card), so the caller supplies that mapping
+// directly. Each beat: { treatment: 'hook'|'calc'|'illustration'|'close',
+// text, values?, headline?, concept? }.
+async function nextwaveV2CompositeWhiteMotionRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, beats, real_duration_sec } = body;
+  if (!heygen_video_url || !Array.isArray(beats) || !beats.length || !real_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_beats_or_real_duration_sec' });
+  }
+  const renderId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2wm-src-${renderId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const totalChars = Math.max(1, beats.reduce((sum, b) => sum + String(b.text || '').length, 0));
+    let cursor = 0;
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const timeline = [];
+
+    for (let i = 0; i < beats.length; i++) {
+      const beat = beats[i];
+      const beatChars = String(beat.text || '').length;
+      const beatDur = real_duration_sec * (beatChars / totalChars);
+      const start = cursor;
+      const end = Math.min(real_duration_sec, cursor + beatDur);
+      cursor = end;
+      const dur = end - start;
+      const isFirst = i === 0;
+      const isLast = i === beats.length - 1;
+      const segPath = join(tmpdir(), `nwv2wm-seg-${renderId}-${i}.mp4`);
+
+      if (beat.treatment === 'hook') {
+        await nwv2WhiteBuildHookSegment({ heygenLocalPath, seekSec: start, headline: beat.headline || beat.text, dur, outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'hook', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+      } else if (beat.treatment === 'illustration' && beat.concept) {
+        const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
+        if (illustration && illustration.path) {
+          const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+          await nwv2WhiteBuildIllustrationSegment({
+            heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor,
+            dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
+          });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'illustration', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), concept: beat.concept });
+        } else {
+          await nwv2WhiteBuildCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.text, values: beat.values || [], dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'calc_card_fallback', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+        }
+      } else if (beat.treatment === 'close') {
+        await nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec: start, dur, outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'close_avatar', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+      } else {
+        // 'calc' (default)
+        await nwv2WhiteBuildCalcCardSegment({
+          heygenLocalPath, seekSec: start, title: beat.title || beat.text, values: beat.values || [],
+          dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
+        });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'calc_card', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), values: beat.values || [] });
+      }
+    }
+
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/whitemotion-${renderId}.mp4`, finalBuf, 'video/mp4');
+
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      timeline,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      render_id: renderId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// Thumbnail — a single deterministically-composed still frame (never the
+// avatar), built from the same white-canvas primitives: headline, gold
+// highlight, two contrast value boxes with a ">>" directional cue between
+// them (the font has no arrow glyph — confirmed via a fonttools check —
+// so a plain, always-available ASCII cue is used instead of risking a
+// missing-glyph box character).
+async function nextwaveV2GenerateThumbnail(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { headline, fromValue, fromLabel, toValue, toLabel } = body;
+  if (!headline || !fromValue || !toValue) return res.status(400).json({ ok: false, error: 'missing_headline_or_values' });
+  const renderId = randomBytes(6).toString('hex');
+  const outPath = join(tmpdir(), `nwv2thumb-${renderId}.png`);
+  try {
+    const lines = nwv2ProofWrapText(headline, 20);
+    const lineH = 96;
+    const blockH = lines.length * lineH;
+    const startY = 140;
+    const filters = [];
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=1[t0]`);
+    let last = 't0', idx = 1;
+    lines.forEach((line, li) => {
+      const safe = line.replace(/['":\\\[\],;%]/g, '');
+      const y = startY + li * lineH;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${NWV2_NAVY}:fontsize=72:box=0:x=(${NEXTWAVE_V2_CANVAS_W}-text_w)/2:y=${y}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    });
+    const boxW = 420, boxH = 260, gap = 40;
+    const totalW = boxW * 2 + gap;
+    const boxesX = Math.round((NEXTWAVE_V2_CANVAS_W - totalW) / 2);
+    const boxesY = startY + blockH + 100;
+    const fromX = boxesX, toX = boxesX + boxW + gap;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_NAVY}@0.4:t=3[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${toX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.92:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    const safeFromVal = nwv2WhiteSanitize(fromValue, 20);
+    const safeFromLabel = nwv2WhiteSanitize(fromLabel || '', 24).replace(/[,;]/g, '');
+    const safeToVal = nwv2WhiteSanitize(toValue, 20);
+    const safeToLabel = nwv2WhiteSanitize(toLabel || '', 24).replace(/[,;]/g, '');
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromVal}':fontcolor=${NWV2_NAVY}:fontsize=56:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 70}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeFromLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=30:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 150}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToVal}':fontcolor=white:fontsize=56:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 70}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeToLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToLabel}':fontcolor=white@0.85:fontsize=30:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 150}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='>>':fontcolor=${NWV2_GOLD_DARK}:fontsize=54:box=0:x=${fromX + boxW}+(${gap}-text_w)/2:y=${boxesY + boxH / 2 - 30}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(nwv2WhiteBrandMarkFilter(last, `t${idx}`));
+    last = `t${idx}`;
+    const filterComplex = filters.join(';');
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-filter_complex', filterComplex,
+      '-map', `[${last}]`,
+      '-frames:v', '1',
+      outPath,
+    ], { timeout: 20000 });
+    const buf = await readFile(outPath);
+    const thumbUrl = await sbStorageUpload(`nextwave-v2-preview/thumb-${renderId}.png`, buf, 'image/png');
+    return res.status(200).json({ ok: true, thumbnail_url: thumbUrl, render_id: renderId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(outPath).catch(() => {});
   }
 }
 
@@ -16245,27 +16651,11 @@ export default async function handler(req, res) {
     // Full-Frame Production Candidate — generalizes the accepted proof
     // mechanism onto real beat data with real synchronized narration audio.
     if (action === 'nextwave_v2_composite_fullframe') return await nextwaveV2CompositeFullFrameRender(req, res);
-    // TEMP DEBUG — White-Canvas Motion Structure phase. Verifying zoompan
-    // (scale-push motion) and boxblur (soft card shadow) support on the
-    // bundled ~2018 static ffmpeg build before designing the motion system,
-    // instead of discovering unsupported options through a failed render —
-    // the last three phases each burned a deploy cycle doing exactly that
-    // (text_align, text_expansion, drawtext's %/%% escape). Remove once the
-    // motion-compositor implementation is complete.
-    if (action === 'nextwave_v2_debug_ffmpeg_filters2') {
-      if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
-      const names = ['zoompan', 'boxblur', 'gblur', 'scale'];
-      const out = {};
-      for (const n of names) {
-        try {
-          const r = await execFileAsync(ffmpegInstaller.path, ['-h', `filter=${n}`], { timeout: 10000 });
-          out[n] = (r.stdout || '') + (r.stderr || '');
-        } catch (e) {
-          out[n] = 'ERROR: ' + ((e && e.stdout) || (e && e.message) || String(e));
-        }
-      }
-      return res.status(200).json({ ok: true, ffmpeg_filter_help: out });
-    }
+    // White-Canvas Motion Structure — CEO-locked visual structure V1: white
+    // persistent canvas, avatar at close only, real motion on every card/
+    // illustration. See file comment above nextwaveV2CompositeWhiteMotionRender.
+    if (action === 'nextwave_v2_composite_white_motion') return await nextwaveV2CompositeWhiteMotionRender(req, res);
+    if (action === 'nextwave_v2_generate_thumbnail')  return await nextwaveV2GenerateThumbnail(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
