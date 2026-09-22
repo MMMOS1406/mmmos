@@ -15346,95 +15346,118 @@ async function nwv2LongTimelineSegment({ heygenLocalPath, seekSec, title, points
 // CEO-gated orchestrator for the Long-format landscape candidate. Explicit
 // `beats` array (same reasoning as the Short's white-motion orchestrator —
 // precise control over which single beat carries the avatar).
-async function nextwaveV2CompositeLongRender(req, res) {
+// Split into per-segment + concat calls (below) rather than one orchestrator
+// — a real render of this 7-beat/~100s candidate hung past 60s with no
+// response, which is the Vercel maxDuration ceiling on this deployment
+// (see the `export const config = { maxDuration: 60 }` a few hundred lines
+// down) killing the function mid-flight. Each segment's own encode is well
+// under that budget individually; the loop across beats is what didn't fit
+// in one request. The client now drives the loop, calling one segment per
+// HTTP request, then a separate concat call once all segments are in
+// storage — mirroring exactly how every segment in this file has already
+// been tested individually throughout this project, just formalized as
+// the real architecture for anything long enough to need it.
+async function nextwaveV2CompositeLongSegmentRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { heygen_video_url, beats, real_duration_sec } = body;
-  if (!heygen_video_url || !Array.isArray(beats) || !beats.length || !real_duration_sec) {
-    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_beats_or_real_duration_sec' });
+  const { heygen_video_url, beat, start_sec, dur_sec, render_id, beat_index } = body;
+  if (!heygen_video_url || !beat || start_sec == null || !dur_sec || !render_id || beat_index == null) {
+    return res.status(400).json({ ok: false, error: 'missing_required_fields' });
   }
-  const renderId = randomBytes(6).toString('hex');
-  const heygenLocalPath = join(tmpdir(), `nwv2long-src-${renderId}.mp4`);
-  const segPaths = [];
+  const heygenLocalPath = join(tmpdir(), `nwv2longseg-src-${render_id}-${beat_index}.mp4`);
+  const segPath = join(tmpdir(), `nwv2longseg-out-${render_id}-${beat_index}.mp4`);
   try {
     await smDownloadToFile(heygen_video_url, heygenLocalPath);
     await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+    const start = Number(start_sec), dur = Number(dur_sec);
+    const isFirst = beat_index === 0;
+    let segmentType = 'calc_card';
+    let illustrationInfo = null;
 
-    const totalChars = Math.max(1, beats.reduce((sum, b) => sum + String(b.text || '').length, 0));
-    let cursor = 0;
-    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
-    const timeline = [];
-
-    for (let i = 0; i < beats.length; i++) {
-      const beat = beats[i];
-      const beatChars = String(beat.text || '').length;
-      const beatDur = real_duration_sec * (beatChars / totalChars);
-      const start = cursor;
-      const end = Math.min(real_duration_sec, cursor + beatDur);
-      cursor = end;
-      const dur = end - start;
-      const isFirst = i === 0;
-      const segPath = join(tmpdir(), `nwv2long-seg-${renderId}-${i}.mp4`);
-
-      if (beat.treatment === 'avatar_panel') {
-        await nwv2LongAvatarPanelSegment({
-          heygenLocalPath, seekSec: start, dur, text: beat.text2 || beat.text, isCta: !!beat.isCta,
-          fadeEdge: isFirst ? null : 'in', outPath: segPath,
-        });
-        segPaths.push(segPath);
-        timeline.push({ beatIndex: i, segment: 'avatar_panel', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
-      } else if (beat.treatment === 'comparison') {
-        await nwv2LongComparisonSegment({
-          heygenLocalPath, seekSec: start, dur,
-          leftTitle: beat.leftTitle, leftBody: beat.leftBody, rightTitle: beat.rightTitle, rightBody: beat.rightBody,
-          outPath: segPath,
-        });
-        segPaths.push(segPath);
-        timeline.push({ beatIndex: i, segment: 'comparison', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
-      } else if (beat.treatment === 'timeline') {
-        await nwv2LongTimelineSegment({ heygenLocalPath, seekSec: start, title: beat.title, points: beat.points, dur, outPath: segPath });
-        segPaths.push(segPath);
-        timeline.push({ beatIndex: i, segment: 'timeline', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
-      } else if (beat.treatment === 'illustration' && beat.concept) {
-        const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
-        if (illustration && illustration.path) {
-          const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
-          await nwv2LongIllustrationSegment({ heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor, dur, outPath: segPath });
-          segPaths.push(segPath);
-          timeline.push({ beatIndex: i, segment: 'illustration', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), concept: beat.concept });
-        } else {
-          await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.text, values: beat.values || [], dur, outPath: segPath });
-          segPaths.push(segPath);
-          timeline.push({ beatIndex: i, segment: 'calc_card_fallback', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
-        }
+    if (beat.treatment === 'avatar_panel') {
+      await nwv2LongAvatarPanelSegment({
+        heygenLocalPath, seekSec: start, dur, text: beat.text2 || beat.text, isCta: !!beat.isCta,
+        fadeEdge: isFirst ? null : 'in', outPath: segPath,
+      });
+      segmentType = 'avatar_panel';
+    } else if (beat.treatment === 'comparison') {
+      await nwv2LongComparisonSegment({
+        heygenLocalPath, seekSec: start, dur,
+        leftTitle: beat.leftTitle, leftBody: beat.leftBody, rightTitle: beat.rightTitle, rightBody: beat.rightBody,
+        outPath: segPath,
+      });
+      segmentType = 'comparison';
+    } else if (beat.treatment === 'timeline') {
+      await nwv2LongTimelineSegment({ heygenLocalPath, seekSec: start, title: beat.title, points: beat.points, dur, outPath: segPath });
+      segmentType = 'timeline';
+    } else if (beat.treatment === 'illustration' && beat.concept) {
+      const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+      const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
+      if (illustration && illustration.path) {
+        const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+        await nwv2LongIllustrationSegment({ heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor, dur, outPath: segPath });
+        segmentType = 'illustration';
+        illustrationInfo = { generated: ideogramBudget.generated, spend_usd: ideogramBudget.spent_usd || 0 };
       } else {
-        await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.title || beat.text, values: beat.values || [], dur, outPath: segPath });
-        segPaths.push(segPath);
-        timeline.push({ beatIndex: i, segment: 'calc_card', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), values: beat.values || [] });
+        await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.text, values: beat.values || [], dur, outPath: segPath });
+        segmentType = 'calc_card_fallback';
       }
+    } else {
+      await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.title || beat.text, values: beat.values || [], dur, outPath: segPath });
+      segmentType = 'calc_card';
     }
 
-    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
-    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
-    const finalBuf = await readFile(concatOut);
-    await unlink(concatOut).catch(() => {});
-    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/long-${renderId}.mp4`, finalBuf, 'video/mp4');
-
+    const buf = await readFile(segPath);
+    const segUrl = await sbStorageUpload(`nextwave-v2-preview/long-${render_id}-seg${beat_index}.mp4`, buf, 'video/mp4');
     return res.status(200).json({
       ok: true,
-      composited_video_url: videoUrl,
-      duration_sec: Number(finalDurationSec.toFixed(2)),
-      timeline,
-      dynamic_illustrations_generated: ideogramBudget.generated,
-      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
-      render_id: renderId,
+      segment_url: segUrl,
+      segment_type: segmentType,
+      beat_index,
+      start: Number(start.toFixed(2)),
+      end: Number((start + dur).toFixed(2)),
+      illustration: illustrationInfo,
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   } finally {
     await unlink(heygenLocalPath).catch(() => {});
-    for (const p of segPaths) await unlink(p).catch(() => {});
+    await unlink(segPath).catch(() => {});
+  }
+}
+
+async function nextwaveV2ConcatLongRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { segment_urls, render_id } = body;
+  if (!Array.isArray(segment_urls) || !segment_urls.length || !render_id) {
+    return res.status(400).json({ ok: false, error: 'missing_segment_urls_or_render_id' });
+  }
+  const localPaths = [];
+  try {
+    for (let i = 0; i < segment_urls.length; i++) {
+      const p = join(tmpdir(), `nwv2longconcat-${render_id}-${i}.mp4`);
+      await smDownloadToFile(segment_urls[i], p);
+      await smAssertValidMediaFile(p, `long segment ${i + 1}/${segment_urls.length} before concat`);
+      localPaths.push(p);
+    }
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: localPaths, id: render_id });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/long-${render_id}.mp4`, finalBuf, 'video/mp4');
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      render_id,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    for (const p of localPaths) await unlink(p).catch(() => {});
   }
 }
 
@@ -17124,7 +17147,8 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_generate_thumbnail')  return await nextwaveV2GenerateThumbnail(req, res);
     // Long-Format Landscape Validation — 1920x1080, sparse avatar (open/close
     // panels only), comparison/timeline treatments for real visual variety.
-    if (action === 'nextwave_v2_composite_long')      return await nextwaveV2CompositeLongRender(req, res);
+    if (action === 'nextwave_v2_composite_long_segment') return await nextwaveV2CompositeLongSegmentRender(req, res);
+    if (action === 'nextwave_v2_concat_long')         return await nextwaveV2ConcatLongRender(req, res);
     if (action === 'nextwave_v2_generate_long_thumbnail') return await nextwaveV2GenerateLongThumbnail(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
