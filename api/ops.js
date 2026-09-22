@@ -14165,24 +14165,28 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     filters.push(`[${lastBg}]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=0x1c2030@0.92:t=fill[bgE0]`);
     filters.push(`[bgE0]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[bgE1]`);
     lastBg = 'bgE1';
-    // Phase: Visual Composition Correction QA fix (round 4, root cause) —
-    // round 3 fixed the filtergraph-joining shape (proven ov-style comma
-    // chain) but STILL silently dropped any value containing '%' (e.g.
-    // "50%", "6%") while plain values ("$60,000", "$1,800") rendered
-    // fine. Cause: ffmpeg drawtext defaults to text_expansion=normal,
-    // which treats '%' as the start of a strftime/%{...} macro sequence
-    // and silently mangles literal '%' text. text_expansion=none makes
-    // drawtext treat `text` as 100% literal, which is what every value
-    // here (percentages, dollar amounts) needs.
+    // Phase: Visual Composition Correction QA fix (round 5, root cause
+    // confirmed) — round 4's text_expansion=none diagnosis was right
+    // (drawtext defaults to text_expansion=normal, which treats a bare
+    // '%' as the start of a strftime/%{...} macro sequence and silently
+    // mangles literal '%' text — confirmed via real frame extraction:
+    // "50%"/"6%" vanished, "$60,000"/"$1,800" rendered fine) but the FIX
+    // was wrong for this bundled ffmpeg build: a real render came back
+    // with "Option 'text_expansion' not found" — the same ~2018 static
+    // build that already rejected text_align. That build predates the
+    // text_expansion option entirely, so expansion can't be disabled —
+    // it must be escaped instead. FFmpeg drawtext's own long-documented
+    // escape for a literal '%' under normal expansion is '%%', so that's
+    // applied here rather than any option this build doesn't have.
     const values = (beat.visual.emphasis_values || []).slice(0, 4);
     if (values.length) {
-      const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24));
+      const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24).replace(/%/g, '%%'));
       const lineH = 90;
       const blockH = safeValues.length * lineH;
       const startY = Math.round(z.y + (z.h - blockH) / 2);
       const textOv = safeValues.map((val, vi) => {
         const y = startY + vi * lineH;
-        return `drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':text_expansion=none:fontcolor=white:fontsize=68:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${y}`;
+        return `drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=white:fontsize=68:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${y}`;
       });
       filters.push(`[${lastBg}]${textOv.join(',')}[bgVals]`);
       lastBg = 'bgVals';
