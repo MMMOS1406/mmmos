@@ -14200,6 +14200,16 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
   filters.push(`[bgP0][pvid]overlay=x=${pWin.x}+(${pWin.w}-overlay_w)/2:y=${pWin.y}+(${pWin.h}-overlay_h)/2:shortest=1[outv]`);
 
   const filterComplex = filters.join(';');
+  // TEMP DEBUG (round 6 diagnosis) — dump the exact deployed filter string
+  // for beat 0 without running ffmpeg, to rule out a stale-deploy false
+  // positive after two rounds produced byte-identical output despite a
+  // real code change. Remove once the evidence-text bug is confirmed
+  // fixed end-to-end.
+  if (beat.__nwv2DebugDumpFilter) {
+    const err = new Error('DEBUG_FILTER_DUMP: ' + filterComplex);
+    err.__debugDump = true;
+    throw err;
+  }
   await execFileAsync(ffmpegInstaller.path, [
     ...inputs,
     '-filter_complex', filterComplex,
