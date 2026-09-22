@@ -14165,15 +14165,15 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     filters.push(`[${lastBg}]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=0x1c2030@0.92:t=fill[bgE0]`);
     filters.push(`[bgE0]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[bgE1]`);
     lastBg = 'bgE1';
-    // Phase: Visual Composition Correction QA fix (round 3) — two prior
-    // attempts (chained bracket-labeled drawtext nodes; a single
-    // multi-line drawtext node) both rendered blank/wrong on real
-    // renders despite ffmpeg exiting 0. This file's OWN proven working
-    // pattern (see drawPanelContent/ov.join(',') a few hundred lines
-    // below) never uses bracket-labeled multi-stage text nodes — it
-    // comma-chains plain drawtext filters onto one carried-over stream,
-    // exactly the ffmpeg idiom for "several filters, no branching."
-    // Copying that exact proven shape here instead of inventing a new one.
+    // Phase: Visual Composition Correction QA fix (round 4, root cause) —
+    // round 3 fixed the filtergraph-joining shape (proven ov-style comma
+    // chain) but STILL silently dropped any value containing '%' (e.g.
+    // "50%", "6%") while plain values ("$60,000", "$1,800") rendered
+    // fine. Cause: ffmpeg drawtext defaults to text_expansion=normal,
+    // which treats '%' as the start of a strftime/%{...} macro sequence
+    // and silently mangles literal '%' text. text_expansion=none makes
+    // drawtext treat `text` as 100% literal, which is what every value
+    // here (percentages, dollar amounts) needs.
     const values = (beat.visual.emphasis_values || []).slice(0, 4);
     if (values.length) {
       const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24));
@@ -14182,7 +14182,7 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
       const startY = Math.round(z.y + (z.h - blockH) / 2);
       const textOv = safeValues.map((val, vi) => {
         const y = startY + vi * lineH;
-        return `drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=white:fontsize=68:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${y}`;
+        return `drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':text_expansion=none:fontcolor=white:fontsize=68:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${y}`;
       });
       filters.push(`[${lastBg}]${textOv.join(',')}[bgVals]`);
       lastBg = 'bgVals';
