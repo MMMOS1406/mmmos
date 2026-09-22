@@ -14178,7 +14178,15 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     const values = (beat.visual.emphasis_values || []).slice(0, 4);
     if (values.length) {
       const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24));
-      const multiline = safeValues.join('\n');
+      // A literal newline BYTE embedded inside the shared -filter_complex
+      // string (which itself uses ';' to separate every OTHER filter node)
+      // rendered as a blank evidence zone on a real test — plausibly
+      // confusing the filtergraph's own line-oriented parsing even though
+      // ffmpeg exited 0. Using drawtext's own two-character "\n" escape
+      // (literal backslash + n, converted to a line break internally by
+      // drawtext's text parser) keeps the outer filtergraph string on one
+      // real line throughout.
+      const multiline = safeValues.join('\\n');
       const lineH = 84;
       const blockH = safeValues.length * lineH;
       const startY = Math.round(z.y + (z.h - blockH) / 2);
