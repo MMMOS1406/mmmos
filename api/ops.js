@@ -14946,23 +14946,36 @@ async function nwv2WhiteBuildCalcCardSegment({ heygenLocalPath, seekSec, title, 
   const blockH = safeValues.length * lineH;
   const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 40 : 0);
   const revealSpan = Math.max(0.55, (dur - 1.4) / Math.max(1, safeValues.length));
+  // Dynamic fontsize by text length — a real render showed a 27-char value
+  // ("8 PCT AVG RETURN (ASSUMED)") overflowing the card's right edge at a
+  // fixed 50px fontsize (~780px usable width only fits ~18-20 chars at that
+  // size). Scales down proportionally past 18 chars, floored so it never
+  // becomes illegibly small.
+  const nwv2FitFontsize = (text, base) => {
+    const len = text.length;
+    if (len <= 18) return base;
+    return Math.max(Math.round(base * (18 / len)), Math.round(base * 0.62));
+  };
   safeValues.forEach((val, vi) => {
     const targetY = startY + vi * lineH;
     const revealAt = 0.5 + vi * revealSpan;
     const isLast = vi === safeValues.length - 1;
     const yExpr = `if(lt(t,${revealAt.toFixed(2)}+0.22),${targetY}+16*(1-(t-${revealAt.toFixed(2)})/0.22),${targetY})`;
     if (!isLast) {
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=50:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
+      const fs = nwv2FitFontsize(val, 50);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=${fs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
       last = `k${idx}`; idx++;
     } else {
       // Size-pop emphasis: smaller instance shows briefly, then a larger
       // gold instance takes over at the same target position — a discrete
       // 100% -> ~112% scale step standing in for a smooth zoom on text
       // (drawtext has no continuous scale parameter on this ffmpeg build).
+      const fs1 = nwv2FitFontsize(val, 52);
+      const fs2 = nwv2FitFontsize(val, 60);
       const popAt = (revealAt + 0.15).toFixed(2);
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=52:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs1}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
       last = `k${idx}`; idx++;
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=60:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs2}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
       last = `k${idx + 1}`; idx += 2;
     }
   });
