@@ -14182,7 +14182,13 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
       const lineH = 84;
       const blockH = safeValues.length * lineH;
       const startY = Math.round(z.y + (z.h - blockH) / 2);
-      filters.push(`[${lastBg}]drawtext=fontfile=${SMM_FONT_PATH}:text='${multiline}':fontcolor=white:fontsize=68:line_spacing=16:text_align=center:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${startY}[bgVals]`);
+      // text_align is NOT supported by the bundled static ffmpeg build
+      // (confirmed via a real "Option 'text_align' not found" filter-init
+      // error on a live render) — the bounding-box horizontal centering
+      // below (x=(zone_w-text_w)/2) still centers the whole multi-line
+      // block; individual short lines (percentages/dollar amounts) read
+      // fine left-aligned within that centered block.
+      filters.push(`[${lastBg}]drawtext=fontfile=${SMM_FONT_PATH}:text='${multiline}':fontcolor=white:fontsize=68:line_spacing=16:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${startY}[bgVals]`);
       lastBg = 'bgVals';
     }
   }
