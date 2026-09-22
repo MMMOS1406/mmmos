@@ -14210,7 +14210,7 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     err.__debugDump = true;
     throw err;
   }
-  await execFileAsync(ffmpegInstaller.path, [
+  const ffArgs = [
     ...inputs,
     '-filter_complex', filterComplex,
     '-map', '[outv]',
@@ -14219,7 +14219,20 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
     '-c:a', 'aac', '-b:a', '192k',
     outPath,
-  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  ];
+  if (beat.__nwv2DebugCaptureStderr) {
+    let stderrOut = '';
+    try {
+      const r = await execFileAsync(ffmpegInstaller.path, ffArgs, { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+      stderrOut = r.stderr || '';
+    } catch (e) {
+      stderrOut = (e && e.stderr) || (e && e.message) || String(e);
+    }
+    const err = new Error('DEBUG_STDERR_DUMP: ' + stderrOut);
+    err.__debugDump = true;
+    throw err;
+  }
+  await execFileAsync(ffmpegInstaller.path, ffArgs, { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
   await smAssertValidMediaFile(outPath, `canvas segment ${beatIdx}`);
   return outPath;
 }
