@@ -14840,6 +14840,12 @@ const NWV2_NAVY = '0x1a2744';
 const NWV2_GOLD = '0xc99e4c';
 const NWV2_GOLD_DARK = '0xa67c2e';
 const NWV2_SHADOW = '0x1a2744@0.16';
+// Production Lifecycle Release — avatar-duration correction. Caps how long
+// the avatar itself stays visible within its own beat (narration/beat
+// timing untouched) — see the correction note on nwv2WhiteBuildCloseSegment
+// / nwv2LongAvatarPanelSegment for the mechanism.
+const NWV2_AVATAR_CAP_SEC_SHORT = 3.0;
+const NWV2_AVATAR_CAP_SEC_LONG = 4.0;
 
 function nwv2WhiteBrandMarkFilter(input, output) {
   return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NWV2_NAVY}@0.45:fontsize=28:x=${NEXTWAVE_V2_CANVAS_W}-tw-30:y=${NEXTWAVE_V2_CANVAS_H}-th-30[${output}]`;
@@ -15046,11 +15052,24 @@ async function nwv2WhiteBuildIllustrationSegment({ heygenLocalPath, seekSec, ill
 
 // Close segment — the ONLY beat where the avatar appears, per the CEO's
 // locked avatar rule. Full-frame, fades in from the white canvas.
-async function nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec, dur, outPath }) {
+// Production Lifecycle Release — avatar-duration correction. The CEO
+// accepted the whole visual/narration/caption system but flagged avatar
+// screen time as too long. Smallest deterministic fix: cap how long the
+// avatar itself stays visible within its existing beat — narration/audio
+// and beat boundaries are untouched, so content flow doesn't change. Once
+// avatarCapSec elapses, the segment dissolves back to the plain branded
+// white canvas (the same fade-to-white motif already used at every other
+// segment boundary in this system) rather than holding the avatar for the
+// whole beat. avatarCapSec is optional so any other caller keeps the prior
+// unconditional-full-duration behavior.
+async function nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec, dur, avatarCapSec, outPath }) {
+  const cap = (typeof avatarCapSec === 'number' && avatarCapSec > 0 && avatarCapSec < dur) ? avatarCapSec : null;
   const filters = [];
   filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[c0]`);
   filters.push(nwv2WhiteBrandMarkFilter('c0', 'c1'));
-  filters.push(`[c1]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const fadeParts = [`fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`];
+  if (cap) fadeParts.push(`fade=t=out:st=${cap.toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`);
+  filters.push(`[c1]${fadeParts.join(',')}[outv]`);
   const filterComplex = filters.join(';');
   await execFileAsync(ffmpegInstaller.path, [
     '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
@@ -15099,9 +15118,18 @@ function nwv2LongLogoFilter(input, output) {
 // Avatar + text panel — used for both the opening hook (headline) and the
 // closing CTA (cta text), the ONLY two beats where the avatar appears at
 // all, per the CEO's sparing-avatar policy for this Long proof.
-async function nwv2LongAvatarPanelSegment({ heygenLocalPath, seekSec, dur, text, isCta, fadeEdge, outPath }) {
+//
+// Production Lifecycle Release — avatar-duration correction, same
+// deterministic mechanism as the Short's close segment: avatarCapSec gates
+// ONLY the avatar overlay + its border (via `enable`), not the headline/CTA
+// text next to it. Beat duration, narration audio, and text stay exactly
+// as before — after the cap, the presenter's column reverts to plain white
+// canvas while the message keeps reading for the rest of the beat.
+async function nwv2LongAvatarPanelSegment({ heygenLocalPath, seekSec, dur, text, isCta, fadeEdge, avatarCapSec, outPath }) {
   const avatarColW = 760, avatarColX = NWV2L_W - avatarColW - 60;
   const textColW = avatarColX - 100;
+  const cap = (typeof avatarCapSec === 'number' && avatarCapSec > 0 && avatarCapSec < dur) ? avatarCapSec : null;
+  const avatarEnable = cap ? `:enable='between(t,0,${cap.toFixed(2)})'` : '';
   const lines = nwv2ProofWrapText(text, 24);
   const lineH = 78;
   const blockH = lines.length * lineH;
@@ -15109,8 +15137,8 @@ async function nwv2LongAvatarPanelSegment({ heygenLocalPath, seekSec, dur, text,
   const filters = [];
   filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[a0]`);
   filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS,scale=${avatarColW}:${NWV2L_H}:force_original_aspect_ratio=decrease[avid]`);
-  filters.push(`[a0][avid]overlay=x=${avatarColX}+(${avatarColW}-overlay_w)/2:y=(${NWV2L_H}-overlay_h)/2[a1]`);
-  filters.push(`[a1]drawbox=x=${avatarColX - 6}:y=40:w=${avatarColW + 12}:h=${NWV2L_H - 80}:color=${NWV2_GOLD}@0.5:t=3[a2]`);
+  filters.push(`[a0][avid]overlay=x=${avatarColX}+(${avatarColW}-overlay_w)/2:y=(${NWV2L_H}-overlay_h)/2${avatarEnable}[a1]`);
+  filters.push(`[a1]drawbox=x=${avatarColX - 6}:y=40:w=${avatarColW + 12}:h=${NWV2L_H - 80}:color=${NWV2_GOLD}@0.5:t=3${avatarEnable}[a2]`);
   let last = 'a2', idx = 3;
   const textColor = isCta ? NWV2_GOLD_DARK : NWV2_NAVY;
   lines.forEach((line, li) => {
@@ -15382,7 +15410,7 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
     if (beat.treatment === 'avatar_panel') {
       await nwv2LongAvatarPanelSegment({
         heygenLocalPath, seekSec: start, dur, text: beat.text2 || beat.text, isCta: !!beat.isCta,
-        fadeEdge: isFirst ? null : 'in', outPath: segPath,
+        fadeEdge: isFirst ? null : 'in', avatarCapSec: NWV2_AVATAR_CAP_SEC_LONG, outPath: segPath,
       });
       segmentType = 'avatar_panel';
     } else if (beat.treatment === 'comparison') {
@@ -15599,7 +15627,7 @@ async function nextwaveV2CompositeWhiteMotionRender(req, res) {
           timeline.push({ beatIndex: i, segment: 'calc_card_fallback', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
         }
       } else if (beat.treatment === 'close') {
-        await nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec: start, dur, outPath: segPath });
+        await nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec: start, dur, avatarCapSec: NWV2_AVATAR_CAP_SEC_SHORT, outPath: segPath });
         segPaths.push(segPath);
         timeline.push({ beatIndex: i, segment: 'close_avatar', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
       } else {

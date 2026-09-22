@@ -13098,6 +13098,27 @@ async function _pollHeygenRenders(){
           },1500);
           continue; // skip the generic branches below entirely for hybrid packages
         }
+        // Production Lifecycle Release — the REAL (non-preview) white-canvas-
+        // motion / long-format production path. Checked immediately after the
+        // preview-only hybrid branch above, for the same reason: this pkg also
+        // carries pkg.lifecycleStage and must not fall into the generic AI
+        // Studio/SRV auto-Submagic branches below, which know nothing about
+        // nextwaveV2ProductionBeats.
+        if(pkg.nextwaveV2Production){
+          const _pkgId=String(pkg.id);
+          setTimeout(function(){
+            if(typeof nwv2ProductionStartComposite==='function'){
+              console.log('[NextWave V2 Production] HeyGen complete — starting composite for pkg',_pkgId);
+              nwv2ProductionStartComposite(pkg,data.durationSec||pkg.renderDurationSec||0).then(function(r){
+                if(r&&r.ok){ console.log('[NextWave V2 Production] Submagic (captions-only) started for pkg',_pkgId,'· projectId:',r.projectId); }
+                else { console.warn('[NextWave V2 Production] composite/Submagic chain failed:',r&&r.detail); }
+                try{ if(typeof saveAppState==='function') saveAppState(); }catch(_){}
+                try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+              });
+            }
+          },1500);
+          continue; // skip the generic branches below entirely for production packages
+        }
         const _isAIStudioLifecycle = (D.aiStudioLifecycleStages && typeof D.aiStudioLifecycleStages==='object'
           && pkg.taskId && D.aiStudioLifecycleStages[String(pkg.taskId)])
           || !!(pkg.lifecycleStage); // v13.75.9 — fallback: pkg.lifecycleStage is Supabase-persisted; handles Brave refresh where aiStudioLifecycleStages may be empty
@@ -16362,6 +16383,245 @@ async function nextwaveV2StartCaptionsOnlySubmagic(pkg){
   }
 }
 
+// ============================================================================
+// NEXTWAVE V2 PRODUCTION LIFECYCLE RELEASE — integrates the CEO-accepted
+// white-canvas-motion (Short) / long-format (Long) visual system into the
+// REAL production Build button. Until this, every one of those compositor
+// functions was only reachable via direct API calls from a preview-test
+// harness — the real "⚡ Start Build" button a non-test NextWave task hits
+// called the old legacy dark-canvas autoStartHeygenRender path instead
+// (confirmed by reading the actual onclick handler before writing any of
+// this). This does NOT touch autoStartHeygenRender or the old path at all
+// — it's wired in as a parallel path selected by which function the real
+// Build button below now calls, so nothing already-working is removed.
+//
+// Script/content boundary: no new script generation here. `_nwv2AutoMapProductionBeats`
+// only RESHAPES the existing GENERATE-stage script + its existing automatic
+// visual-plan classification (host/exact_evidence/targeted_broll — the same
+// classifier proven across every prior validation phase) into the beat
+// shapes the accepted compositors expect. It invents no copy: headlines/
+// titles are the beat's own first narration sentence, uppercased; evidence
+// values are exactly what the classifier already extracted.
+function _nwv2DeriveCaption(text,maxChars){
+  const clean=String(text||'').replace(/[.!?]+\s*$/,'').trim();
+  const upper=clean.toUpperCase();
+  return upper.length>maxChars ? upper.slice(0,maxChars) : upper;
+}
+// Avatar restricted to first+last beat regardless of the classifier's own
+// per-beat treatment — matches the CEO's explicit "avatar only at open/
+// close, brief" policy already validated in the prior two phases; the
+// avatar-duration cap itself lives server-side (NWV2_AVATAR_CAP_SEC_SHORT/
+// LONG in api/ops.js) and applies automatically to every beat this mapper
+// marks 'hook'/'close'/'avatar_panel'.
+function _nwv2AutoMapProductionBeats(vp,isLong){
+  const beats=vp.beats||[];
+  return beats.map(function(b,i){
+    const isFirst=i===0, isLast=i===beats.length-1;
+    const text=(b.unit_texts||[]).join(' ');
+    const treatment=b.visual&&b.visual.visual_treatment;
+    const caption=_nwv2DeriveCaption((b.unit_texts&&b.unit_texts[0])||text,isLong?60:44);
+    if(isLong){
+      if(isFirst||isLast){
+        return{treatment:'avatar_panel',text:text,text2:caption,isCta:isLast};
+      }
+      if(treatment==='exact_evidence'){
+        return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+      }
+      if(treatment==='targeted_broll'&&b.visual.broll_prompt){
+        return{treatment:'illustration',text:text,concept:b.visual.broll_prompt};
+      }
+      return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+    }
+    if(isLast){ return{treatment:'close',text:text}; }
+    if(isFirst){ return{treatment:'hook',text:text,headline:caption}; }
+    if(treatment==='exact_evidence'){
+      return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+    }
+    if(treatment==='targeted_broll'&&b.visual.broll_prompt){
+      return{treatment:'illustration',text:text,concept:b.visual.broll_prompt};
+    }
+    return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+  });
+}
+// Deterministic thumbnail params from the SAME beats already going into the
+// video — the first calc/exact_evidence beat with 2+ real values supplies
+// the from/to contrast; falls back to the overall package title if no
+// calc beat exists. No invented numbers.
+function _nwv2DeriveThumbnailParams(beats,pkgTitle){
+  const calcBeat=beats.find(function(b){return b.treatment==='calc'&&Array.isArray(b.values)&&b.values.length>=2;});
+  const headline=_nwv2DeriveCaption(pkgTitle||(beats[0]&&(beats[0].headline||beats[0].text2||beats[0].text))||'NextWave',60);
+  if(calcBeat){
+    return{
+      headline:headline,
+      fromValue:calcBeat.values[0],
+      fromLabel:_nwv2DeriveCaption(calcBeat.title||'',22),
+      toValue:calcBeat.values[calcBeat.values.length-1],
+      toLabel:_nwv2DeriveCaption(calcBeat.title||'',22),
+    };
+  }
+  return{headline:headline,fromValue:'',fromLabel:'',toValue:'',toLabel:''};
+}
+async function nwv2ProductionGenerateThumbnail(pkg,beats,isLong){
+  const params=_nwv2DeriveThumbnailParams(beats,pkg.title);
+  if(!params.fromValue||!params.toValue) return{ok:false,reason:'no_evidence_values_for_thumbnail'};
+  const action=isLong?'nextwave_v2_generate_long_thumbnail':'nextwave_v2_generate_thumbnail';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action='+action,params);
+    const data=await r.json();
+    // Deliberately NOT pkg.thumbnailUrl — _pollHeygenRenders (the generic,
+    // engine-agnostic HeyGen-completion handler) unconditionally overwrites
+    // pkg.thumbnailUrl with HeyGen's own auto-generated presenter-frame
+    // thumbnail on every completion (see the `pkg.thumbnailUrl = data.thumbnailUrl`
+    // line in that function), which runs AFTER this Build-stage call and would
+    // silently replace the intended deterministic thumbnail with a random
+    // HeyGen video frame. A separate field sidesteps that collision entirely
+    // without touching the generic poller (which other engines also rely on).
+    if(data.ok&&data.thumbnail_url){ pkg.nextwaveV2ThumbnailUrl=data.thumbnail_url; return{ok:true,thumbnailUrl:data.thumbnail_url}; }
+    return{ok:false,reason:'thumbnail_error',detail:data.error};
+  }catch(e){
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+// White-canvas-motion / long-format HeyGen source settings — DIFFERENT from
+// NEXTWAVE_V2_HYBRID_BG_COLOR/_SCALE above, which belong to the superseded,
+// preview-only dark-canvas hybrid path. The white-canvas compositors
+// (nwv2WhiteBuildCloseSegment, nwv2LongAvatarPanelSegment in api/ops.js)
+// overlay the raw HeyGen footage directly with no chroma key, so the
+// source itself must already be rendered on the SAME white canvas color
+// used everywhere else in the system (NWV2_WHITE_BG server-side); scale
+// 2.0 is the value ops.js's own Long-format comment documents as already
+// validated for this avatar family in the white/full-frame composition.
+const NWV2_PRODUCTION_BG_COLOR='#f7f4ee';
+const NWV2_PRODUCTION_HEYGEN_SCALE=2.0;
+
+// Real production BUILD entry point — this is what the real "⚡ Start Build"
+// button now calls for NextWave tasks (see renderNextWaveLifecycleCard's
+// build-stage button below), replacing the legacy autoStartHeygenRender
+// call for this engine specifically. Reuses the SAME existing HeyGen
+// avatar/voice already validated across every prior phase — per the CEO's
+// explicit "do not redesign the avatar identity in this phase" instruction,
+// no rotation/new avatar is introduced here.
+async function nwv2ProductionStartBuild(pkg){
+  if(!pkg||!pkg.script) return{ok:false,reason:'missing_pkg_or_script'};
+  const cleanScript=(typeof _cleanScriptForRender==='function')?_cleanScriptForRender(pkg.script):pkg.script;
+  if(!cleanScript) return{ok:false,reason:'empty_script'};
+  const isLong=!!pkg.isLong;
+  try{
+    const vpr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_generate_visual_plan',{script:cleanScript});
+    const vpd=await vpr.json();
+    if(!vpd.ok||!vpd.visual_plan_package) return{ok:false,reason:'visual_plan_error',detail:vpd.error};
+    const vp=vpd.visual_plan_package;
+    const beats=_nwv2AutoMapProductionBeats(vp,isLong);
+    pkg.nextwaveV2VisualPlan=vp;
+    pkg.nextwaveV2ProductionBeats=beats;
+    pkg.nextwaveV2Production=true;
+    pkg.nextwaveV2ProductionIsLong=isLong;
+    // Thumbnail needs only the script-derived beats, not the rendered video —
+    // generated now so it's ready well before Approve, per the CEO's explicit
+    // requirement that a generated thumbnail actually be attached before
+    // production release, not left as an afterthought.
+    await nwv2ProductionGenerateThumbnail(pkg,beats,isLong);
+    const r=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
+      avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
+      voice_id:NEXTWAVE_V2_HYBRID_VOICE_ID,
+      script:cleanScript,
+      background:{type:'color',value:NWV2_PRODUCTION_BG_COLOR},
+      dimension:isLong?{width:1080,height:1920}:{width:1080,height:1920}, // avatar source always portrait — see landscape composition note on nwv2LongAvatarPanelSegment
+      scale:NWV2_PRODUCTION_HEYGEN_SCALE,
+      test:false,
+    });
+    const data=await r.json();
+    if(data.ok&&data.videoId){
+      pkg.heygenJobId=data.videoId;
+      pkg.renderStatus='rendering';
+      pkg.renderStartedAt=new Date().toISOString();
+      pkg.renderError=null;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      return{ok:true,videoId:data.videoId};
+    }
+    pkg.renderStatus='failed';
+    pkg.renderError='heygen_start_error: '+(data.error||('HTTP '+data.status));
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'heygen_start_error',detail:pkg.renderError};
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='production_build_network_error: '+e.message;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+// Fires from the HeyGen-completion poller (see the nextwaveV2Production
+// branch added to _pollHeygenRenders). Short = one request (proven safe —
+// at most ~7 lightweight segments, well under the 60s function ceiling).
+// Long = per-segment + concat calls (the SAME architecture fix already
+// proven necessary and working in the Long validation phase, since a
+// single request hung past the Vercel maxDuration timeout there).
+async function nwv2ProductionStartComposite(pkg,realDurationSec){
+  const beats=pkg.nextwaveV2ProductionBeats;
+  if(!beats||!beats.length){ pkg.submagicError='missing_production_beats_at_composite_stage'; return{ok:false,reason:'missing_beats'}; }
+  pkg.renderStatus='compositing';
+  try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+  try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+  const heygenUrl=pkg.heygenRawUrl||pkg.videoUrl;
+  try{
+    let compositedUrl=null;
+    if(!pkg.nextwaveV2ProductionIsLong){
+      const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_white_motion',{
+        heygen_video_url:heygenUrl, beats:beats, real_duration_sec:realDurationSec,
+      });
+      const data=await r.json();
+      if(!data.ok||!data.composited_video_url){
+        pkg.renderStatus='failed'; pkg.renderError='composite_error: '+(data.error||('HTTP '+data.status));
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'composite_error',detail:pkg.renderError};
+      }
+      compositedUrl=data.composited_video_url;
+    }else{
+      const totalChars=beats.reduce(function(s,b){return s+String(b.text||'').length;},0)||1;
+      let cursor=0; const renderId='p'+Date.now().toString(36);
+      const segUrls=[];
+      for(let i=0;i<beats.length;i++){
+        const beat=beats[i];
+        const beatDur=realDurationSec*(String(beat.text||'').length/totalChars);
+        const start=cursor; cursor+=beatDur;
+        const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_long_segment',{
+          heygen_video_url:heygenUrl, beat:beat, start_sec:start, dur_sec:beatDur,
+          render_id:renderId, beat_index:i,
+        });
+        const data=await r.json();
+        if(!data.ok||!data.segment_url){
+          pkg.renderStatus='failed'; pkg.renderError='long_segment_error(beat '+i+'): '+(data.error||('HTTP '+data.status));
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'long_segment_error',detail:pkg.renderError};
+        }
+        segUrls.push(data.segment_url);
+      }
+      const cr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_concat_long',{segment_urls:segUrls,render_id:renderId});
+      const cdata=await cr.json();
+      if(!cdata.ok||!cdata.composited_video_url){
+        pkg.renderStatus='failed'; pkg.renderError='long_concat_error: '+(cdata.error||('HTTP '+cr.status));
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'long_concat_error',detail:pkg.renderError};
+      }
+      compositedUrl=cdata.composited_video_url;
+    }
+    // Reuses the EXISTING, already-proven canvas-composite field name/
+    // Submagic hand-off unchanged — nextwaveV2StartCaptionsOnlySubmagic only
+    // reads pkg.nextwaveV2CanvasVideoUrl, so populating it here (rather than
+    // forking a parallel captions function) means the real Submagic poller's
+    // existing NextWave auto-advance-to-approve logic keeps working exactly
+    // as already validated, with zero duplicated code.
+    pkg.nextwaveV2CanvasVideoUrl=compositedUrl;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return await nextwaveV2StartCaptionsOnlySubmagic(pkg);
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='production_composite_network_error: '+e.message;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
 function _srvEnglishCancelTask(taskId){
   if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
   const t=D.tasks.find(function(x){return String(x.id)===String(taskId);});
@@ -18448,6 +18708,23 @@ async function _nextWaveRunPublish(pkgId,taskId){
       pkg.youtubeVideoId=_ytId;
       pkg.youtubeWatchUrl=d.watchUrl||(_ytId?('https://www.youtube.com/watch?v='+_ytId):'');
       pkg.youtubeStudioUrl=d.studioUrl||(_ytId?('https://studio.youtube.com/video/'+_ytId):'');
+      // Production Lifecycle Release — attach the deterministic Build-stage
+      // thumbnail to the actual YouTube video, not just to package storage.
+      // Awaited (not fire-and-forget like SRV Farsi's) so pkg.thumbnailSetOnYoutube
+      // reliably reflects whether it actually reached YouTube before Publish
+      // reports success — the CEO's order is explicit that a thumbnail merely
+      // existing in storage is not sufficient.
+      if(pkg.nextwaveV2ThumbnailUrl&&_ytId){
+        try{
+          const tr=await fetch('/api/ops?action=set_yt_thumbnail',{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({videoId:_ytId,engine:'NextWave',thumbUrl:pkg.nextwaveV2ThumbnailUrl}),
+          });
+          const td=await tr.json().catch(function(){return{};});
+          pkg.thumbnailSetOnYoutube=!!(td&&td.ok);
+          if(!(td&&td.ok)) console.warn('[NextWave V2 Production] YouTube thumbnail set failed:',td&&td.error);
+        }catch(e){ pkg.thumbnailSetOnYoutube=false; console.warn('[NextWave V2 Production] YouTube thumbnail set error:',e.message); }
+      }
       if(typeof savePackageToSupabase==='function')await savePackageToSupabase(pkg).catch(function(){});
       if(typeof saveAppState==='function')saveAppState();
       _nextWaveSetStage(taskId,'done');
@@ -18692,8 +18969,8 @@ function renderNextWaveLifecycleCard(task){
       </div>`;
     }
     if(!renderStatus||!pkg){
-      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">HeyGen renders the video automatically. MMM polls every 45 sec.<br>Submagic captions apply after render.</div>`;
-      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const r=await autoStartHeygenRender(p);if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('HeyGen submit failed: '+(r&&(r.detail||r.reason)||'unknown'));}})()">⚡ Start Build (HeyGen → Submagic)</button>`;
+      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">Generates the CEO-accepted white-canvas visual plan from this package's own reviewed script, starts the HeyGen presenter render, composites the accepted visual system, and applies Submagic captions automatically. MMM polls every 45 sec.</div>`;
+      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Starting…';const r=await nwv2ProductionStartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('Build failed to start: '+(r&&(r.detail||r.reason)||'unknown'));btn.textContent='⚡ Start Build (HeyGen → Submagic)';}})()">⚡ Start Build (HeyGen → Submagic)</button>`;
     }else if(renderStatus==='rendering'){
       const _jobShort=escHTML(String(pkg.heygenJobId||'').slice(0,16));
       const _started=pkg.renderStartedAt?new Date(pkg.renderStartedAt).toLocaleTimeString():'—';
