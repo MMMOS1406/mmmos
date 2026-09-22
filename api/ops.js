@@ -14165,28 +14165,25 @@ async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, 
     filters.push(`[${lastBg}]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=0x1c2030@0.92:t=fill[bgE0]`);
     filters.push(`[bgE0]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[bgE1]`);
     lastBg = 'bgE1';
-    // Phase: Visual Composition Correction QA fix — the earlier per-value
-    // stacked-drawtext-filter-chain version silently dropped all but one
-    // value on a real render (root cause not fully isolated without direct
-    // ffmpeg stderr access — one long filter chain of near-identical
-    // generated names is a real risk surface). Replaced with ONE drawtext
-    // call over an explicitly comma-preserving joined string (the default
-    // nextwaveV2SanitizeDrawtext strips commas, which is correct for plain
-    // captions but wrong for dollar amounts like "$60,000") and real
-    // multi-line wrapping via the same nextwaveV2WrapLines already proven
-    // elsewhere in this file — a single filter is far less likely to
-    // silently fail than a long generated chain.
+    // Phase: Visual Composition Correction QA fix (round 2) — the
+    // previous fix (one drawtext call per wrapped line, chained through
+    // successive filter outputs) STILL silently dropped every line but
+    // the last on a real render, even with just 2 chained filters — the
+    // chaining itself is the risk, not the text content or line count.
+    // Now a genuinely single drawtext invocation: one value per real
+    // ffmpeg newline (drawtext natively supports \n inside its own text
+    // argument), no second filter node at all. Comma-preserving (the
+    // default nextwaveV2SanitizeDrawtext strips commas, correct for
+    // plain captions but wrong for dollar amounts like "$60,000").
     const values = (beat.visual.emphasis_values || []).slice(0, 4);
-    const joined = values.map((v) => String(v).replace(/['":\\\[\];]/g, '')).join('   ·   ');
-    if (joined) {
-      const lines = nextwaveV2WrapLines(joined, 64, z.w - 100, 4);
-      const lineH = 78;
-      const startY = z.y + (z.h - lines.length * lineH) / 2;
-      lines.forEach((line, li) => {
-        const safeLine = line.replace(/'/g, '');
-        filters.push(`[${lastBg}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLine}':fontcolor=white:fontsize=64:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${Math.round(startY + li * lineH)}[bgV${li}]`);
-        lastBg = `bgV${li}`;
-      });
+    if (values.length) {
+      const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24));
+      const multiline = safeValues.join('\n');
+      const lineH = 84;
+      const blockH = safeValues.length * lineH;
+      const startY = Math.round(z.y + (z.h - blockH) / 2);
+      filters.push(`[${lastBg}]drawtext=fontfile=${SMM_FONT_PATH}:text='${multiline}':fontcolor=white:fontsize=68:line_spacing=16:text_align=center:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${startY}[bgVals]`);
+      lastBg = 'bgVals';
     }
   }
 
