@@ -15151,7 +15151,11 @@ async function nwv2LongAvatarPanelSegment({ heygenLocalPath, seekSec, dur, text,
 // one-line definition. Genuinely different visual grammar from a calc
 // card, not a reskin of it.
 async function nwv2LongComparisonSegment({ heygenLocalPath, seekSec, dur, leftTitle, leftBody, rightTitle, rightBody, outPath }) {
-  const panelW = 780, panelH = 560, panelY = 260, gap = 60;
+  // gap widened from 60->130 after a real render showed the "VS" divider
+  // straddling both panels' colored edges at the narrower gap (readable,
+  // but visually awkward) — panelW trimmed slightly to compensate so the
+  // total composition width is unchanged.
+  const panelW = 745, panelH = 560, panelY = 260, gap = 130;
   const leftX = NWV2L_W / 2 - gap / 2 - panelW;
   const rightX = NWV2L_W / 2 + gap / 2;
   const filters = [];
