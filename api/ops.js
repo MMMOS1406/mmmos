@@ -16245,6 +16245,27 @@ export default async function handler(req, res) {
     // Full-Frame Production Candidate — generalizes the accepted proof
     // mechanism onto real beat data with real synchronized narration audio.
     if (action === 'nextwave_v2_composite_fullframe') return await nextwaveV2CompositeFullFrameRender(req, res);
+    // TEMP DEBUG — White-Canvas Motion Structure phase. Verifying zoompan
+    // (scale-push motion) and boxblur (soft card shadow) support on the
+    // bundled ~2018 static ffmpeg build before designing the motion system,
+    // instead of discovering unsupported options through a failed render —
+    // the last three phases each burned a deploy cycle doing exactly that
+    // (text_align, text_expansion, drawtext's %/%% escape). Remove once the
+    // motion-compositor implementation is complete.
+    if (action === 'nextwave_v2_debug_ffmpeg_filters2') {
+      if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+      const names = ['zoompan', 'boxblur', 'gblur', 'scale'];
+      const out = {};
+      for (const n of names) {
+        try {
+          const r = await execFileAsync(ffmpegInstaller.path, ['-h', `filter=${n}`], { timeout: 10000 });
+          out[n] = (r.stdout || '') + (r.stderr || '');
+        } catch (e) {
+          out[n] = 'ERROR: ' + ((e && e.stdout) || (e && e.message) || String(e));
+        }
+      }
+      return res.status(200).json({ ok: true, ffmpeg_filter_help: out });
+    }
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
