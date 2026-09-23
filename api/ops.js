@@ -14036,8 +14036,21 @@ async function nextwaveV2GenerateVisualPlanPackageAction(req, res) {
     if (!script || typeof script !== 'string' || !script.trim()) {
       return res.status(400).json({ ok: false, error: 'script is required' });
     }
-    if (script.length > 3000) {
-      return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 3000 characters)' });
+    // Live Validation Defect #2 — this endpoint is now the real production
+    // path for BOTH Short and Long (nwv2ProductionStartBuild calls it for
+    // both), not just the original Short-only candidate testing this 3000
+    // cap was set for. A real Long script runs ~950-1100 words per the
+    // approved script architecture (~7 min at ~140wpm), which lands at
+    // 5000-6000+ characters including its own [MM:SS LABEL] segment
+    // markers — confirmed live: a real approved Long task's script hit
+    // this cap at 4779 characters (cleaned) and silently blocked Build
+    // with no visible error (the caller's early-return path on this
+    // specific failure never touched pkg.renderStatus). Raised to a limit
+    // that comfortably covers a real Long script with headroom, while
+    // still bounding the downstream classifier/Anthropic call. Short
+    // scripts (~100-150 words) are far under this either way.
+    if (script.length > 8000) {
+      return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 8000 characters)' });
     }
     const pkg = await nextwaveV2GenerateVisualPlanPackage(script);
     return res.status(200).json({ ok: true, visual_plan_package: pkg });
