@@ -14399,6 +14399,49 @@ async function nextwaveV2ConcatCanvasSegments({ paths, id }) {
   return outPath;
 }
 
+// Live Validation Defect #11 — nextwaveV2ConcatCanvasSegments (above) re-encodes
+// the ENTIRE output via filter_complex + libx264, which is correct for its other
+// three callers (Phase 5.3's deprecated illustrated renderer, the Proof builder,
+// and the FullFrame builder) because those mix genuinely heterogeneous segment
+// sources. But confirmed live on the real Finance/Long task: a real 27-segment
+// concat (~389s combined) hit execFileAsync's 90s timeout partway through the
+// re-encode (frame progress still climbing, no ffmpeg error, killed by Node's
+// child_process timeout) — the encode simply needs more wall-clock than a single
+// serverless call can spend. The 27 segments here are NOT heterogeneous uploads;
+// every one was produced by this SAME session's own per-beat composers with
+// identical encode settings, confirmed empirically via ffprobe on all 27 real
+// inputs (h264 High, yuv420p, 1920x1080, 25fps/25tbr/12800tbn/50tbc, aac 44100Hz
+// mono — byte-identical across every segment). A re-encode is not technically
+// required for compatible inputs like these, so this Long-only path tries a
+// stream-copy concat (ffmpeg's concat DEMUXER, `-c copy`) first — a few seconds
+// of I/O instead of ~3 minutes of encoding, comfortably inside any serverless
+// ceiling — and only falls back to the existing re-encode function, completely
+// unchanged, if the fast copy path fails validation. `-loglevel error -nostats`
+// suppresses ffmpeg's default per-frame progress spam (the cause of the
+// multi-hundred-KB unreadable renderError persisted by the timeout above) so a
+// real failure here stays diagnosable in a single production run.
+async function nextwaveV2ConcatLongSegmentsFast({ paths, id }) {
+  for (let i = 0; i < paths.length; i++) {
+    await smAssertValidMediaFile(paths[i], `long segment ${i + 1}/${paths.length} before fast concat`);
+  }
+  const listPath = join(tmpdir(), `nwv2longconcat-list-${id}.txt`);
+  const listContents = paths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+  await writeFile(listPath, listContents, 'utf8');
+  const outPath = join(tmpdir(), `nwv2longconcat-fast-${id}.mp4`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-loglevel', 'error', '-nostats',
+      '-f', 'concat', '-safe', '0', '-i', listPath,
+      '-c', 'copy', '-movflags', '+faststart',
+      outPath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 5 });
+    await smAssertValidMediaFile(outPath, 'fast-concatenated long master');
+    return outPath;
+  } finally {
+    await unlink(listPath).catch(() => {});
+  }
+}
+
 // BUILD step — composites the persistent-canvas video from the already-
 // completed HeyGen render + the reviewed visual plan, uploads it, and
 // returns its URL for the caller (the frontend) to hand to Submagic in
@@ -15649,7 +15692,19 @@ async function nextwaveV2ConcatLongRender(req, res) {
       await smAssertValidMediaFile(p, `long segment ${i + 1}/${segment_urls.length} before concat`);
       localPaths.push(p);
     }
-    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: localPaths, id: render_id });
+    // Live Validation Defect #11 — try the fast stream-copy concat first (see
+    // nextwaveV2ConcatLongSegmentsFast above: these 27 segments are our own
+    // uniformly-encoded output, not heterogeneous uploads, so a re-encode is
+    // not technically required and the fast path avoids the 90s execFileAsync
+    // timeout a real 27-segment re-encode was confirmed to hit in production).
+    // Falls back to the existing, unchanged re-encode path if the fast path
+    // fails for any reason — no behavior change for that fallback.
+    let concatOut;
+    try {
+      concatOut = await nextwaveV2ConcatLongSegmentsFast({ paths: localPaths, id: render_id });
+    } catch (fastErr) {
+      concatOut = await nextwaveV2ConcatCanvasSegments({ paths: localPaths, id: render_id });
+    }
     const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
     const finalBuf = await readFile(concatOut);
     await unlink(concatOut).catch(() => {});
@@ -15661,7 +15716,17 @@ async function nextwaveV2ConcatLongRender(req, res) {
       render_id,
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
+    // Live Validation Defect #11 — the prior unbounded e.message persisted a
+    // multi-hundred-KB blob of raw ffmpeg per-frame progress (Node's execFile
+    // error format is "Command failed: <cmd>\n<stderr>", and default ffmpeg
+    // logging writes every frame's progress to stderr), making a real failure
+    // undiagnosable without another blind production run. The actual failure
+    // reason (if any) is always at the tail, not buried in the input banners,
+    // so this keeps only the last 2000 chars — still enough to diagnose a
+    // genuine ffmpeg error, no secrets involved (only /tmp paths and codec info).
+    const _msg = String((e && e.message) || e);
+    const _bounded = _msg.length > 2000 ? '…' + _msg.slice(-2000) : _msg;
+    return res.status(500).json({ ok: false, error: _bounded });
   } finally {
     for (const p of localPaths) await unlink(p).catch(() => {});
   }
