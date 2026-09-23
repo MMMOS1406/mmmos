@@ -16532,10 +16532,10 @@ async function _nwv2PollHeygenJobToCompletion(videoId,maxAttempts,intervalMs){
       const data=await r.json();
       if(!data.ok) continue;
       if(data.status==='completed'&&data.videoUrl) return{ok:true,videoUrl:data.videoUrl,durationSec:data.durationSec};
-      if(data.status==='failed') return{ok:false,reason:'heygen_render_failed',detail:data.raw||data};
+      if(data.status==='failed') return{ok:false,reason:'heygen_render_failed',detail:data.raw||data,videoId:videoId};
     }catch(_){ /* transient — keep polling within the bounded attempt count */ }
   }
-  return{ok:false,reason:'heygen_poll_timeout'};
+  return{ok:false,reason:'heygen_poll_timeout',videoId:videoId};
 }
 
 // Real production BUILD entry point — this is what the real "⚡ Start Build"
@@ -16617,43 +16617,69 @@ async function nwv2ProductionStartBuild(pkg){
     // visually shown.
     const avatarCap=isLong?NWV2_AVATAR_CAP_SEC_LONG:NWV2_AVATAR_CAP_SEC_SHORT;
     const renderId='b'+Date.now().toString(36);
-    pkg.nextwaveV2AvatarClipUrls={};
+    // Live Validation Defect #5 — SUBMIT ONCE idempotency. The prior version
+    // never persisted a submitted HeyGen video_id anywhere until AFTER a
+    // successful poll, so a real poll timeout on a job HeyGen had actually
+    // accepted left no record of it at all — a resume/retry had no way to
+    // avoid paying for a duplicate generation. Job IDs are now persisted the
+    // instant HeyGen accepts them, kept even on timeout (never cleared by a
+    // failure path), and checked FIRST on every beat before ever calling
+    // heygen_start_render — an already-submitted beat resumes polling the
+    // SAME job; only a beat with no recorded job ID yet submits a new one.
+    // Never resets existing progress from a prior attempt.
+    pkg.nextwaveV2AvatarClipUrls=pkg.nextwaveV2AvatarClipUrls||{};
+    pkg.nextwaveV2AvatarJobIds=pkg.nextwaveV2AvatarJobIds||{};
     for(let i=0;i<beats.length;i++){
       const isAvatarBeat=isLong?(beats[i].treatment==='avatar_panel'):(beats[i].treatment==='close');
       if(!isAvatarBeat) continue;
-      const t=timeline[i];
-      const clipDur=Math.min(avatarCap,t.dur);
-      const sliceR=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_slice_narration',{
-        master_audio_url:narrData.master_audio_url, start_sec:t.start, dur_sec:clipDur,
-        render_id:renderId, slice_id:'avatar'+i,
-      });
-      const sliceD=await sliceR.json();
-      if(!sliceD.ok||!sliceD.slice_url){
-        pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown');
+      if(pkg.nextwaveV2AvatarClipUrls[i]) continue; // already completed in a prior attempt
+      let videoId=pkg.nextwaveV2AvatarJobIds[i]||null;
+      if(!videoId){
+        const t=timeline[i];
+        const clipDur=Math.min(avatarCap,t.dur);
+        const sliceR=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_slice_narration',{
+          master_audio_url:narrData.master_audio_url, start_sec:t.start, dur_sec:clipDur,
+          render_id:renderId, slice_id:'avatar'+i,
+        });
+        const sliceD=await sliceR.json();
+        if(!sliceD.ok||!sliceD.slice_url){
+          pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown');
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'narration_slice_error',detail:pkg.renderError};
+        }
+        const hgR=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
+          avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
+          audio_url:sliceD.slice_url,
+          background:{type:'color',value:NWV2_PRODUCTION_BG_COLOR},
+          dimension:{width:1080,height:1920},
+          scale:NWV2_PRODUCTION_HEYGEN_SCALE,
+          test:false,
+        });
+        const hgData=await hgR.json();
+        if(!hgData.ok||!hgData.videoId){
+          const _apiMsg=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.message;
+          const _apiCode=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.code;
+          pkg.renderStatus='failed';
+          pkg.renderError='heygen_start_error: '+(_apiMsg?(_apiCode?'['+_apiCode+'] '+_apiMsg:_apiMsg):(hgData.error||('HTTP '+hgData.status)));
+          pkg.renderErrorRaw=hgData;
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'heygen_start_error',detail:pkg.renderError};
+        }
+        videoId=hgData.videoId;
+        // Persisted BEFORE polling — the critical fix. Even if the poll
+        // below times out, this job ID survives to the next attempt.
+        pkg.nextwaveV2AvatarJobIds[i]=videoId;
         try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
-        return{ok:false,reason:'narration_slice_error',detail:pkg.renderError};
       }
-      const hgR=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
-        avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
-        audio_url:sliceD.slice_url,
-        background:{type:'color',value:NWV2_PRODUCTION_BG_COLOR},
-        dimension:{width:1080,height:1920},
-        scale:NWV2_PRODUCTION_HEYGEN_SCALE,
-        test:false,
-      });
-      const hgData=await hgR.json();
-      if(!hgData.ok||!hgData.videoId){
-        const _apiMsg=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.message;
-        const _apiCode=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.code;
-        pkg.renderStatus='failed';
-        pkg.renderError='heygen_start_error: '+(_apiMsg?(_apiCode?'['+_apiCode+'] '+_apiMsg:_apiMsg):(hgData.error||('HTTP '+hgData.status)));
-        pkg.renderErrorRaw=hgData;
-        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
-        return{ok:false,reason:'heygen_start_error',detail:pkg.renderError};
-      }
-      const poll=await _nwv2PollHeygenJobToCompletion(hgData.videoId,36,5000);
+      // Live Validation Defect #5 — the real timeout (9:25:53 -> ~9:29, ~3.5
+      // min) landed right at the old 36x5s=180s bound, consistent with
+      // HeyGen's queue/processing overhead sometimes exceeding a few
+      // minutes even for a short clip. Raised to 60x5s=300s (5 min) —
+      // still bounded, never loops indefinitely, never re-submits.
+      const poll=await _nwv2PollHeygenJobToCompletion(videoId,60,5000);
       if(!poll.ok){
-        pkg.renderStatus='failed'; pkg.renderError='heygen_avatar_clip_failed(beat '+i+'): '+(poll.reason||'unknown');
+        pkg.renderStatus='failed';
+        pkg.renderError='heygen_avatar_clip_failed(beat '+i+', job '+videoId+'): '+(poll.reason||'unknown')+' — job ID preserved, a Retry will resume checking this SAME job, not submit a new one';
         pkg.renderErrorRaw=poll.detail||null;
         try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
         return{ok:false,reason:'heygen_avatar_clip_failed',detail:pkg.renderError};

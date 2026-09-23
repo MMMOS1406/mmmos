@@ -6411,6 +6411,28 @@ async function heygenListAvatars(req, res) {
   });
 }
 
+// Live Validation Defect #5 — read-only recovery tool. Neither
+// heygenStartRender's caller nor _nwv2PollHeygenJobToCompletion's own
+// timeout path ever persisted the submitted video_id anywhere durable, so
+// a poll timeout on a job HeyGen actually accepted left MMMOS with no
+// record of it at all. This lists recent jobs directly from HeyGen (no
+// generation, no spend) so an already-submitted job can be found and its
+// real status/output checked instead of assuming failure and submitting a
+// duplicate paid generation.
+async function heygenListVideos(req, res) {
+  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
+  const limit = (req.query && req.query.limit) || 20;
+  const r = await _heygenFetch('/v1/video.list?limit=' + encodeURIComponent(limit));
+  const videos = (r.data && r.data.data && r.data.data.videos) || (r.data && r.data.videos) || [];
+  return res.status(r.ok ? 200 : (r.status || 502)).json({
+    ok: r.ok,
+    status: r.status,
+    videos,
+    raw: r.data,
+    error: r.error || null,
+  });
+}
+
 async function heygenListVoices(req, res) {
   if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
   const r = await _heygenFetch('/v2/voices');
@@ -17433,6 +17455,7 @@ export default async function handler(req, res) {
     if (action === 'heygen_test')                return await heygenTest(req, res);
     if (action === 'heygen_list_avatars')        return await heygenListAvatars(req, res);
     if (action === 'heygen_list_voices')         return await heygenListVoices(req, res);
+    if (action === 'heygen_list_videos')         return await heygenListVideos(req, res); // Live Validation Defect #5 — read-only job recovery
     if (action === 'heygen_start_render')        return await heygenStartRender(req, res);
     if (action === 'heygen_render_status')       return await heygenRenderStatus(req, res);
     if (action === 'heygen_group_looks')         return await heygenGroupLooks(req, res); // v13.51.6
