@@ -26911,6 +26911,10 @@ function renderEngineeringBrain(){
               ${state.note?`<div style="font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.5">${state.note}</div>`:''}
               ${retryNote}
               ${showButton?`<button onclick="_engReviewAuthorizeProductionRelease('${t.id}','${sha}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(168,85,247,0.5);background:rgba(168,85,247,0.15);color:#a855f7;font-size:11px;font-weight:700;cursor:pointer">🚀 Authorize Production Release</button>`:''}
+              ${showButton?`<div style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(168,85,247,0.25)">
+                <div style="font-size:9px;color:var(--dim);line-height:1.5;margin-bottom:6px">Direct path — restores the pre-existing single-step CEO authorization (unchanged productionDeploymentAuthorize: same CEO-session gate, same server-side commit-integrity check, same audit record) for use only while the Engineering Worker execution path above is unavailable. Deploys immediately on confirmation — no separate worker step.</div>
+                <button onclick="_engReviewAuthorizeRelease('${t.id}','${sha}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.1);color:#8b5cf6;font-size:11px;font-weight:700;cursor:pointer">🔓 Authorize Production Release (Direct)</button>
+              </div>`:''}
             </div>`;
           }).join('')}
         </div>`;
