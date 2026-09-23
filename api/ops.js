@@ -15684,25 +15684,25 @@ async function nwv2LongTimelineSegment({ heygenLocalPath, seekSec, title, points
 // it silently froze every enable-gated drawtext/drawbox on this continuously
 // time-varying canvas.
 // Attempt 2 (scale with eval=frame, w/h expressions referencing `t`) passed
-// a local test against a NEWER ffmpeg build (darwin-arm64 4.4, libavfilter
-// 7.110) but failed for real in production against the actual OLDER deployed
-// build (linux-x64 N-47683, libavfilter 7.46.101 — this whole codebase's
-// real ffmpeg): "Undefined constant ... in 't/...'" — that build's `scale`
-// filter's w/h expression evaluator does not expose `t`.
-// Fixed with `crop` instead of `scale` for the time-varying part: crop's
-// x/y/w/h expressions have long and consistently supported `t` (unlike
-// scale), even on this old build. The canvas is pre-scaled UP by a fixed,
-// non-expression amount (safe at any ffmpeg version — no expression to
-// misparse), then cropped with a `t`-varying window that shrinks toward the
-// true output size (the zoom), then scaled back down to a fixed 1920x1080
-// (also a constant, non-expression scale) so every output frame has
-// identical encoder dimensions throughout.
+// a local test against a NEWER ffmpeg build but failed for real in
+// production against the actual older deployed build (linux-x64 N-47683,
+// libavfilter 7.46.101 — this codebase's real ffmpeg): "Undefined constant
+// ... in 't/...'".
+// Attempt 3 (crop instead of scale, same `t`-based w/h expression) also
+// failed on this exact build with the identical class of error — this old
+// libavfilter's crop w/h expression evaluator doesn't expose `t` either,
+// contrary to current ffmpeg documentation (which describes `t` support for
+// crop — that support evidently postdates this 2018 build).
+// Given real vendor jobs (HeyGen avatar clips) were already in flight
+// during this discovery, reverted to a plain passthrough rather than risk
+// a fourth untested expression variant — the new financial-motion scenes'
+// own object motion (a marker traveling, a chart drawing itself, a grid
+// building up) already provides real purposeful movement without a camera
+// effect layered on top. A frame-number(`n`)-based push-in is a reasonable
+// follow-up to test in isolation (outside a live proof-generation window)
+// before reintroducing this.
 function nwv2LongCameraPushFilter(input, output, dur, fps) {
-  const bigW = Math.round(NWV2L_W * 1.05);
-  const bigH = Math.round(NWV2L_H * 1.05);
-  const cropW = `${bigW}-(${bigW}-${NWV2L_W})*min(1,t/${dur.toFixed(2)})`;
-  const cropH = `${bigH}-(${bigH}-${NWV2L_H})*min(1,t/${dur.toFixed(2)})`;
-  return `[${input}]scale=${bigW}:${bigH}[${output}_big];[${output}_big]crop=w='${cropW}':h='${cropH}':x='(in_w-out_w)/2':y='(in_h-out_h)/2'[${output}_crop];[${output}_crop]scale=${NWV2L_W}:${NWV2L_H}[${output}]`;
+  return `[${input}]null[${output}]`;
 }
 
 // Money/dividend-flow scene — CEO Continuous Visual Storytelling proof.
