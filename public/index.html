@@ -16584,15 +16584,35 @@ async function nwv2ProductionStartBuild(pkg){
     try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
     try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
 
-    // ONE master narration call, ever — never per-beat, per the locked
-    // architecture. script_text is capped at 5000 chars server-side; the
-    // cleaned real Long script that motivated this correction was 4779.
-    const narr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_prepare_master_narration',{script:cleanScript});
-    const narrData=await narr.json();
-    if(!narrData.ok||!narrData.master_audio_url){
-      pkg.renderStatus='failed'; pkg.renderError='master_narration_error: '+(narrData.error||'unknown');
-      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
-      return{ok:false,reason:'master_narration_error',detail:pkg.renderError};
+    // Live Validation Defect #7 — master-narration idempotent reuse. Every
+    // Retry was calling ElevenLabs again even when only an already-slow
+    // HeyGen avatar job needed resuming — confirmed live, the real Long
+    // task accumulated 3 distinct narration files across 3 Retries with an
+    // unchanged script. Identity is the EXACT cleaned script text that
+    // produced the cached asset (byte-for-byte, not a hash — simpler, no
+    // collision surface, human-inspectable) stored alongside the audio URL;
+    // any script change is a guaranteed mismatch. The cached asset is also
+    // verified reachable (HEAD request) before being trusted, never reused
+    // on a URL's mere presence alone.
+    let narrData=null;
+    if(pkg.nextwaveV2MasterNarrationScript===cleanScript && pkg.nextwaveV2MasterAudioUrl && pkg.nextwaveV2MasterDurationSec){
+      let cachedValid=false;
+      try{ const headR=await fetch(pkg.nextwaveV2MasterAudioUrl,{method:'HEAD'}); cachedValid=headR.ok; }catch(_){ cachedValid=false; }
+      if(cachedValid) narrData={ok:true, master_audio_url:pkg.nextwaveV2MasterAudioUrl, duration_sec:pkg.nextwaveV2MasterDurationSec, reused:true};
+    }
+    if(!narrData){
+      // ONE master narration call — never per-beat, per the locked
+      // architecture. script_text is capped at 5000 chars server-side; the
+      // cleaned real Long script that motivated the bounded-HeyGen
+      // correction was 4779.
+      const narr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_prepare_master_narration',{script:cleanScript});
+      narrData=await narr.json();
+      if(!narrData.ok||!narrData.master_audio_url){
+        pkg.renderStatus='failed'; pkg.renderError='master_narration_error: '+(narrData.error||'unknown');
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'master_narration_error',detail:pkg.renderError};
+      }
+      pkg.nextwaveV2MasterNarrationScript=cleanScript;
     }
     pkg.nextwaveV2MasterAudioUrl=narrData.master_audio_url;
     pkg.nextwaveV2MasterDurationSec=narrData.duration_sec;
