@@ -15676,6 +15676,236 @@ async function nwv2LongTimelineSegment({ heygenLocalPath, seekSec, title, points
   return outPath;
 }
 
+// Shared subtle push-in, applied as the LAST step before each new financial-
+// motion segment's logo+fade. NOT zoompan — real-world test against actual
+// ffmpeg (a locally fetched @ffmpeg-installer/darwin-arm64 binary, the same
+// vendor/family as the linux-x64 build production actually runs, used
+// specifically because local Homebrew ffmpeg lacks libfreetype/drawtext)
+// proved zoompan breaks silently on a continuously time-varying composited
+// canvas: it froze every enable-gated drawtext/drawbox at whatever their
+// state was at its first sampled input frame, so PORTFOLIO/CASH labels, the
+// stock-chart staircase, and the $3,000 pop-in all vanished entirely even
+// though the exact same drawtext expressions rendered correctly in
+// isolation. zoompan's Ken-Burns design (nwv2LongIllustrationSegment, which
+// correctly still uses it) assumes a single repeating INPUT frame — a
+// `-loop 1` static image — not a real multi-second video stream. Fixed with
+// a scale(eval=frame)+crop pair instead: the whole canvas is scaled up by a
+// small, time-varying factor (re-evaluated every real frame via `t`) and
+// center-cropped back to the true output size — genuine per-frame push-in
+// that composites correctly on top of already-time-varying content.
+// Verified: HELLO text rendered via drawtext was visibly larger at t=3.5s
+// than at t=0.5s of a 4s clip, with no frames lost or frozen.
+function nwv2LongCameraPushFilter(input, output, dur, fps) {
+  const scaledW = `${NWV2L_W}*(1+0.035*min(1,t/${dur.toFixed(2)}))`;
+  const scaledH = `${NWV2L_H}*(1+0.035*min(1,t/${dur.toFixed(2)}))`;
+  return `[${input}]scale=w='${scaledW}':h='${scaledH}':eval=frame[${output}_sc];[${output}_sc]crop=${NWV2L_W}:${NWV2L_H}:(in_w-${NWV2L_W})/2:(in_h-${NWV2L_H})/2[${output}]`;
+}
+
+// Money/dividend-flow scene — CEO Continuous Visual Storytelling proof.
+// Answers "what should the viewer see happening" for narration like "the
+// portfolio pays a $3,000 dividend": a labeled source box and a labeled
+// destination box, a connecting path that draws itself in, and a small
+// gold "money" marker that visibly travels from source to destination —
+// arriving, and popping the amount text, at the exact real spoken moment
+// (meaningEventAtSec, a beat-relative second from nwv2FindMeaningEventTime)
+// rather than an arbitrary fixed offset. Falls back to a fixed 65%-of-
+// duration arrival when no meaning-event timestamp was resolvable, so the
+// scene degrades gracefully instead of failing.
+async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, toLabel, amountText, dur, meaningEventAtSec, outPath }) {
+  const boxW = 340, boxH = 200;
+  const fromX = 220, toX = NWV2L_W - 220 - boxW, boxY = 440;
+  const pathY = boxY + boxH / 2;
+  const pathX0 = fromX + boxW, pathX1 = toX;
+  const pathW = pathX1 - pathX0;
+  const arriveAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 0.6 && meaningEventAtSec < dur - 0.3)
+    ? meaningEventAtSec : Math.max(0.8, dur * 0.65);
+  const travelStart = Math.max(0.3, arriveAt - 1.2);
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[m0]`);
+  let last = 'm0', idx = 1;
+  const safeFrom = nwv2WhiteSanitize(fromLabel || '', 20);
+  const safeTo = nwv2WhiteSanitize(toLabel || '', 20);
+  filters.push(`[${last}]drawbox=x=${fromX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_NAVY}@0.08:t=fill[m${idx}]`);
+  last = `m${idx}`; idx++;
+  filters.push(`[${last}]drawbox=x=${fromX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_NAVY}@0.5:t=3[m${idx}]`);
+  last = `m${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFrom}':fontcolor=${NWV2_NAVY}:fontsize=34:box=0:x=${fromX}+(${boxW}-text_w)/2:y=${boxY + boxH / 2 - 17}:enable='gte(t,0.2)'[m${idx}]`);
+  last = `m${idx}`; idx++;
+  filters.push(`[${last}]drawbox=x=${toX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.14:t=fill[m${idx}]`);
+  last = `m${idx}`; idx++;
+  filters.push(`[${last}]drawbox=x=${toX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD_DARK}:t=3[m${idx}]`);
+  last = `m${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTo}':fontcolor=${NWV2_GOLD_DARK}:fontsize=34:box=0:x=${toX}+(${boxW}-text_w)/2:y=${boxY + boxH / 2 - 17}:enable='gte(t,0.2)'[m${idx}]`);
+  last = `m${idx}`; idx++;
+  // Path draws in just ahead of the money marker's travel.
+  filters.push(`[${last}]drawbox=x=${pathX0}:y=${pathY - 3}:w='min(${pathW},${pathW}*max(0,t-${travelStart.toFixed(2)})/1.2)':h=6:color=${NWV2_GOLD}@0.5:t=fill:enable='gte(t,${travelStart.toFixed(2)})'[m${idx}]`);
+  last = `m${idx}`; idx++;
+  // Money marker travels pathX0 -> pathX1 over [travelStart, arriveAt].
+  const markerX = `${pathX0}+(${pathX1}-${pathX0})*min(1,max(0,(t-${travelStart.toFixed(2)})/${(arriveAt - travelStart).toFixed(2)}))`;
+  filters.push(`[${last}]drawbox=x='${markerX}'-16:y=${pathY - 16}:w=32:h=32:color=${NWV2_GOLD_DARK}:t=fill:enable='between(t,${travelStart.toFixed(2)},${(arriveAt + 0.05).toFixed(2)})'[m${idx}]`);
+  last = `m${idx}`; idx++;
+  // Amount pops at the destination at the exact meaning-event arrival time.
+  const safeAmount = nwv2WhiteSanitize(amountText || '', 18);
+  if (safeAmount) {
+    const popEnd = (arriveAt + 0.18).toFixed(2);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=40:box=0:x=${toX}+(${boxW}-text_w)/2:y=${boxY + boxH / 2 + 30}:enable='between(t,${arriveAt.toFixed(2)},${popEnd})'[m${idx}]`);
+    last = `m${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=46:box=0:x=${toX}+(${boxW}-text_w)/2:y=${boxY + boxH / 2 + 26}:enable='gte(t,${popEnd})'[m${idx}]`);
+    last = `m${idx}`; idx++;
+  }
+  filters.push(nwv2LongCameraPushFilter(last, `m${idx}`, dur, 25));
+  last = `m${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `m${idx}`));
+  last = `m${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long money-flow segment');
+  return outPath;
+}
+
+// Stock/percentage-movement scene — for narration like "the stock rises
+// 2%": a staircase line chart (same self-drawing-diagram principle as
+// nwv2LongTimelineSegment, extended to a multi-segment rising/falling
+// line since ffmpeg has no native line-chart primitive and this codebase
+// deliberately doesn't add a charting dependency) draws itself left to
+// right, and the change label pops in at the real spoken moment.
+async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, changeText, direction, dur, meaningEventAtSec, outPath }) {
+  const chartX0 = 260, chartX1 = NWV2L_W - 260, chartW = chartX1 - chartX0;
+  const chartYBase = 760, chartYTop = 380, chartH = chartYBase - chartYTop;
+  const rising = direction !== 'down';
+  const steps = 6;
+  const drawEndAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 1.0 && meaningEventAtSec < dur - 0.2)
+    ? meaningEventAtSec : Math.max(1.2, dur * 0.7);
+  const drawStart = 0.5;
+  const drawSpan = Math.max(0.6, drawEndAt - drawStart);
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[s0]`);
+  let last = 's0', idx = 1;
+  const safeLabel = nwv2WhiteSanitize(label || '', 40);
+  if (safeLabel) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${NWV2_NAVY}:fontsize=40:box=0:x=(${NWV2L_W}-text_w)/2:y=220:enable='gte(t,0.2)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  // Baseline axis.
+  filters.push(`[${last}]drawbox=x=${chartX0}:y=${chartYBase}:w=${chartW}:h=3:color=${NWV2_NAVY}@0.25:t=fill[s${idx}]`);
+  last = `s${idx}`; idx++;
+  // Staircase segments — each one's reveal window is a slice of [drawStart, drawEndAt],
+  // its own drawbox width animates in over its slice (a real "line drawing itself"),
+  // and its y-level steps up (rising) or down (falling) toward the final point.
+  for (let i = 0; i < steps; i++) {
+    const segX0 = chartX0 + Math.round((chartW * i) / steps);
+    const segX1 = chartX0 + Math.round((chartW * (i + 1)) / steps);
+    const segW = segX1 - segX0;
+    const levelFrac = rising ? (i + 1) / steps : 1 - (i + 1) / steps;
+    const segY = Math.round(chartYBase - chartH * levelFrac * 0.85);
+    const segStart = drawStart + (drawSpan * i) / steps;
+    const segDur = drawSpan / steps;
+    filters.push(`[${last}]drawbox=x=${segX0}:y=${segY}:w='min(${segW},${segW}*max(0,t-${segStart.toFixed(2)})/${segDur.toFixed(2)})':h=6:color=${NWV2_GOLD_DARK}:t=fill:enable='gte(t,${segStart.toFixed(2)})'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  // Change label pops in exactly at the real spoken percentage moment.
+  const safeChange = nwv2WhiteSanitize(changeText || '', 14);
+  if (safeChange) {
+    const finalY = Math.round(chartYBase - chartH * 0.85) - 70;
+    const popEnd = (drawEndAt + 0.18).toFixed(2);
+    const changeColor = rising ? NWV2_GOLD_DARK : '0xb0413e';
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeChange}':fontcolor=${changeColor}:fontsize=42:box=0:x=${chartX1}-text_w-20:y=${finalY}:enable='between(t,${drawEndAt.toFixed(2)},${popEnd})'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeChange}':fontcolor=${changeColor}:fontsize=48:box=0:x=${chartX1}-text_w-20:y=${finalY - 4}:enable='gte(t,${popEnd})'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  filters.push(nwv2LongCameraPushFilter(last, `s${idx}`, dur, 25));
+  last = `s${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `s${idx}`));
+  last = `s${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long stock chart segment');
+  return outPath;
+}
+
+// Share-accumulation / cause-effect comparison scene — for narration like
+// "now the same cash buys fewer shares": a grid of unit squares on the
+// left (the "before" quantity, present from the start) versus a grid on
+// the right that builds itself up square-by-square (the "after" quantity)
+// — fewer, highlighted in the consequence color the instant the real
+// spoken moment names the new count. Same self-building-diagram principle
+// as the timeline/stock-chart scenes, applied to discrete unit counting
+// instead of a continuous line.
+async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, afterLabel, afterCount, dur, meaningEventAtSec, outPath }) {
+  const gridW = 620, gridX0 = 180, gridX1 = NWV2L_W - 180 - gridW;
+  const gridY = 420, cell = 46, gap = 14, cols = 8;
+  const revealAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 0.6 && meaningEventAtSec < dur - 0.3)
+    ? meaningEventAtSec : Math.max(1.0, dur * 0.6);
+  const before = Math.max(1, Math.min(24, Math.round(beforeCount) || 8));
+  const after = Math.max(1, Math.min(24, Math.round(afterCount) || 5));
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[c0]`);
+  let last = 'c0', idx = 1;
+  const drawGrid = (count, x0, y0, color, startTime, span, labelStart, label) => {
+    const safeLabel = nwv2WhiteSanitize(label || '', 24);
+    if (safeLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${NWV2_NAVY}:fontsize=30:box=0:x=${x0}:y=${y0 - 60}:enable='gte(t,${labelStart.toFixed(2)})'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+    const perCell = span / count;
+    for (let i = 0; i < count; i++) {
+      const col = i % cols, row = Math.floor(i / cols);
+      const cx = x0 + col * (cell + gap);
+      const cy = y0 + row * (cell + gap);
+      const at = startTime + i * perCell;
+      filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${color}:t=fill:enable='gte(t,${at.toFixed(2)})'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+  };
+  drawGrid(before, gridX0, gridY, `${NWV2_NAVY}@0.55`, 0.3, 1.0, 0.15, beforeLabel || 'BEFORE');
+  drawGrid(after, gridX1, gridY, NWV2_GOLD_DARK, revealAt, 0.9, revealAt - 0.15, afterLabel || 'AFTER');
+  // Consequence badge — the delta, highlighted exactly at the reveal moment.
+  const delta = before - after;
+  if (delta !== 0) {
+    const badgeText = nwv2WhiteSanitize((delta > 0 ? '-' : '+') + Math.abs(delta) + ' SHARES', 20);
+    const badgeY = gridY - 60;
+    const popEnd = (revealAt + 0.2).toFixed(2);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${badgeText}':fontcolor=0xb0413e:fontsize=34:box=0:x=(${NWV2L_W}-text_w)/2:y=${badgeY}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
+  filters.push(nwv2LongCameraPushFilter(last, `c${idx}`, dur, 25));
+  last = `c${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long share-compare segment');
+  return outPath;
+}
+
 // CEO-gated orchestrator for the Long-format landscape candidate. Explicit
 // `beats` array (same reasoning as the Short's white-motion orchestrator —
 // precise control over which single beat carries the avatar).
@@ -15706,12 +15936,35 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { narration_audio_url, avatar_clip_url, beat, dur_sec, render_id, beat_index } = body;
+  const {
+    narration_audio_url, avatar_clip_url, beat, dur_sec, render_id, beat_index,
+    alignment, aligned_script, beat_start_sec,
+  } = body;
   if (!narration_audio_url || !beat || !dur_sec || !render_id || beat_index == null) {
     return res.status(400).json({ ok: false, error: 'missing_required_fields' });
   }
   if (beat.treatment === 'avatar_panel' && !avatar_clip_url) {
     return res.status(400).json({ ok: false, error: 'avatar_clip_url_required_for_avatar_panel_beat' });
+  }
+  // PM correction (Continuous Visual Storytelling proof) — meaning-event
+  // synchronization. The client already has the full master-narration
+  // alignment (from nextwaveV2PrepareMasterNarration) and each beat's real
+  // absolute start second; when a beat carries a meaning_event_pattern (a
+  // dollar amount, a percentage, a specific phrase to find in the script),
+  // this resolves its REAL spoken timestamp via nwv2FindMeaningEventTime
+  // (pure local lookup, no vendor call) and converts it to a time relative
+  // to THIS beat's own local timeline — what the new financial-motion
+  // segment builders' `meaningEventAtSec` parameter expects. Falls through
+  // to undefined (each builder's own fixed-fraction-of-duration default) if
+  // the alignment/pattern/beat_start aren't all present, or if no match is
+  // found — never a hard failure, just a graceful degrade to beat-level timing.
+  let meaningEventAtSec;
+  if (beat.meaning_event_pattern && alignment && aligned_script && beat_start_sec != null) {
+    try {
+      const pattern = new RegExp(beat.meaning_event_pattern);
+      const hit = nwv2FindMeaningEventTime(alignment, aligned_script, pattern, Number(beat.meaning_event_from_char) || 0);
+      if (hit) meaningEventAtSec = hit.startSec - Number(beat_start_sec);
+    } catch (_) { /* malformed pattern — degrade to default timing */ }
   }
   const narrationLocalPath = join(tmpdir(), `nwv2longseg-narr-${render_id}-${beat_index}.mp3`);
   const avatarLocalPath = avatar_clip_url ? join(tmpdir(), `nwv2longseg-avatar-${render_id}-${beat_index}.mp4`) : null;
@@ -15744,6 +15997,27 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
     } else if (beat.treatment === 'timeline') {
       await nwv2LongTimelineSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, title: beat.title, points: beat.points, dur, outPath: segPath });
       segmentType = 'timeline';
+    } else if (beat.treatment === 'money_flow') {
+      await nwv2LongMoneyFlowSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        fromLabel: beat.fromLabel, toLabel: beat.toLabel, amountText: beat.amountText,
+        meaningEventAtSec, outPath: segPath,
+      });
+      segmentType = 'money_flow';
+    } else if (beat.treatment === 'stock_chart') {
+      await nwv2LongStockChartSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        label: beat.label, changeText: beat.changeText, direction: beat.direction,
+        meaningEventAtSec, outPath: segPath,
+      });
+      segmentType = 'stock_chart';
+    } else if (beat.treatment === 'share_compare') {
+      await nwv2LongShareCompareSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        beforeLabel: beat.beforeLabel, beforeCount: beat.beforeCount, afterLabel: beat.afterLabel, afterCount: beat.afterCount,
+        meaningEventAtSec, outPath: segPath,
+      });
+      segmentType = 'share_compare';
     } else if (beat.treatment === 'illustration' && beat.concept) {
       const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
       const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
@@ -15770,6 +16044,7 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
       beat_index,
       dur: Number(dur.toFixed(2)),
       illustration: illustrationInfo,
+      meaning_event_at_sec: (typeof meaningEventAtSec === 'number') ? Number(meaningEventAtSec.toFixed(2)) : null,
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
