@@ -16513,7 +16513,19 @@ async function nwv2ProductionStartBuild(pkg){
   if(!pkg||!pkg.script) return{ok:false,reason:'missing_pkg_or_script'};
   const cleanScript=(typeof _cleanScriptForRender==='function')?_cleanScriptForRender(pkg.script):pkg.script;
   if(!cleanScript) return{ok:false,reason:'empty_script'};
-  const isLong=!!pkg.isLong;
+  // Live Validation Defect #3 — pkg.isLong is never actually set anywhere in
+  // this file (confirmed by search); it doesn't exist as a package field —
+  // only task.isLong does. This silently evaluated false for every real
+  // NextWave package, including a real Finance/Long task, which then ran
+  // through the SHORT auto-mapper (hook/calc/close, wrong beat count) and
+  // would have routed to the single-request Short compositor — the exact
+  // architecture the per-segment Long path exists to avoid a Vercel
+  // function-timeout on. Reuses the same proven 3-level Long detection
+  // autoStartHeygenRender already relies on elsewhere in this file, instead
+  // of inventing a new one.
+  const isLong=(pkg.contentFormat==='long')
+    || !!(pkg.taskId && Array.isArray(D.tasks) && D.tasks.some(function(t){return String(t.id)===String(pkg.taskId)&&(t.contentFormat==='long'||t.isLong);}))
+    || (typeof pkg.workflowNotes==='string' && pkg.workflowNotes.toLowerCase().includes('landscape'));
   try{
     const vpr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_generate_visual_plan',{script:cleanScript});
     const vpd=await vpr.json();
@@ -16547,8 +16559,17 @@ async function nwv2ProductionStartBuild(pkg){
       try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
       return{ok:true,videoId:data.videoId};
     }
+    // Live Validation Defect #3 — this only ever stored the generic
+    // 'HTTP <status>' fallback, discarding the actual HeyGen vendor
+    // message/code the server already forwards in data.raw.error — matches
+    // the more thorough pattern autoStartHeygenRender already uses, so a
+    // real vendor failure (e.g. insufficient credits) is diagnosable
+    // directly from the stored error instead of needing to trace it by hand.
+    const _apiMsg=data&&data.raw&&data.raw.error&&data.raw.error.message;
+    const _apiCode=data&&data.raw&&data.raw.error&&data.raw.error.code;
     pkg.renderStatus='failed';
-    pkg.renderError='heygen_start_error: '+(data.error||('HTTP '+data.status));
+    pkg.renderError='heygen_start_error: '+(_apiMsg?(_apiCode?'['+_apiCode+'] '+_apiMsg:_apiMsg):(data.error||('HTTP '+data.status)));
+    pkg.renderErrorRaw=data;
     try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
     return{ok:false,reason:'heygen_start_error',detail:pkg.renderError};
   }catch(e){
