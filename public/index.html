@@ -19352,15 +19352,33 @@ function renderNextWaveLifecycleCard(task){
       //     in the current session/auth plumbing itself.
       const _isAuthError=_errStr.indexOf('ceo_authorization_required')!==-1;
       const _isTooLong=/too long/i.test(_errStr);
+      // Live Validation Defect #10 — a failure can now occur AFTER the
+      // bounded pipeline is already mid-flight (visual plan classified,
+      // master narration synthesized, avatar clips generated, some/all
+      // per-beat composites already persisted — e.g. a CEO session expiring
+      // partway through the Defect #9 per-beat compositor loop). Routing
+      // that case through the unconditional nwv2ProductionStartBuild above
+      // would re-call nextwave_v2_generate_visual_plan — a non-deterministic
+      // LLM classification — and overwrite pkg.nextwaveV2ProductionBeats,
+      // risking a mismatch against beats already composited under the OLD
+      // beat definitions. When this mid-flight evidence is present, resume
+      // must go straight to nwv2ProductionStartComposite instead, skipping
+      // visual-plan regeneration and narration re-synthesis entirely — the
+      // exact same completed-beat/asset state confirmed untouched via a
+      // live read-only Supabase check is what this condition detects.
+      const _canResumeComposite=!!(pkg&&pkg.nextwaveV2ProductionBeats&&pkg.nextwaveV2ProductionBeats.length&&pkg.nextwaveV2BeatTimeline&&pkg.nextwaveV2BeatTimeline.length&&pkg.nextwaveV2MasterAudioUrl);
       const _title=_isTooLong?'Script exceeded the build size limit (fixed)':(_isAuthError?'CEO session expired':'Build failed');
       const _icon=_isTooLong?'✂️':(_isAuthError?'🔒':'🔴');
       body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">${_icon}</span><span style="font-size:14px;font-weight:800;color:#ef4444">${_title}</span></div>
         ${_isTooLong?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">This error is from an earlier attempt — the script-length limit that caused it has been raised to fit real Long scripts. <strong>Click Retry Build below to try again.</strong></div>`:''}
-        ${_isAuthError&&!_isTooLong?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">This stopped before HeyGen was ever contacted, so nothing was rendered and no spend occurred. If this happens again on a fresh click: log out, log back in as Admin, then click Retry Build below.</div>`:''}
+        ${_isAuthError&&!_isTooLong&&!_canResumeComposite?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">This stopped before HeyGen was ever contacted, so nothing was rendered and no spend occurred. If this happens again on a fresh click: log out, log back in as Admin, then click Retry Build below.</div>`:''}
+        ${_isAuthError&&_canResumeComposite?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">The build already reached compositing before this stopped — the visual plan, master narration, and any completed beat segments are preserved. Log out, log back in as Admin, then click Resume Compositing below to continue from the first unfinished beat with no re-generation.</div>`:''}
         <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
       </div>`;
-      body+=`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;p.renderStatus=null;p.renderError=null;p.heygenJobId=null;window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Retrying…';const r=await nwv2ProductionStartBuild(p);btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Retry Build</button>`;
+      body+=_canResumeComposite
+        ?`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;p.renderStatus=null;p.renderError=null;window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Resuming…';const r=await nwv2ProductionStartComposite(p);btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Resume Compositing</button>`
+        :`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;p.renderStatus=null;p.renderError=null;p.heygenJobId=null;window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Retrying…';const r=await nwv2ProductionStartBuild(p);btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Retry Build</button>`;
     }
     body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
   }
