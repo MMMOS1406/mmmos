@@ -11290,9 +11290,20 @@ async function nextwaveSynthesizeNarrationElevenLabs(text, voiceId) {
 async function nextwaveV2PrepareMasterNarration(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
-  const { script, voice_id } = req.body || {};
+  const { script, voice_id: voiceIdOverride } = req.body || {};
   if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script_required' });
   if (script.length > 5000) return res.status(400).json({ ok: false, error: 'script too long for one narration call (max 5000 characters)' });
+  // Live Validation Defect #12 — this real production narration path never
+  // read the CEO's already-saved voice selection (nextwaveV2GetVoiceConfig,
+  // set via nextwave_v2_set_voice — the exact mechanism built for this
+  // purpose and already used by the deprecated Phase 5.3 nextwaveV2BuildRender)
+  // and always fell through to the hardcoded ELEVENLABS_VOICE_ID default
+  // ("Rachel", female) since the client never sends an explicit voice_id.
+  // Same reuse-saved-config pattern as nextwaveV2BuildRender, now wired into
+  // the real bounded pipeline: an explicit request-body override still wins,
+  // otherwise the CEO's saved choice applies automatically.
+  const savedVoice = await nextwaveV2GetVoiceConfig();
+  const voice_id = voiceIdOverride || savedVoice.voice_id || null;
   const result = await nextwaveSynthesizeNarrationElevenLabs(script, voice_id);
   if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
   const renderId = randomBytes(6).toString('hex');
