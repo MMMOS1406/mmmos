@@ -11265,6 +11265,83 @@ async function nextwaveSynthesizeNarrationElevenLabs(text, voiceId) {
   }
 }
 
+// PM correction (Continuous Visual Storytelling proof) — the comment above
+// this function previously stated ElevenLabs "does not return per-word
+// timestamps without a separate forced-alignment call." That was checked
+// against only the base /v1/text-to-speech endpoint. ElevenLabs' OWN account
+// (same API key, confirmed no separate subscription tier required) also
+// exposes /v1/text-to-speech/{voice_id}/with-timestamps, which returns the
+// identical audio PLUS character-level start/end timestamps for the exact
+// text sent, in one call — not a new vendor, not incremental cost versus the
+// narration synthesis NextWave already pays for. This gives a deterministic,
+// local way to find the real spoken timestamp of any substring of the
+// script (a dollar amount, a percentage, a specific phrase) via a plain
+// string search against the returned `characters` array — no ASR, no
+// forced-alignment service, no ML inference of our own.
+async function nextwaveSynthesizeNarrationElevenLabsWithTimestamps(text, voiceId) {
+  if (!ELEVENLABS_API_KEY) return { ok: false, error: 'elevenlabs_not_configured' };
+  if (!text || typeof text !== 'string' || !text.trim()) return { ok: false, error: 'text_required' };
+  const useVoiceId = (voiceId && typeof voiceId === 'string') ? voiceId : ELEVENLABS_VOICE_ID;
+  try {
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(useVoiceId)}/with-timestamps`, {
+      method: 'POST',
+      headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.15, use_speaker_boost: true },
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return { ok: false, error: `elevenlabs_error_${r.status}: ${t.slice(0, 200)}` };
+    }
+    const data = await r.json();
+    if (!data.audio_base64 || !data.alignment) return { ok: false, error: 'elevenlabs_with_timestamps_missing_fields' };
+    const buf = Buffer.from(data.audio_base64, 'base64');
+    if (!buf || buf.length < 512) return { ok: false, error: 'elevenlabs_returned_empty_audio' };
+    return {
+      ok: true,
+      buffer: buf,
+      provider: 'elevenlabs',
+      alignment: {
+        characters: data.alignment.characters || [],
+        character_start_times_seconds: data.alignment.character_start_times_seconds || [],
+        character_end_times_seconds: data.alignment.character_end_times_seconds || [],
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: `elevenlabs_request_failed: ${e.message}` };
+  }
+}
+
+// Deterministic, local lookup — no vendor call. Given the alignment returned
+// by nextwaveSynthesizeNarrationElevenLabsWithTimestamps and the EXACT text
+// string that was synthesized (character-for-character, since alignment
+// indices are positions in that exact string), finds the first match of
+// `pattern` at or after `fromCharIndex` and returns the real spoken
+// start/end time of that match. Returns null if the alignment doesn't cover
+// the match (defensive — caller should fall back to beat-level timing).
+function nwv2FindMeaningEventTime(alignment, fullText, pattern, fromCharIndex) {
+  if (!alignment || !Array.isArray(alignment.characters) || !alignment.characters.length) return null;
+  const searchFrom = Math.max(0, fromCharIndex || 0);
+  const re = (pattern instanceof RegExp) ? pattern : new RegExp(String(pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const sub = fullText.slice(searchFrom);
+  const m = sub.match(re);
+  if (!m || m.index == null) return null;
+  const startIdx = searchFrom + m.index;
+  const endIdx = startIdx + m[0].length - 1;
+  const starts = alignment.character_start_times_seconds;
+  const ends = alignment.character_end_times_seconds;
+  if (startIdx < 0 || startIdx >= starts.length || endIdx < 0 || endIdx >= ends.length) return null;
+  return {
+    matchedText: m[0],
+    charIndex: startIdx,
+    startSec: starts[startIdx],
+    endSec: ends[endIdx],
+  };
+}
+
 // ============================================================================
 // BOUNDED HEYGEN IMPLEMENTATION — CEO Decision (NextWave V2 authoritative
 // ElevenLabs narration). Locked target: ONE continuous ElevenLabs master
@@ -11304,7 +11381,16 @@ async function nextwaveV2PrepareMasterNarration(req, res) {
   // otherwise the CEO's saved choice applies automatically.
   const savedVoice = await nextwaveV2GetVoiceConfig();
   const voice_id = voiceIdOverride || savedVoice.voice_id || null;
-  const result = await nextwaveSynthesizeNarrationElevenLabs(script, voice_id);
+  // PM correction (Continuous Visual Storytelling proof) — meaning-event
+  // synchronization needs real spoken timestamps for specific script
+  // substrings (a dollar amount, a percentage, a phrase), not just the
+  // proportional beat-level split below. Same ElevenLabs account/API key,
+  // same cost as the plain synthesis call this function always made — the
+  // with-timestamps endpoint returns identical audio plus character-level
+  // alignment in one call. `alignment` is returned to the caller so it can
+  // be persisted alongside the rest of the pipeline state (same pattern as
+  // every other nextwaveV2* field) and used by nwv2FindMeaningEventTime.
+  const result = await nextwaveSynthesizeNarrationElevenLabsWithTimestamps(script, voice_id);
   if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
   const renderId = randomBytes(6).toString('hex');
   const localPath = join(tmpdir(), `nwv2-master-narration-${renderId}.mp3`);
@@ -11313,7 +11399,14 @@ async function nextwaveV2PrepareMasterNarration(req, res) {
     await smAssertValidMediaFile(localPath, 'ElevenLabs master narration');
     const durationSec = await nextwaveV2GetDurationSec(localPath);
     const url = await sbStorageUpload(`nextwave-v2-preview/narration-${renderId}.mp3`, result.buffer, 'audio/mpeg');
-    return res.status(200).json({ ok: true, master_audio_url: url, duration_sec: Number(durationSec.toFixed(2)), render_id: renderId });
+    return res.status(200).json({
+      ok: true,
+      master_audio_url: url,
+      duration_sec: Number(durationSec.toFixed(2)),
+      render_id: renderId,
+      alignment: result.alignment || null,
+      aligned_script: script,
+    });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   } finally {
