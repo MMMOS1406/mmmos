@@ -11425,7 +11425,7 @@ async function nextwaveV2PrepareMasterNarration(req, res) {
 async function nextwaveV2SliceNarration(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
-  const { master_audio_url, start_sec, dur_sec, render_id, slice_id } = req.body || {};
+  const { master_audio_url, start_sec, dur_sec, render_id, slice_id, pad_to_sec } = req.body || {};
   if (!master_audio_url || start_sec == null || !dur_sec || !render_id || slice_id == null) {
     return res.status(400).json({ ok: false, error: 'missing_required_fields' });
   }
@@ -11434,9 +11434,24 @@ async function nextwaveV2SliceNarration(req, res) {
   try {
     await smDownloadToFile(master_audio_url, srcPath);
     await smAssertValidMediaFile(srcPath, 'master narration (slice source)');
+    // Storyboard Implementation Proof v5 — CEO: proof felt too compressed
+    // (19.86s); target ~27-32s "without slowing narration unnaturally."
+    // Optional pad_to_sec appends trailing SILENCE (via apad) after the real
+    // spoken content ends, so a beat's visual can hold/develop longer on
+    // screen while every word is still spoken at its exact natural pace —
+    // no re-synthesis, no ElevenLabs call, same real narration audio.
+    // Omitted (the default for every existing caller), this is unchanged.
+    // IMPORTANT: dur_sec must stay an INPUT-side trim (before -i) here so
+    // only the real narration content for THIS beat is ever read — without
+    // that, apad's whole_dur would just keep reading further real speech
+    // from the next beat rather than adding silence.
+    const shouldPad = typeof pad_to_sec === 'number' && pad_to_sec > Number(dur_sec);
+    const outputArgs = shouldPad
+      ? ['-af', `apad=whole_dur=${Number(pad_to_sec).toFixed(2)}`, '-t', String(Number(pad_to_sec).toFixed(2))]
+      : [];
     await execFileAsync(ffmpegInstaller.path, [
-      '-y', '-ss', String(Number(start_sec).toFixed(2)), '-i', srcPath,
-      '-t', String(Number(dur_sec).toFixed(2)),
+      '-y', '-ss', String(Number(start_sec).toFixed(2)), '-t', String(Number(dur_sec).toFixed(2)), '-i', srcPath,
+      ...outputArgs,
       '-c:a', 'libmp3lame', '-b:a', '192k',
       outPath,
     ], { timeout: 30000 });
@@ -15797,10 +15812,19 @@ function nwv2LongCameraPushFilter(input, output, dur, fps) {
 // the money: it scales up briefly the instant the coin trail arrives,
 // synchronized with the $3,000 hero number. icon params are optional —
 // omitting them still renders correctly with text-only path ends.
+// Storyboard Implementation Proof v5 — CEO review of v4: visual subjects
+// too small, too much dead space, PORTFOLIO/BROKERAGE labels collided with
+// the coin trail. Icons enlarged 260->440 (a real hero visual, not a small
+// icon), and the whole layout re-stacked with generous vertical separation
+// (icon zone / label row / coin-trail row are now three fully distinct
+// bands, not overlapping) so the collision cannot recur regardless of
+// label/path length. $3,000 also enlarged further as the dominant element.
 async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, toLabel, amountText, dur, meaningEventAtSec, fromIconPath, fromIconKeyColor, toIconPath, toIconKeyColor, outPath }) {
-  const iconZone = 260;
-  const pathY = Math.round(NWV2L_H * 0.52);
-  const pathX0 = 360, pathX1 = NWV2L_W - 360;
+  const iconZone = 440;
+  const iconTop = 260;
+  const labelY = iconTop + iconZone + 30;
+  const pathY = labelY + 110;
+  const pathX0 = 340, pathX1 = NWV2L_W - 340;
   const pathW = pathX1 - pathX0;
   const arriveAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 0.6 && meaningEventAtSec < dur - 0.3)
     ? meaningEventAtSec : Math.max(0.8, dur * 0.65);
@@ -15822,13 +15846,13 @@ async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, t
 
   if (fromIconIn !== null) {
     const keyOpt = fromIconKeyColor ? `,colorkey=color=${fromIconKeyColor}:similarity=0.26:blend=0.12` : '';
-    const ix = pathX0 - iconZone / 2, iy = pathY - iconZone - 40;
+    const ix = pathX0 - iconZone / 2;
     filters.push(`[${fromIconIn}:v]scale=${iconZone}:${iconZone}:force_original_aspect_ratio=decrease${keyOpt}[m${idx}icon]`);
-    filters.push(`[${last}][m${idx}icon]overlay=x=${ix}+(${iconZone}-overlay_w)/2:y=${iy}+(${iconZone}-overlay_h)/2[m${idx}]`);
+    filters.push(`[${last}][m${idx}icon]overlay=x=${ix}+(${iconZone}-overlay_w)/2:y=${iconTop}+(${iconZone}-overlay_h)/2[m${idx}]`);
     last = `m${idx}`; idx++;
   }
   if (safeFrom) {
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFrom}':fontcolor=${NWV2_NAVY}:fontsize=36:box=0:x=${pathX0}-text_w/2:y=${pathY - 20}:enable='gte(t,0.2)'[m${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFrom}':fontcolor=${NWV2_NAVY}:fontsize=40:box=0:x=${pathX0}-text_w/2:y=${labelY}:enable='gte(t,0.2)'[m${idx}]`);
     last = `m${idx}`; idx++;
   }
 
@@ -15837,42 +15861,43 @@ async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, t
   if (toIconIn !== null) {
     const keyOpt = toIconKeyColor ? `,colorkey=color=${toIconKeyColor}:similarity=0.26:blend=0.12` : '';
     const baseZone = iconZone;
-    const bigZone = Math.round(iconZone * 1.18);
-    const ix0 = pathX1 - baseZone / 2, iy0 = pathY - baseZone - 40;
+    const bigZone = Math.round(iconZone * 1.14);
+    const ix0 = pathX1 - baseZone / 2;
     filters.push(`[${toIconIn}:v]scale=${baseZone}:${baseZone}:force_original_aspect_ratio=decrease${keyOpt}[m${idx}iconbase]`);
     filters.push(`[${toIconIn}:v]scale=${bigZone}:${bigZone}:force_original_aspect_ratio=decrease${keyOpt}[m${idx}iconbig]`);
-    filters.push(`[${last}][m${idx}iconbase]overlay=x=${ix0}+(${baseZone}-overlay_w)/2:y=${iy0}+(${baseZone}-overlay_h)/2:enable='lt(t,${arriveAt.toFixed(2)})'[m${idx}a]`);
-    const ix1 = pathX1 - bigZone / 2, iy1 = pathY - bigZone - 40 - (bigZone - baseZone) / 2;
+    filters.push(`[${last}][m${idx}iconbase]overlay=x=${ix0}+(${baseZone}-overlay_w)/2:y=${iconTop}+(${baseZone}-overlay_h)/2:enable='lt(t,${arriveAt.toFixed(2)})'[m${idx}a]`);
+    const ix1 = pathX1 - bigZone / 2, iy1 = iconTop - (bigZone - baseZone) / 2;
     filters.push(`[m${idx}a][m${idx}iconbig]overlay=x=${ix1}+(${bigZone}-overlay_w)/2:y=${iy1}+(${bigZone}-overlay_h)/2:enable='gte(t,${arriveAt.toFixed(2)})'[m${idx}]`);
     last = `m${idx}`; idx++;
   }
   if (safeTo) {
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTo}':fontcolor=${NWV2_GOLD_DARK}:fontsize=36:box=0:x=${pathX1}-text_w/2:y=${pathY - 20}:enable='gte(t,0.2)'[m${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTo}':fontcolor=${NWV2_GOLD_DARK}:fontsize=40:box=0:x=${pathX1}-text_w/2:y=${labelY}:enable='gte(t,0.2)'[m${idx}]`);
     last = `m${idx}`; idx++;
   }
 
-  // Path draws in just ahead of the coin trail.
-  filters.push(`[${last}]drawbox=x=${pathX0}:y=${pathY - 3}:w='min(${pathW},${pathW}*max(0,t-${travelStart.toFixed(2)})/1.2)':h=8:color=${NWV2_GOLD}@0.6:t=fill:enable='gte(t,${travelStart.toFixed(2)})'[m${idx}]`);
+  // Path draws in just ahead of the coin trail — its own row, well below
+  // the icon+label band so it can never collide with either.
+  filters.push(`[${last}]drawbox=x=${pathX0}:y=${pathY - 4}:w='min(${pathW},${pathW}*max(0,t-${travelStart.toFixed(2)})/1.2)':h=8:color=${NWV2_GOLD}@0.6:t=fill:enable='gte(t,${travelStart.toFixed(2)})'[m${idx}]`);
   last = `m${idx}`; idx++;
 
   // A staggered trail of 3 large coin markers (not one dot) so money
-  // visibly FLOWS — bigger than v2/v3 so the movement itself reads clearly.
+  // visibly FLOWS — bigger again so the movement reads clearly at this scale.
   for (let c = 0; c < 3; c++) {
     const cStart = travelStart + (travelSpan * 0.18 * c);
     const cSpan = Math.max(0.3, travelSpan - travelSpan * 0.18 * c);
     const cx = `${pathX0}+(${pathX1}-${pathX0})*min(1,max(0,(t-${cStart.toFixed(2)})/${cSpan.toFixed(2)}))`;
-    const r = 26 - c * 4;
+    const r = 32 - c * 5;
     filters.push(`[${last}]drawbox=x='${cx}'-${r}:y=${pathY - r}:w=${r * 2}:h=${r * 2}:color=${NWV2_GOLD_DARK}@${(0.95 - c * 0.15).toFixed(2)}:t=fill:enable='between(t,${cStart.toFixed(2)},${landEnd})'[m${idx}]`);
     last = `m${idx}`; idx++;
   }
 
-  // Amount pops as a large hero number — the visual payoff — at the real meaning-event moment.
+  // Amount pops as the dominant hero number, above the icon row, at the real meaning-event moment.
   const safeAmount = nwv2WhiteSanitize(amountText || '', 18);
   if (safeAmount) {
     const popEnd = (arriveAt + 0.18).toFixed(2);
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=68:box=0:x=(${NWV2L_W}-text_w)/2:y=140:enable='between(t,${arriveAt.toFixed(2)},${popEnd})'[m${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=84:box=0:x=(${NWV2L_W}-text_w)/2:y=100:enable='between(t,${arriveAt.toFixed(2)},${popEnd})'[m${idx}]`);
     last = `m${idx}`; idx++;
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=76:box=0:x=(${NWV2L_W}-text_w)/2:y=132:enable='gte(t,${popEnd})'[m${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=92:box=0:x=(${NWV2L_W}-text_w)/2:y=92:enable='gte(t,${popEnd})'[m${idx}]`);
     last = `m${idx}`; idx++;
   }
   filters.push(nwv2LongCameraPushFilter(last, `m${idx}`, dur, 25));
@@ -15903,10 +15928,13 @@ async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, t
 // and data points are drawn directly over it, larger, brighter, with a
 // glow-style thicker line. Falls back to the v2 white-card rendering when
 // no background asset is available.
+// Storyboard Implementation Proof v5 — CEO: chart "too empty and visually
+// weak," must occupy most of the frame, with DAY 0/DAY 3 axis labels.
+// Card enlarged to span nearly the full frame width/height.
 async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, changeText, direction, dur, meaningEventAtSec, bgPath, outPath }) {
   const hasBg = !!bgPath;
-  const chartX0 = 300, chartX1 = NWV2L_W - 300, chartW = chartX1 - chartX0;
-  const chartYBase = hasBg ? 840 : 760, chartYTop = hasBg ? 320 : 380, chartH = chartYBase - chartYTop;
+  const chartX0 = 140, chartX1 = NWV2L_W - 140, chartW = chartX1 - chartX0;
+  const chartYBase = hasBg ? 840 : 900, chartYTop = hasBg ? 320 : 260, chartH = chartYBase - chartYTop;
   const rising = direction !== 'down';
   const steps = 14;
   const drawEndAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 1.0 && meaningEventAtSec < dur - 0.2)
@@ -15947,8 +15975,13 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
     filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${labelColor}:fontsize=38:${boxOpt}:x=${chartX0}:y=${chartYTop - 90}:enable='gte(t,0.2)'[s${idx}]`);
     last = `s${idx}`; idx++;
   }
-  // Baseline axis.
+  // Baseline axis, with DAY 0 / DAY 3 endpoints labeled so the delay-window
+  // relationship (the same 2-3 day span from the timeline scene) is explicit.
   filters.push(`[${last}]drawbox=x=${chartX0}:y=${chartYBase}:w=${chartW}:h=3:color=${axisColor}:t=fill[s${idx}]`);
+  last = `s${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='DAY 0':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX0}:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+  last = `s${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='DAY 3':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX1}-text_w:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
   last = `s${idx}`; idx++;
   // A finer 14-segment staircase that draws itself in, thicker/glowing when
   // over a dark background, with a data-point marker popping at each step —
@@ -16032,12 +16065,15 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
 // immediately." Also drops the v3 full-frame AI background by default
 // (bgPath now genuinely optional and unused by the current dispatcher —
 // PM: "do not add more AI backgrounds," information must be the hero).
+// Storyboard Implementation Proof v5 — CEO: "visually underdeveloped,"
+// "use most of the frame." Panels enlarged 760x420 -> 840x560, cells
+// enlarged, value labels enlarged.
 async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, outPath }) {
   const hasBg = !!bgPath;
-  const panelW = hasBg ? 820 : 760, panelH = hasBg ? 480 : 420, panelY = hasBg ? 300 : 340;
-  const leftX = 110, rightX = NWV2L_W - 110 - panelW;
+  const panelW = hasBg ? 820 : 840, panelH = hasBg ? 480 : 560, panelY = hasBg ? 300 : 260;
+  const leftX = 90, rightX = leftX + panelW + 60;
   const gridX0 = leftX + 70, gridX1 = rightX + 70;
-  const gridY = panelY + (hasBg ? 150 : 130), cell = hasBg ? 52 : 46, gap = 14, cols = 8;
+  const gridY = panelY + (hasBg ? 150 : 190), cell = hasBg ? 52 : 60, gap = 16, cols = 8;
   const revealAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 0.6 && meaningEventAtSec < dur - 0.3)
     ? meaningEventAtSec : Math.max(1.0, dur * 0.6);
   const before = Math.max(1, Math.min(24, Math.round(beforeCount) || 8));
@@ -16095,23 +16131,27 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
   // draws (the grid is a representative visual, not a literal count).
   const safeBeforeValue = nwv2WhiteSanitize(beforeValue || '', 20);
   if (safeBeforeValue) {
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeValue}':fontcolor=${labelTextColor}:fontsize=48:box=0:x=${gridX0}:y=${gridY - 40}:enable='gte(t,0.15)'[c${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeValue}':fontcolor=${labelTextColor}:fontsize=64:box=0:x=${gridX0}:y=${gridY - 55}:enable='gte(t,0.15)'[c${idx}]`);
     last = `c${idx}`; idx++;
   }
   const safeAfterValue = nwv2WhiteSanitize(afterValue || '', 20);
   if (safeAfterValue) {
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterValue}':fontcolor=${NWV2_GOLD_DARK}:fontsize=48:box=0:x=${gridX1}:y=${gridY - 40}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterValue}':fontcolor=${NWV2_GOLD_DARK}:fontsize=64:box=0:x=${gridX1}:y=${gridY - 55}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
     last = `c${idx}`; idx++;
   }
+  // "SAME $3,000" — the causal anchor tying this scene back to the money-
+  // flow scene's dollar amount, present from the start above the badge.
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='SAME $3,000':fontcolor=${NWV2_NAVY}@0.65:fontsize=30:box=0:x=(${NWV2L_W}-text_w)/2:y=70:enable='gte(t,0.15)'[c${idx}]`);
+  last = `c${idx}`; idx++;
   // Consequence badge — the delta, styled as a highlighted pill, at the reveal moment.
   const delta = before - after;
   if (delta !== 0) {
     const badgeText = nwv2WhiteSanitize((delta > 0 ? '-' : '+') + Math.abs(delta) + ' SHARES', 20);
-    const badgeW = 300, badgeH = 70, badgeX = (NWV2L_W - badgeW) / 2, badgeY = panelY - 100;
+    const badgeW = 360, badgeH = 90, badgeX = (NWV2L_W - badgeW) / 2, badgeY = 115;
     const badgeBg = hasBg ? 'black@0.4' : '0xb0413e@0.12';
     filters.push(`[${last}]drawbox=x=${badgeX}:y=${badgeY}:w=${badgeW}:h=${badgeH}:color=${badgeBg}:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
     last = `c${idx}`; idx++;
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${badgeText}':fontcolor=0xf87171:fontsize=38:box=0:x=(${NWV2L_W}-text_w)/2:y=${badgeY + 15}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${badgeText}':fontcolor=0xf87171:fontsize=48:box=0:x=(${NWV2L_W}-text_w)/2:y=${badgeY + 20}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
     last = `c${idx}`; idx++;
   }
   if (!hasBg) filters.push(nwv2LongCameraPushFilter(last, `c${idx}`, dur, 25));
@@ -16144,15 +16184,18 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
 // scenes) instead of blank canvas. Cards are enlarged and occupy real
 // frame area; falls back to the v2 white-canvas rendering with no hero
 // headline when no background asset is supplied.
+// Storyboard Implementation Proof v5 — CEO: timeline "uses only a small
+// portion of the canvas," cards must "span most of the useful frame
+// width." Cards enlarged 300x220 -> 400x320, spanning ~1750 of 1920px.
 async function nwv2LongDayCardsSegment({ heygenLocalPath, seekSec, title, heroText, heroSub, days, dur, meaningEventAtSec, bgPath, outPath }) {
   const hasBg = !!bgPath;
   const items = (days || []).slice(0, 4);
   const n = Math.max(1, items.length);
-  const cardW = hasBg ? 360 : 300, cardH = hasBg ? 280 : 220, gap = hasBg ? 44 : 40;
+  const cardW = hasBg ? 360 : 400, cardH = hasBg ? 280 : 320, gap = hasBg ? 44 : 50;
   const totalW = n * cardW + (n - 1) * gap;
   const startX = Math.round((NWV2L_W - totalW) / 2);
-  const cardY = hasBg ? 620 : 480;
-  const lineY = cardY - 40;
+  const cardY = hasBg ? 620 : 600;
+  const lineY = cardY - 50;
   const revealSpan = Math.max(0.6, (dur - 1.2) / n);
 
   const inputArgs = ['-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath];
@@ -16178,11 +16221,11 @@ async function nwv2LongDayCardsSegment({ heygenLocalPath, seekSec, title, heroTe
   const safeHero = nwv2WhiteSanitize(heroText || '', 16);
   const safeHeroSub = nwv2WhiteSanitize(heroSub || '', 30);
   if (safeHero) {
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHero}':fontcolor=${NWV2_GOLD}:fontsize=${hasBg ? 86 : 64}:${boxOpt}:x=(${NWV2L_W}-text_w)/2:y=${hasBg ? 130 : 160}:enable='gte(t,0.15)'[d${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHero}':fontcolor=${NWV2_GOLD}:fontsize=${hasBg ? 86 : 100}:${boxOpt}:x=(${NWV2L_W}-text_w)/2:y=${hasBg ? 130 : 130}:enable='gte(t,0.15)'[d${idx}]`);
     last = `d${idx}`; idx++;
   }
   if (safeHeroSub) {
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHeroSub}':fontcolor=${titleColor}:fontsize=32:${boxOpt}:x=(${NWV2L_W}-text_w)/2:y=${hasBg ? 240 : 240}:enable='gte(t,0.15)'[d${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHeroSub}':fontcolor=${titleColor}:fontsize=38:${boxOpt}:x=(${NWV2L_W}-text_w)/2:y=${hasBg ? 240 : 260}:enable='gte(t,0.15)'[d${idx}]`);
     last = `d${idx}`; idx++;
   }
   const safeTitle = nwv2WhiteSanitize(title || '', 40);
@@ -16208,11 +16251,11 @@ async function nwv2LongDayCardsSegment({ heygenLocalPath, seekSec, title, heroTe
     filters.push(`[${last}]drawbox=x=${x0}:y=${cardY}:w=${cardW}:h=${cardH}:color=${border}:t=3:enable='gte(t,${revealAt.toFixed(2)})'[d${idx}]`);
     last = `d${idx}`; idx++;
     if (safeLabel) {
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${labelColor}:fontsize=${hasBg ? 48 : 40}:box=0:x=${x0}+(${cardW}-text_w)/2:y=${cardY + (hasBg ? 90 : 70)}:enable='gte(t,${(revealAt + 0.1).toFixed(2)})'[d${idx}]`);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${labelColor}:fontsize=${hasBg ? 48 : 56}:box=0:x=${x0}+(${cardW}-text_w)/2:y=${cardY + (hasBg ? 90 : 100)}:enable='gte(t,${(revealAt + 0.1).toFixed(2)})'[d${idx}]`);
       last = `d${idx}`; idx++;
     }
     if (safeSub) {
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeSub}':fontcolor=${titleColor}@0.75:fontsize=26:box=0:x=${x0}+(${cardW}-text_w)/2:y=${cardY + (hasBg ? 170 : 140)}:enable='gte(t,${(revealAt + 0.15).toFixed(2)})'[d${idx}]`);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeSub}':fontcolor=${titleColor}@0.75:fontsize=30:box=0:x=${x0}+(${cardW}-text_w)/2:y=${cardY + (hasBg ? 170 : 200)}:enable='gte(t,${(revealAt + 0.15).toFixed(2)})'[d${idx}]`);
       last = `d${idx}`; idx++;
     }
   });
