@@ -16501,6 +16501,23 @@ async function nwv2ProductionGenerateThumbnail(pkg,beats,isLong){
 // validated for this avatar family in the white/full-frame composition.
 const NWV2_PRODUCTION_BG_COLOR='#f7f4ee';
 const NWV2_PRODUCTION_HEYGEN_SCALE=2.0;
+// Live Validation Defect #4 — NWV2_AVATAR_CAP_SEC_SHORT/_LONG are defined in
+// api/ops.js (server-side Node scope) only; nwv2ProductionStartBuild below
+// references them as if they were also in scope client-side, which they
+// never were — confirmed by search, this was a genuine missing definition,
+// not a naming/value mismatch. Live-failed on a real Long Retry Build with
+// "NWV2_AVATAR_CAP_SEC_LONG is not defined" — verified from the real
+// package's persisted state that this crashed AFTER a real, successful
+// ElevenLabs master-narration call (a real 6.4MB MP3 exists in storage) and
+// BEFORE ever reaching HeyGen (heygenJobId stayed null) — so the fix below
+// is a pure missing-constant correction, not a change to when/whether
+// either vendor is called. Values must stay identical to the server-side
+// constants (api/ops.js) — the compositor's own avatar-fade timing is
+// computed server-side from the SAME numbers, so a client/server mismatch
+// here would desync the requested clip length from where the visual fade
+// actually happens.
+const NWV2_AVATAR_CAP_SEC_SHORT=3.0;
+const NWV2_AVATAR_CAP_SEC_LONG=4.0;
 
 // Bounded HeyGen implementation (CEO Decision — NextWave V2 authoritative
 // ElevenLabs narration). Polls a single HeyGen job (already started) to
