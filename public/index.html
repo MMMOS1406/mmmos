@@ -16749,10 +16749,31 @@ async function nwv2ProductionStartComposite(pkg){
         return{ok:false,reason:'composite_error',detail:pkg.renderError};
       }
       compositedUrl=data.composited_video_url;
+    }else if(pkg.nextwaveV2CanvasVideoUrl){
+      // Live Validation Defect #9 — final concat already succeeded in a
+      // prior attempt (this pkg just never got past persisting it before
+      // the Submagic hand-off, or Resume was clicked again after success).
+      // Never re-run compositing once the final video already exists.
+      compositedUrl=pkg.nextwaveV2CanvasVideoUrl;
     }else{
-      const renderId='p'+Date.now().toString(36);
-      const segUrls=[];
+      // Live Validation Defect #9 — SUBMIT ONCE, same principle as the
+      // defect #5 avatar-job fix, now applied to per-beat compositing.
+      // segUrls used to be a local array only, never persisted — a real
+      // Long (27 beats, real ffmpeg work per beat, this browser tab is the
+      // only thing driving it) interrupted partway through lost ALL
+      // progress, and "Resume" restarted every beat from 0 every time,
+      // confirmed live: after one full Resume Compositing click, the real
+      // package had zero record of any completed beat at all. Each
+      // beat's segment_url is now persisted onto pkg the instant it
+      // succeeds; Resume checks for an existing persisted segment first
+      // and skips straight past any beat already done. render_id is also
+      // persisted so segment file naming stays consistent across resumes
+      // rather than restarting under a fresh id each time.
+      pkg.nextwaveV2LongSegmentUrls=pkg.nextwaveV2LongSegmentUrls||{};
+      const renderId=pkg.nextwaveV2LongRenderId||('p'+Date.now().toString(36));
+      pkg.nextwaveV2LongRenderId=renderId;
       for(let i=0;i<beats.length;i++){
+        if(pkg.nextwaveV2LongSegmentUrls[i]) continue; // already composited in a prior attempt
         const beat=beats[i];
         const t=timeline[i];
         // Every beat needs its own narration slice for audio — matches the
@@ -16763,7 +16784,7 @@ async function nwv2ProductionStartComposite(pkg){
         });
         const sliceD=await sliceR.json();
         if(!sliceD.ok||!sliceD.slice_url){
-          pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown');
+          pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown')+' — completed beats preserved, a Resume will continue from beat '+i;
           try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
           return{ok:false,reason:'narration_slice_error',detail:pkg.renderError};
         }
@@ -16773,16 +16794,18 @@ async function nwv2ProductionStartComposite(pkg){
         });
         const data=await r.json();
         if(!data.ok||!data.segment_url){
-          pkg.renderStatus='failed'; pkg.renderError='long_segment_error(beat '+i+'): '+(data.error||('HTTP '+data.status));
+          pkg.renderStatus='failed'; pkg.renderError='long_segment_error(beat '+i+'): '+(data.error||('HTTP '+data.status))+' — completed beats preserved, a Resume will continue from beat '+i;
           try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
           return{ok:false,reason:'long_segment_error',detail:pkg.renderError};
         }
-        segUrls.push(data.segment_url);
+        pkg.nextwaveV2LongSegmentUrls[i]=data.segment_url;
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
       }
+      const segUrls=beats.map(function(_,i){return pkg.nextwaveV2LongSegmentUrls[i];});
       const cr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_concat_long',{segment_urls:segUrls,render_id:renderId});
       const cdata=await cr.json();
       if(!cdata.ok||!cdata.composited_video_url){
-        pkg.renderStatus='failed'; pkg.renderError='long_concat_error: '+(cdata.error||('HTTP '+cr.status));
+        pkg.renderStatus='failed'; pkg.renderError='long_concat_error: '+(cdata.error||('HTTP '+cr.status))+' — all 27 beats remain preserved, a Resume will retry only the final concat';
         try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
         return{ok:false,reason:'long_concat_error',detail:pkg.renderError};
       }
