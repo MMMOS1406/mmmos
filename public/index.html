@@ -19229,6 +19229,31 @@ function renderNextWaveLifecycleCard(task){
         <div style="font-size:11px;color:var(--text);margin-top:12px;line-height:1.5">MMM polls every 45 sec — auto-advances when ready.</div>
       </div>`;
       body+=`<button style="${btnBlue}" onclick="_pollHeygenRenders().then(function(){if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks')})">↻ Check render status now</button>`;
+    }else if(renderStatus==='compositing'){
+      // Live Validation Defect #8 — this real (non-preview) Build branch had
+      // no case for 'compositing' at all, a status nwv2ProductionStartComposite
+      // sets and persists immediately on entry. With no matching branch, the
+      // whole if/else chain fell through silently — no status, no error, no
+      // button, just the trailing "Back to Review" — indistinguishable from
+      // a defect even though nothing had actually failed. Confirmed live:
+      // narration and both avatar clips were correctly reused (zero new
+      // vendor calls), the compositor was genuinely invoked and persisted
+      // this exact status; the blank screen was purely a missing UI branch,
+      // not a backend/compositor failure. The Long per-beat compositing
+      // loop runs entirely client-side with no server-side job to poll, so
+      // if the tab was closed/refreshed mid-loop there is nothing to
+      // "check" — Resume below simply calls nwv2ProductionStartBuild again,
+      // which (per the defect #5/#7 fixes) safely skips narration and both
+      // already-completed avatar clips and goes straight back into
+      // compositing, at zero additional vendor cost.
+      const _startedComp=pkg.renderStartedAt?new Date(pkg.renderStartedAt).toLocaleTimeString():'—';
+      body+=`<div style="padding:20px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.40);border-radius:12px;text-align:center;margin-bottom:12px">
+        <div style="font-size:32px;margin-bottom:12px">🎬</div>
+        <div style="font-size:16px;font-weight:800;color:#a855f7;margin-bottom:8px">Compositing final video…</div>
+        <div style="font-size:11px;color:var(--dim);line-height:1.6;font-family:'JetBrains Mono',monospace">narration + avatar already reused, no new vendor cost so far<br>started: ${escHTML(_startedComp)}<br>real ffmpeg work per beat — a Long can take a few minutes</div>
+        <div style="font-size:11px;color:var(--text);margin-top:12px;line-height:1.5">This runs in your browser tab, not on a server — if it looks stuck (tab was closed/refreshed), click Resume below. It will NOT re-charge narration or either avatar clip.</div>
+      </div>`;
+      body+=`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Resuming…';const r=await nwv2ProductionStartBuild(p);btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Resume Compositing</button>`;
     }else if(renderStatus==='post_processing'){
       body+=`<div style="padding:20px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.40);border-radius:12px;text-align:center;margin-bottom:12px">
         <div style="font-size:32px;margin-bottom:12px">✨</div>
