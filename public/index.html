@@ -18671,6 +18671,43 @@ async function _nextWaveGeneratePackage(taskId){
     alert('Generation failed: '+e.message);
   }
 }
+// Live Validation Defect #1 — Review edit persistence. Reads the three
+// editable Review textareas straight off the DOM (no separate draft/state
+// object to drift out of sync with what's on screen), writes them onto the
+// SAME pkg object every downstream NextWave function (Build, the auto-mapper,
+// thumbnail derivation, Publish) already reads pkg.title/pkg.hook/pkg.script
+// from, and persists via the existing savePackageToSupabase — identical to
+// every other save path in this file, so a reload round-trips the edit
+// correctly (full_package stores the whole object as JSON; there is no
+// second, independently-stale copy anywhere in this chain).
+async function _nextWaveSaveReviewEdits(pkgId,taskId){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(!pkg)return{ok:false,reason:'missing_package'};
+  const titleEl=document.getElementById('nw-rev-title-'+taskId);
+  const hookEl=document.getElementById('nw-rev-hook-'+taskId);
+  const scriptEl=document.getElementById('nw-rev-script-'+taskId);
+  if(titleEl)pkg.title=titleEl.value;
+  if(hookEl)pkg.hook=hookEl.value;
+  if(scriptEl){
+    pkg.script=scriptEl.value;
+    pkg.lyrics=scriptEl.value; // legacy mirror field — savePackageToSupabase's own upload prefers lyrics||script for its indexed column, so both must carry the edit
+  }
+  const statusEl=document.getElementById('nw-rev-savestatus-'+taskId);
+  if(statusEl)statusEl.textContent='Saving…';
+  const ok=await (typeof savePackageToSupabase==='function'?savePackageToSupabase(pkg):Promise.resolve(false)).catch(function(){return false;});
+  if(typeof saveAppState==='function')saveAppState();
+  if(statusEl)statusEl.textContent=ok?('✓ Saved '+new Date().toLocaleTimeString()):'⚠ Save failed — check your connection and try again';
+  return{ok:!!ok};
+}
+// Approve must never advance to Build on an unsaved edit — saves first and
+// refuses to proceed if that save fails, so Build can never silently
+// consume stale pre-edit content.
+async function _nextWaveApproveReview(pkgId,taskId){
+  const r=await _nextWaveSaveReviewEdits(pkgId,taskId);
+  if(!r.ok){alert('Could not save your edits — Build was NOT started. Check your connection and try again.');return;}
+  _nextWaveSetStage(taskId,'build');
+  if(typeof renderTab==='function')renderTab(currentTab);
+}
 async function _nextWaveRunPublish(pkgId,taskId){
   const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
   if(!pkg){alert('Package not found');return;}
@@ -18780,23 +18817,51 @@ function renderNextWaveLifecycleCard(task){
     body+=`<button style="${btnBlue}" onclick="_nextWaveGeneratePackage('${taskId}')">⚡ Auto-Generate Package</button>`;
   }
   // ── REVIEW ────────────────────────────────────────────────────────────────
+  // Live Validation Defect #1 — the previous version showed Title/Hook/Script
+  // as small, read-only, copy-on-click boxes (Script capped at a 140px
+  // scrollable window in an 11px font), and offered no way to actually edit
+  // anything — Review was a preview, not the real quality-control gate the
+  // lifecycle requires. Title/Hook/Script are now real, generously-sized
+  // <textarea>s; Save Edits writes them onto the SAME pkg object Build reads
+  // from (pkg.title/pkg.hook/pkg.script — confirmed the exact fields
+  // nwv2ProductionStartBuild and the thumbnail/beat-mapper read) and persists
+  // via the same savePackageToSupabase() every other save in this file uses,
+  // so a reload restores the edited version (full_package round-trips the
+  // whole object as JSON — there is no separate stale copy anywhere in the
+  // chain). Approve now saves first and refuses to advance to Build if that
+  // save fails, so Build can never silently run on an unsaved edit.
   else if(stage==='review'){
     if(pkg){
-      const fields=[
-        {label:'Title',val:pkg.title},
-        {label:'Hook',val:pkg.hook},
-        {label:'Script',val:pkg.script||pkg.lyrics,long:true},
-        {label:'YouTube Caption',val:pkg.captionYT||pkg.captionYouTube},
-        {label:'Hashtags',val:pkg.hashtags},
-      ];
-      fields.forEach(function(f){
-        if(!f.val)return;
-        body+=`<div style="margin-bottom:12px">
-          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">${f.label}</div>
-          <div style="font-size:${f.long?'11px':'13px'};color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 10px;max-height:${f.long?'140px':'60px'};overflow-y:auto;white-space:pre-wrap;cursor:pointer" onclick="navigator.clipboard.writeText(${JSON.stringify(f.val||'')})">${escHTML(f.val||'')}</div>
+      const _rid=taskId;
+      const titleVal=pkg.title||'';
+      const hookVal=pkg.hook||'';
+      const scriptVal=pkg.script||pkg.lyrics||'';
+      const captionVal=pkg.captionYT||pkg.captionYouTube||'';
+      const hashtagsVal=pkg.hashtags||'';
+      const editableField=function(label,id,val,rows){
+        return `<div style="margin-bottom:12px">
+          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">${label}</div>
+          <textarea id="${id}" rows="${rows}" style="width:100%;box-sizing:border-box;font-size:12px;line-height:1.5;color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px 10px;white-space:pre-wrap;font-family:inherit;resize:vertical">${escHTML(val)}</textarea>
         </div>`;
-      });
-      body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve Script → Build</button>`;
+      };
+      body+=editableField('Title (editable)','nw-rev-title-'+_rid,titleVal,2);
+      body+=editableField('Hook (editable)','nw-rev-hook-'+_rid,hookVal,2);
+      body+=editableField('Full Script (editable — do not truncate before reading)','nw-rev-script-'+_rid,scriptVal,16);
+      if(captionVal){
+        body+=`<div style="margin-bottom:12px">
+          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">YouTube Caption</div>
+          <div style="font-size:12px;color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 10px;max-height:120px;overflow-y:auto;white-space:pre-wrap;cursor:pointer" onclick="navigator.clipboard.writeText(${JSON.stringify(captionVal)})" title="Click to copy">${escHTML(captionVal)}</div>
+        </div>`;
+      }
+      if(hashtagsVal){
+        body+=`<div style="margin-bottom:12px">
+          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">Hashtags</div>
+          <div style="font-size:12px;color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 10px;white-space:pre-wrap;cursor:pointer" onclick="navigator.clipboard.writeText(${JSON.stringify(hashtagsVal)})" title="Click to copy">${escHTML(hashtagsVal)}</div>
+        </div>`;
+      }
+      body+=`<div id="nw-rev-savestatus-${_rid}" style="font-size:10px;color:var(--dim);margin-bottom:8px;min-height:14px"></div>`;
+      body+=`<button style="${btnBlue}" onclick="_nextWaveSaveReviewEdits('${pkgId}','${_rid}')">💾 Save Edits</button>`;
+      body+=`<button style="${btnGreen}" onclick="_nextWaveApproveReview('${pkgId}','${taskId}')">✅ Approve Script → Build</button>`;
       body+=`<button style="${btnRed}" onclick="if(confirm('Discard package and regenerate?')){_nextWaveSetStage('${taskId}','generate');if(typeof renderTab==='function')renderTab(currentTab)}">↺ Discard & Regenerate</button>`;
     }else{
       body+=`<div style="color:var(--dim);font-size:12px;margin-bottom:12px">Package not found — try generating again.</div>`;
