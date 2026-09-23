@@ -15677,28 +15677,32 @@ async function nwv2LongTimelineSegment({ heygenLocalPath, seekSec, title, points
 }
 
 // Shared subtle push-in, applied as the LAST step before each new financial-
-// motion segment's logo+fade. NOT zoompan — real-world test against actual
-// ffmpeg (a locally fetched @ffmpeg-installer/darwin-arm64 binary, the same
-// vendor/family as the linux-x64 build production actually runs, used
-// specifically because local Homebrew ffmpeg lacks libfreetype/drawtext)
-// proved zoompan breaks silently on a continuously time-varying composited
-// canvas: it froze every enable-gated drawtext/drawbox at whatever their
-// state was at its first sampled input frame, so PORTFOLIO/CASH labels, the
-// stock-chart staircase, and the $3,000 pop-in all vanished entirely even
-// though the exact same drawtext expressions rendered correctly in
-// isolation. zoompan's Ken-Burns design (nwv2LongIllustrationSegment, which
-// correctly still uses it) assumes a single repeating INPUT frame — a
-// `-loop 1` static image — not a real multi-second video stream. Fixed with
-// a scale(eval=frame)+crop pair instead: the whole canvas is scaled up by a
-// small, time-varying factor (re-evaluated every real frame via `t`) and
-// center-cropped back to the true output size — genuine per-frame push-in
-// that composites correctly on top of already-time-varying content.
-// Verified: HELLO text rendered via drawtext was visibly larger at t=3.5s
-// than at t=0.5s of a 4s clip, with no frames lost or frozen.
+// motion segment's logo+fade.
+// Attempt 1 (zoompan) broke: it assumes a single REPEATING input frame (the
+// Ken-Burns case in nwv2LongIllustrationSegment, which correctly still uses
+// it on a `-loop 1` static image), not a real multi-second video stream —
+// it silently froze every enable-gated drawtext/drawbox on this continuously
+// time-varying canvas.
+// Attempt 2 (scale with eval=frame, w/h expressions referencing `t`) passed
+// a local test against a NEWER ffmpeg build (darwin-arm64 4.4, libavfilter
+// 7.110) but failed for real in production against the actual OLDER deployed
+// build (linux-x64 N-47683, libavfilter 7.46.101 — this whole codebase's
+// real ffmpeg): "Undefined constant ... in 't/...'" — that build's `scale`
+// filter's w/h expression evaluator does not expose `t`.
+// Fixed with `crop` instead of `scale` for the time-varying part: crop's
+// x/y/w/h expressions have long and consistently supported `t` (unlike
+// scale), even on this old build. The canvas is pre-scaled UP by a fixed,
+// non-expression amount (safe at any ffmpeg version — no expression to
+// misparse), then cropped with a `t`-varying window that shrinks toward the
+// true output size (the zoom), then scaled back down to a fixed 1920x1080
+// (also a constant, non-expression scale) so every output frame has
+// identical encoder dimensions throughout.
 function nwv2LongCameraPushFilter(input, output, dur, fps) {
-  const scaledW = `${NWV2L_W}*(1+0.035*min(1,t/${dur.toFixed(2)}))`;
-  const scaledH = `${NWV2L_H}*(1+0.035*min(1,t/${dur.toFixed(2)}))`;
-  return `[${input}]scale=w='${scaledW}':h='${scaledH}':eval=frame[${output}_sc];[${output}_sc]crop=${NWV2L_W}:${NWV2L_H}:(in_w-${NWV2L_W})/2:(in_h-${NWV2L_H})/2[${output}]`;
+  const bigW = Math.round(NWV2L_W * 1.05);
+  const bigH = Math.round(NWV2L_H * 1.05);
+  const cropW = `${bigW}-(${bigW}-${NWV2L_W})*min(1,t/${dur.toFixed(2)})`;
+  const cropH = `${bigH}-(${bigH}-${NWV2L_H})*min(1,t/${dur.toFixed(2)})`;
+  return `[${input}]scale=${bigW}:${bigH}[${output}_big];[${output}_big]crop=w='${cropW}':h='${cropH}':x='(in_w-out_w)/2':y='(in_h-out_h)/2'[${output}_crop];[${output}_crop]scale=${NWV2L_W}:${NWV2L_H}[${output}]`;
 }
 
 // Money/dividend-flow scene — CEO Continuous Visual Storytelling proof.
