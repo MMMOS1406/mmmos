@@ -16405,7 +16405,15 @@ async function nextwaveV2StartCaptionsOnlySubmagic(pkg){
 function _nwv2DeriveCaption(text,maxChars){
   const clean=String(text||'').replace(/[.!?]+\s*$/,'').trim();
   const upper=clean.toUpperCase();
-  return upper.length>maxChars ? upper.slice(0,maxChars) : upper;
+  if(upper.length<=maxChars) return upper;
+  // Truncate at the last whole word within the limit — a live test caught a
+  // plain slice() here mid-word-breaking real narration ("...IS HARML"),
+  // which is exactly the kind of unpolished output the production release
+  // can't ship. Falls back to a hard slice only if there's no space at all
+  // (e.g. one very long token) so this never returns an empty string.
+  const hardCut=upper.slice(0,maxChars);
+  const lastSpace=hardCut.lastIndexOf(' ');
+  return lastSpace>0 ? hardCut.slice(0,lastSpace) : hardCut;
 }
 // Avatar restricted to first+last beat regardless of the classifier's own
 // per-beat treatment — matches the CEO's explicit "avatar only at open/
