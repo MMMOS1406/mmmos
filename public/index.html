@@ -19100,12 +19100,29 @@ function renderNextWaveLifecycleCard(task){
       body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">→ Continue with Raw MP4 — Advance to Approve</button>`;
     }else if(renderStatus==='failed'){
       const _errRaw=pkg&&pkg.renderError||'unknown';
-      const _errFailed=escHTML((typeof _errRaw==='object'?(_errRaw.message||_errRaw.code||JSON.stringify(_errRaw)):String(_errRaw)).slice(0,250));
+      const _errStr=(typeof _errRaw==='object'?(_errRaw.message||_errRaw.code||JSON.stringify(_errRaw)):String(_errRaw));
+      const _errFailed=escHTML(_errStr.slice(0,250));
+      // Live Validation Defect #2 — this generic failed-state block is shared
+      // by every real NextWave Build regardless of which path started the
+      // render, and its Retry button was hardcoded to the LEGACY
+      // autoStartHeygenRender — so retrying a failure from the accepted V2
+      // production path (pkg.nextwaveV2Production, set by
+      // nwv2ProductionStartBuild) would have silently fallen back to the old
+      // dark-canvas hybrid renderer instead of re-attempting V2. Also: a
+      // ceo_authorization_required failure here is a stale/missing CEO
+      // session, not HeyGen itself failing — the previous "HeyGen render
+      // failed" label was misleading about both what failed and what
+      // Retry would actually do.
+      const _isAuthError=_errStr.indexOf('ceo_authorization_required')!==-1;
+      const _isV2Production=!!(pkg&&pkg.nextwaveV2Production);
+      const _title=_isAuthError?'CEO session expired':(_isV2Production?'NextWave V2 build failed':'HeyGen render failed');
+      const _icon=_isAuthError?'🔒':'🔴';
       body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">🔴</span><span style="font-size:14px;font-weight:800;color:#ef4444">HeyGen render failed</span></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">${_icon}</span><span style="font-size:14px;font-weight:800;color:#ef4444">${_title}</span></div>
+        ${_isAuthError?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">Your Admin session had expired or was not active when Build ran — this stopped before HeyGen was ever contacted, so nothing was rendered and no spend occurred. <strong>Log out, log back in as Admin, then click Retry Build below.</strong></div>`:''}
         <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
       </div>`;
-      body+=`<button style="${btnBlue}" onclick="(function(){var p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(p){p.renderStatus=null;p.renderError=null;p.heygenJobId=null;window._vaPkg=p;autoStartHeygenRender(p).then(function(){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');});}})()">↻ Retry Build</button>`;
+      body+=`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;p.renderStatus=null;p.renderError=null;p.heygenJobId=null;window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Retrying…';const r=await (${_isV2Production}?nwv2ProductionStartBuild(p):autoStartHeygenRender(p));btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Retry Build</button>`;
     }
     body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
   }
