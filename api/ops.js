@@ -6476,9 +6476,26 @@ async function heygenStartRender(req, res) {
   if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { avatar_id, voice_id, script, background, dimension, test, scale } = body;
-  if (!avatar_id || !voice_id || !script) {
-    return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id','voice_id','script'], got: Object.keys(body) });
+  const { avatar_id, voice_id, script, audio_url, background, dimension, test, scale } = body;
+  // Bounded HeyGen implementation (CEO Decision — NextWave V2 authoritative
+  // ElevenLabs narration) — audio-driven mode. HeyGen's own Create Video V2
+  // "voice" object supports type:'audio' + audio_url as an alternative to
+  // type:'text' + input_text + voice_id (script and audio are mutually
+  // exclusive per HeyGen's documented schema); passing a pre-synthesized
+  // ElevenLabs slice here means HeyGen only lip-syncs to audio it's given,
+  // never independently narrates. Text-mode callers (existing legacy path,
+  // untouched) are unaffected — this only activates when audio_url is present.
+  let voiceBlock;
+  if (audio_url) {
+    voiceBlock = { type: 'audio', audio_url };
+  } else {
+    if (!voice_id || !script) {
+      return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id','voice_id','script (or audio_url for audio-driven mode)'], got: Object.keys(body) });
+    }
+    voiceBlock = { type: 'text', input_text: script, voice_id };
+  }
+  if (!avatar_id) {
+    return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id'], got: Object.keys(body) });
   }
   // Build background block per HeyGen v2 spec. Three valid types: color, image, video.
   // Default to a dark color if no background passed.
@@ -6502,7 +6519,7 @@ async function heygenStartRender(req, res) {
   // v13.75.6 — video_inputs item. background_audio goes at videoBody TOP LEVEL per HeyGen v2 spec.
   const videoInput = {
     character: { type: 'avatar', avatar_id: avatar_id, avatar_style: 'normal', scale: characterScale },
-    voice: { type: 'text', input_text: script, voice_id: voice_id },
+    voice: voiceBlock,
     background: backgroundBlock,
   };
   const videoBody = {
@@ -11226,6 +11243,89 @@ async function nextwaveSynthesizeNarrationElevenLabs(text, voiceId) {
   }
 }
 
+// ============================================================================
+// BOUNDED HEYGEN IMPLEMENTATION — CEO Decision (NextWave V2 authoritative
+// ElevenLabs narration). Locked target: ONE continuous ElevenLabs master
+// narration is the sole authoritative audio track for the whole video;
+// HeyGen only ever receives a short audio slice (driving, not synthesizing)
+// for the beats where the avatar is actually visible. This keeps every
+// existing segment-builder function (calc card, illustration, comparison,
+// timeline — all of which already only ever pull [0:a?] from their source
+// file, never [0:v], for non-avatar beats — confirmed by reading each one
+// before this change) completely UNCHANGED: each beat still gets its own
+// independent source file via seekSec/dur exactly as before, the only
+// difference is WHICH file that source now is per beat (see the client-side
+// per-beat source selection in nwv2ProductionStartComposite).
+//
+// Generates the full master narration ONCE (never per-beat), uploads it,
+// and returns its REAL measured duration — beat timing is then derived from
+// this real duration (still a char-weighted proportional split between
+// beats, the same method already proven for the estimated-duration case,
+// just now calibrated against real audio length instead of a wpm guess;
+// ElevenLabs' base TTS endpoint does not return per-word timestamps without
+// a separate forced-alignment call, which this bounded correction does not
+// add — noted explicitly as a limitation, not hidden).
+async function nextwaveV2PrepareMasterNarration(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script, voice_id } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script_required' });
+  if (script.length > 5000) return res.status(400).json({ ok: false, error: 'script too long for one narration call (max 5000 characters)' });
+  const result = await nextwaveSynthesizeNarrationElevenLabs(script, voice_id);
+  if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
+  const renderId = randomBytes(6).toString('hex');
+  const localPath = join(tmpdir(), `nwv2-master-narration-${renderId}.mp3`);
+  try {
+    await writeFile(localPath, result.buffer);
+    await smAssertValidMediaFile(localPath, 'ElevenLabs master narration');
+    const durationSec = await nextwaveV2GetDurationSec(localPath);
+    const url = await sbStorageUpload(`nextwave-v2-preview/narration-${renderId}.mp3`, result.buffer, 'audio/mpeg');
+    return res.status(200).json({ ok: true, master_audio_url: url, duration_sec: Number(durationSec.toFixed(2)), render_id: renderId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(localPath).catch(() => {});
+  }
+}
+
+// Slices an exact interval out of the master narration — used both for the
+// short audio HeyGen lip-syncs to (avatar-visible beats) and for every
+// non-avatar beat's own authoritative audio (replacing what used to be a
+// slice of a full-length HeyGen render). Re-downloads the master per call
+// rather than caching across requests — this file is stateless like every
+// other compositor action in this codebase, and a Long has at most 2-3
+// avatar-visible slices plus per-beat non-avatar slices, so the repeat
+// download cost is small and bounded.
+async function nextwaveV2SliceNarration(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { master_audio_url, start_sec, dur_sec, render_id, slice_id } = req.body || {};
+  if (!master_audio_url || start_sec == null || !dur_sec || !render_id || slice_id == null) {
+    return res.status(400).json({ ok: false, error: 'missing_required_fields' });
+  }
+  const srcPath = join(tmpdir(), `nwv2-master-src-${render_id}.mp3`);
+  const outPath = join(tmpdir(), `nwv2-slice-${render_id}-${slice_id}.mp3`);
+  try {
+    await smDownloadToFile(master_audio_url, srcPath);
+    await smAssertValidMediaFile(srcPath, 'master narration (slice source)');
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-ss', String(Number(start_sec).toFixed(2)), '-i', srcPath,
+      '-t', String(Number(dur_sec).toFixed(2)),
+      '-c:a', 'libmp3lame', '-b:a', '192k',
+      outPath,
+    ], { timeout: 30000 });
+    await smAssertValidMediaFile(outPath, 'narration slice');
+    const buf = await readFile(outPath);
+    const url = await sbStorageUpload(`nextwave-v2-preview/slice-${render_id}-${slice_id}.mp3`, buf, 'audio/mpeg');
+    return res.status(200).json({ ok: true, slice_url: url });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(srcPath).catch(() => {});
+    await unlink(outPath).catch(() => {});
+  }
+}
+
 // HTTP action — CEO-session-gated, same requirement as every other action that spends money or
 // reaches an external paid API (P0/P0.1 pattern: privileged/costly actions must be authenticated
 // first). script_text is capped to keep a single call's cost bounded and predictable.
@@ -15075,19 +15175,31 @@ async function nwv2WhiteBuildIllustrationSegment({ heygenLocalPath, seekSec, ill
 // segment boundary in this system) rather than holding the avatar for the
 // whole beat. avatarCapSec is optional so any other caller keeps the prior
 // unconditional-full-duration behavior.
-async function nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec, dur, avatarCapSec, outPath }) {
+// Bounded HeyGen implementation — heygenLocalPath is now a SHORT clip
+// (exactly avatarCapSec long, or the beat's own duration if shorter — never
+// the full beat length), generated by HeyGen's audio-driven mode from a
+// slice of the ElevenLabs master narration. audioLocalPath is that SAME
+// beat's full-duration slice of the master narration, used as the sole
+// audio track here so the HeyGen clip's own audio (which HeyGen embeds
+// alongside the video it produces) never becomes a second, competing
+// narration source — the master track stays authoritative end to end.
+// tpad clones the clip's last frame to cover the gap between the short
+// avatar clip and the beat's full duration; irrelevant visually since the
+// avatar fade-out at `cap` already hides everything past that point.
+async function nwv2WhiteBuildCloseSegment({ heygenLocalPath, audioLocalPath, dur, avatarCapSec, outPath }) {
   const cap = (typeof avatarCapSec === 'number' && avatarCapSec > 0 && avatarCapSec < dur) ? avatarCapSec : null;
+  const padSec = Math.max(0, dur - (cap || dur));
   const filters = [];
-  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[c0]`);
+  filters.push(`[0:v]tpad=stop_mode=clone:stop_duration=${padSec.toFixed(2)},trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[c0]`);
   filters.push(nwv2WhiteBrandMarkFilter('c0', 'c1'));
   const fadeParts = [`fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`];
   if (cap) fadeParts.push(`fade=t=out:st=${cap.toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`);
   filters.push(`[c1]${fadeParts.join(',')}[outv]`);
   const filterComplex = filters.join(';');
   await execFileAsync(ffmpegInstaller.path, [
-    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-y', '-i', heygenLocalPath, '-i', audioLocalPath,
     '-filter_complex', filterComplex,
-    '-map', '[outv]', '-map', '0:a?',
+    '-map', '[outv]', '-map', '1:a',
     '-t', dur.toFixed(2),
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
     '-c:a', 'aac', '-b:a', '192k',
@@ -15138,18 +15250,25 @@ function nwv2LongLogoFilter(input, output) {
 // text next to it. Beat duration, narration audio, and text stay exactly
 // as before — after the cap, the presenter's column reverts to plain white
 // canvas while the message keeps reading for the rest of the beat.
-async function nwv2LongAvatarPanelSegment({ heygenLocalPath, seekSec, dur, text, isCta, fadeEdge, avatarCapSec, outPath }) {
+// Bounded HeyGen implementation — same source-split as the Short's close
+// segment: heygenLocalPath is now a SHORT audio-driven clip (avatarCapSec
+// long, or the beat's own duration if shorter), audioLocalPath is this
+// beat's full-duration master-narration slice and the only audio actually
+// used. tpad extends the short clip's video to the full beat length so
+// downstream timing/overlay-enable windows are unaffected.
+async function nwv2LongAvatarPanelSegment({ heygenLocalPath, audioLocalPath, dur, text, isCta, fadeEdge, avatarCapSec, outPath }) {
   const avatarColW = 760, avatarColX = NWV2L_W - avatarColW - 60;
   const textColW = avatarColX - 100;
   const cap = (typeof avatarCapSec === 'number' && avatarCapSec > 0 && avatarCapSec < dur) ? avatarCapSec : null;
   const avatarEnable = cap ? `:enable='between(t,0,${cap.toFixed(2)})'` : '';
+  const padSec = Math.max(0, dur - (cap || dur));
   const lines = nwv2ProofWrapText(text, 24);
   const lineH = 78;
   const blockH = lines.length * lineH;
   const startY = Math.round((NWV2L_H - blockH) / 2);
   const filters = [];
   filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[a0]`);
-  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS,scale=${avatarColW}:${NWV2L_H}:force_original_aspect_ratio=decrease[avid]`);
+  filters.push(`[0:v]tpad=stop_mode=clone:stop_duration=${padSec.toFixed(2)},trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS,scale=${avatarColW}:${NWV2L_H}:force_original_aspect_ratio=decrease[avid]`);
   filters.push(`[a0][avid]overlay=x=${avatarColX}+(${avatarColW}-overlay_w)/2:y=(${NWV2L_H}-overlay_h)/2${avatarEnable}[a1]`);
   filters.push(`[a1]drawbox=x=${avatarColX - 6}:y=40:w=${avatarColW + 12}:h=${NWV2L_H - 80}:color=${NWV2_GOLD}@0.5:t=3${avatarEnable}[a2]`);
   let last = 'a2', idx = 3;
@@ -15175,9 +15294,9 @@ async function nwv2LongAvatarPanelSegment({ heygenLocalPath, seekSec, dur, text,
   filters.push(fadeArg ? `[${last}]${fadeArg}[outv]` : `[${last}]null[outv]`);
   const filterComplex = filters.join(';');
   await execFileAsync(ffmpegInstaller.path, [
-    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-y', '-i', heygenLocalPath, '-i', audioLocalPath,
     '-filter_complex', filterComplex,
-    '-map', '[outv]', '-map', '0:a?',
+    '-map', '[outv]', '-map', '1:a',
     '-t', dur.toFixed(2),
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
     '-c:a', 'aac', '-b:a', '192k',
@@ -15402,54 +15521,74 @@ async function nwv2LongTimelineSegment({ heygenLocalPath, seekSec, title, points
 // storage — mirroring exactly how every segment in this file has already
 // been tested individually throughout this project, just formalized as
 // the real architecture for anything long enough to need it.
+// Bounded HeyGen implementation — request contract changed from
+// {heygen_video_url, start_sec} (seek into one shared full-length HeyGen
+// render) to {narration_audio_url, avatar_clip_url}: narration_audio_url is
+// this beat's own already-sliced segment of the ONE ElevenLabs master
+// narration (always required — used as audio for every beat type, avatar
+// or not), avatar_clip_url is the short HeyGen audio-driven clip (only
+// present for the avatar_panel treatment). Every non-avatar segment builder
+// below is called completely UNCHANGED (heygenLocalPath/seekSec=0 params) —
+// they only ever read audio from that param and construct their own visuals
+// from scratch, confirmed by inspection before this change, so a per-beat
+// narration slice standing in for what used to be a shared-file seek
+// produces an identical result.
 async function nextwaveV2CompositeLongSegmentRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { heygen_video_url, beat, start_sec, dur_sec, render_id, beat_index } = body;
-  if (!heygen_video_url || !beat || start_sec == null || !dur_sec || !render_id || beat_index == null) {
+  const { narration_audio_url, avatar_clip_url, beat, dur_sec, render_id, beat_index } = body;
+  if (!narration_audio_url || !beat || !dur_sec || !render_id || beat_index == null) {
     return res.status(400).json({ ok: false, error: 'missing_required_fields' });
   }
-  const heygenLocalPath = join(tmpdir(), `nwv2longseg-src-${render_id}-${beat_index}.mp4`);
+  if (beat.treatment === 'avatar_panel' && !avatar_clip_url) {
+    return res.status(400).json({ ok: false, error: 'avatar_clip_url_required_for_avatar_panel_beat' });
+  }
+  const narrationLocalPath = join(tmpdir(), `nwv2longseg-narr-${render_id}-${beat_index}.mp3`);
+  const avatarLocalPath = avatar_clip_url ? join(tmpdir(), `nwv2longseg-avatar-${render_id}-${beat_index}.mp4`) : null;
   const segPath = join(tmpdir(), `nwv2longseg-out-${render_id}-${beat_index}.mp4`);
   try {
-    await smDownloadToFile(heygen_video_url, heygenLocalPath);
-    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
-    const start = Number(start_sec), dur = Number(dur_sec);
+    await smDownloadToFile(narration_audio_url, narrationLocalPath);
+    await smAssertValidMediaFile(narrationLocalPath, 'downloaded narration slice');
+    if (avatarLocalPath) {
+      await smDownloadToFile(avatar_clip_url, avatarLocalPath);
+      await smAssertValidMediaFile(avatarLocalPath, 'downloaded HeyGen avatar clip');
+    }
+    const dur = Number(dur_sec);
     const isFirst = beat_index === 0;
     let segmentType = 'calc_card';
     let illustrationInfo = null;
 
     if (beat.treatment === 'avatar_panel') {
       await nwv2LongAvatarPanelSegment({
-        heygenLocalPath, seekSec: start, dur, text: beat.text2 || beat.text, isCta: !!beat.isCta,
+        heygenLocalPath: avatarLocalPath, audioLocalPath: narrationLocalPath, dur, text: beat.text2 || beat.text, isCta: !!beat.isCta,
         fadeEdge: isFirst ? null : 'in', avatarCapSec: NWV2_AVATAR_CAP_SEC_LONG, outPath: segPath,
       });
       segmentType = 'avatar_panel';
     } else if (beat.treatment === 'comparison') {
       await nwv2LongComparisonSegment({
-        heygenLocalPath, seekSec: start, dur,
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
         leftTitle: beat.leftTitle, leftBody: beat.leftBody, rightTitle: beat.rightTitle, rightBody: beat.rightBody,
         outPath: segPath,
       });
       segmentType = 'comparison';
     } else if (beat.treatment === 'timeline') {
-      await nwv2LongTimelineSegment({ heygenLocalPath, seekSec: start, title: beat.title, points: beat.points, dur, outPath: segPath });
+      await nwv2LongTimelineSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, title: beat.title, points: beat.points, dur, outPath: segPath });
       segmentType = 'timeline';
     } else if (beat.treatment === 'illustration' && beat.concept) {
       const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
       const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
       if (illustration && illustration.path) {
         const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
-        await nwv2LongIllustrationSegment({ heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor, dur, outPath: segPath });
+        await nwv2LongIllustrationSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, illustrationPath: illustration.path, keyColor, dur, outPath: segPath });
         segmentType = 'illustration';
         illustrationInfo = { generated: ideogramBudget.generated, spend_usd: ideogramBudget.spent_usd || 0 };
       } else {
-        await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.text, values: beat.values || [], dur, outPath: segPath });
+        await nwv2LongCalcCardSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, title: beat.text, values: beat.values || [], dur, outPath: segPath });
         segmentType = 'calc_card_fallback';
       }
     } else {
-      await nwv2LongCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.title || beat.text, values: beat.values || [], dur, outPath: segPath });
+      await nwv2LongCalcCardSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, title: beat.title || beat.text, values: beat.values || [], dur, outPath: segPath });
       segmentType = 'calc_card';
     }
 
@@ -15460,14 +15599,14 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
       segment_url: segUrl,
       segment_type: segmentType,
       beat_index,
-      start: Number(start.toFixed(2)),
-      end: Number((start + dur).toFixed(2)),
+      dur: Number(dur.toFixed(2)),
       illustration: illustrationInfo,
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   } finally {
-    await unlink(heygenLocalPath).catch(() => {});
+    await unlink(narrationLocalPath).catch(() => {});
+    if (avatarLocalPath) await unlink(avatarLocalPath).catch(() => {});
     await unlink(segPath).catch(() => {});
   }
 }
@@ -15588,20 +15727,39 @@ async function nextwaveV2GenerateLongThumbnail(req, res) {
 // beat is CLOSE (avatar, never card), so the caller supplies that mapping
 // directly. Each beat: { treatment: 'hook'|'calc'|'illustration'|'close',
 // text, values?, headline?, concept? }.
+// Bounded HeyGen implementation — request contract changed from
+// {heygen_video_url, real_duration_sec} (one shared full-length HeyGen
+// render, seek per beat) to {master_audio_url, master_duration_sec,
+// avatar_clip_url}: master_audio_url/master_duration_sec is the ONE
+// ElevenLabs master narration and its REAL measured duration (beat timing
+// is now derived from that real duration, not an estimate); avatar_clip_url
+// is the short HeyGen audio-driven clip for the Short's only avatar-visible
+// beat ('close'). Slicing per beat now happens locally with ffmpeg against
+// the downloaded master (fast, no extra network round trip — Short has few
+// beats and this stays comfortably inside one request). Every non-close
+// segment builder is called completely UNCHANGED (heygenLocalPath/seekSec=0)
+// — confirmed none of them read [0:v] from that param, only [0:a?].
 async function nextwaveV2CompositeWhiteMotionRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { heygen_video_url, beats, real_duration_sec } = body;
-  if (!heygen_video_url || !Array.isArray(beats) || !beats.length || !real_duration_sec) {
-    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_beats_or_real_duration_sec' });
+  const { master_audio_url, master_duration_sec, avatar_clip_url, beats } = body;
+  if (!master_audio_url || !Array.isArray(beats) || !beats.length || !master_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_master_audio_url_or_beats_or_master_duration_sec' });
   }
   const renderId = randomBytes(6).toString('hex');
-  const heygenLocalPath = join(tmpdir(), `nwv2wm-src-${renderId}.mp4`);
+  const masterLocalPath = join(tmpdir(), `nwv2wm-master-${renderId}.mp3`);
+  const avatarLocalPath = avatar_clip_url ? join(tmpdir(), `nwv2wm-avatar-${renderId}.mp4`) : null;
   const segPaths = [];
+  const slicePaths = [];
   try {
-    await smDownloadToFile(heygen_video_url, heygenLocalPath);
-    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+    await smDownloadToFile(master_audio_url, masterLocalPath);
+    await smAssertValidMediaFile(masterLocalPath, 'downloaded ElevenLabs master narration');
+    if (avatarLocalPath) {
+      await smDownloadToFile(avatar_clip_url, avatarLocalPath);
+      await smAssertValidMediaFile(avatarLocalPath, 'downloaded HeyGen avatar clip');
+    }
+    const real_duration_sec = Number(master_duration_sec);
 
     const totalChars = Math.max(1, beats.reduce((sum, b) => sum + String(b.text || '').length, 0));
     let cursor = 0;
@@ -15619,9 +15777,15 @@ async function nextwaveV2CompositeWhiteMotionRender(req, res) {
       const isFirst = i === 0;
       const isLast = i === beats.length - 1;
       const segPath = join(tmpdir(), `nwv2wm-seg-${renderId}-${i}.mp4`);
+      const slicePath = join(tmpdir(), `nwv2wm-slice-${renderId}-${i}.mp3`);
+      await execFileAsync(ffmpegInstaller.path, [
+        '-y', '-ss', start.toFixed(2), '-i', masterLocalPath, '-t', dur.toFixed(2),
+        '-c:a', 'libmp3lame', '-b:a', '192k', slicePath,
+      ], { timeout: 20000 });
+      slicePaths.push(slicePath);
 
       if (beat.treatment === 'hook') {
-        await nwv2WhiteBuildHookSegment({ heygenLocalPath, seekSec: start, headline: beat.headline || beat.text, dur, outPath: segPath });
+        await nwv2WhiteBuildHookSegment({ heygenLocalPath: slicePath, seekSec: 0, headline: beat.headline || beat.text, dur, outPath: segPath });
         segPaths.push(segPath);
         timeline.push({ beatIndex: i, segment: 'hook', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
       } else if (beat.treatment === 'illustration' && beat.concept) {
@@ -15629,24 +15793,24 @@ async function nextwaveV2CompositeWhiteMotionRender(req, res) {
         if (illustration && illustration.path) {
           const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
           await nwv2WhiteBuildIllustrationSegment({
-            heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor,
+            heygenLocalPath: slicePath, seekSec: 0, illustrationPath: illustration.path, keyColor,
             dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
           });
           segPaths.push(segPath);
           timeline.push({ beatIndex: i, segment: 'illustration', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), concept: beat.concept });
         } else {
-          await nwv2WhiteBuildCalcCardSegment({ heygenLocalPath, seekSec: start, title: beat.text, values: beat.values || [], dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath });
+          await nwv2WhiteBuildCalcCardSegment({ heygenLocalPath: slicePath, seekSec: 0, title: beat.text, values: beat.values || [], dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath });
           segPaths.push(segPath);
           timeline.push({ beatIndex: i, segment: 'calc_card_fallback', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
         }
       } else if (beat.treatment === 'close') {
-        await nwv2WhiteBuildCloseSegment({ heygenLocalPath, seekSec: start, dur, avatarCapSec: NWV2_AVATAR_CAP_SEC_SHORT, outPath: segPath });
+        await nwv2WhiteBuildCloseSegment({ heygenLocalPath: avatarLocalPath, audioLocalPath: slicePath, dur, avatarCapSec: NWV2_AVATAR_CAP_SEC_SHORT, outPath: segPath });
         segPaths.push(segPath);
         timeline.push({ beatIndex: i, segment: 'close_avatar', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
       } else {
         // 'calc' (default)
         await nwv2WhiteBuildCalcCardSegment({
-          heygenLocalPath, seekSec: start, title: beat.title || beat.text, values: beat.values || [],
+          heygenLocalPath: slicePath, seekSec: 0, title: beat.title || beat.text, values: beat.values || [],
           dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
         });
         segPaths.push(segPath);
@@ -15672,7 +15836,9 @@ async function nextwaveV2CompositeWhiteMotionRender(req, res) {
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   } finally {
-    await unlink(heygenLocalPath).catch(() => {});
+    await unlink(masterLocalPath).catch(() => {});
+    if (avatarLocalPath) await unlink(avatarLocalPath).catch(() => {});
+    for (const p of slicePaths) await unlink(p).catch(() => {});
     for (const p of segPaths) await unlink(p).catch(() => {});
   }
 }
@@ -17153,6 +17319,8 @@ export default async function handler(req, res) {
     if (action === 'production_package_review')      return await productionPackageReview(req, res);       // v16.31.0
     if (action === 'ceo_review_queue_list')          return await ceoReviewQueueList(req, res);            // v16.31.0
     if (action === 'nextwave_narration_synthesize')  return await nextwaveNarrationSynthesize(req, res);     // NextWave V2 — ElevenLabs narration, PR pending review, not yet deployed
+    if (action === 'nextwave_v2_prepare_master_narration') return await nextwaveV2PrepareMasterNarration(req, res); // Bounded HeyGen implementation — authoritative ElevenLabs master track
+    if (action === 'nextwave_v2_slice_narration')    return await nextwaveV2SliceNarration(req, res);        // Bounded HeyGen implementation — per-beat audio slice
     // NextWave V2 Phase 4: read/compute-only visual-planning (segment ->
     // classify -> resolve). Does not touch narration above in any way.
     if (action === 'nextwave_v2_plan_visuals')       return await nextwaveV2PlanVisuals(req, res);

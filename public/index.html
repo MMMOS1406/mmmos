@@ -16502,27 +16502,50 @@ async function nwv2ProductionGenerateThumbnail(pkg,beats,isLong){
 const NWV2_PRODUCTION_BG_COLOR='#f7f4ee';
 const NWV2_PRODUCTION_HEYGEN_SCALE=2.0;
 
+// Bounded HeyGen implementation (CEO Decision — NextWave V2 authoritative
+// ElevenLabs narration). Polls a single HeyGen job (already started) to
+// completion. Bounded attempts — never re-issues the paid generation call
+// itself on failure/timeout; that stays a one-shot, explicit, CEO-clicked
+// action, exactly like every other paid step in this pipeline.
+async function _nwv2PollHeygenJobToCompletion(videoId,maxAttempts,intervalMs){
+  for(let i=0;i<maxAttempts;i++){
+    await new Promise(function(res){setTimeout(res,intervalMs);});
+    try{
+      const r=await fetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
+      const data=await r.json();
+      if(!data.ok) continue;
+      if(data.status==='completed'&&data.videoUrl) return{ok:true,videoUrl:data.videoUrl,durationSec:data.durationSec};
+      if(data.status==='failed') return{ok:false,reason:'heygen_render_failed',detail:data.raw||data};
+    }catch(_){ /* transient — keep polling within the bounded attempt count */ }
+  }
+  return{ok:false,reason:'heygen_poll_timeout'};
+}
+
 // Real production BUILD entry point — this is what the real "⚡ Start Build"
 // button now calls for NextWave tasks (see renderNextWaveLifecycleCard's
 // build-stage button below), replacing the legacy autoStartHeygenRender
 // call for this engine specifically. Reuses the SAME existing HeyGen
-// avatar/voice already validated across every prior phase — per the CEO's
-// explicit "do not redesign the avatar identity in this phase" instruction,
-// no rotation/new avatar is introduced here.
+// avatar identity already validated across every prior phase — per the
+// CEO's explicit "do not redesign the avatar identity" instruction, no
+// rotation/new avatar is introduced here.
+//
+// Bounded HeyGen implementation — CEO-approved locked architecture:
+// reviewed script -> ONE continuous ElevenLabs master narration ->
+// visual-plan/beat timing derived from that master's REAL duration -> for
+// each avatar-visible beat only, slice the exact master-audio interval and
+// send it to HeyGen in audio-driven mode (HeyGen lip-syncs to that audio,
+// never independently narrates) -> existing compositor, now sourcing every
+// beat's audio from the master track and only the avatar-visible beat(s)'
+// video from the resulting short HeyGen clip. HeyGen never receives the
+// full narration — only the exact bounded interval(s) actually shown.
 async function nwv2ProductionStartBuild(pkg){
   if(!pkg||!pkg.script) return{ok:false,reason:'missing_pkg_or_script'};
   const cleanScript=(typeof _cleanScriptForRender==='function')?_cleanScriptForRender(pkg.script):pkg.script;
   if(!cleanScript) return{ok:false,reason:'empty_script'};
   // Live Validation Defect #3 — pkg.isLong is never actually set anywhere in
   // this file (confirmed by search); it doesn't exist as a package field —
-  // only task.isLong does. This silently evaluated false for every real
-  // NextWave package, including a real Finance/Long task, which then ran
-  // through the SHORT auto-mapper (hook/calc/close, wrong beat count) and
-  // would have routed to the single-request Short compositor — the exact
-  // architecture the per-segment Long path exists to avoid a Vercel
-  // function-timeout on. Reuses the same proven 3-level Long detection
-  // autoStartHeygenRender already relies on elsewhere in this file, instead
-  // of inventing a new one.
+  // only task.isLong does. Reuses the same proven 3-level Long detection
+  // autoStartHeygenRender already relies on elsewhere in this file.
   const isLong=(pkg.contentFormat==='long')
     || !!(pkg.taskId && Array.isArray(D.tasks) && D.tasks.some(function(t){return String(t.id)===String(pkg.taskId)&&(t.contentFormat==='long'||t.isLong);}))
     || (typeof pkg.workflowNotes==='string' && pkg.workflowNotes.toLowerCase().includes('landscape'));
@@ -16536,42 +16559,93 @@ async function nwv2ProductionStartBuild(pkg){
     pkg.nextwaveV2ProductionBeats=beats;
     pkg.nextwaveV2Production=true;
     pkg.nextwaveV2ProductionIsLong=isLong;
-    // Thumbnail needs only the script-derived beats, not the rendered video —
-    // generated now so it's ready well before Approve, per the CEO's explicit
-    // requirement that a generated thumbnail actually be attached before
-    // production release, not left as an afterthought.
     await nwv2ProductionGenerateThumbnail(pkg,beats,isLong);
-    const r=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
-      avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
-      voice_id:NEXTWAVE_V2_HYBRID_VOICE_ID,
-      script:cleanScript,
-      background:{type:'color',value:NWV2_PRODUCTION_BG_COLOR},
-      dimension:isLong?{width:1080,height:1920}:{width:1080,height:1920}, // avatar source always portrait — see landscape composition note on nwv2LongAvatarPanelSegment
-      scale:NWV2_PRODUCTION_HEYGEN_SCALE,
-      test:false,
-    });
-    const data=await r.json();
-    if(data.ok&&data.videoId){
-      pkg.heygenJobId=data.videoId;
-      pkg.renderStatus='rendering';
-      pkg.renderStartedAt=new Date().toISOString();
-      pkg.renderError=null;
-      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
-      return{ok:true,videoId:data.videoId};
-    }
-    // Live Validation Defect #3 — this only ever stored the generic
-    // 'HTTP <status>' fallback, discarding the actual HeyGen vendor
-    // message/code the server already forwards in data.raw.error — matches
-    // the more thorough pattern autoStartHeygenRender already uses, so a
-    // real vendor failure (e.g. insufficient credits) is diagnosable
-    // directly from the stored error instead of needing to trace it by hand.
-    const _apiMsg=data&&data.raw&&data.raw.error&&data.raw.error.message;
-    const _apiCode=data&&data.raw&&data.raw.error&&data.raw.error.code;
-    pkg.renderStatus='failed';
-    pkg.renderError='heygen_start_error: '+(_apiMsg?(_apiCode?'['+_apiCode+'] '+_apiMsg:_apiMsg):(data.error||('HTTP '+data.status)));
-    pkg.renderErrorRaw=data;
+
+    pkg.renderStatus='rendering';
+    pkg.renderStartedAt=new Date().toISOString();
+    pkg.renderError=null;
     try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
-    return{ok:false,reason:'heygen_start_error',detail:pkg.renderError};
+    try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+
+    // ONE master narration call, ever — never per-beat, per the locked
+    // architecture. script_text is capped at 5000 chars server-side; the
+    // cleaned real Long script that motivated this correction was 4779.
+    const narr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_prepare_master_narration',{script:cleanScript});
+    const narrData=await narr.json();
+    if(!narrData.ok||!narrData.master_audio_url){
+      pkg.renderStatus='failed'; pkg.renderError='master_narration_error: '+(narrData.error||'unknown');
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      return{ok:false,reason:'master_narration_error',detail:pkg.renderError};
+    }
+    pkg.nextwaveV2MasterAudioUrl=narrData.master_audio_url;
+    pkg.nextwaveV2MasterDurationSec=narrData.duration_sec;
+
+    // Authoritative timeline — same char-weighted proportional split already
+    // proven for the estimated-duration case, now calibrated against the
+    // REAL measured master-narration duration instead of a wpm guess.
+    const totalChars=beats.reduce(function(s,b){return s+String(b.text||'').length;},0)||1;
+    let cursor=0;
+    const timeline=beats.map(function(b){
+      const chars=String(b.text||'').length;
+      const dur=narrData.duration_sec*(chars/totalChars);
+      const start=cursor; cursor+=dur;
+      return{start:start,dur:dur};
+    });
+    pkg.nextwaveV2BeatTimeline=timeline;
+
+    // Avatar-visible beat(s) only — 'close' for Short (one), 'avatar_panel'
+    // for Long (open + close). Each gets a short master-audio slice, capped
+    // at the approved avatar-duration limit, sent to HeyGen audio-driven —
+    // the only HeyGen spend in this entire Build, bounded to exactly what's
+    // visually shown.
+    const avatarCap=isLong?NWV2_AVATAR_CAP_SEC_LONG:NWV2_AVATAR_CAP_SEC_SHORT;
+    const renderId='b'+Date.now().toString(36);
+    pkg.nextwaveV2AvatarClipUrls={};
+    for(let i=0;i<beats.length;i++){
+      const isAvatarBeat=isLong?(beats[i].treatment==='avatar_panel'):(beats[i].treatment==='close');
+      if(!isAvatarBeat) continue;
+      const t=timeline[i];
+      const clipDur=Math.min(avatarCap,t.dur);
+      const sliceR=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_slice_narration',{
+        master_audio_url:narrData.master_audio_url, start_sec:t.start, dur_sec:clipDur,
+        render_id:renderId, slice_id:'avatar'+i,
+      });
+      const sliceD=await sliceR.json();
+      if(!sliceD.ok||!sliceD.slice_url){
+        pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown');
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'narration_slice_error',detail:pkg.renderError};
+      }
+      const hgR=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
+        avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
+        audio_url:sliceD.slice_url,
+        background:{type:'color',value:NWV2_PRODUCTION_BG_COLOR},
+        dimension:{width:1080,height:1920},
+        scale:NWV2_PRODUCTION_HEYGEN_SCALE,
+        test:false,
+      });
+      const hgData=await hgR.json();
+      if(!hgData.ok||!hgData.videoId){
+        const _apiMsg=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.message;
+        const _apiCode=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.code;
+        pkg.renderStatus='failed';
+        pkg.renderError='heygen_start_error: '+(_apiMsg?(_apiCode?'['+_apiCode+'] '+_apiMsg:_apiMsg):(hgData.error||('HTTP '+hgData.status)));
+        pkg.renderErrorRaw=hgData;
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'heygen_start_error',detail:pkg.renderError};
+      }
+      const poll=await _nwv2PollHeygenJobToCompletion(hgData.videoId,36,5000);
+      if(!poll.ok){
+        pkg.renderStatus='failed'; pkg.renderError='heygen_avatar_clip_failed(beat '+i+'): '+(poll.reason||'unknown');
+        pkg.renderErrorRaw=poll.detail||null;
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'heygen_avatar_clip_failed',detail:pkg.renderError};
+      }
+      pkg.nextwaveV2AvatarClipUrls[i]=poll.videoUrl;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    }
+
+    return await nwv2ProductionStartComposite(pkg);
   }catch(e){
     pkg.renderStatus='failed';
     pkg.renderError='production_build_network_error: '+e.message;
@@ -16579,24 +16653,31 @@ async function nwv2ProductionStartBuild(pkg){
     return{ok:false,reason:'network_error',detail:e.message};
   }
 }
-// Fires from the HeyGen-completion poller (see the nextwaveV2Production
-// branch added to _pollHeygenRenders). Short = one request (proven safe —
-// at most ~7 lightweight segments, well under the 60s function ceiling).
-// Long = per-segment + concat calls (the SAME architecture fix already
-// proven necessary and working in the Long validation phase, since a
-// single request hung past the Vercel maxDuration timeout there).
-async function nwv2ProductionStartComposite(pkg,realDurationSec){
+// Called directly by nwv2ProductionStartBuild once the master narration and
+// any avatar clip(s) are ready — no separate async poller needed for this
+// phase (matches the pattern the existing Long per-segment loop below
+// already used). Short = one request (proven safe — at most ~7 lightweight
+// segments, well under the function ceiling). Long = per-segment + concat
+// calls (the architecture fix already proven necessary in the Long
+// validation phase, since a single request hung past the Vercel maxDuration
+// timeout there). Every beat now gets its own narration-master slice for
+// audio; only avatar-visible beats also carry a bounded HeyGen clip.
+async function nwv2ProductionStartComposite(pkg){
   const beats=pkg.nextwaveV2ProductionBeats;
-  if(!beats||!beats.length){ pkg.submagicError='missing_production_beats_at_composite_stage'; return{ok:false,reason:'missing_beats'}; }
+  const timeline=pkg.nextwaveV2BeatTimeline;
+  if(!beats||!beats.length||!timeline||!timeline.length){ pkg.submagicError='missing_production_beats_or_timeline_at_composite_stage'; return{ok:false,reason:'missing_beats'}; }
   pkg.renderStatus='compositing';
   try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
   try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
-  const heygenUrl=pkg.heygenRawUrl||pkg.videoUrl;
+  const isLong=pkg.nextwaveV2ProductionIsLong;
+  const avatarClipUrls=pkg.nextwaveV2AvatarClipUrls||{};
   try{
     let compositedUrl=null;
-    if(!pkg.nextwaveV2ProductionIsLong){
+    if(!isLong){
+      const avatarClipUrl=Object.values(avatarClipUrls)[0]||null;
       const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_white_motion',{
-        heygen_video_url:heygenUrl, beats:beats, real_duration_sec:realDurationSec,
+        master_audio_url:pkg.nextwaveV2MasterAudioUrl, master_duration_sec:pkg.nextwaveV2MasterDurationSec,
+        avatar_clip_url:avatarClipUrl, beats:beats,
       });
       const data=await r.json();
       if(!data.ok||!data.composited_video_url){
@@ -16606,16 +16687,26 @@ async function nwv2ProductionStartComposite(pkg,realDurationSec){
       }
       compositedUrl=data.composited_video_url;
     }else{
-      const totalChars=beats.reduce(function(s,b){return s+String(b.text||'').length;},0)||1;
-      let cursor=0; const renderId='p'+Date.now().toString(36);
+      const renderId='p'+Date.now().toString(36);
       const segUrls=[];
       for(let i=0;i<beats.length;i++){
         const beat=beats[i];
-        const beatDur=realDurationSec*(String(beat.text||'').length/totalChars);
-        const start=cursor; cursor+=beatDur;
+        const t=timeline[i];
+        // Every beat needs its own narration slice for audio — matches the
+        // authoritative master timeline, no seeking into a shared file.
+        const sliceR=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_slice_narration',{
+          master_audio_url:pkg.nextwaveV2MasterAudioUrl, start_sec:t.start, dur_sec:t.dur,
+          render_id:renderId, slice_id:'beat'+i,
+        });
+        const sliceD=await sliceR.json();
+        if(!sliceD.ok||!sliceD.slice_url){
+          pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown');
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'narration_slice_error',detail:pkg.renderError};
+        }
         const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_long_segment',{
-          heygen_video_url:heygenUrl, beat:beat, start_sec:start, dur_sec:beatDur,
-          render_id:renderId, beat_index:i,
+          narration_audio_url:sliceD.slice_url, avatar_clip_url:avatarClipUrls[i]||null,
+          beat:beat, dur_sec:t.dur, render_id:renderId, beat_index:i,
         });
         const data=await r.json();
         if(!data.ok||!data.segment_url){
