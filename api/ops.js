@@ -16024,7 +16024,19 @@ async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, t
 // Storyboard Implementation Proof v5 — CEO: chart "too empty and visually
 // weak," must occupy most of the frame, with DAY 0/DAY 3 axis labels.
 // Card enlarged to span nearly the full frame width/height.
-async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, changeText, direction, dur, meaningEventAtSec, bgPath, outPath }) {
+// Proof B — NextWave V2 architecture generalization test. Every prior call
+// site (Proof A's 2-3 day price-rise beat) passes no `series`, so that
+// entire code path below is untouched byte-for-byte; this only adds a new
+// OPTIONAL branch for a real data-driven multi-series chart (e.g. two
+// investors' portfolio value over 10 years), where the old version drew a
+// fixed 14-step decorative ramp with hardcoded "DAY 0"/"DAY 3" labels.
+// `series`: [{ label, color, points: (number|null)[] }] — same-length
+// arrays sharing one X axis (points[i] === null/undefined means that
+// series hasn't started yet at that x-index, e.g. an investor who hasn't
+// begun contributing). `axisStartLabel`/`axisEndLabel` replace the
+// hardcoded day labels. `markerIndex`/`markerLabel` optionally calls out
+// one x-index (e.g. "year 5, investor B starts") with a vertical marker.
+async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, changeText, direction, dur, meaningEventAtSec, bgPath, series, axisStartLabel, axisEndLabel, markerIndex, markerLabel, outPath }) {
   const hasBg = !!bgPath;
   // A visible margin is left around the chart panel only when a background
   // exists, so the environmental context (v6) actually shows; with no
@@ -16077,6 +16089,76 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
     filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${labelColor}:fontsize=38:box=0:x=${chartX0}:y=${chartYTop - 90}:enable='gte(t,0.2)'[s${idx}]`);
     last = `s${idx}`; idx++;
   }
+  if (series && series.length) {
+    // Proof B — real data-driven multi-series step chart (e.g. two
+    // investors' portfolio value across the same 10-year axis). Shares the
+    // panel/grid/label drawing above; everything below is new and only
+    // runs when a caller actually passes `series`.
+    const n = Math.max(...series.map((s) => s.points.length));
+    let globalMax = 0;
+    series.forEach((s) => s.points.forEach((v) => { if (typeof v === 'number' && v > globalMax) globalMax = v; }));
+    if (globalMax <= 0) globalMax = 1;
+    filters.push(`[${last}]drawbox=x=${chartX0}:y=${chartYBase}:w=${chartW}:h=3:color=${axisColor}:t=fill[s${idx}]`);
+    last = `s${idx}`; idx++;
+    const safeStartLabel = nwv2WhiteSanitize(axisStartLabel || 'START', 16);
+    const safeEndLabel = nwv2WhiteSanitize(axisEndLabel || 'END', 16);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeStartLabel}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX0}:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeEndLabel}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX1}-text_w:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    // Optional vertical marker calling out one x-index (e.g. "year 5,
+    // investor B starts") — the visual cue for "one path starting later."
+    if (typeof markerIndex === 'number' && markerIndex > 0 && markerIndex < n) {
+      const mx = chartX0 + Math.round((chartW * markerIndex) / (n - 1));
+      filters.push(`[${last}]drawbox=x=${mx}:y=${chartYTop}:w=2:h=${chartH}:color=${NWV2_NAVY}@0.25:t=fill:enable='gte(t,0.4)'[s${idx}]`);
+      last = `s${idx}`; idx++;
+      const safeMarkerLabel = nwv2WhiteSanitize(markerLabel || '', 22);
+      if (safeMarkerLabel) {
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeMarkerLabel}':fontcolor=${NWV2_NAVY}@0.6:fontsize=22:box=0:x=${mx}+10:y=${chartYTop + 10}:enable='gte(t,0.5)'[s${idx}]`);
+        last = `s${idx}`; idx++;
+      }
+    }
+    const lineH = hasBg ? 8 : 5;
+    series.forEach((s) => {
+      const color = s.color || lineColor;
+      let lastDefinedY = null;
+      for (let i = 0; i < s.points.length - 1; i++) {
+        const v0 = s.points[i], v1 = s.points[i + 1];
+        if (v0 == null || v1 == null) continue;
+        const x0 = chartX0 + Math.round((chartW * i) / (n - 1));
+        const x1 = chartX0 + Math.round((chartW * (i + 1)) / (n - 1));
+        const y0 = Math.round(chartYBase - chartH * 0.85 * (v0 / globalMax));
+        const y1 = Math.round(chartYBase - chartH * 0.85 * (v1 / globalMax));
+        const segStart = drawStart + (drawSpan * i) / (n - 1);
+        const segDur = drawSpan / (n - 1);
+        const segW = x1 - x0;
+        // Step-chart style: flat segment at the new level, plus a vertical
+        // connector at the transition — an honest read of discrete
+        // year-over-year data, not a smoothed/interpolated curve.
+        filters.push(`[${last}]drawbox=x=${x0}:y=${y1}:w='min(${segW},${segW}*max(0,t-${segStart.toFixed(2)})/${segDur.toFixed(2)})':h=${lineH}:color=${color}:t=fill:enable='gte(t,${segStart.toFixed(2)})'[s${idx}]`);
+        last = `s${idx}`; idx++;
+        const connY0 = Math.min(y0, y1), connH = Math.max(2, Math.abs(y1 - y0));
+        filters.push(`[${last}]drawbox=x=${x0}:y=${connY0}:w=${lineH}:h=${connH}:color=${color}:t=fill:enable='gte(t,${segStart.toFixed(2)})'[s${idx}]`);
+        last = `s${idx}`; idx++;
+        lastDefinedY = y1;
+      }
+      // Value label at each series' final point, in that series' color,
+      // popping in once its line finishes drawing. The caller supplies the
+      // authoritative formatted string (finalValueText, e.g. "$91,473") —
+      // this renderer never formats or computes the number itself.
+      const finalVal = [...s.points].reverse().find((v) => v != null);
+      if (finalVal != null && lastDefinedY != null) {
+        const safeSeriesLabel = nwv2WhiteSanitize(s.label || '', 20);
+        const safeVal = nwv2WhiteSanitize(s.finalValueText || String(finalVal), 20);
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeVal}':fontcolor=${color}:fontsize=40:box=0:x=${chartX1}-text_w-4:y=${Math.max(chartYTop, lastDefinedY - 60)}:enable='gte(t,${drawEndAt.toFixed(2)})'[s${idx}]`);
+        last = `s${idx}`; idx++;
+        if (safeSeriesLabel) {
+          filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeSeriesLabel}':fontcolor=${color}@0.8:fontsize=22:box=0:x=${chartX1}-text_w-4:y=${Math.max(chartYTop, lastDefinedY - 60) + 44}:enable='gte(t,${drawEndAt.toFixed(2)})'[s${idx}]`);
+          last = `s${idx}`; idx++;
+        }
+      }
+    });
+  } else {
   // Baseline axis, with DAY 0 / DAY 3 endpoints labeled so the delay-window
   // relationship (the same 2-3 day span from the timeline scene) is explicit.
   filters.push(`[${last}]drawbox=x=${chartX0}:y=${chartYBase}:w=${chartW}:h=3:color=${axisColor}:t=fill[s${idx}]`);
@@ -16120,6 +16202,7 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
     last = `s${idx}`; idx++;
     filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeChange}':fontcolor=${changeColor}:fontsize=50:box=0:x=${badgeX}+(${badgeW}-text_w)/2:y=${finalY - 4}:enable='gte(t,${popEnd})'[s${idx}]`);
     last = `s${idx}`; idx++;
+  }
   }
   filters.push(nwv2LongCameraPushFilter(last, `s${idx}`, dur, 25));
   last = `s${idx}`; idx++;
@@ -16177,15 +16260,27 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
 // the number swaps to afterValue and the "-N SHARES" badge appears — a
 // single causal transition (100 -> 97, 3 disappear) instead of two static
 // counts side by side.
-async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, outPath }) {
+// Proof B generalization — `displayMode` ('chips', the Proof A default, or
+// 'bar') and `anchorText`/`deltaSuffix` were previously hardcoded literals
+// ("SAME $3,000", "SHARES") left over from Proof A's specific narrative;
+// they're now optional parameters defaulting to those exact same literals,
+// so Proof A is byte-for-byte unaffected. 'bar' mode is for comparing two
+// raw VALUES (e.g. two final dollar totals) rather than a count of
+// discrete interchangeable units — a chip grid is the wrong metaphor for
+// "$91,473 vs $36,738" (there's nothing to visually delete), so this adds
+// two proportional horizontal bars instead, sharing the same panel/
+// header/value-swap/badge mechanics.
+async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, displayMode, anchorText, deltaSuffix, deltaTextOverride, outPath }) {
   const hasBg = !!bgPath;
-  // The grid is a representative visual capped at 24 cells, not a literal
-  // rendering of beforeCount/afterCount (real content is often 100 -> 97,
-  // and clamping each side to 24 independently used to collapse both to the
-  // same 24 and hide the delta entirely). Instead: cap the total at 24, then
-  // scale the real delta proportionally onto that representative total so
-  // the causal "N units disappear" transition stays visible regardless of
-  // scale. The badge text below still reports the real, unscaled delta.
+  const mode = displayMode === 'bar' ? 'bar' : 'chips';
+  // The grid/bar is a representative visual capped at 24 units, not a
+  // literal rendering of beforeCount/afterCount (real content is often
+  // 100 -> 97, or a 0-100 percentage-of-larger-value scale in bar mode,
+  // and clamping each side to 24 independently used to collapse both to
+  // the same 24 and hide the delta entirely). Instead: cap the total at
+  // 24, then scale the real delta proportionally onto that representative
+  // total so the causal "value drops" transition stays visible regardless
+  // of scale. The badge text below still reports the real, unscaled delta.
   const rawBefore = Math.max(1, Math.round(beforeCount) || 8);
   const rawAfter = Math.max(0, Math.min(rawBefore, Number.isFinite(Number(afterCount)) ? Math.round(afterCount) : 5));
   const rawDelta = Math.max(0, rawBefore - rawAfter);
@@ -16198,11 +16293,12 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
 
   const cell = hasBg ? 80 : 90, gap = 18, cols = Math.min(8, before);
   const rows = Math.ceil(before / cols);
-  const gridW = cols * cell + (cols - 1) * gap;
-  const gridH = rows * cell + (rows - 1) * gap;
+  const gridW = mode === 'bar' ? Math.min(8, before) * cell + (Math.min(8, before) - 1) * gap : cols * cell + (cols - 1) * gap;
+  const barH = hasBg ? 80 : 90, barGap = 40;
+  const contentH = mode === 'bar' ? (barH * 2 + barGap) : (rows * cell + (rows - 1) * gap);
   const panelPad = hasBg ? 70 : 90;
   const panelW = gridW + panelPad * 2;
-  const panelH = 260 + gridH + 40;
+  const panelH = 260 + contentH + 40;
   const panelX = Math.round((NWV2L_W - panelW) / 2);
   const panelY = hasBg ? 300 : 260;
   const gridX0 = panelX + panelPad;
@@ -16240,34 +16336,64 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
   last = `c${idx}`; idx++;
   filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterValue}':fontcolor=${NWV2_GOLD_DARK}:fontsize=72:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 100}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
   last = `c${idx}`; idx++;
-  // The units themselves, styled as investment-unit chips (filled body +
-  // gold ribbon top) rather than plain squares. Units beyond `after` vanish
-  // at the reveal moment — the visible causal transition PM asked for.
-  for (let i = 0; i < before; i++) {
-    const col = i % cols, row = Math.floor(i / cols);
-    const cx = gridX0 + col * (cell + gap);
-    const cy = gridY0 + row * (cell + gap);
-    const isLost = i >= after;
-    const appearAt = 0.2 + i * (0.5 / before);
-    const enableExpr = isLost
-      ? `gte(t,${appearAt.toFixed(2)})*lt(t,${revealAt.toFixed(2)})`
-      : `gte(t,${appearAt.toFixed(2)})`;
-    const bodyColor = isLost ? `${NWV2_NAVY}@0.08` : `${NWV2_GOLD}@0.20`;
-    const ribbonColor = isLost ? `${NWV2_NAVY}@0.3` : NWV2_GOLD_DARK;
-    filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${bodyColor}:t=fill:enable='${enableExpr}'[c${idx}]`);
+  if (mode === 'chips') {
+    // The units themselves, styled as investment-unit chips (filled body +
+    // gold ribbon top) rather than plain squares. Units beyond `after`
+    // vanish at the reveal moment — the visible causal transition for a
+    // count of discrete, interchangeable units (e.g. shares).
+    for (let i = 0; i < before; i++) {
+      const col = i % cols, row = Math.floor(i / cols);
+      const cx = gridX0 + col * (cell + gap);
+      const cy = gridY0 + row * (cell + gap);
+      const isLost = i >= after;
+      const appearAt = 0.2 + i * (0.5 / before);
+      const enableExpr = isLost
+        ? `gte(t,${appearAt.toFixed(2)})*lt(t,${revealAt.toFixed(2)})`
+        : `gte(t,${appearAt.toFixed(2)})`;
+      const bodyColor = isLost ? `${NWV2_NAVY}@0.08` : `${NWV2_GOLD}@0.20`;
+      const ribbonColor = isLost ? `${NWV2_NAVY}@0.3` : NWV2_GOLD_DARK;
+      filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${bodyColor}:t=fill:enable='${enableExpr}'[c${idx}]`);
+      last = `c${idx}`; idx++;
+      filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${Math.round(cell * 0.16)}:color=${ribbonColor}:t=fill:enable='${enableExpr}'[c${idx}]`);
+      last = `c${idx}`; idx++;
+      filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${ribbonColor}:t=2:enable='${enableExpr}'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+  } else {
+    // Two proportional horizontal bars — for comparing two raw VALUES
+    // (e.g. two final dollar totals) where there's no discrete unit to
+    // visually delete. Before-bar grows in first at full width; after-bar
+    // grows in at the reveal moment, sized to its real proportion of the
+    // before value (same before/after scale already computed above).
+    const bar1Y = gridY0, bar2Y = gridY0 + barH + barGap;
+    const afterFrac = before > 0 ? after / before : 0;
+    const bar2W = Math.max(6, Math.round(gridW * afterFrac));
+    const safeBeforeRowLabel = nwv2WhiteSanitize(beforeLabel || '', 22);
+    const safeAfterRowLabel = nwv2WhiteSanitize(afterLabel || '', 22);
+    filters.push(`[${last}]drawbox=x=${gridX0}:y=${bar1Y}:w='min(${gridW},${gridW}*max(0,t-0.3)/0.6)':h=${barH}:color=${NWV2_GOLD}@0.75:t=fill:enable='gte(t,0.3)'[c${idx}]`);
     last = `c${idx}`; idx++;
-    filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${Math.round(cell * 0.16)}:color=${ribbonColor}:t=fill:enable='${enableExpr}'[c${idx}]`);
+    if (safeBeforeRowLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeRowLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=24:box=0:x=${gridX0}:y=${bar1Y - 32}:enable='gte(t,0.3)'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawbox=x=${gridX0}:y=${bar2Y}:w='min(${bar2W},${bar2W}*max(0,t-${revealAt.toFixed(2)})/0.6)':h=${barH}:color=${NWV2_NAVY}@0.55:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
     last = `c${idx}`; idx++;
-    filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${ribbonColor}:t=2:enable='${enableExpr}'[c${idx}]`);
-    last = `c${idx}`; idx++;
+    if (safeAfterRowLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterRowLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=24:box=0:x=${gridX0}:y=${bar2Y - 32}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
   }
-  // "SAME $3,000" — the causal anchor tying this scene back to the money-
-  // flow scene's dollar amount, present from the start above the panel.
-  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='SAME \$3,000':fontcolor=${NWV2_NAVY}@0.65:fontsize=30:box=0:x=(${NWV2L_W}-text_w)/2:y=70:enable='gte(t,0.15)'[c${idx}]`);
+  // Causal anchor line tying this scene back to whatever stays constant
+  // across before/after (defaults to Proof A's exact literal so it's
+  // unaffected; a genuinely different script passes its own anchorText).
+  const safeAnchor = nwv2WhiteSanitize(anchorText || 'SAME $3,000', 30);
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAnchor}':fontcolor=${NWV2_NAVY}@0.65:fontsize=30:box=0:x=(${NWV2L_W}-text_w)/2:y=70:enable='gte(t,0.15)'[c${idx}]`);
   last = `c${idx}`; idx++;
   // Consequence badge — the delta, styled as a highlighted pill, below the panel at the reveal moment.
   if (delta !== 0) {
-    const badgeText = nwv2WhiteSanitize((delta > 0 ? '-' : '+') + Math.abs(delta) + ' SHARES', 20);
+    const badgeText = deltaTextOverride
+      ? nwv2WhiteSanitize(deltaTextOverride, 24)
+      : nwv2WhiteSanitize((delta > 0 ? '-' : '+') + Math.abs(delta) + ' ' + (deltaSuffix || 'SHARES'), 24);
     const badgeW = 360, badgeH = 90, badgeX = (NWV2L_W - badgeW) / 2, badgeY = panelY + panelH + 30;
     filters.push(`[${last}]drawbox=x=${badgeX}:y=${badgeY}:w=${badgeW}:h=${badgeH}:color=0xb0413e@0.12:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
     last = `c${idx}`; idx++;
@@ -16438,6 +16564,85 @@ async function _nwv2ResolveSceneBg(beat) {
   if (!bg || !bg.path) return null;
   return { path: bg.path, info: { generated: ideogramBudget.generated, spend_usd: ideogramBudget.spent_usd || 0 } };
 }
+
+// Proof B — NextWave V2 architecture generalization test. This is the
+// "visual classifier" half of the meaning-unit -> treatment pipeline: a
+// GENERAL, keyword/pattern rule set over the section label + unit text
+// (not a lookup table for any one script), reusing the same
+// nextwaveHasDynamicNumbers/NEXTWAVE_V2_DYNAMIC_NUMBER_RE infrastructure
+// nextwaveClassifyVisualIntent already relies on for the older HUD
+// pipeline. Returns one of the Long-format treatments that already exist
+// as reusable render primitives (avatar_panel/money_flow/stock_chart/
+// share_compare/calc_card) — this function decides WHICH one fits a given
+// unit's language, it never decides WHAT specific numbers/labels to put
+// in it (that binding happens separately, per script, since it requires
+// the real verified figures — see Section 7 of the Proof B order).
+const NWV2_LONG_RECURRING_CUES = ['a month', 'each month', 'every month', 'per month', 'monthly', 'a week', 'each week', 'every week', 'per week', 'weekly', 'contribute', 'contributing', 'invest', 'investing', 'deposit', 'depositing'];
+const NWV2_LONG_GROWTH_CUES = ['grow', 'grows', 'growing', 'growth', 'compound', 'compounding', 'return', 'returns', 'annual', 'over the next', 'over time', 'portfolio value', 'balance'];
+const NWV2_LONG_COMPARE_CUES = ['instead of', 'versus', ' vs ', 'compare', 'compared', 'wait', 'waiting', 'delay', 'later', 'gap', 'difference', 'cost you', 'costs you'];
+function nwv2ClassifyLongTreatment(unitText, sectionLabel) {
+  const text = String(unitText || '').toLowerCase();
+  const section = String(sectionLabel || '').toUpperCase();
+  const hasNumber = nextwaveHasDynamicNumbers(text);
+  const hasCue = (list) => list.some((kw) => text.includes(kw));
+  if (section.includes('HOOK') || section.includes('CTA') || section.includes('CLOSE') || section.includes('OUTRO')) {
+    return 'avatar_panel';
+  }
+  // A unit describing a value at MULTIPLE distinct points in time/duration
+  // (e.g. "...after ten years" and "...for the remaining five years" in
+  // the same unit) is describing a TRAJECTORY, not a single before/after
+  // snapshot — that's a time-series chart even if comparison words like
+  // "wait" also appear in the same sentence. General signal (count of
+  // digit-duration mentions), not specific to any one script.
+  // Reuses the same generalized number-phrase matcher nextwaveHasDynamicNumbers
+  // relies on (handles both digit and spelled-out forms, e.g. "10 years" and
+  // "ten years") rather than a narrow digit-only pattern, then filters to the
+  // matches that are actually durations.
+  const allNumberMatches = [...text.matchAll(new RegExp(NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, 'gi'))].map((m) => m[0]);
+  const durationMentions = allNumberMatches.filter((m) => /(?:days?|weeks?|months?|years?)\s*$/i.test(m));
+  if (durationMentions.length >= 2 && hasCue(NWV2_LONG_GROWTH_CUES)) return 'stock_chart';
+  // Comparison language + a number wins over growth language when both are
+  // present (e.g. "you end up with only $36,738" is both a growth AND a
+  // comparison statement) — the comparison framing is the more specific,
+  // more informative classification for a single-snapshot delay/gap
+  // narrative (as opposed to the multi-duration trajectory case above).
+  if (hasCue(NWV2_LONG_COMPARE_CUES) && hasNumber) return 'share_compare';
+  // Recurring-contribution language is checked before growth language: a
+  // sentence like "invest $500 every month, assuming an 8% annual return"
+  // matches both cue sets, but the concrete recurring ACTION (money moving
+  // each period) is the more specific, more visualizable concept — growth/
+  // rate wording alone (with no recurring cue) still correctly falls
+  // through to stock_chart below.
+  if (hasCue(NWV2_LONG_RECURRING_CUES) && hasNumber) return 'money_flow';
+  if (hasCue(NWV2_LONG_GROWTH_CUES) && hasNumber) return 'stock_chart';
+  return hasNumber ? 'calc_card' : 'avatar_panel';
+}
+
+// Server-side, independently callable/testable so the classification can
+// be inspected and verified before any rendering happens — not just
+// asserted. Read-only, no CEO session required (mirrors the existing
+// debug/plan actions' access level).
+async function nextwaveV2ClassifyLongBeats(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script } = req.body || {};
+  if (!script || typeof script !== 'string') return res.status(400).json({ ok: false, error: 'script (string) required' });
+  const units = nextwaveSegmentMeaningUnits(script);
+  const bySection = new Map();
+  units.forEach((u) => {
+    if (!bySection.has(u.section)) bySection.set(u.section, []);
+    bySection.get(u.section).push(u);
+  });
+  const beats = [...bySection.entries()].map(([section, sectionUnits]) => {
+    const combinedText = sectionUnits.map((u) => u.text).join(' ');
+    return {
+      section,
+      units: sectionUnits.map((u) => u.unit),
+      text: combinedText,
+      treatment: nwv2ClassifyLongTreatment(combinedText, section),
+    };
+  });
+  return res.status(200).json({ ok: true, unit_count: units.length, beats });
+}
 async function nextwaveV2CompositeLongSegmentRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
@@ -16576,6 +16781,8 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
       await nwv2LongStockChartSegment({
         heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
         label: beat.label, changeText: beat.changeText, direction: beat.direction,
+        series: beat.series, axisStartLabel: beat.axisStartLabel, axisEndLabel: beat.axisEndLabel,
+        markerIndex: beat.markerIndex, markerLabel: beat.markerLabel,
         bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
       });
       segmentType = 'stock_chart';
@@ -16591,6 +16798,7 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
         heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
         beforeLabel: beat.beforeLabel, beforeCount: beat.beforeCount, beforeValue: beat.beforeValue,
         afterLabel: beat.afterLabel, afterCount: beat.afterCount, afterValue: beat.afterValue,
+        displayMode: beat.displayMode, anchorText: beat.anchorText, deltaSuffix: beat.deltaSuffix, deltaTextOverride: beat.deltaTextOverride,
         bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
       });
       segmentType = 'share_compare';
@@ -18402,6 +18610,7 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_generate_thumbnail')  return await nextwaveV2GenerateThumbnail(req, res);
     // Long-Format Landscape Validation — 1920x1080, sparse avatar (open/close
     // panels only), comparison/timeline treatments for real visual variety.
+    if (action === 'nextwave_v2_classify_long_beats')  return await nextwaveV2ClassifyLongBeats(req, res);
     if (action === 'nextwave_v2_composite_long_segment') return await nextwaveV2CompositeLongSegmentRender(req, res);
     if (action === 'nextwave_v2_concat_long')         return await nextwaveV2ConcatLongRender(req, res);
     if (action === 'nextwave_v2_generate_long_thumbnail') return await nextwaveV2GenerateLongThumbnail(req, res);
