@@ -14048,7 +14048,13 @@ async function nextwaveV2ResolveOrGenerateSceneBackground(sceneConcept, budget) 
     return { role, path: await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`), reused: true, cost_usd: 0 };
   }
   if (!budget || budget.remaining <= 0) return null;
-  const prompt = `Premium editorial illustration for a modern finance explainer video: ${sceneConcept}. Warm, bright, clean environment with soft natural daylight, cream and warm gold color palette with navy accents, professional financial-magazine illustration style, shallow depth with a clear foreground subject, high production value. Absolutely NOT dark, NOT futuristic, NOT sci-fi, NOT a dashboard or screen interface. No text, no words, no letters, no numbers, no typography of any kind anywhere in the image, no people, no logos.`;
+  // Proof A v6.1 Creative QC cleanup — real renders showed Ideogram
+  // hallucinating garbled pseudo-text on objects whose real-world form
+  // conventionally carries text (calendar grids, ribbons/banners), despite
+  // the existing "no text" instruction. Excluding that whole OBJECT CLASS
+  // (not just asking for "no text" again) is the actual fix: a scene with
+  // no ribbon/banner/sign/plaque has nowhere for pseudo-text to appear.
+  const prompt = `Premium editorial illustration for a modern finance explainer video: ${sceneConcept}. Warm, bright, clean environment with soft natural daylight, cream and warm gold color palette with navy accents, professional financial-magazine illustration style, shallow depth with a clear foreground subject, high production value. Absolutely NOT dark, NOT futuristic, NOT sci-fi, NOT a dashboard or screen interface. No text, no words, no letters, no numbers, no typography of any kind anywhere in the image, no people, no logos. Do not include ribbons, banners, plaques, signs, labels, pennants, or any object whose real-world form conventionally displays text or writing.`;
   try {
     const gen = await nextwaveV2IdeogramResolveObject(role, prompt, '16x9');
     if (!gen.ok) return null;
@@ -15200,8 +15206,25 @@ function nwv2WhiteBrandMarkFilter(input, output) {
   return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NWV2_NAVY}@0.45:fontsize=28:x=${NEXTWAVE_V2_CANVAS_W}-tw-30:y=${NEXTWAVE_V2_CANVAS_H}-th-30[${output}]`;
 }
 
+// Proof A v6.1 — PM flagged visible punctuation damage ("That's" rendering
+// as "Thats", em dashes vanishing entirely). Apostrophes were being
+// stripped outright because the ASCII apostrophe is ffmpeg drawtext's own
+// text='...' delimiter — a raw one breaks the filter string. Tested
+// ffmpeg's documented close-quote/escaped-quote/reopen-quote idiom
+// ('\'') against this production ffmpeg build directly: it does not
+// behave as documented here and corrupts the filter chain. Fix instead
+// with a typographic curly apostrophe (U+2019) — a normal glyph, not a
+// delimiter, confirmed present in this font and confirmed rendering
+// correctly, and the more correct character for contractions in
+// commercial text anyway. Em/en dashes normalize to a plain hyphen
+// (proven to render — "2-3 DAYS", "-3 SHARES" already do).
 function nwv2WhiteSanitize(v, maxLen) {
-  return String(v).replace(/['":\\\[\]]/g, '').slice(0, maxLen || 40).replace(/%/g, ' PCT');
+  let s = String(v).replace(/[":\\\[\]]/g, '');
+  s = s.replace(/[—–]/g, ' - ');
+  s = s.replace(/'/g, '’');
+  s = s.slice(0, maxLen || 40);
+  s = s.replace(/%/g, ' PCT');
+  return s;
 }
 
 // HOOK segment — headline directly on the white canvas (no card/box), a
@@ -15543,7 +15566,12 @@ async function nwv2LongAvatarPanelSegment({ heygenLocalPath, audioLocalPath, dur
   let last = 'a1', idx = 2;
   const textColor = isCta ? NWV2_GOLD_DARK : NWV2_NAVY;
   lines.forEach((line, li) => {
-    const safe = line.replace(/['":\\\[\],;%]/g, '');
+    // Proof A v6.1 — same fix as nwv2WhiteSanitize: normalize dashes to a
+    // rendering hyphen and convert apostrophes to the typographic curly
+    // form (U+2019) so real beat text like "That's" and em-dash pauses
+    // survive intact instead of being stripped.
+    let safe = line.replace(/[":\\\[\],;%]/g, '');
+    safe = safe.replace(/[—–]/g, ' - ').replace(/'/g, '’');
     const y0 = startY + li * lineH;
     const yExpr = `if(lt(t,0.5),${y0}+22*(1-t/0.5),${y0})`;
     filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${textColor}:fontsize=54:box=0:x=70:y='${yExpr}'[a${idx}]`);
@@ -15895,7 +15923,12 @@ async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, t
   if (bgIn !== null) {
     const totalFrames = Math.max(1, Math.round(dur * 25));
     filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[m0pre]`);
-    filters.push(`[m0pre]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[m0scaled]`);
+    // Proof A v6.1 — a soft blur keeps large scene shapes (buildings,
+    // furniture, environment) recognizable while making any residual
+    // Ideogram pseudo-text illegible, and reads as intentional shallow
+    // depth-of-field rather than a defect.
+    filters.push(`[m0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[m0blur]`);
+    filters.push(`[m0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[m0scaled]`);
     filters.push(`[m0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.30:t=fill[m0]`);
   } else {
     filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[m0]`);
@@ -16021,7 +16054,8 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
   if (hasBg) {
     const totalFrames = Math.max(1, Math.round(dur * 25));
     filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[s0pre]`);
-    filters.push(`[s0pre]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[s0scaled]`);
+    filters.push(`[s0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[s0blur]`);
+    filters.push(`[s0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[s0scaled]`);
     filters.push(`[s0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.15:t=fill[s0]`);
   } else {
     filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[s0]`);
@@ -16183,7 +16217,8 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
   if (hasBg) {
     const totalFrames = Math.max(1, Math.round(dur * 25));
     filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[c0pre]`);
-    filters.push(`[c0pre]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[c0scaled]`);
+    filters.push(`[c0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[c0blur]`);
+    filters.push(`[c0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[c0scaled]`);
     filters.push(`[c0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.15:t=fill[c0]`);
   } else {
     filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[c0]`);
@@ -16292,7 +16327,8 @@ async function nwv2LongDayCardsSegment({ heygenLocalPath, seekSec, title, heroTe
   if (hasBg) {
     const totalFrames = Math.max(1, Math.round(dur * 25));
     filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[d0pre]`);
-    filters.push(`[d0pre]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[d0scaled]`);
+    filters.push(`[d0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[d0blur]`);
+    filters.push(`[d0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[d0scaled]`);
     filters.push(`[d0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.15:t=fill[d0]`);
   } else {
     filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[d0]`);
