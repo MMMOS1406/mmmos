@@ -11443,11 +11443,18 @@ async function nextwaveV2SliceNarration(req, res) {
     // Omitted (the default for every existing caller), this is unchanged.
     // IMPORTANT: dur_sec must stay an INPUT-side trim (before -i) here so
     // only the real narration content for THIS beat is ever read — without
-    // that, apad's whole_dur would just keep reading further real speech
-    // from the next beat rather than adding silence.
+    // that, the pad would just keep reading further real speech from the
+    // next beat rather than adding silence.
+    // apad's `whole_dur` option doesn't exist on the actual deployed ffmpeg
+    // build (linux-x64 N-47683, 2018 — confirmed live: "Option 'whole_dur'
+    // not found") even though current ffmpeg docs list it — that option
+    // postdates this build, same class of gap hit earlier with scale/crop's
+    // `t` support. Plain `apad` (no args, pads indefinitely) combined with
+    // an explicit output `-t` to cap the total duration is universally
+    // supported across ffmpeg versions and produces the identical result.
     const shouldPad = typeof pad_to_sec === 'number' && pad_to_sec > Number(dur_sec);
     const outputArgs = shouldPad
-      ? ['-af', `apad=whole_dur=${Number(pad_to_sec).toFixed(2)}`, '-t', String(Number(pad_to_sec).toFixed(2))]
+      ? ['-af', 'apad', '-t', String(Number(pad_to_sec).toFixed(2))]
       : [];
     await execFileAsync(ffmpegInstaller.path, [
       '-y', '-ss', String(Number(start_sec).toFixed(2)), '-t', String(Number(dur_sec).toFixed(2)), '-i', srcPath,
