@@ -1,0 +1,6 @@
+{
+  "file": "fourth_holdout.mjs",
+  "sha256": "f830fc7ffc441ef8d788f4a49e4517b6a30b8a9157331df23b1087580112bfcb",
+  "frozen_at": "2026-09-25T20:36:45Z",
+  "note": "30 normal + 6 safety scripts. Written after the bounded release-candidate corrections and frozen BEFORE its first run. The Brain, planner, validator and renderer must not change in response to this set's results."
+}
