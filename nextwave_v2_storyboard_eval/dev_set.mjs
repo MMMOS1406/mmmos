@@ -199,3 +199,33 @@ export const DEV3 = [
     calcs: [], together: [], status: 'needs_review',
   },
 ];
+
+// ── DEVELOPMENT set 4: analogues of the structures the final validator must handle
+// (parts vs total flow, percent+dollar decrease, lump-sum milestones). Development only.
+export const DEV4 = [
+  {
+    id: 'D16_parts_and_total_flow',
+    script: "Your company sends $100 a month and you send $200 a month into the account, for $300 a month in total.",
+    mentions: [
+      { raw: '$100', roles: ['recurring_amount'], basis: 'per_month' }, { raw: '$200', roles: ['recurring_amount'], basis: 'per_month' },
+      { raw: '$300', roles: ['recurring_amount', 'outcome'], basis: 'per_month' },
+    ],
+    calcs: [{ target: '$300', expected: () => 100 + 200 }], together: [['$100', '$200']], status: 'PASS',
+  },
+  {
+    id: 'D17_pct_decrease_dollars',
+    script: "Streaming fees fell 10 percent, from $20 to $18 a month.",
+    mentions: [{ raw: '10 percent', roles: ['change_pct'] }, { raw: '$20', roles: ['recurring_amount'], basis: 'per_month' }, { raw: '$18', roles: ['recurring_amount', 'outcome'], basis: 'per_month' }],
+    calcs: [{ target: '$18', expected: () => 20 * 0.9 }], together: [['$20', '$18']], status: 'PASS',
+  },
+  {
+    id: 'D18_lump_milestones',
+    script: "A $5,000 deposit at 6 percent is worth about $8,954 after 10 years and $16,036 after 20 years.",
+    mentions: [
+      { raw: '$5,000', roles: ['principal'] }, { raw: '6 percent', roles: ['rate'] }, { raw: '$8,954', roles: ['outcome'] }, { raw: '10 years', roles: ['horizon'] },
+      { raw: '$16,036', roles: ['outcome'] }, { raw: '20 years', roles: ['horizon'] },
+    ],
+    calcs: [{ target: '$8,954', expected: () => 5000 * Math.pow(1.06, 10) }, { target: '$16,036', expected: () => 5000 * Math.pow(1.06, 20) }],
+    together: [['$8,954', '$16,036']], status: 'PASS',
+  },
+];

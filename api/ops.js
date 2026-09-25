@@ -15689,13 +15689,19 @@ async function nwv2LongCalcCardSegment({ heygenLocalPath, seekSec, title, values
     if (len <= t) return base;
     return Math.max(Math.round(base * (t / len)), Math.round(base * 0.62));
   };
-  const safeTitle = nwv2WhiteSanitize(title, 50).replace(/[,;]/g, '');
+  // ONE font size for every value line (the longest line decides), the last (result)
+  // line emphasised; the title is fitted to the box. Nothing is truncated.
+  const CHAR_W = 0.68, INNER_W = boxW - 120;
+  const safeTitle = nwv2WhiteSanitize(title, 60).replace(/[,;]/g, '');
   if (safeTitle) {
-    const fs = nwv2FitFontsizeL(safeTitle, 42, 30);
+    const fs = Math.max(28, Math.min(42, Math.floor(INNER_W / (safeTitle.length * CHAR_W))));
     filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=${fs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 56}:enable='gte(t,0.35)'[k${idx}]`);
     last = `k${idx}`; idx++;
   }
   const safeValues = (values || []).slice(0, 4).map((v) => nwv2WhiteSanitize(v, 60));
+  const maxLen = Math.max(1, ...safeValues.map((v) => v.length));
+  const fsBase = Math.max(28, Math.min(46, Math.floor(INNER_W / (maxLen * CHAR_W))));
+  const fsLast = Math.min(fsBase + 8, Math.max(fsBase, Math.floor(INNER_W / (Math.max(1, (safeValues[safeValues.length - 1] || '').length) * CHAR_W))));
   const lineH = 108;
   const blockH = safeValues.length * lineH;
   const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 40 : 0);
@@ -15706,16 +15712,13 @@ async function nwv2LongCalcCardSegment({ heygenLocalPath, seekSec, title, values
     const isLast = vi === safeValues.length - 1;
     const yExpr = `if(lt(t,${revealAt.toFixed(2)}+0.22),${targetY}+16*(1-(t-${revealAt.toFixed(2)})/0.22),${targetY})`;
     if (!isLast) {
-      const fs = nwv2FitFontsizeL(val, 46, 20);
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=${fs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=${fsBase}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
       last = `k${idx}`; idx++;
     } else {
-      const fs1 = nwv2FitFontsizeL(val, 48, 20);
-      const fs2 = nwv2FitFontsizeL(val, 56, 20);
       const popAt = (revealAt + 0.15).toFixed(2);
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs1}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fsBase}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
       last = `k${idx}`; idx++;
-      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs2}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fsLast}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
       last = `k${idx + 1}`; idx += 2;
     }
   });
@@ -16037,7 +16040,7 @@ async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, t
 // begun contributing). `axisStartLabel`/`axisEndLabel` replace the
 // hardcoded day labels. `markerIndex`/`markerLabel` optionally calls out
 // one x-index (e.g. "year 5, investor B starts") with a vertical marker.
-async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, subLabel, yTicks, yMax, changeText, direction, dur, meaningEventAtSec, bgPath, series, axisStartLabel, axisEndLabel, markerIndex, markerLabel, outPath }) {
+async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, subLabel, yTicks, yMax, milestones, changeText, direction, dur, meaningEventAtSec, bgPath, series, axisStartLabel, axisEndLabel, markerIndex, markerLabel, outPath }) {
   const hasBg = !!bgPath;
   // A visible margin is left around the chart panel only when a background
   // exists, so the environmental context (v6) actually shows; with no
@@ -16083,7 +16086,8 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, subL
   // collided, never overlapping a line and never truncated), and a title/
   // subtitle block inside the card. `plotX0/plotX1` are the data extents.
   const hasSeries = !!(series && series.length);
-  const LABEL_COL_W = 340, Y_PAD = 130;
+  const hasMilestones = !!(series && series.length && Array.isArray(milestones) && milestones.length);
+  const LABEL_COL_W = hasMilestones ? 60 : 340, Y_PAD = 130;
   const hasYScale = Array.isArray(yTicks) && yTicks.length > 0;
   const plotX0 = chartX0 + (hasYScale ? Y_PAD : 0);
   const plotX1 = hasSeries ? chartX1 - LABEL_COL_W : chartX1;
@@ -16170,8 +16174,31 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, subL
         lastDefinedY = y1;
       }
       const finalVal = [...s.points].reverse().find((v) => v != null);
-      if (finalVal != null && lastDefinedY != null) ends.push({ s, color, endY: lastDefinedY, finalVal });
+      if (finalVal != null && lastDefinedY != null && !hasMilestones) ends.push({ s, color, endY: lastDefinedY, finalVal });
     });
+    // Milestones on ONE trajectory: a dot on the curve at each stated time, a thin guide
+    // to the axis, and its value + time label attached above-left of the dot (the
+    // region above-left of a rising curve is empty). Labels that would overlap are
+    // lifted, never dropped or truncated.
+    if (hasMilestones) {
+      const BLOCK_H = 74, boxes = [];
+      const pts0 = series[0].points;
+      [...milestones].sort((x, y) => x.index - y.index).forEach((m) => {
+        const v = pts0[m.index]; if (v == null) return;
+        const px = plotX0 + Math.round((plotW * m.index) / (n - 1)), py = yOf(v);
+        const tSec = drawStart + (drawSpan * m.index) / (n - 1) + 0.1;
+        const valTxt = nwv2WhiteSanitize(m.valueText || '', 20), labTxt = nwv2WhiteSanitize(m.label || '', 40);
+        const w = Math.max(String(valTxt).length * 26, String(labTxt).length * 15) + 12;
+        let top = py - 22 - BLOCK_H;
+        const hit = (t) => boxes.some((b) => !(px + 6 < b.x0 || px + 6 - w > b.x1 || t + BLOCK_H < b.y0 || t > b.y1));
+        while (hit(top) && top > chartYTop - 40) top -= 16;
+        boxes.push({ x0: px + 6 - w, x1: px + 6, y0: top, y1: top + BLOCK_H });
+        filters.push(`[${last}]drawbox=x=${px - 1}:y=${py}:w=2:h=${chartYBase - py}:color=${NWV2_NAVY}@0.25:t=fill:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+        filters.push(`[${last}]drawbox=x=${px - 9}:y=${py - 9}:w=18:h=18:color=${NWV2_GOLD_DARK}:t=fill:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${valTxt}':fontcolor=${NWV2_GOLD_DARK}:fontsize=38:box=0:x=${px + 6}-text_w:y=${Math.round(top)}:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${labTxt}':fontcolor=${NWV2_NAVY}@0.75:fontsize=22:box=0:x=${px + 6}-text_w:y=${Math.round(top) + 44}:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+      });
+    }
     // Direct labels in the right-hand column: value (the caller's own
     // authoritative string, never computed here) + the series name wrapped to
     // at most two lines. Blocks are stacked so none overlaps another and none
@@ -16489,9 +16516,9 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
   // Consequence badge — the delta, styled as a highlighted pill, below the panel at the reveal moment.
   if (delta !== 0) {
     const badgeText = deltaTextOverride
-      ? nwv2WhiteSanitize(deltaTextOverride, 24)
+      ? nwv2WhiteSanitize(deltaTextOverride, 34)
       : nwv2WhiteSanitize((direction === 'down' ? '-' : '+') + delta + (deltaSuffix ? ' ' + deltaSuffix : ''), 24);
-    const badgeW = 360, badgeH = 90, badgeX = (NWV2L_W - badgeW) / 2, badgeY = panelY + panelH + 30;
+    const badgeW = Math.max(360, String(badgeText).length * 30 + 70), badgeH = 90, badgeX = (NWV2L_W - badgeW) / 2, badgeY = panelY + panelH + 30;
     // The renderer cannot know whether a change is good or bad (a payment
     // that fell is good, a balance that fell is not): the caller states the
     // tone. Default preserves the earlier look for decreases (red) and uses a
@@ -16914,7 +16941,7 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
       if (bg && bg.info) illustrationInfo = bg.info;
       await nwv2LongStockChartSegment({
         heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
-        label: beat.label, subLabel: beat.subLabel, yTicks: beat.yTicks, yMax: beat.yMax, changeText: beat.changeText, direction: beat.direction,
+        label: beat.label, subLabel: beat.subLabel, yTicks: beat.yTicks, yMax: beat.yMax, milestones: beat.milestones, changeText: beat.changeText, direction: beat.direction,
         series: beat.series, axisStartLabel: beat.axisStartLabel, axisEndLabel: beat.axisEndLabel,
         markerIndex: beat.markerIndex, markerLabel: beat.markerLabel,
         bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
