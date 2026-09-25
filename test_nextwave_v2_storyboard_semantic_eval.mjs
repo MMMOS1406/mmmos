@@ -17,7 +17,7 @@ import { promisify } from 'node:util';
 import { deps as baseDeps, SCRIPTS as PROOF_SCRIPTS } from './test_nextwave_v2_storyboard_brain.mjs';
 import { nextwaveV2BuildStoryboardSemantic } from './lib/nextwaveV2SemanticStoryboard.mjs';
 import { makeLiveCaller, makeRecordingCaller, MODEL_ID } from './lib/nextwaveV2SemanticProposer.mjs';
-import { DEV, DEV2, DEV3 } from './nextwave_v2_storyboard_eval/dev_set.mjs';
+import { DEV, DEV2, DEV3, DEV4 } from './nextwave_v2_storyboard_eval/dev_set.mjs';
 
 const args = process.argv.slice(2);
 const argVal = (k) => { const i = args.indexOf(k); return i > -1 ? args[i + 1] : null; };
@@ -40,9 +40,15 @@ if (setName === 'final') {
   if (actual !== freeze.sha256) { console.error(`REFUSING TO RUN: ${freeze.file} hash ${actual} != frozen ${freeze.sha256}. The fresh set is no longer untouched.`); process.exit(2); }
   console.log(`fresh hold-out hash verified against freeze_fresh.json (${actual.slice(0, 12)}…, frozen ${freeze.frozen_at})`);
   cases = (await import('./nextwave_v2_storyboard_eval/' + freeze.file)).FRESH;
+} else if (setName === 'third') {
+  const freeze = JSON.parse(readFileSync(dir + 'freeze_third.json', 'utf8'));
+  const actual = createHash('sha256').update(readFileSync(dir + freeze.file)).digest('hex');
+  if (actual !== freeze.sha256) { console.error(`REFUSING TO RUN: ${freeze.file} hash ${actual} != frozen ${freeze.sha256}. The third set is no longer untouched.`); process.exit(2); }
+  console.log(`third hold-out hash verified against freeze_third.json (${actual.slice(0, 12)}…, frozen ${freeze.frozen_at})`);
+  cases = (await import('./nextwave_v2_storyboard_eval/' + freeze.file)).THIRD;
 } else if (setName === 'dev') {
   // the first final set was SPENT (seen and reported); it is now development data
-  cases = [...DEV, ...DEV2, ...DEV3, ...(await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL];
+  cases = [...DEV, ...DEV2, ...DEV3, ...DEV4, ...(await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL, ...(await import('./nextwave_v2_storyboard_eval/fresh_holdout.mjs')).FRESH];
 } else if (setName === 'proofs') {
   // Proof A / Proof B / synthetic C scripts through the SEMANTIC Brain (no ground truth
   // here: status, scenes, derived values and renderer parameters are inspected directly)
@@ -53,6 +59,8 @@ if (setName === 'final') {
 const recPath = dir + `recordings/${setName === 'final' ? 'final' : setName}.json`;
 mkdirSync(dir + 'recordings', { recursive: true });
 const store = new Map(existsSync(recPath) ? Object.entries(JSON.parse(readFileSync(recPath, 'utf8'))) : []);
+// spent hold-out sets are development data: their recorded model responses are reusable for replay
+if (setName === 'dev') for (const f of ['fresh', 'final', 'proofs', 'third_spent']) { const fp = dir + `recordings/${f}.json`; if (existsSync(fp)) for (const [k, v] of Object.entries(JSON.parse(readFileSync(fp, 'utf8')))) if (!store.has(k)) store.set(k, v); }
 const tally = { live_calls: 0, replayed: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0 };
 let liveCaller = null;
 if (live) {
@@ -150,7 +158,7 @@ for (const c of cases) {
     if (cmp.form === 'bars') {
       const [b, a] = [rp.beforeCount, rp.afterCount];
       if (cmp.delta) {
-        const num = Number(String(rp.deltaTextOverride || '').replace(/[^0-9.]/g, '').replace(/(\d)\.$/, '$1').match(/[\d.]+/)?.[0]);
+        const num = Number(String(rp.deltaTextOverride || '').replace(/\([^)]*\)/g, '').replace(/[^0-9.]/g, '').replace(/(\d)\.$/, '$1').match(/[\d.]+/)?.[0]);
         // duration deltas print "N MONTHS": digits only
         if (Number.isFinite(num) && Math.abs(num - Math.abs(a - b)) > Math.max(1, 0.001 * Math.abs(a - b))) visualIssues.push(`${sc.scene_id}: delta ${rp.deltaTextOverride} != |${b}-${a}|`);
         const sign = a < b ? '-' : '+'; if (!String(rp.deltaTextOverride).startsWith(sign)) visualIssues.push(`${sc.scene_id}: delta sign`);
@@ -209,7 +217,7 @@ async function renderScenes(id, out) {
       if (s.treatment === 'avatar_panel') await R.nwv2LongAvatarPanelSegment({ heygenLocalPath: avatar, audioLocalPath: audio, dur: 5, text: p.text, isCta: !!p.isCta, fadeEdge: null, contextCaption: p.contextCaption, outPath: o });
       else if (s.treatment === 'money_flow') await R.nwv2LongMoneyFlowSegment({ heygenLocalPath: avatar, seekSec: 0, fromLabel: p.fromLabel, toLabel: p.toLabel, amountText: p.amountText, dur: 7, outPath: o });
       else if (s.treatment === 'day_cards') await R.nwv2LongDayCardsSegment({ heygenLocalPath: avatar, seekSec: 0, heroText: p.heroText, heroSub: p.heroSub, days: p.days, dur: 7, outPath: o });
-      else if (s.treatment === 'stock_chart') await R.nwv2LongStockChartSegment({ heygenLocalPath: avatar, seekSec: 0, label: p.label, subLabel: p.subLabel, yTicks: p.yTicks, yMax: p.yMax, changeText: p.changeText, direction: p.direction, series: p.series, axisStartLabel: p.axisStartLabel, axisEndLabel: p.axisEndLabel, markerIndex: p.markerIndex, markerLabel: p.markerLabel, dur: 9, outPath: o });
+      else if (s.treatment === 'stock_chart') await R.nwv2LongStockChartSegment({ heygenLocalPath: avatar, seekSec: 0, label: p.label, subLabel: p.subLabel, yTicks: p.yTicks, yMax: p.yMax, milestones: p.milestones, changeText: p.changeText, direction: p.direction, series: p.series, axisStartLabel: p.axisStartLabel, axisEndLabel: p.axisEndLabel, markerIndex: p.markerIndex, markerLabel: p.markerLabel, dur: 9, outPath: o });
       else if (s.treatment === 'share_compare') await R.nwv2LongShareCompareSegment({ heygenLocalPath: avatar, seekSec: 0, beforeLabel: p.beforeLabel, beforeCount: p.beforeCount, beforeValue: p.beforeValue, afterLabel: p.afterLabel, afterCount: p.afterCount, afterValue: p.afterValue, displayMode: p.displayMode, anchorText: p.anchorText, deltaSuffix: p.deltaSuffix, deltaTextOverride: p.deltaTextOverride, deltaNote: p.deltaNote, headerLabel: p.headerLabel, deltaTone: p.deltaTone, dur: 9, outPath: o });
       else await R.nwv2LongCalcCardSegment({ heygenLocalPath: avatar, seekSec: 0, title: p.title, values: p.values, dur: 7, outPath: o });
       res.push({ scene: s.scene_id, treatment: s.treatment, ok: true, file: o });
