@@ -1,0 +1,6 @@
+{
+  "file": "fresh_holdout.mjs",
+  "sha256": "c4dca59327aa79e28e5c5ea1032ff396666d54976d3f37666f564f97283e6b55",
+  "frozen_at": "2026-09-25T14:38:20Z",
+  "note": "Written after the generalization corrections were implemented and frozen BEFORE its first run. The Brain, prompts and renderer must not be changed in response to this set's results; if this hash stops matching, or the Brain changes after seeing results, the set is no longer untouched."
+}
