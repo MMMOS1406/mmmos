@@ -16164,10 +16164,17 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
   // relationship (the same 2-3 day span from the timeline scene) is explicit.
   filters.push(`[${last}]drawbox=x=${chartX0}:y=${chartYBase}:w=${chartW}:h=3:color=${axisColor}:t=fill[s${idx}]`);
   last = `s${idx}`; idx++;
-  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='DAY 0':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX0}:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
-  last = `s${idx}`; idx++;
-  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='DAY 3':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX1}-text_w:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
-  last = `s${idx}`; idx++;
+  // Axis end labels only when the caller supplies them (the decorative path
+  // used to hardcode "DAY 0"/"DAY 3" from one script's window).
+  const legacyStart = nwv2WhiteSanitize(axisStartLabel || '', 16), legacyEnd = nwv2WhiteSanitize(axisEndLabel || '', 16);
+  if (legacyStart) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${legacyStart}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX0}:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  if (legacyEnd) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${legacyEnd}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${chartX1}-text_w:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
   // A finer 14-segment staircase that draws itself in, thicker/glowing when
   // over a dark background, with a data-point marker popping at each step —
   // real "chart visibly developing and dominating the frame."
@@ -16261,17 +16268,14 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
 // the number swaps to afterValue and the "-N SHARES" badge appears — a
 // single causal transition (100 -> 97, 3 disappear) instead of two static
 // counts side by side.
-// Proof B generalization — `displayMode` ('chips', the Proof A default, or
-// 'bar') and `anchorText`/`deltaSuffix` were previously hardcoded literals
-// ("SAME $3,000", "SHARES") left over from Proof A's specific narrative;
-// they're now optional parameters defaulting to those exact same literals,
-// so Proof A is byte-for-byte unaffected. 'bar' mode is for comparing two
-// raw VALUES (e.g. two final dollar totals) rather than a count of
-// discrete interchangeable units — a chip grid is the wrong metaphor for
-// "$91,473 vs $36,738" (there's nothing to visually delete), so this adds
-// two proportional horizontal bars instead, sharing the same panel/
-// header/value-swap/badge mechanics.
-async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, displayMode, anchorText, deltaSuffix, deltaTextOverride, headerLabel, outPath }) {
+// `displayMode` is 'chips' (a count of discrete interchangeable units) or
+// 'bar' (two raw VALUES, e.g. two final dollar totals — a chip grid is the
+// wrong metaphor for "$91,473 vs $36,738"). The comparison is direction-
+// neutral (after may be below, above or equal to before). Every label
+// (`anchorText`, `deltaSuffix`, header, after-value fallback) is supplied by
+// the caller: this primitive no longer falls back to any literal from an
+// earlier script ("SAME $3,000", "YOUR SHARES", "REMAIN", "SHARES").
+async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, displayMode, anchorText, deltaSuffix, deltaTextOverride, headerLabel, deltaTone, outPath }) {
   const hasBg = !!bgPath;
   const mode = displayMode === 'bar' ? 'bar' : 'chips';
   // The grid/bar is a representative visual capped at 24 units, not a
@@ -16282,19 +16286,32 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
   // 24, then scale the real delta proportionally onto that representative
   // total so the causal "value drops" transition stays visible regardless
   // of scale. The badge text below still reports the real, unscaled delta.
+  // Direction-neutral: `after` may be below, above, or equal to `before`
+  // (a cost that fell, a balance that grew, a neutral swap). Nothing here
+  // assumes after <= before; the scene shows a decrease, an increase, or no
+  // change according to the actual values. For a decrease this arithmetic is
+  // identical to the previous clamped version.
   const rawBefore = Math.max(1, Math.round(beforeCount) || 8);
-  const rawAfter = Math.max(0, Math.min(rawBefore, Number.isFinite(Number(afterCount)) ? Math.round(afterCount) : 5));
-  const rawDelta = Math.max(0, rawBefore - rawAfter);
-  const before = Math.min(24, rawBefore);
-  const scaledDelta = rawDelta > 0 ? Math.max(1, Math.round(before * (rawDelta / rawBefore))) : 0;
-  const after = Math.max(0, before - scaledDelta);
+  const rawAfter = Math.max(0, Number.isFinite(Number(afterCount)) ? Math.round(afterCount) : 5);
+  const direction = rawAfter < rawBefore ? 'down' : rawAfter > rawBefore ? 'up' : 'flat';
+  const bigCount = Math.max(rawBefore, rawAfter);
+  const cells = Math.min(24, bigCount);
+  const rawDelta = Math.abs(rawAfter - rawBefore);
+  const scaledDelta = rawDelta > 0 ? Math.max(1, Math.round(cells * (rawDelta / bigCount))) : 0;
+  const before = direction === 'up' ? cells - scaledDelta : cells;
+  const after = direction === 'up' ? cells : cells - scaledDelta;
   const delta = rawDelta;
+  // Bars use the real (unrounded, uncapped) magnitudes so their lengths are
+  // exactly proportional whichever side is larger.
+  const barBefore = Number(beforeCount) > 0 ? Number(beforeCount) : rawBefore;
+  const barAfter = Number.isFinite(Number(afterCount)) && Number(afterCount) >= 0 ? Number(afterCount) : rawAfter;
+  const barMax = Math.max(barBefore, barAfter) || 1;
   const revealAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 0.6 && meaningEventAtSec < dur - 0.3)
     ? meaningEventAtSec : Math.max(1.0, dur * 0.6);
 
-  const cell = hasBg ? 80 : 90, gap = 18, cols = Math.min(8, before);
-  const rows = Math.ceil(before / cols);
-  const gridW = mode === 'bar' ? Math.min(8, before) * cell + (Math.min(8, before) - 1) * gap : cols * cell + (cols - 1) * gap;
+  const cell = hasBg ? 80 : 90, gap = 18, cols = Math.min(8, cells);
+  const rows = Math.ceil(cells / cols);
+  const gridW = mode === 'bar' ? Math.min(8, cells) * cell + (Math.min(8, cells) - 1) * gap : cols * cell + (cols - 1) * gap;
   const barH = hasBg ? 80 : 90, barGap = 40;
   const contentH = mode === 'bar' ? (barH * 2 + barGap) : (rows * cell + (rows - 1) * gap);
   const panelPad = hasBg ? 70 : 90;
@@ -16329,14 +16346,14 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
   // panel header does not change at the reveal but the hero value does, so a
   // scenario-specific beforeLabel used as the header contradicts the swapped
   // number. Defaults to beforeLabel, so every existing caller is unchanged.
-  const safeHeaderLabel = nwv2WhiteSanitize(headerLabel || beforeLabel || 'YOUR SHARES', 24);
+  const safeHeaderLabel = nwv2WhiteSanitize(headerLabel || beforeLabel || '', 24);
   if (safeHeaderLabel) {
     filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHeaderLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=32:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 35}:enable='gte(t,0.15)'[c${idx}]`);
     last = `c${idx}`; idx++;
   }
   // Hero count — reads beforeValue until the reveal, then swaps to afterValue.
   const safeBeforeValue = nwv2WhiteSanitize(beforeValue || String(rawBefore), 20);
-  const safeAfterValue = nwv2WhiteSanitize(afterValue || (String(rawAfter) + (afterLabel ? ' ' + afterLabel : ' REMAIN')), 24);
+  const safeAfterValue = nwv2WhiteSanitize(afterValue || (String(rawAfter) + (afterLabel ? ' ' + afterLabel : '')), 24);
   filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeValue}':fontcolor=${NWV2_NAVY}:fontsize=72:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 100}:enable='lt(t,${revealAt.toFixed(2)})'[c${idx}]`);
   last = `c${idx}`; idx++;
   filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterValue}':fontcolor=${NWV2_GOLD_DARK}:fontsize=72:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 100}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
@@ -16346,16 +16363,17 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
     // gold ribbon top) rather than plain squares. Units beyond `after`
     // vanish at the reveal moment — the visible causal transition for a
     // count of discrete, interchangeable units (e.g. shares).
-    for (let i = 0; i < before; i++) {
+    for (let i = 0; i < cells; i++) {
       const col = i % cols, row = Math.floor(i / cols);
       const cx = gridX0 + col * (cell + gap);
       const cy = gridY0 + row * (cell + gap);
-      const isLost = i >= after;
-      const appearAt = 0.2 + i * (0.5 / before);
+      const isLost = direction === 'down' && i >= after;   // visible only before the reveal
+      const isNew = direction === 'up' && i >= before;     // appears at the reveal
+      const appearAt = 0.2 + i * (0.5 / cells);
       const enableExpr = isLost
         ? `gte(t,${appearAt.toFixed(2)})*lt(t,${revealAt.toFixed(2)})`
-        : `gte(t,${appearAt.toFixed(2)})`;
-      const bodyColor = isLost ? `${NWV2_NAVY}@0.08` : `${NWV2_GOLD}@0.20`;
+        : isNew ? `gte(t,${revealAt.toFixed(2)})` : `gte(t,${appearAt.toFixed(2)})`;
+      const bodyColor = isLost ? `${NWV2_NAVY}@0.08` : isNew ? `${NWV2_GOLD}@0.38` : `${NWV2_GOLD}@0.20`;
       const ribbonColor = isLost ? `${NWV2_NAVY}@0.3` : NWV2_GOLD_DARK;
       filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${bodyColor}:t=fill:enable='${enableExpr}'[c${idx}]`);
       last = `c${idx}`; idx++;
@@ -16371,11 +16389,11 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
     // grows in at the reveal moment, sized to its real proportion of the
     // before value (same before/after scale already computed above).
     const bar1Y = gridY0, bar2Y = gridY0 + barH + barGap;
-    const afterFrac = before > 0 ? after / before : 0;
-    const bar2W = Math.max(6, Math.round(gridW * afterFrac));
+    const bar1W = Math.max(6, Math.round(gridW * (barBefore / barMax)));
+    const bar2W = Math.max(6, Math.round(gridW * (barAfter / barMax)));
     const safeBeforeRowLabel = nwv2WhiteSanitize(beforeLabel || '', 22);
     const safeAfterRowLabel = nwv2WhiteSanitize(afterLabel || '', 22);
-    filters.push(`[${last}]drawbox=x=${gridX0}:y=${bar1Y}:w='min(${gridW},${gridW}*max(0,t-0.3)/0.6)':h=${barH}:color=${NWV2_GOLD}@0.75:t=fill:enable='gte(t,0.3)'[c${idx}]`);
+    filters.push(`[${last}]drawbox=x=${gridX0}:y=${bar1Y}:w='min(${bar1W},${bar1W}*max(0,t-0.3)/0.6)':h=${barH}:color=${NWV2_GOLD}@0.75:t=fill:enable='gte(t,0.3)'[c${idx}]`);
     last = `c${idx}`; idx++;
     if (safeBeforeRowLabel) {
       filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeRowLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=24:box=0:x=${gridX0}:y=${bar1Y - 32}:enable='gte(t,0.3)'[c${idx}]`);
@@ -16388,21 +16406,30 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
       last = `c${idx}`; idx++;
     }
   }
-  // Causal anchor line tying this scene back to whatever stays constant
-  // across before/after (defaults to Proof A's exact literal so it's
-  // unaffected; a genuinely different script passes its own anchorText).
-  const safeAnchor = nwv2WhiteSanitize(anchorText || 'SAME $3,000', 30);
-  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAnchor}':fontcolor=${NWV2_NAVY}@0.65:fontsize=30:box=0:x=(${NWV2L_W}-text_w)/2:y=70:enable='gte(t,0.15)'[c${idx}]`);
-  last = `c${idx}`; idx++;
+  // Causal anchor line (optional): whatever stays constant across
+  // before/after. Drawn ONLY when the caller supplies it — the primitive no
+  // longer falls back to a literal from any particular script.
+  const safeAnchor = nwv2WhiteSanitize(anchorText || '', 30);
+  if (safeAnchor) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAnchor}':fontcolor=${NWV2_NAVY}@0.65:fontsize=30:box=0:x=(${NWV2L_W}-text_w)/2:y=70:enable='gte(t,0.15)'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
   // Consequence badge — the delta, styled as a highlighted pill, below the panel at the reveal moment.
   if (delta !== 0) {
     const badgeText = deltaTextOverride
       ? nwv2WhiteSanitize(deltaTextOverride, 24)
-      : nwv2WhiteSanitize((delta > 0 ? '-' : '+') + Math.abs(delta) + ' ' + (deltaSuffix || 'SHARES'), 24);
+      : nwv2WhiteSanitize((direction === 'down' ? '-' : '+') + delta + (deltaSuffix ? ' ' + deltaSuffix : ''), 24);
     const badgeW = 360, badgeH = 90, badgeX = (NWV2L_W - badgeW) / 2, badgeY = panelY + panelH + 30;
-    filters.push(`[${last}]drawbox=x=${badgeX}:y=${badgeY}:w=${badgeW}:h=${badgeH}:color=0xb0413e@0.12:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    // The renderer cannot know whether a change is good or bad (a payment
+    // that fell is good, a balance that fell is not): the caller states the
+    // tone. Default preserves the earlier look for decreases (red) and uses a
+    // neutral tone for increases.
+    const tone = deltaTone || (direction === 'down' ? 'negative' : 'neutral');
+    const toneColor = tone === 'positive' ? '0x2f7d4f' : tone === 'negative' ? '0xb0413e' : NWV2_NAVY;
+    const toneFillAlpha = tone === 'neutral' ? '0.10' : '0.12';
+    filters.push(`[${last}]drawbox=x=${badgeX}:y=${badgeY}:w=${badgeW}:h=${badgeH}:color=${toneColor}@${toneFillAlpha}:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
     last = `c${idx}`; idx++;
-    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${badgeText}':fontcolor=0xb0413e:fontsize=48:box=0:x=(${NWV2L_W}-text_w)/2:y=${badgeY + 20}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${badgeText}':fontcolor=${toneColor}:fontsize=48:box=0:x=(${NWV2L_W}-text_w)/2:y=${badgeY + 20}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
     last = `c${idx}`; idx++;
   }
   filters.push(nwv2LongCameraPushFilter(last, `c${idx}`, dur, 25));
@@ -16825,7 +16852,7 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
         heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
         beforeLabel: beat.beforeLabel, beforeCount: beat.beforeCount, beforeValue: beat.beforeValue,
         afterLabel: beat.afterLabel, afterCount: beat.afterCount, afterValue: beat.afterValue,
-        displayMode: beat.displayMode, anchorText: beat.anchorText, deltaSuffix: beat.deltaSuffix, deltaTextOverride: beat.deltaTextOverride, headerLabel: beat.headerLabel,
+        displayMode: beat.displayMode, anchorText: beat.anchorText, deltaSuffix: beat.deltaSuffix, deltaTextOverride: beat.deltaTextOverride, headerLabel: beat.headerLabel, deltaTone: beat.deltaTone,
         bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
       });
       segmentType = 'share_compare';
