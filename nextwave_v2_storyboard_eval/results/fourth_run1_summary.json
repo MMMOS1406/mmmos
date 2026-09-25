@@ -1,0 +1,499 @@
+{
+ "setName": "fourth",
+ "sums": {
+  "cases": 36,
+  "full": 31,
+  "needs_review": 11,
+  "misbindings": 0,
+  "silent_drops": 0,
+  "gt_mentions": 158,
+  "bound_ok": 150,
+  "unbound_reported": 8,
+  "calcs_gt": 44,
+  "calcs_verified": 40,
+  "calcs_agree": 40,
+  "provenance_bad": 0,
+  "blocked": 0,
+  "visual_mismatch": 0,
+  "normal": 30,
+  "normal_full": 25,
+  "normal_review": 5,
+  "normal_blocked": 0,
+  "safety": 6,
+  "safety_safe": 6
+ },
+ "tally": {
+  "live_calls": 72,
+  "replayed": 0,
+  "input_tokens": 191862,
+  "output_tokens": 48214,
+  "cost_usd": 1.2987960000000003
+ },
+ "model": "claude-sonnet-4-5",
+ "rows": [
+  {
+   "id": "N01_stock_total_return",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(start_to_result)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N02_monthly_cash_flow",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N03_million_dollar_recurring",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N04_cents_daily_snack",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N05_delayed_saving",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": [
+    "review:unbound_value 25 years (passes disagree: remaining_period vs horizon)"
+   ]
+  },
+  {
+   "id": "N06_delayed_million",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": [
+    "review:unbound_value 25 years (passes disagree: remaining_period vs horizon)"
+   ]
+  },
+  {
+   "id": "N07_real_salary",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(start_to_result)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N08_annual_contribution",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N09_refi_mortgage_hyphen_term",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": [
+    "review:uncovered_numeric_token 6.8"
+   ]
+  },
+  {
+   "id": "N10_tiny_fee_vs_high_fee",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N11_tax_bracket",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N12_gain_transformation",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N13_pct_increase_dollars",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N14_pct_decrease_dollars",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [
+    [
+     "$80",
+     "$68"
+    ]
+   ],
+   "scenes": [
+    "u00:avatar_panel(explanation)"
+   ],
+   "reasons": [
+    "review:unbound_value $80 (only one valid pass labelled this quantity)"
+   ]
+  },
+  {
+   "id": "N15_cents_monthly_yearly_lifetime",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N16_lump_milestones",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N17_recurring_milestones_million",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N18_single_stock_return",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(start_to_result)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N19_two_stocks",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": [
+    "review:stated_value_not_reproduced"
+   ]
+  },
+  {
+   "id": "N20_runway",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N21_payoff_time",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N22_two_payment_options",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N23_match_percent_and_dollars",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N24_grocery_inflation_monthly",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N25_real_value_cents",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(start_to_result)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N26_weekly_saving",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N27_paycheck_split_parts_total",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N28_recurring_transfer_flow",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:money_flow(flow)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N29_dividend_income",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N30_401k_nominal_vs_real",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "S1_direction_unknown",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(explanation)"
+   ],
+   "reasons": [
+    "review:direction_ambiguous 2 percent (the script does not say whether the change is up or down)"
+   ]
+  },
+  {
+   "id": "S2_contradicted_growth",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "review:stated_value_not_reproduced"
+   ]
+  },
+  {
+   "id": "S3_pct_disagrees_with_dollars",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": [
+    "review:pct_dollar_mismatch (the stated percentage change is not what the stated dollar figures imply, or its direction differs)"
+   ]
+  },
+  {
+   "id": "S4_unclear_options",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(explanation)"
+   ],
+   "reasons": [
+    "review:unassigned_quantity $30 (both passes judged this money/percent quantity to play no financial role)",
+    "review:unassigned_quantity $300 (both passes judged this money/percent quantity to play no financial role)",
+    "review:unassigned_quantity 9 percent (both passes judged this money/percent quantity to play no financial role)",
+    "review:uncovered_numeric_token 4"
+   ]
+  },
+  {
+   "id": "S5_delayed_payoff_unsupported",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "review:stated_value_not_reproduced"
+   ]
+  },
+  {
+   "id": "S6_ages_unsupported",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "review:uncovered_numeric_token 25",
+    "review:uncovered_numeric_token 45",
+    "review:uncovered_numeric_token 65"
+   ]
+  }
+ ]
+}

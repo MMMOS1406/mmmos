@@ -1,0 +1,367 @@
+fourth hold-out hash verified against freeze_fourth.json (f830fc7ffc44…, frozen 2026-09-25T20:36:45Z)
+
+=== N01_stock_total_return  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(start_to_result)
+  OK                 $12,000        bound=principal (verified)  expected principal
+  OK                 7.5 percent    bound=rate (verified)  expected rate
+  OK                 $50,974        bound=outcome (verified)  expected outcome
+  OK                 20 years       bound=horizon (verified)  expected horizon
+  calc $50,974      stated=50974 independent=50974.21 gtOK=true brainVerified=true computed=50974.2132 (annual_compounding) agrees=true
+  render: S1:share_compare:OK
+
+=== N02_monthly_cash_flow  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $3,450         bound=income_amount (corroborated)  expected income_amount|recurring_amount|principal|baseline_amount|transfer_amount
+  OK                 $1,900         bound=recurring_amount (corroborated)  expected recurring_amount|outcome|baseline_amount|transfer_amount|upfront_cost
+  OK                 $310           bound=recurring_amount (corroborated)  expected recurring_amount|outcome|baseline_amount|transfer_amount|upfront_cost
+  OK                 $1,240         bound=outcome (verified)  expected outcome|recurring_amount|gap
+  calc $1,240       stated=1240 independent=1240 gtOK=true brainVerified=true computed=1240 (difference) agrees=true
+  render: S1:calc_card:OK
+
+=== N03_million_dollar_recurring  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $2,000         bound=recurring_amount (verified)  expected recurring_amount
+  OK                 7 percent      bound=rate (verified)  expected rate
+  OK                 30 years       bound=horizon (verified)  expected horizon
+  OK                 $2,439,942     bound=outcome (verified)  expected outcome
+  calc $2,439,942   stated=2439942 independent=2439941.99 gtOK=true brainVerified=true computed=2439941.9916 (monthly_annuity) agrees=true
+  render: S1:calc_card:OK
+
+=== N04_cents_daily_snack  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $3.75          bound=recurring_amount (corroborated)  expected recurring_amount
+  OK                 $1,368.75      bound=outcome (verified)  expected outcome|gap|recurring_amount
+  calc $1,368.75    stated=1368.75 independent=1368.75 gtOK=true brainVerified=true computed=1368.75 (annualize) agrees=true
+  render: S1:calc_card:OK
+
+=== N05_delayed_saving  [expected PASS]  -> needs_review ===
+scenes: u00+u01:stock_chart(trajectory_comparison)
+  OK                 $200           bound=recurring_amount (verified)  expected recurring_amount
+  OK                 30 years       bound=horizon (verified)  expected horizon
+  OK                 6 percent      bound=rate (verified)  expected rate
+  OK                 $200,903       bound=outcome (verified)  expected outcome
+  OK                 five years     bound=delay_period (corroborated)  expected delay_period
+  unbound_reported   25 years         expected horizon
+  OK                 $138,599       bound=outcome (verified)  expected outcome
+  calc $200,903     stated=200903 independent=200903.01 gtOK=true brainVerified=true computed=200903.0085 (monthly_annuity) agrees=true
+  calc $138,599     stated=138599 independent=138598.79 gtOK=true brainVerified=true computed=138598.7925 (monthly_annuity) agrees=true
+  issues: review:unbound_value 25 years (passes disagree: remaining_period vs horizon)
+  render: S1:stock_chart:OK
+
+=== N06_delayed_million  [expected PASS]  -> needs_review ===
+scenes: u00+u01:stock_chart(trajectory_comparison)
+  OK                 $600           bound=recurring_amount (verified)  expected recurring_amount
+  OK                 35 years       bound=horizon (verified)  expected horizon
+  OK                 7 percent      bound=rate (verified)  expected rate
+  OK                 $1,080,633     bound=outcome (verified)  expected outcome
+  OK                 ten years      bound=delay_period (verified)  expected delay_period
+  unbound_reported   25 years         expected horizon
+  OK                 $486,043       bound=outcome (verified)  expected outcome
+  calc $1,080,633   stated=1080633 independent=1080632.76 gtOK=true brainVerified=true computed=1080632.7608 (monthly_annuity) agrees=true
+  calc $486,043     stated=486043 independent=486043.02 gtOK=true brainVerified=true computed=486043.0158 (monthly_annuity) agrees=true
+  issues: review:unbound_value 25 years (passes disagree: remaining_period vs horizon)
+  render: S1:stock_chart:OK
+
+=== N07_real_salary  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(start_to_result)
+  OK                 $60,000        bound=baseline_amount (verified)  expected baseline_amount|income_amount|principal
+  OK                 15 years       bound=horizon (verified)  expected horizon
+  OK                 2.5 percent    bound=inflation_rate (verified)  expected inflation_rate
+  OK                 $41,428        bound=outcome (verified)  expected outcome
+  calc $41,428      stated=41428 independent=41427.93 gtOK=true brainVerified=true computed=41427.9334 (annual_compounding) agrees=true
+  render: S1:share_compare:OK
+
+=== N08_annual_contribution  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $7,000         bound=recurring_amount (verified)  expected recurring_amount
+  OK                 5 percent      bound=rate (verified)  expected rate
+  OK                 25 years       bound=horizon (verified)  expected horizon
+  OK                 $334,090       bound=outcome (verified)  expected outcome
+  calc $334,090     stated=334090 independent=334089.69 gtOK=true brainVerified=true computed=334089.6917 (yearly_annuity) agrees=true
+  render: S1:calc_card:OK
+
+=== N09_refi_mortgage_hyphen_term  [expected PASS]  -> needs_review ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 $240,000       bound=principal (verified)  expected principal
+  OK                 30-year        bound=horizon (verified)  expected horizon
+  reported_uncovered 6.8              expected rate
+  OK                 5.2 percent    bound=rate (verified)  expected rate
+  OK                 $1,565         bound=outcome (corroborated)  expected outcome|recurring_amount
+  OK                 $1,318         bound=outcome (verified)  expected outcome|recurring_amount
+  calc $1,565       stated=1565 independent=1564.62 gtOK=true brainVerified=false
+  calc $1,318       stated=1318 independent=1317.87 gtOK=true brainVerified=true computed=1317.8661 (monthly_amortization) agrees=true
+  issues: review:uncovered_numeric_token 6.8
+  render: S1:share_compare:OK
+
+=== N10_tiny_fee_vs_high_fee  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 $100,000       bound=principal (verified)  expected principal
+  OK                 25 years       bound=horizon (verified)  expected horizon
+  OK                 6 percent      bound=rate (verified)  expected rate
+  OK                 0.05 percent   bound=fee_rate (verified)  expected fee_rate
+  OK                 $424,154       bound=outcome (verified)  expected outcome
+  OK                 0.85 percent   bound=fee_rate (verified)  expected fee_rate
+  OK                 $350,939       bound=outcome (verified)  expected outcome
+  calc $424,154     stated=424154 independent=424154.45 gtOK=true brainVerified=true computed=424154.4485 (annual_compounding) agrees=true
+  calc $350,939     stated=350939 independent=350939.24 gtOK=true brainVerified=true computed=350939.2354 (annual_compounding) agrees=true
+  render: S1:share_compare:OK
+
+=== N11_tax_bracket  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $85,000        bound=transfer_amount (verified)  expected income_amount|transfer_amount|principal|baseline_amount
+  OK                 22 percent     bound=tax_rate (verified)  expected tax_rate
+  OK                 $18,700        bound=outcome (verified)  expected outcome|gap
+  OK                 $66,300        bound=outcome (verified)  expected outcome
+  calc $18,700      stated=18700 independent=18700 gtOK=true brainVerified=true computed=18700 (flat_rate) agrees=true
+  calc $66,300      stated=66300 independent=66300 gtOK=true brainVerified=true computed=66300 (flat_rate) agrees=true
+  render: S1:calc_card:OK
+
+=== N12_gain_transformation  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 $40,000        bound=transfer_amount (corroborated)  expected transfer_amount|principal|baseline_amount|outcome
+  OK                 $25,000        bound=principal (corroborated)  expected principal|baseline_amount|upfront_cost|transfer_amount
+  OK                 $15,000        bound=outcome (verified)  expected gap|outcome
+  OK                 15 percent     bound=tax_rate (verified)  expected tax_rate
+  OK                 $2,250         bound=outcome (verified)  expected outcome|gap
+  calc $15,000      stated=15000 independent=15000 gtOK=true brainVerified=true computed=15000 (difference) agrees=true
+  calc $2,250       stated=2250 independent=2250 gtOK=true brainVerified=true computed=2250 (share_of) agrees=true
+  render: S1:share_compare:OK
+
+=== N13_pct_increase_dollars  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 8 percent      bound=change_pct (corroborated)  expected change_pct
+  OK                 $175           bound=recurring_amount (corroborated)  expected recurring_amount
+  OK                 $189           bound=recurring_amount (corroborated)  expected recurring_amount|outcome
+  calc $189         stated=189 independent=189 gtOK=true brainVerified=false
+  render: S1:share_compare:OK
+
+=== N14_pct_decrease_dollars  [expected PASS]  -> needs_review ===
+scenes: u00:avatar_panel(explanation)
+  OK                 15 percent     bound=change_pct (corroborated)  expected change_pct
+  unbound_reported   $80              expected recurring_amount
+  OK                 $68            bound=recurring_amount (corroborated)  expected recurring_amount|outcome
+  calc $68          stated=68 independent=68 gtOK=true brainVerified=false
+  SCENE-GROUPING FAIL: [["$80","$68"]]
+  issues: review:unbound_value $80 (only one valid pass labelled this quantity)
+  render: S1:avatar_panel:OK
+
+=== N15_cents_monthly_yearly_lifetime  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $9.99          bound=recurring_amount (corroborated)  expected recurring_amount
+  OK                 $119.88        bound=outcome (verified)  expected outcome|gap|recurring_amount
+  OK                 $1,198.80      bound=outcome (verified)  expected outcome|gap
+  OK                 ten years      bound=horizon (corroborated)  expected horizon
+  calc $119.88      stated=119.88 independent=119.88 gtOK=true brainVerified=true computed=119.88 (annualize) agrees=true
+  calc $1,198.80    stated=1198.8 independent=1198.8 gtOK=true brainVerified=true computed=1198.8 (multiply) agrees=true
+  render: S1:calc_card:OK
+
+=== N16_lump_milestones  [expected PASS]  -> clean  FULL ===
+scenes: u00:stock_chart(trajectory_comparison)
+  OK                 $8,000         bound=principal (verified)  expected principal
+  OK                 7 percent      bound=rate (verified)  expected rate
+  OK                 $15,737        bound=outcome (verified)  expected outcome
+  OK                 10 years       bound=horizon (verified)  expected horizon
+  OK                 $30,957        bound=outcome (verified)  expected outcome
+  OK                 20 years       bound=horizon (verified)  expected horizon
+  OK                 $60,898        bound=outcome (verified)  expected outcome
+  OK                 30 years       bound=horizon (verified)  expected horizon
+  calc $15,737      stated=15737 independent=15737.21 gtOK=true brainVerified=true computed=15737.2109 (annual_compounding) agrees=true
+  calc $30,957      stated=30957 independent=30957.48 gtOK=true brainVerified=true computed=30957.4757 (annual_compounding) agrees=true
+  calc $60,898      stated=60898 independent=60898.04 gtOK=true brainVerified=true computed=60898.0403 (annual_compounding) agrees=true
+  render: S1:stock_chart:OK
+
+=== N17_recurring_milestones_million  [expected PASS]  -> clean  FULL ===
+scenes: u00:stock_chart(trajectory_comparison)
+  OK                 $1,500         bound=recurring_amount (verified)  expected recurring_amount
+  OK                 8 percent      bound=rate (verified)  expected rate
+  OK                 20 years       bound=horizon (verified)  expected horizon
+  OK                 $883,531       bound=outcome (verified)  expected outcome
+  OK                 30 years       bound=horizon (verified)  expected horizon
+  OK                 $2,235,539     bound=outcome (verified)  expected outcome
+  calc $883,531     stated=883531 independent=883530.62 gtOK=true brainVerified=true computed=883530.6234 (monthly_annuity) agrees=true
+  calc $2,235,539   stated=2235539 independent=2235539.17 gtOK=true brainVerified=true computed=2235539.173 (monthly_annuity) agrees=true
+  render: S1:stock_chart:OK
+
+=== N18_single_stock_return  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(start_to_result)
+  OK                 12 percent     bound=rate (verified)  expected rate
+  OK                 $5,000         bound=principal (verified)  expected principal
+  OK                 $15,529        bound=outcome (verified)  expected outcome
+  OK                 10 years       bound=horizon (verified)  expected horizon
+  calc $15,529      stated=15529 independent=15529.24 gtOK=true brainVerified=true computed=15529.241 (annual_compounding) agrees=true
+  render: S1:share_compare:OK
+
+=== N19_two_stocks  [expected PASS]  -> needs_review ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 15 years       bound=horizon (verified)  expected horizon
+  OK                 $20,000        bound=principal (verified)  expected principal
+  OK                 $72,850        bound=outcome (verified)  expected outcome
+  OK                 9 percent      bound=rate (verified)  expected rate
+  OK                 $41,579        bound=outcome (corroborated)  expected outcome
+  OK                 one returning 5 percent bound=rate (corroborated)  expected rate
+  calc $72,850      stated=72850 independent=72849.65 gtOK=true brainVerified=true computed=72849.6492 (annual_compounding) agrees=true
+  calc $41,579      stated=41579 independent=41578.56 gtOK=true brainVerified=false
+  issues: review:stated_value_not_reproduced
+  render: S1:share_compare:OK
+
+=== N20_runway  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $22,800        bound=principal (verified)  expected principal
+  OK                 $3,800         bound=recurring_amount (verified)  expected recurring_amount
+  OK                 6 months       bound=result_duration (verified)  expected result_duration
+  calc 6 months     stated=6 independent=6 gtOK=true brainVerified=true computed=6 (simple_division) agrees=true
+  render: S1:calc_card:OK
+
+=== N21_payoff_time  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $12,000        bound=principal (verified)  expected principal
+  OK                 15 percent     bound=rate (verified)  expected rate
+  OK                 $350           bound=recurring_amount (verified)  expected recurring_amount
+  OK                 45 months      bound=result_duration (verified)  expected result_duration
+  calc 45 months    stated=45 independent=45.05 gtOK=true brainVerified=true computed=45.0485 (monthly_amortization) agrees=true
+  render: S1:calc_card:OK
+
+=== N22_two_payment_options  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 $10,000        bound=principal (verified)  expected principal
+  OK                 12 percent     bound=rate (verified)  expected rate
+  OK                 $250           bound=recurring_amount (verified)  expected recurring_amount
+  OK                 51 months      bound=result_duration (verified)  expected result_duration
+  OK                 $500           bound=recurring_amount (verified)  expected recurring_amount
+  OK                 22 months      bound=result_duration (verified)  expected result_duration
+  calc 51 months    stated=51 independent=51.34 gtOK=true brainVerified=true computed=51.3376 (monthly_amortization) agrees=true
+  calc 22 months    stated=22 independent=22.43 gtOK=true brainVerified=true computed=22.4257 (monthly_amortization) agrees=true
+  render: S1:share_compare:OK
+
+=== N23_match_percent_and_dollars  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 5 percent      bound=savings_rate (corroborated)  expected savings_rate
+  OK                 $90,000        bound=income_amount (corroborated)  expected income_amount
+  OK                 $4,500         bound=outcome (verified)  expected outcome|recurring_amount|transfer_amount|gap
+  OK                 $4,500         bound=outcome (verified)  expected outcome|recurring_amount|transfer_amount|gap
+  OK                 100 percent    bound=match_rate (corroborated)  expected match_rate
+  OK                 $9,000         bound=outcome (verified)  expected outcome|recurring_amount|transfer_amount|gap
+  calc $4,500       stated=4500 independent=4500 gtOK=true brainVerified=true computed=4500 (share_of) agrees=true
+  calc $9,000       stated=9000 independent=9000 gtOK=true brainVerified=true computed=9000 (sum) agrees=true
+  render: S1:calc_card:OK
+
+=== N24_grocery_inflation_monthly  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $800           bound=recurring_amount (corroborated)  expected recurring_amount|baseline_amount
+  OK                 $1,075         bound=outcome (verified)  expected outcome|recurring_amount
+  OK                 ten years      bound=horizon (verified)  expected horizon
+  OK                 3 percent      bound=inflation_rate (verified)  expected inflation_rate
+  calc $1,075       stated=1075 independent=1075.13 gtOK=true brainVerified=true computed=1075.1331 (annual_compounding) agrees=true
+  render: S1:calc_card:OK
+
+=== N25_real_value_cents  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(start_to_result)
+  OK                 $100           bound=principal (verified)  expected principal|baseline_amount
+  OK                 4 percent      bound=inflation_rate (verified)  expected inflation_rate
+  OK                 $67.56         bound=outcome (verified)  expected outcome
+  OK                 10 years       bound=horizon (verified)  expected horizon
+  calc $67.56       stated=67.56 independent=67.56 gtOK=true brainVerified=true computed=67.5564 (annual_compounding) agrees=true
+  render: S1:share_compare:OK
+
+=== N26_weekly_saving  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $75            bound=recurring_amount (verified)  expected recurring_amount
+  OK                 3 percent      bound=rate (verified)  expected rate
+  OK                 8 years        bound=horizon (verified)  expected horizon
+  OK                 $35,251        bound=outcome (verified)  expected outcome
+  calc $35,251      stated=35251 independent=35250.95 gtOK=true brainVerified=true computed=35250.9531 (weekly_annuity) agrees=true
+  render: S1:calc_card:OK
+
+=== N27_paycheck_split_parts_total  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $2,400         bound=outcome (verified)  expected income_amount|transfer_amount|principal|outcome|baseline_amount
+  OK                 $1,600         bound=recurring_amount (corroborated)  expected transfer_amount|outcome|recurring_amount|gap|baseline_amount
+  OK                 $800           bound=recurring_amount (corroborated)  expected transfer_amount|outcome|recurring_amount|gap|baseline_amount
+  calc $2,400       stated=2400 independent=2400 gtOK=true brainVerified=true computed=2400 (sum) agrees=true
+  render: S1:calc_card:OK
+
+=== N28_recurring_transfer_flow  [expected PASS]  -> clean  FULL ===
+scenes: u00:money_flow(flow)
+  OK                 $250           bound=recurring_amount (corroborated)  expected recurring_amount|transfer_amount
+  render: S1:money_flow:OK
+
+=== N29_dividend_income  [expected PASS]  -> clean  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $50,000        bound=principal (corroborated)  expected principal
+  OK                 3 percent      bound=rate (corroborated)  expected rate
+  OK                 $1,500         bound=outcome (verified)  expected outcome|recurring_amount|gap
+  OK                 $125           bound=outcome (verified)  expected outcome|recurring_amount|gap
+  calc $1,500       stated=1500 independent=1500 gtOK=true brainVerified=true computed=1500 (share_of) agrees=true
+  calc $125         stated=125 independent=125 gtOK=true brainVerified=true computed=125 (per_period) agrees=true
+  render: S1:calc_card:OK
+
+=== N30_401k_nominal_vs_real  [expected PASS]  -> clean  FULL ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 $250,000       bound=principal (verified)  expected principal
+  OK                 6 percent      bound=rate (verified)  expected rate
+  OK                 $801,784       bound=outcome (verified)  expected outcome
+  OK                 20 years       bound=horizon (verified)  expected horizon
+  OK                 $443,928       bound=outcome (verified)  expected outcome
+  OK                 3 percent      bound=inflation_rate (verified)  expected inflation_rate
+  calc $801,784     stated=801784 independent=801783.87 gtOK=true brainVerified=true computed=801783.8681 (annual_compounding) agrees=true
+  calc $443,928     stated=443928 independent=443928.29 gtOK=true brainVerified=true computed=443928.3609 (annual_compounding) agrees=true
+  render: S1:share_compare:OK
+
+=== S1_direction_unknown  [expected needs_review]  -> needs_review  FULL ===
+scenes: u00:avatar_panel(explanation)
+  OK                 2 percent      bound=change_pct (corroborated)  expected change_pct
+  issues: review:direction_ambiguous 2 percent (the script does not say whether the change is up or down)
+  render: S1:avatar_panel:OK
+
+=== S2_contradicted_growth  [expected needs_review]  -> needs_review  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $1,200         bound=recurring_amount (corroborated)  expected recurring_amount
+  OK                 7 percent      bound=rate (corroborated)  expected rate
+  OK                 25 years       bound=horizon (corroborated)  expected horizon
+  OK                 $300,000       bound=outcome (corroborated)  expected outcome
+  issues: review:stated_value_not_reproduced
+  render: S1:calc_card:OK
+
+=== S3_pct_disagrees_with_dollars  [expected needs_review]  -> needs_review  FULL ===
+scenes: u00:share_compare(outcome_comparison)
+  OK                 10 percent     bound=change_pct (corroborated)  expected change_pct|none
+  OK                 $2,000         bound=recurring_amount (corroborated)  expected recurring_amount
+  OK                 $2,500         bound=recurring_amount (corroborated)  expected recurring_amount|outcome
+  issues: review:pct_dollar_mismatch (the stated percentage change is not what the stated dollar figures imply, or its direction differs)
+  render: S1:share_compare:OK
+
+=== S4_unclear_options  [expected needs_review]  -> needs_review  FULL ===
+scenes: u00:avatar_panel(explanation)
+  labelled_incidental $30              expected none|fee_rate|upfront_cost|baseline_amount|principal|outcome|transfer_amount|recurring_amount
+  labelled_incidental $300             expected none|upfront_cost|baseline_amount|principal|outcome|transfer_amount|recurring_amount
+  labelled_incidental 9 percent        expected none|rate|fee_rate|tax_rate|change_pct
+  labelled_incidental 3 or 30 years    expected none|horizon
+  issues: review:unassigned_quantity $30 (both passes judged this money/percent quantity to play no financial role) | review:unassigned_quantity $300 (both passes judged this money/percent quantity to play no financial role) | review:unassigned_quantity 9 percent (both passes judged this money/percent quantity to play no financial role) | review:uncovered_numeric_token 4
+  render: S1:avatar_panel:OK
+
+=== S5_delayed_payoff_unsupported  [expected SAFE]  -> needs_review  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $500           bound=recurring_amount (corroborated)  expected recurring_amount
+  OK                 $15,000        bound=principal (corroborated)  expected principal
+  OK                 8 percent      bound=rate (corroborated)  expected rate
+  OK                 33 months      bound=result_duration (corroborated)  expected result_duration|none
+  OK                 six months     bound=delay_period (corroborated)  expected delay_period|none
+  OK                 $700           bound=gap (corroborated)  expected gap|outcome|none
+  issues: review:stated_value_not_reproduced
+  render: S1:calc_card:OK
+
+=== S6_ages_unsupported  [expected SAFE]  -> needs_review  FULL ===
+scenes: u00:calc_card(single_figure)
+  OK                 $200           bound=recurring_amount (corroborated)  expected none|recurring_amount
+  OK                 $600           bound=recurring_amount (corroborated)  expected none|recurring_amount
+  OK                 $1.2 million   bound=outcome (corroborated)  expected none|outcome
+  issues: review:uncovered_numeric_token 25 | review:uncovered_numeric_token 45 | review:uncovered_numeric_token 65
+  render: S1:calc_card:OK
+
+================ SUMMARY (fourth set, 36 scripts) ================
+FULL understanding: 31/36 (86%)   needs_review: 11/36   blocked: 0
+NORMAL scripts: FULL 25/30   needs_review 5   blocked 0   |   SAFETY scripts stopped/handled safely: 6/6
+ground-truth quantities: 158   bound correctly: 150   unbound/reported: 8   MISBINDINGS: 0   SILENT DROPS: 0
+independent visual-semantic mismatches through rendering: 0
+calculations (independent recompute): 44   Brain-verified: 40   agree with independent: 40   unprovenanced rendered numbers: 0
+model: claude-sonnet-4-5   live calls: 72  replayed: 0  tokens in/out: 191862/48214  cost this run: $1.2988
