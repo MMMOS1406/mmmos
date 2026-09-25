@@ -1,0 +1,6 @@
+{
+  "file": "final_holdout.mjs",
+  "sha256": "d960e9b7166d92c7a7dbb0aa6cd2d5b8b8885a423a2ab0c121aa67e892368bef",
+  "frozen_at": "2026-09-25T04:05:22Z",
+  "note": "Written and frozen BEFORE the semantic layer was implemented. Run once after implementation. If this hash stops matching, the set is no longer untouched."
+}
