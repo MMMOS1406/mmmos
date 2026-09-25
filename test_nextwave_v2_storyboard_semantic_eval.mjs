@@ -46,9 +46,15 @@ if (setName === 'final') {
   if (actual !== freeze.sha256) { console.error(`REFUSING TO RUN: ${freeze.file} hash ${actual} != frozen ${freeze.sha256}. The third set is no longer untouched.`); process.exit(2); }
   console.log(`third hold-out hash verified against freeze_third.json (${actual.slice(0, 12)}…, frozen ${freeze.frozen_at})`);
   cases = (await import('./nextwave_v2_storyboard_eval/' + freeze.file)).THIRD;
+} else if (setName === 'fourth') {
+  const freeze = JSON.parse(readFileSync(dir + 'freeze_fourth.json', 'utf8'));
+  const actual = createHash('sha256').update(readFileSync(dir + freeze.file)).digest('hex');
+  if (actual !== freeze.sha256) { console.error(`REFUSING TO RUN: ${freeze.file} hash ${actual} != frozen ${freeze.sha256}. The fourth set is no longer untouched.`); process.exit(2); }
+  console.log(`fourth hold-out hash verified against freeze_fourth.json (${actual.slice(0, 12)}…, frozen ${freeze.frozen_at})`);
+  cases = (await import('./nextwave_v2_storyboard_eval/' + freeze.file)).FRESH;
 } else if (setName === 'dev') {
   // the first final set was SPENT (seen and reported); it is now development data
-  cases = [...DEV, ...DEV2, ...DEV3, ...DEV4, ...(await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL, ...(await import('./nextwave_v2_storyboard_eval/fresh_holdout.mjs')).FRESH];
+  cases = [...DEV, ...DEV2, ...DEV3, ...DEV4, ...(await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL, ...(await import('./nextwave_v2_storyboard_eval/fresh_holdout.mjs')).FRESH, ...(await import('./nextwave_v2_storyboard_eval/third_holdout.mjs')).THIRD];
 } else if (setName === 'proofs') {
   // Proof A / Proof B / synthetic C scripts through the SEMANTIC Brain (no ground truth
   // here: status, scenes, derived values and renderer parameters are inspected directly)
@@ -60,7 +66,7 @@ const recPath = dir + `recordings/${setName === 'final' ? 'final' : setName}.jso
 mkdirSync(dir + 'recordings', { recursive: true });
 const store = new Map(existsSync(recPath) ? Object.entries(JSON.parse(readFileSync(recPath, 'utf8'))) : []);
 // spent hold-out sets are development data: their recorded model responses are reusable for replay
-if (setName === 'dev') for (const f of ['fresh', 'final', 'proofs', 'third_spent']) { const fp = dir + `recordings/${f}.json`; if (existsSync(fp)) for (const [k, v] of Object.entries(JSON.parse(readFileSync(fp, 'utf8')))) if (!store.has(k)) store.set(k, v); }
+if (setName === 'dev') for (const f of ['fresh', 'final', 'proofs', 'third']) { const fp = dir + `recordings/${f}.json`; if (existsSync(fp)) for (const [k, v] of Object.entries(JSON.parse(readFileSync(fp, 'utf8')))) if (!store.has(k)) store.set(k, v); }
 const tally = { live_calls: 0, replayed: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0 };
 let liveCaller = null;
 if (live) {
