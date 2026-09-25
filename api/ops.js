@@ -17,6 +17,7 @@ import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypt
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
+import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -16270,7 +16271,7 @@ async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, chan
 // "$91,473 vs $36,738" (there's nothing to visually delete), so this adds
 // two proportional horizontal bars instead, sharing the same panel/
 // header/value-swap/badge mechanics.
-async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, displayMode, anchorText, deltaSuffix, deltaTextOverride, outPath }) {
+async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, displayMode, anchorText, deltaSuffix, deltaTextOverride, headerLabel, outPath }) {
   const hasBg = !!bgPath;
   const mode = displayMode === 'bar' ? 'bar' : 'chips';
   // The grid/bar is a representative visual capped at 24 units, not a
@@ -16324,7 +16325,11 @@ async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLab
   filters.push(`[${last}]drawbox=x=${panelX + 8}:y=${panelY + 8}:w=${panelW}:h=${panelH}:color=${NWV2_SHADOW}:t=fill[c${idx}]`); last = `c${idx}`; idx++;
   filters.push(`[${last}]drawbox=x=${panelX}:y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_WHITE_CARD}@${hasBg ? 0.92 : 1.0}:t=fill[c${idx}]`); last = `c${idx}`; idx++;
   filters.push(`[${last}]drawbox=x=${panelX}:y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_NAVY}@0.2:t=3[c${idx}]`); last = `c${idx}`; idx++;
-  const safeHeaderLabel = nwv2WhiteSanitize(beforeLabel || 'YOUR SHARES', 24);
+  // `headerLabel` (optional, added with the Autonomous Storyboard Brain): the
+  // panel header does not change at the reveal but the hero value does, so a
+  // scenario-specific beforeLabel used as the header contradicts the swapped
+  // number. Defaults to beforeLabel, so every existing caller is unchanged.
+  const safeHeaderLabel = nwv2WhiteSanitize(headerLabel || beforeLabel || 'YOUR SHARES', 24);
   if (safeHeaderLabel) {
     filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHeaderLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=32:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 35}:enable='gte(t,0.15)'[c${idx}]`);
     last = `c${idx}`; idx++;
@@ -16643,6 +16648,28 @@ async function nextwaveV2ClassifyLongBeats(req, res) {
   });
   return res.status(200).json({ ok: true, unit_count: units.length, beats });
 }
+// Autonomous Storyboard Brain — inspectable independently of rendering. Pure
+// deterministic computation over the script text: no Anthropic call, no
+// vendor call, no spend, no session required (same access posture as
+// nextwave_v2_classify_long_beats / nextwave_v2_debug_storyboard). The
+// production functions it builds on are passed in, not duplicated.
+async function nextwaveV2StoryboardBrainAction(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script (string) required' });
+  if (script.length > 6000) return res.status(400).json({ ok: false, error: 'script too long (max 6000 characters)' });
+  try {
+    const out = nextwaveV2BuildStoryboard(script, {
+      segmentMeaningUnits: nextwaveSegmentMeaningUnits,
+      wordsToNumber: _nextwaveWordsToNumber,
+      numberRegexSource: NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source,
+      classifyLongTreatment: nwv2ClassifyLongTreatment,
+    });
+    return res.status(out.ok ? 200 : 422).json(out);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
 async function nextwaveV2CompositeLongSegmentRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
@@ -16798,7 +16825,7 @@ async function nextwaveV2CompositeLongSegmentRender(req, res) {
         heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
         beforeLabel: beat.beforeLabel, beforeCount: beat.beforeCount, beforeValue: beat.beforeValue,
         afterLabel: beat.afterLabel, afterCount: beat.afterCount, afterValue: beat.afterValue,
-        displayMode: beat.displayMode, anchorText: beat.anchorText, deltaSuffix: beat.deltaSuffix, deltaTextOverride: beat.deltaTextOverride,
+        displayMode: beat.displayMode, anchorText: beat.anchorText, deltaSuffix: beat.deltaSuffix, deltaTextOverride: beat.deltaTextOverride, headerLabel: beat.headerLabel,
         bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
       });
       segmentType = 'share_compare';
@@ -18611,6 +18638,7 @@ export default async function handler(req, res) {
     // Long-Format Landscape Validation — 1920x1080, sparse avatar (open/close
     // panels only), comparison/timeline treatments for real visual variety.
     if (action === 'nextwave_v2_classify_long_beats')  return await nextwaveV2ClassifyLongBeats(req, res);
+    if (action === 'nextwave_v2_storyboard_brain')     return await nextwaveV2StoryboardBrainAction(req, res);
     if (action === 'nextwave_v2_composite_long_segment') return await nextwaveV2CompositeLongSegmentRender(req, res);
     if (action === 'nextwave_v2_concat_long')         return await nextwaveV2ConcatLongRender(req, res);
     if (action === 'nextwave_v2_generate_long_thumbnail') return await nextwaveV2GenerateLongThumbnail(req, res);
