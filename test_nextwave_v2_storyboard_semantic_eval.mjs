@@ -14,10 +14,10 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { deps as baseDeps } from './test_nextwave_v2_storyboard_brain.mjs';
+import { deps as baseDeps, SCRIPTS as PROOF_SCRIPTS } from './test_nextwave_v2_storyboard_brain.mjs';
 import { nextwaveV2BuildStoryboardSemantic } from './lib/nextwaveV2SemanticStoryboard.mjs';
 import { makeLiveCaller, makeRecordingCaller, MODEL_ID } from './lib/nextwaveV2SemanticProposer.mjs';
-import { DEV } from './nextwave_v2_storyboard_eval/dev_set.mjs';
+import { DEV, DEV2, DEV3 } from './nextwave_v2_storyboard_eval/dev_set.mjs';
 
 const args = process.argv.slice(2);
 const argVal = (k) => { const i = args.indexOf(k); return i > -1 ? args[i + 1] : null; };
@@ -34,10 +34,23 @@ if (setName === 'final') {
   if (actual !== freeze.sha256) { console.error(`REFUSING TO RUN: final_holdout.mjs hash ${actual} != frozen ${freeze.sha256}. The final set is no longer untouched.`); process.exit(2); }
   console.log(`final hold-out hash verified against freeze.json (${actual.slice(0, 12)}…, frozen ${freeze.frozen_at})`);
   cases = (await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL;
-} else cases = DEV;
+} else if (setName === 'fresh') {
+  const freeze = JSON.parse(readFileSync(dir + 'freeze_fresh.json', 'utf8'));
+  const actual = createHash('sha256').update(readFileSync(dir + freeze.file)).digest('hex');
+  if (actual !== freeze.sha256) { console.error(`REFUSING TO RUN: ${freeze.file} hash ${actual} != frozen ${freeze.sha256}. The fresh set is no longer untouched.`); process.exit(2); }
+  console.log(`fresh hold-out hash verified against freeze_fresh.json (${actual.slice(0, 12)}…, frozen ${freeze.frozen_at})`);
+  cases = (await import('./nextwave_v2_storyboard_eval/' + freeze.file)).FRESH;
+} else if (setName === 'dev') {
+  // the first final set was SPENT (seen and reported); it is now development data
+  cases = [...DEV, ...DEV2, ...DEV3, ...(await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL];
+} else if (setName === 'proofs') {
+  // Proof A / Proof B / synthetic C scripts through the SEMANTIC Brain (no ground truth
+  // here: status, scenes, derived values and renderer parameters are inspected directly)
+  cases = Object.entries(PROOF_SCRIPTS).map(([k, script]) => ({ id: 'P' + k + '_proof_script', script, mentions: [], calcs: [], together: [], status: 'PASS' }));
+} else { console.error('unknown --set ' + setName); process.exit(2); }
 
 // recording store
-const recPath = dir + `recordings/${setName}.json`;
+const recPath = dir + `recordings/${setName === 'final' ? 'final' : setName}.json`;
 mkdirSync(dir + 'recordings', { recursive: true });
 const store = new Map(existsSync(recPath) ? Object.entries(JSON.parse(readFileSync(recPath, 'utf8'))) : []);
 const tally = { live_calls: 0, replayed: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0 };
@@ -115,12 +128,40 @@ for (const c of cases) {
     const tol = cc.tol != null ? cc.tol : tolFor(q && q.kind)(expected);
     const statedOk = stated != null && Math.abs(stated - expected) <= tol;
     const det = (out.calculations || []).find((d) => d.target === (q && q.id) && d.verified);
-    const brainAgree = det ? Math.abs(det.computed - expected) <= Math.max(tol, 1e-6 * Math.abs(expected)) : null;
+    const brainExp = cc.brainExpected ? cc.brainExpected() : expected; // e.g. periods in the calculation's own cadence when the script states years
+    const brainAgree = det ? Math.abs(det.computed - brainExp) <= Math.max(cc.brainExpected ? 0.01 * Math.abs(brainExp) : tol, 1e-6 * Math.abs(brainExp)) : null;
     if (det) sums.calcs_verified++;
     if (brainAgree) sums.calcs_agree++;
     calcRows.push({ target: cc.target, stated, independent_expected: +expected.toFixed(2), gt_consistent: statedOk, brain_verified: !!det, brain_computed: det ? det.computed : null, convention: det ? det.convention : null, brain_agrees_with_independent: brainAgree });
   }
   row.calcRows = calcRows;
+
+  // independent VISUAL-SEMANTIC check on the final renderer parameters, using
+  // the GT metric/time-basis tags (not the Brain's own identity logic)
+  const gtOf = (span) => c.mentions.filter(Boolean).find((g) => norm(g.raw) === norm(span));
+  const visualIssues = [];
+  for (const sc of (out.scenes || [])) {
+    const cmp = sc.comparison, rp = sc.renderer_params;
+    if (!cmp) continue;
+    const ents = cmp.values.map((v) => (out.values || []).find((e) => e.id === v.entity_id));
+    const gts = ents.map((e) => e && e.provenance && e.provenance.span_text ? gtOf(e.provenance.span_text) : null);
+    const bs = gts.map((g) => g && g.basis).filter(Boolean);
+    if (new Set(bs).size > 1) visualIssues.push(`${sc.scene_id}: compared values have different GT time bases (${bs.join(' vs ')})`);
+    if (cmp.form === 'bars') {
+      const [b, a] = [rp.beforeCount, rp.afterCount];
+      if (cmp.delta) {
+        const num = Number(String(rp.deltaTextOverride || '').replace(/[^0-9.]/g, '').replace(/(\d)\.$/, '$1').match(/[\d.]+/)?.[0]);
+        // duration deltas print "N MONTHS": digits only
+        if (Number.isFinite(num) && Math.abs(num - Math.abs(a - b)) > Math.max(1, 0.001 * Math.abs(a - b))) visualIssues.push(`${sc.scene_id}: delta ${rp.deltaTextOverride} != |${b}-${a}|`);
+        const sign = a < b ? '-' : '+'; if (!String(rp.deltaTextOverride).startsWith(sign)) visualIssues.push(`${sc.scene_id}: delta sign`);
+        if (cmp.delta.source === 'stated_gap') {
+          const gapEnt = (out.values || []).find((e) => e.id === cmp.delta.entity_id); const gg = gapEnt && gtOf(gapEnt.provenance.span_text);
+          if (gg && gg.basis && bs.length && gg.basis !== bs[0]) visualIssues.push(`${sc.scene_id}: stated gap basis ${gg.basis} != bars basis ${bs[0]}`);
+        }
+      }
+    }
+  }
+  row.visualIssues = visualIssues; sums.visual_mismatch = (sums.visual_mismatch || 0) + (out.integrity.status === 'blocked' ? 0 : visualIssues.length);
 
   const iss = out.integrity.issues || [];
   const blockers = iss.filter((i) => i.severity === 'blocking');
@@ -130,11 +171,17 @@ for (const c of cases) {
   row.scenes = (out.scenes || []).map((s) => `${s.unit_ids.join('+')}:${s.treatment}(${s.intent})`);
 
   const expectPass = c.status === 'PASS';
+  const expectSafeStop = c.status === 'needs_review', expectSafeAny = c.status === 'SAFE';
   const allBound = ok === c.mentions.filter(Boolean).length || (mentionRows.length && mentionRows.every((m) => m.result === 'OK'));
   const calcsOk = calcRows.every((r) => r.gt_consistent && r.brain_verified && r.brain_agrees_with_independent !== false);
-  row.full = expectPass ? (status === 'clean' && allBound && togetherFail.length === 0 && misb === 0 && drops === 0) : (status === 'needs_review' && misb === 0 && drops === 0);
+  row.full = expectPass ? (status === 'clean' && allBound && togetherFail.length === 0 && misb === 0 && drops === 0)
+    : expectSafeAny ? ((status !== 'clean' || (misb === 0 && drops === 0)) && visualIssues.length === 0)
+    : ((status === 'needs_review' || status === 'blocked') && misb === 0 && drops === 0);
+  row.kind = expectPass ? 'normal' : 'safety';
   row.calcs_all_verified = calcsOk;
 
+  sums.normal = (sums.normal || 0) + (expectPass ? 1 : 0); sums.normal_full = (sums.normal_full || 0) + (expectPass && row.full ? 1 : 0); sums.normal_review = (sums.normal_review || 0) + (expectPass && status === 'needs_review' ? 1 : 0); sums.normal_blocked = (sums.normal_blocked || 0) + (expectPass && status === 'blocked' ? 1 : 0);
+  sums.safety = (sums.safety || 0) + (expectPass ? 0 : 1); sums.safety_safe = (sums.safety_safe || 0) + (!expectPass && row.full ? 1 : 0);
   sums.cases++; sums.misbindings += misb; sums.silent_drops += drops; sums.gt_mentions += mentionRows.length; sums.bound_ok += ok; sums.unbound_reported += unb;
   if (row.full) sums.full++; if (status === 'needs_review') sums.needs_review++; if (status === 'blocked') sums.blocked++;
   sums.provenance_bad += blockers.filter((b) => b.kind === 'unprovenanced_rendered_number').length;
@@ -162,8 +209,8 @@ async function renderScenes(id, out) {
       if (s.treatment === 'avatar_panel') await R.nwv2LongAvatarPanelSegment({ heygenLocalPath: avatar, audioLocalPath: audio, dur: 5, text: p.text, isCta: !!p.isCta, fadeEdge: null, contextCaption: p.contextCaption, outPath: o });
       else if (s.treatment === 'money_flow') await R.nwv2LongMoneyFlowSegment({ heygenLocalPath: avatar, seekSec: 0, fromLabel: p.fromLabel, toLabel: p.toLabel, amountText: p.amountText, dur: 7, outPath: o });
       else if (s.treatment === 'day_cards') await R.nwv2LongDayCardsSegment({ heygenLocalPath: avatar, seekSec: 0, heroText: p.heroText, heroSub: p.heroSub, days: p.days, dur: 7, outPath: o });
-      else if (s.treatment === 'stock_chart') await R.nwv2LongStockChartSegment({ heygenLocalPath: avatar, seekSec: 0, label: p.label, changeText: p.changeText, direction: p.direction, series: p.series, axisStartLabel: p.axisStartLabel, axisEndLabel: p.axisEndLabel, markerIndex: p.markerIndex, markerLabel: p.markerLabel, dur: 9, outPath: o });
-      else if (s.treatment === 'share_compare') await R.nwv2LongShareCompareSegment({ heygenLocalPath: avatar, seekSec: 0, beforeLabel: p.beforeLabel, beforeCount: p.beforeCount, beforeValue: p.beforeValue, afterLabel: p.afterLabel, afterCount: p.afterCount, afterValue: p.afterValue, displayMode: p.displayMode, anchorText: p.anchorText, deltaSuffix: p.deltaSuffix, deltaTextOverride: p.deltaTextOverride, headerLabel: p.headerLabel, deltaTone: p.deltaTone, dur: 9, outPath: o });
+      else if (s.treatment === 'stock_chart') await R.nwv2LongStockChartSegment({ heygenLocalPath: avatar, seekSec: 0, label: p.label, subLabel: p.subLabel, yTicks: p.yTicks, yMax: p.yMax, changeText: p.changeText, direction: p.direction, series: p.series, axisStartLabel: p.axisStartLabel, axisEndLabel: p.axisEndLabel, markerIndex: p.markerIndex, markerLabel: p.markerLabel, dur: 9, outPath: o });
+      else if (s.treatment === 'share_compare') await R.nwv2LongShareCompareSegment({ heygenLocalPath: avatar, seekSec: 0, beforeLabel: p.beforeLabel, beforeCount: p.beforeCount, beforeValue: p.beforeValue, afterLabel: p.afterLabel, afterCount: p.afterCount, afterValue: p.afterValue, displayMode: p.displayMode, anchorText: p.anchorText, deltaSuffix: p.deltaSuffix, deltaTextOverride: p.deltaTextOverride, deltaNote: p.deltaNote, headerLabel: p.headerLabel, deltaTone: p.deltaTone, dur: 9, outPath: o });
       else await R.nwv2LongCalcCardSegment({ heygenLocalPath: avatar, seekSec: 0, title: p.title, values: p.values, dur: 7, outPath: o });
       res.push({ scene: s.scene_id, treatment: s.treatment, ok: true, file: o });
     } catch (e) { res.push({ scene: s.scene_id, treatment: s.treatment, ok: false, error: e.message.split('\n')[0].slice(0, 140) }); }
@@ -181,12 +228,15 @@ for (const r of rows) {
   r.calcRows.forEach((c) => console.log(`  calc ${String(c.target).padEnd(12)} stated=${c.stated} independent=${c.independent_expected} gtOK=${c.gt_consistent} brainVerified=${c.brain_verified}${c.brain_verified ? ` computed=${c.brain_computed} (${c.convention}) agrees=${c.brain_agrees_with_independent}` : ''}`));
   if (r.together_fail.length) console.log('  SCENE-GROUPING FAIL: ' + JSON.stringify(r.together_fail));
   if (r.reasons.length) console.log('  issues: ' + r.reasons.slice(0, 8).join(' | '));
+  if (r.visualIssues && r.visualIssues.length) console.log('  VISUAL-SEMANTIC ISSUES: ' + r.visualIssues.join(' | '));
   if (r.render) console.log('  render: ' + (r.render.skipped ? r.render.skipped : r.render.map((x) => `${x.scene}:${x.treatment}:${x.ok ? 'OK' : 'FAIL ' + x.error}`).join('  ')));
 }
 const pct = (a, b) => (b ? (100 * a / b).toFixed(0) + '%' : 'n/a');
 console.log(`\n================ SUMMARY (${setName} set, ${sums.cases} scripts) ================`);
 console.log(`FULL understanding: ${sums.full}/${sums.cases} (${pct(sums.full, sums.cases)})   needs_review: ${sums.needs_review}/${sums.cases}   blocked: ${sums.blocked}`);
+console.log(`NORMAL scripts: FULL ${sums.normal_full || 0}/${sums.normal || 0}   needs_review ${sums.normal_review || 0}   blocked ${sums.normal_blocked || 0}   |   SAFETY scripts stopped/handled safely: ${sums.safety_safe || 0}/${sums.safety || 0}`);
 console.log(`ground-truth quantities: ${sums.gt_mentions}   bound correctly: ${sums.bound_ok}   unbound/reported: ${sums.unbound_reported}   MISBINDINGS: ${sums.misbindings}   SILENT DROPS: ${sums.silent_drops}`);
+console.log(`independent visual-semantic mismatches through rendering: ${sums.visual_mismatch || 0}`);
 console.log(`calculations (independent recompute): ${sums.calcs_gt}   Brain-verified: ${sums.calcs_verified}   agree with independent: ${sums.calcs_agree}   unprovenanced rendered numbers: ${sums.provenance_bad}`);
 console.log(`model: ${MODEL_ID}   live calls: ${tally.live_calls}  replayed: ${tally.replayed}  tokens in/out: ${tally.input_tokens}/${tally.output_tokens}  cost this run: $${tally.cost_usd.toFixed(4)}`);
 if (live && tally.live_calls) writeFileSync(recPath, JSON.stringify(Object.fromEntries(store), null, 1));
