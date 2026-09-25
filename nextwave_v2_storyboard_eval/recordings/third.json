@@ -1,0 +1,738 @@
+{
+ "a5040b7e1639ddb440bc42beba2a225f28e7558aec8558765770236f89a9b907": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$400 goes straight from your checking account into your brokerage account\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"BROKERAGE CONTRIBUTION\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"flow\",\n      \"purpose\": \"regular contribution from checking to brokerage\",\n      \"from_label\": \"CHECKING ACCOUNT\",\n      \"to_label\": \"BROKERAGE ACCOUNT\"\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2622,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 214,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "95fcc9db677785ef30b5551b0cb2f6ec4756438edb4e72b7a5932a648ea238a7": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Every payday, $400 goes straight from your checking account into your brokerage account.\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"contribution\",\n      \"label\": \"PAYDAY CONTRIBUTION\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"flow\",\n      \"purpose\": \"regular transfer from checking to brokerage\",\n      \"from_label\": \"CHECKING ACCOUNT\",\n      \"to_label\": \"BROKERAGE ACCOUNT\"\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2625,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 218,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "1cde0a90fb2e93406ccde380332e206ad415f98563cf0d326d13da0aa1ee7022": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"You send $300 a month into a Roth IRA\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"a Roth IRA earning 6 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL RETURN\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 25 years it grows to\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"it grows to about $207,898\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"monthly contributions grow to ending balance over time\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2660,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 590,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "038fb21b14dcfbd79d30af8f1e2dcff14723acc89e3234eb856b39926a2ae98f": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"You send $300 a month into a Roth IRA\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Roth IRA earning 6 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL RETURN\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 25 years it grows to\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"it grows to about $207,898\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"Monthly contributions grow to ending balance over time\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2663,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 589,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "2b8e17e061cdca796fe45e1e61fb8449a659cd746bbb5f65d0d2d010ad7bf467": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Save $250 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY SAVING\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Save $250 a month at 6 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL RETURN\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"After 10 years you'll have\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TEN YEARS\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"After 10 years you'll have about $40,970\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    },\n    {\n      \"id\": \"u01.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 20 years about\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TWENTY YEARS\"\n    },\n    {\n      \"id\": \"u01.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 20 years about $115,510\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    },\n    {\n      \"id\": \"u01.m4\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 30 years about\",\n      \"scenario\": \"S3\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"THIRTY YEARS\"\n    },\n    {\n      \"id\": \"u01.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 30 years about $251,129\",\n      \"scenario\": \"S3\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"TEN YEARS\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"TWENTY YEARS\"\n    },\n    {\n      \"id\": \"S3\",\n      \"label\": \"THIRTY YEARS\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\", \"u01\"],\n      \"intent\": \"trajectory_comparison\",\n      \"purpose\": \"compare growth of monthly savings over three time horizons\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m0\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m1\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m3\"\n    },\n    {\n      \"id\": \"c3\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m4\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2711,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 1263,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "1e88a0b4d359e948f684b7669cdacea8cd5d8077b1e7c0c2ded91d2281cfe861": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Save $250 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"a month at 6 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"After 10 years you'll have\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TEN YEARS\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"After 10 years you'll have about $40,970\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"BALANCE\"\n    },\n    {\n      \"id\": \"u01.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 20 years about $115,510\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TWENTY YEARS\"\n    },\n    {\n      \"id\": \"u01.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 20 years about $115,510\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"BALANCE\"\n    },\n    {\n      \"id\": \"u01.m4\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 30 years about $251,129\",\n      \"scenario\": \"S3\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"THIRTY YEARS\"\n    },\n    {\n      \"id\": \"u01.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 30 years about $251,129\",\n      \"scenario\": \"S3\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"TEN YEAR HORIZON\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"TWENTY YEAR HORIZON\"\n    },\n    {\n      \"id\": \"S3\",\n      \"label\": \"THIRTY YEAR HORIZON\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\", \"u01\"],\n      \"intent\": \"trajectory_comparison\",\n      \"purpose\": \"Show how monthly savings grow over three different time horizons\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m0\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m1\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m3\"\n    },\n    {\n      \"id\": \"c3\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m4\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2714,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 1268,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "5dfd9316cee21c93fe12ddf1c4e5c35ef253ee88cada5b399d0b5e27b893bc3a": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Your $200,000 nest egg grows 5 percent a year\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"NEST EGG\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"nest egg grows 5 percent a year for 20 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"grows 5 percent a year for 20 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"for 20 years to about $530,660\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"FUTURE VALUE\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"inflation_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"with 3 percent inflation that only buys\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INFLATION RATE\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"only buys what about $293,813 buys today\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"purchasing_power\",\n      \"label\": \"PURCHASING POWER\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"nest egg grows to future value but inflation erodes purchasing power\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"real_value\",\n      \"inputs\": {\n        \"amount\": {\"calc\": \"c1\", \"output\": \"end_value\"},\n        \"inflation_rate\": \"u00.m4\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"purchasing_power\",\n      \"target\": \"u00.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2691,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 886,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "f8d03d5eb3e4635cf632db8b9283819caf0f80d4e30e636240a919fc06b3442a": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$200,000 nest egg grows 5 percent a year\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"NEST EGG\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"nest egg grows 5 percent a year\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"grows 5 percent a year for 20 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"for 20 years to about $530,660\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"FUTURE VALUE\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"inflation_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"with 3 percent inflation\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INFLATION RATE\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"only buys what about $293,813 buys today\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"purchasing_power\",\n      \"label\": \"PURCHASING POWER\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"nest egg grows to future value but inflation erodes purchasing power\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"real_value\",\n      \"inputs\": {\n        \"amount\": {\"calc\": \"c1\", \"output\": \"end_value\"},\n        \"inflation_rate\": \"u00.m4\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"purchasing_power\",\n      \"target\": \"u00.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2694,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 875,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "ef768ec761f011e3a67b98ee9f00146bd545324e222497e80c333a8042be6a4b": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"transfer_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"You sell shares for a $25,000 gain\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"CAPITAL GAIN\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"tax_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"At a 15 percent long-term rate\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TAX RATE\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you owe $3,750\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"tax_owed\",\n      \"label\": \"TAX OWED\"\n    },\n    {\n      \"id\": \"u01.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"keep $21,250\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"after_tax_proceeds\",\n      \"label\": \"AFTER TAX\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"flow\",\n      \"purpose\": \"shares sold for capital gain\",\n      \"from_label\": \"SHARES\",\n      \"to_label\": \"CAPITAL GAIN\"\n    },\n    {\n      \"unit_ids\": [\"u01\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"tax owed and proceeds after tax\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u01.m0\"\n      },\n      \"output\": \"after_tax_proceeds\",\n      \"target\": \"u01.m2\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u01.m0\"\n      },\n      \"output\": \"tax_owed\",\n      \"target\": \"u01.m1\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2668,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 712,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "9ce1d8279682e2a62b93f0c47a15206c7083d88506205ffa039221f1097cf221": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"transfer_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"You sell shares for a $25,000 gain.\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"CAPITAL GAIN\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"tax_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"At a 15 percent long-term rate\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TAX RATE\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you owe $3,750\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"tax_owed\",\n      \"label\": \"TAX OWED\"\n    },\n    {\n      \"id\": \"u01.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"keep $21,250\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"after_tax_proceeds\",\n      \"label\": \"AFTER TAX\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"flow\",\n      \"purpose\": \"shares sold for gain\",\n      \"from_label\": \"SHARES\",\n      \"to_label\": \"GAIN\"\n    },\n    {\n      \"unit_ids\": [\"u01\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"tax owed and proceeds after tax\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u01.m0\"\n      },\n      \"output\": \"tax_owed\",\n      \"target\": \"u01.m1\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u01.m0\"\n      },\n      \"output\": \"after_tax_proceeds\",\n      \"target\": \"u01.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2671,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 709,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "22df995b46bc60b39e0c36bcdd3f47c6737eef0f3fe5f8a54b61d6988249283b": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"change_pct\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Your car insurance jumped 12 percent\",\n      \"scenario\": null,\n      \"direction\": \"up\",\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INSURANCE JUMP\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $150 to $168 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"OLD PREMIUM\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $150 to $168 a month\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"NEW PREMIUM\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"gap\",\n      \"confidence\": 1.0,\n      \"evidence\": \"which adds $216 a year\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL INCREASE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"BEFORE INCREASE\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"AFTER INCREASE\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"change_over_window\",\n      \"purpose\": \"insurance premium increase and annual cost impact\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"difference\"},\n        \"a\": \"u00.m2\",\n        \"b\": \"u00.m1\",\n        \"cadence\": {\"literal\": \"month\"}\n      },\n      \"output\": \"value\",\n      \"target\": null\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"annualize\"},\n        \"a\": {\"calc\": \"c1\", \"output\": \"value\"},\n        \"cadence\": {\"literal\": \"month\"}\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2653,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 729,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "652cdfbfb69b43ea820d41f47e767cb11cc8566f4db764676e9191bf26c42264": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"change_pct\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Your car insurance jumped 12 percent\",\n      \"scenario\": null,\n      \"direction\": \"up\",\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INSURANCE JUMP\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $150 to $168 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"OLD PREMIUM\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $150 to $168 a month\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"NEW PREMIUM\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"gap\",\n      \"confidence\": 1.0,\n      \"evidence\": \"which adds $216 a year\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL INCREASE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"BEFORE INCREASE\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"AFTER INCREASE\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"Compare old and new monthly premiums and show annual cost increase\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": \"difference\",\n        \"a\": \"u00.m2\",\n        \"b\": \"u00.m1\"\n      },\n      \"output\": \"value\",\n      \"target\": null\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": \"annualize\",\n        \"a\": {\"calc\": \"c1\", \"output\": \"value\"},\n        \"cadence\": {\"literal\": \"month\"}\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2656,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 720,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "51f43a37b467c83e8beead1e0e21ea2a2182b8f77c5b055595d197295194dabf": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"change_pct\",\n      \"confidence\": 1.0,\n      \"evidence\": \"cut your payment by 25 percent\",\n      \"scenario\": null,\n      \"direction\": \"down\",\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PAYMENT CUT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $2,400 to $1,800 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"ORIGINAL PAYMENT\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $2,400 to $1,800 a month\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"NEW PAYMENT\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"BEFORE REFINANCING\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"AFTER REFINANCING\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"payment reduction from refinancing\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"difference\"},\n        \"a\": \"u00.m1\",\n        \"b\": \"u00.m2\"\n      },\n      \"output\": \"value\",\n      \"target\": null\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2644,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 545,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "5c9c5c673353a49589e0b41a2a9c6306891e04ade3b3f1145c77e5781c416dc8": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"change_pct\",\n      \"confidence\": 1.0,\n      \"evidence\": \"cut your payment by 25 percent\",\n      \"scenario\": null,\n      \"direction\": \"down\",\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PAYMENT REDUCTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $2,400 to $1,800 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"BEFORE REFINANCING\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"from $2,400 to $1,800 a month\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"AFTER REFINANCING\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"BEFORE REFINANCING\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"AFTER REFINANCING\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"monthly payment before and after refinancing\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"difference\"},\n        \"a\": \"u00.m1\",\n        \"b\": \"u00.m2\"\n      },\n      \"output\": \"value\",\n      \"target\": null\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"ratio\"},\n        \"a\": {\"calc\": \"c1\", \"output\": \"value\"},\n        \"b\": \"u00.m1\"\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m0\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2647,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 643,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "ea53cadf665abaee4d24fef8c80207ea6b724db2595206a5277c8385fa4f66ba": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"A $20,000 loan at 9 percent over five years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOAN AMOUNT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"loan at 9 percent over five years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ORIGINAL RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"over five years costs $415 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOAN TERM\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"costs $415 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"ORIGINAL PAYMENT\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Refinance at 6 percent and it drops\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"REFINANCE RATE\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"it drops to $387 a month\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"REFINANCE PAYMENT\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"ORIGINAL LOAN\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"REFINANCED LOAN\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\", \"u01\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"compare monthly payments at two interest rates\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"loan_payment\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"periodic_payment\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"loan_payment\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u01.m0\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"periodic_payment\",\n      \"target\": \"u01.m1\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2688,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 923,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "4113b9c7620caf2579abe15eda6d2c5a799e275b6f098d62054c8176d213c2ce": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$20,000 loan at 9 percent over five years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOAN AMOUNT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$20,000 loan at 9 percent over five years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ORIGINAL RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$20,000 loan at 9 percent over five years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOAN TERM\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"costs $415 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"ORIGINAL PAYMENT\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Refinance at 6 percent and it drops\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"REFINANCE RATE\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"it drops to $387 a month\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": \"periodic_payment\",\n      \"label\": \"NEW PAYMENT\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"ORIGINAL LOAN\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"REFINANCED\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\", \"u01\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"compare monthly payments before and after refinancing\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"loan_payment\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"periodic_payment\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"loan_payment\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u01.m0\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"periodic_payment\",\n      \"target\": \"u01.m1\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2691,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 926,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "3471d15167b2ac80d616047eb850d0311888ac391cb514da098945df4ba19c11": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$60,000 invested for 20 years at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INVESTED AMOUNT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invested for 20 years at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invested for 20 years at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"no-fee fund grows to $232,181\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"NO-FEE OUTCOME\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"fee_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"fund charging 1.5 percent a year\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL FEE\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"ends near $175,065\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"WITH-FEE OUTCOME\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"NO-FEE FUND\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"FUND WITH FEE\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"compare growth with and without annual fee\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m2\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m2\",\n        \"fee\": \"u00.m4\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2690,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 942,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "0302f899bb2121fcce02e9886a55b7cfacb42749f53bee0a8cd2ef5c6f2acc59": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$60,000 invested for 20 years at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INITIAL INVESTMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invested for 20 years at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invested for 20 years at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"no-fee fund grows to $232,181\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"NO FEE RESULT\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"fee_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"fund charging 1.5 percent a year\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL FEE\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"ends near $175,065\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"WITH FEE RESULT\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"NO FEE FUND\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"FUND WITH FEE\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"Compare growth with and without annual fee\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m2\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m2\",\n        \"fee\": \"u00.m4\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2693,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 939,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "f9ec12bb21fcfaf50a09240a923ff0c3e407c125f4a5be9528af4cd1dacd7f30": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Earn $5,000 in interest\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INTEREST EARNED\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"tax_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"in the 32 percent bracket\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TAX BRACKET\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$1,600 goes to tax\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"tax_owed\",\n      \"label\": \"TAX OWED\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"so you keep $3,400\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"after_tax_proceeds\",\n      \"label\": \"AFTER TAX\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"tax on interest income\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u00.m1\"\n      },\n      \"output\": \"after_tax_proceeds\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u00.m1\"\n      },\n      \"output\": \"tax_owed\",\n      \"target\": \"u00.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2660,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 643,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "5b993f2b252ccacbf3209a903f2135351b2d82910e32b72795ba7b6a6780f9a6": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"outcome\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Earn $5,000 in interest\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"other\",\n      \"label\": \"INTEREST EARNED\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"tax_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"in the 32 percent bracket\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TAX BRACKET\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$1,600 goes to tax\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"tax_owed\",\n      \"label\": \"TAX OWED\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"so you keep $3,400\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"after_tax_proceeds\",\n      \"label\": \"AFTER TAX\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"tax on interest income\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u00.m1\"\n      },\n      \"output\": \"tax_owed\",\n      \"target\": \"u00.m2\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"after_tax\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"tax_rate\": \"u00.m1\"\n      },\n      \"output\": \"after_tax_proceeds\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2663,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 644,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "cdd42e46a91c4e0e2705436cd57aae13e5fd4c9af8383cba643cbafce70eff1c": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Set aside $150 a week\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"week\",\n      \"metric\": null,\n      \"label\": \"WEEKLY SAVING\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"a week for 3 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 4 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you'll have about $24,852\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"weekly saving grows to ending balance\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"week\"},\n        \"rate\": \"u00.m2\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2653,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 574,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "1348f439d7e97052a78994c7d7fd33f09754d5fcd68e862811ec73f92e532714": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Set aside $150 a week for 3 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"week\",\n      \"metric\": null,\n      \"label\": \"WEEKLY CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Set aside $150 a week for 3 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"for 3 years at 4 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you'll have about $24,852\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"weekly savings growing to end balance\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"week\"},\n        \"years\": \"u00.m1\",\n        \"rate\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2656,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 587,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "8313fdbf040fe03bbbefaf3222b6b0251954a7b8c8dc48ec7b633c6fff641c36": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest $300 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY INVESTMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest $300 a month at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL RETURN\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest $300 a month at 7 percent for 40 years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INVESTMENT PERIOD\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you'll have about $787,444\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"delay_period\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Start ten years later\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"DELAY\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest for 30 years\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INVESTMENT PERIOD\"\n    },\n    {\n      \"id\": \"u01.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you'll end with $365,991\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"START NOW\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"START TEN YEARS LATER\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\", \"u01\"],\n      \"intent\": \"trajectory_comparison\",\n      \"purpose\": \"compare ending balances from starting now versus delaying ten years\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2706,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 1039,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "1bace159a634ea9f8ccf432e742b52d37e41b56a5d3179d43412762eee5a6d2b": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest $300 a month\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest $300 a month at 7 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL RETURN\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest $300 a month at 7 percent for 40 years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INVESTMENT PERIOD\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you'll have about $787,444\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    },\n    {\n      \"id\": \"u01.m0\",\n      \"role\": \"delay_period\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Start ten years later\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"DELAY\"\n    },\n    {\n      \"id\": \"u01.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"invest for 30 years\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INVESTMENT PERIOD\"\n    },\n    {\n      \"id\": \"u01.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you'll end with $365,991\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"START NOW\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"START TEN YEARS LATER\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\", \"u01\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"Compare ending balances from starting now versus delaying ten years\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u01.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u01.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2709,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 1039,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "3d4f4fa9513714c0464b11fe31c25900c0227b17b2c6b3f4d6099a74fa952164": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"baseline_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"A $5 coffee today\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"COFFEE TODAY\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"will cost about $6.72 in ten years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"future_price\",\n      \"label\": \"FUTURE PRICE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"in ten years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": null\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"inflation_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"if inflation runs at 3 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": null\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"coffee price inflates over ten years\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"real_value\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"inflation_rate\": \"u00.m3\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"future_price\",\n      \"target\": \"u00.m1\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2652,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 557,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "4ed9da07124de1ab8c35261527bf2cf2de592c8935401f699345ce4717492f43": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"baseline_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"A $5 coffee today will cost about\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"COFFEE TODAY\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"will cost about $6.72 in ten years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"future_price\",\n      \"label\": \"FUTURE PRICE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"in ten years if inflation runs at\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TEN YEARS\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"inflation_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"if inflation runs at 3 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INFLATION RATE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"coffee price inflated over time\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"real_value\",\n      \"inputs\": {\n        \"amount\": \"u00.m0\",\n        \"inflation_rate\": \"u00.m3\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"future_price\",\n      \"target\": \"u00.m1\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2655,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 573,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "f6883c020bf4184c3bb653fcb4d4c95217b86b29671f08a7e389c9ed857562c1": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$18,000 saved and expenses of $2,500 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"SAVED\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"expenses of $2,500 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY EXPENSES\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"result_duration\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you can cover about 7 months\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"periods\",\n      \"label\": \"RUNWAY\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"how long savings last at monthly expense rate\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"runway\",\n      \"inputs\": {\n        \"fund\": \"u00.m0\",\n        \"expense\": \"u00.m1\"\n      },\n      \"output\": \"periods\",\n      \"target\": \"u00.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2644,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 465,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "c532a3606ba10bb2b5a9ba01c17a5e50f053f1c1cd2d6480e320caefc5065759": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$18,000 saved and expenses of $2,500 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"SAVED FUND\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"expenses of $2,500 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY EXPENSES\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"result_duration\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you can cover about 7 months\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"RUNWAY\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"how long savings last at current spending\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"runway\",\n      \"inputs\": {\n        \"fund\": \"u00.m0\",\n        \"expense\": \"u00.m1\"\n      },\n      \"output\": \"periods\",\n      \"target\": \"u00.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2647,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 465,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "c5c6273379362ec0b4b5edeb86677c907044f06858f2f9cd90b5ccaf5a41e01f": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Paying $300 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY PAYMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"on $9,000\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOAN BALANCE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 18 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INTEREST RATE\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"result_duration\",\n      \"confidence\": 1.0,\n      \"evidence\": \"takes about 40 months to clear\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PAYOFF TIME\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"time to pay off debt with fixed payment\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"loan_payoff\",\n      \"inputs\": {\n        \"principal\": \"u00.m1\",\n        \"rate\": \"u00.m2\",\n        \"payment\": \"u00.m0\"\n      },\n      \"output\": \"payoff_periods\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2653,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 562,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "96d61f9cbd5294a3c19b7c7820e024df55aa376f5c0519c989fe97b3c76b6009": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Paying $300 a month on $9,000\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY PAYMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Paying $300 a month on $9,000\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOAN BALANCE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$9,000 at 18 percent takes about 40 months\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"INTEREST RATE\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"result_duration\",\n      \"confidence\": 1.0,\n      \"evidence\": \"takes about 40 months to clear\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PAYOFF TIME\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"time to pay off debt\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"loan_payoff\",\n      \"inputs\": {\n        \"principal\": \"u00.m1\",\n        \"rate\": \"u00.m2\",\n        \"payment\": \"u00.m0\"\n      },\n      \"output\": \"payoff_periods\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2656,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 581,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "56f2fd1df8760430d71064ca9ac6acf272c8c246fcb7b4ce16425299e1512dce": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$15,000 lump sum at 8 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LUMP SUM\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"lump sum at 8 percent is worth\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"worth about $32,384 after 10 years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"VALUE AFTER\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 10 years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TEN YEARS\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$69,914 after 20 years\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"VALUE AFTER\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 20 years\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TWENTY YEARS\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"TEN YEARS\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"TWENTY YEARS\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"trajectory_comparison\",\n      \"purpose\": \"compare growth of lump sum over two time horizons\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m3\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m2\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m5\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m4\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2680,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 912,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "69b612f23dbdd51d389f92d31a321d7953f3fdee84f113a882563a5e65a4caa5": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"principal\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$15,000 lump sum at 8 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LUMP SUM\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"lump sum at 8 percent is worth\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"GROWTH RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"worth about $32,384 after 10 years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"VALUE AFTER\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 10 years\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TEN YEARS\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$69,914 after 20 years\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"VALUE AFTER\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"after 20 years\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TWENTY YEARS\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"TEN YEAR HORIZON\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"TWENTY YEAR HORIZON\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"Compare growth of same principal over two different time horizons\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m3\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m2\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"principal\": \"u00.m0\",\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m5\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m4\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2683,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 916,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "a75ced0b2ed291fc0ca7416f0137faa92b88995267166d71306050823c79871d": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$12 monthly subscription\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY SUBSCRIPTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"costs $144 a year\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"year\",\n      \"metric\": \"total_paid\",\n      \"label\": \"ANNUAL COST\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$1,440 over ten years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"total_paid\",\n      \"label\": \"TEN YEAR COST\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"over ten years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TEN YEARS\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"monthly subscription cost accumulates to annual and ten-year totals\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"annualize\"},\n        \"a\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"}\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m1\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"multiply\"},\n        \"a\": \"u00.m1\",\n        \"b\": \"u00.m3\"\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2648,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 653,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "3f15b390c38a918e0ffe9871c119d3ecfc170808ba263d9fff1820c6125d93fc": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$12 monthly subscription\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY SUBSCRIPTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"costs $144 a year\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"total_paid\",\n      \"label\": \"ANNUAL COST\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$1,440 over ten years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"total_paid\",\n      \"label\": \"DECADE COST\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"over ten years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TEN YEARS\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"start_to_result\",\n      \"purpose\": \"monthly subscription accumulates to annual and decade totals\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": \"annualize\",\n        \"a\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"}\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m1\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": \"multiply\",\n        \"a\": \"u00.m0\",\n        \"b\": {\"literal\": \"120\"}\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2651,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 640,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "14fc228142ff1d87677d7cf602b647ced3d3caf052488eb63a4fc099db71d345": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Invest $500 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY INVESTMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"a month for 25 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 5 percent you'd have\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOWER RETURN\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 5 percent you'd have about $297,755\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 8 percent about $475,513\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"HIGHER RETURN\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 8 percent about $475,513\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"5 PERCENT RETURN\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"8 PERCENT RETURN\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"trajectory_comparison\",\n      \"purpose\": \"compare growth at two different return rates\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m2\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m4\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2679,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 941,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "3f46174e7f1c3057204feb9e142e727832a104e2ccb7eb3b35968f3c7ba984d0": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Invest $500 a month for 25 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY INVESTMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Invest $500 a month for 25 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 5 percent you'd have about $297,755\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"LOWER RETURN\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 5 percent you'd have about $297,755\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    },\n    {\n      \"id\": \"u00.m4\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 8 percent about $475,513\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"HIGHER RETURN\"\n    },\n    {\n      \"id\": \"u00.m5\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 8 percent about $475,513\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"FIVE PERCENT RETURN\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"EIGHT PERCENT RETURN\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"Compare ending balances at two different return rates\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m2\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    },\n    {\n      \"id\": \"c2\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m4\",\n        \"years\": \"u00.m1\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m5\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2682,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 958,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "bc887b73df7e63638638f82bbd8e2cb64d5b154c5e08c1460bb0efd1fce3ddcd": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Your employer sends $250 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"EMPLOYER CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you send $500 a month into the plan\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"YOUR CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$750 a month in total\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"TOTAL CONTRIBUTION\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"flow\",\n      \"purpose\": \"contributions flowing into retirement plan\",\n      \"from_label\": \"EMPLOYER AND YOU\",\n      \"to_label\": \"RETIREMENT PLAN\"\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"sum\"},\n        \"a\": \"u00.m0\",\n        \"b\": \"u00.m1\",\n        \"cadence\": {\"literal\": \"month\"}\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2647,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 490,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "499d91f13b7d9611bb6b4518baa7150ec162add889cdab742baa321a354b5d62": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Your employer sends $250 a month into the plan\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"EMPLOYER CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"you send $500 a month into the plan\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"YOUR CONTRIBUTION\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"$750 a month in total\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"TOTAL CONTRIBUTION\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"flow\",\n      \"purpose\": \"contributions into retirement plan\",\n      \"from_label\": \"EMPLOYER AND YOU\",\n      \"to_label\": \"RETIREMENT PLAN\"\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"arithmetic\",\n      \"inputs\": {\n        \"op\": {\"literal\": \"sum\"},\n        \"a\": \"u00.m0\",\n        \"b\": \"u00.m1\"\n      },\n      \"output\": \"value\",\n      \"target\": \"u00.m2\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2650,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 480,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "daa756823a19ff5c84a5cc9bc6ddfde18888b50e5a930b92824af76399bef7d2": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"change_pct\",\n      \"confidence\": 0.95,\n      \"evidence\": \"Prices might change by 5 percent, up or down\",\n      \"scenario\": null,\n      \"direction\": \"either\",\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PRICE CHANGE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"explanation\",\n      \"purpose\": \"uncertainty about price direction\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2627,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 197,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "19e88c6a93c03c7193162904a39c2a7dba10d5051d8c977220f22fc17c024279": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"change_pct\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Prices might change by 5 percent, up or down\",\n      \"scenario\": null,\n      \"direction\": \"either\",\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PRICE CHANGE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"change_over_window\",\n      \"purpose\": \"potential price movement in either direction\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2630,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 203,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "eb226c14eb8cee01ce03a655cd00da53fa38a6834ac229981b3767900970bb69": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Paying $500 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY PAYMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 6 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"for 20 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"builds about $500,000\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING VALUE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"monthly contributions grow to ending value\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2650,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 567,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "e983d3381abdfb1416288a50e4fbc67bd9398fe3eee2f513fbbb8f10b70dd33b": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"recurring_amount\",\n      \"confidence\": 1.0,\n      \"evidence\": \"Paying $500 a month\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": \"month\",\n      \"metric\": null,\n      \"label\": \"MONTHLY PAYMENT\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 6 percent\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"ANNUAL RETURN\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"horizon\",\n      \"confidence\": 1.0,\n      \"evidence\": \"for 20 years\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"TIME HORIZON\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"builds about $500,000\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"ENDING BALANCE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"single_figure\",\n      \"purpose\": \"monthly contributions grow to ending balance\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": [\n    {\n      \"id\": \"c1\",\n      \"model\": \"compound_growth\",\n      \"inputs\": {\n        \"recurring\": \"u00.m0\",\n        \"cadence\": {\"literal\": \"month\"},\n        \"rate\": \"u00.m1\",\n        \"years\": \"u00.m2\"\n      },\n      \"output\": \"end_value\",\n      \"target\": \"u00.m3\"\n    }\n  ]\n}\n</json>",
+  "usage": {
+   "input_tokens": 2653,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 568,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "8b8c7a88f88b51c3d03cdbaab68b82ff337c5b768fc89fc0f4553edc2026b377": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"upfront_cost\",\n      \"confidence\": 0.7,\n      \"evidence\": \"it could cost $50 or $500 or maybe nothing\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PLAN COST\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"upfront_cost\",\n      \"confidence\": 0.7,\n      \"evidence\": \"it could cost $50 or $500 or maybe nothing\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"PLAN COST\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"fee_rate\",\n      \"confidence\": 0.6,\n      \"evidence\": \"plus 3 percent or 12 percent, sometime later\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"FEE RATE\"\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"fee_rate\",\n      \"confidence\": 0.6,\n      \"evidence\": \"plus 3 percent or 12 percent, sometime later\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"FEE RATE\"\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"explanation\",\n      \"purpose\": \"describing variable plan costs and fees\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2658,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 495,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "e8f5d99e06244efa50a6e379de1b7ea81a824a0ed002213af6f734bc2e4d1a5e": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"none\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Depending on the plan it could cost $50 or $500 or maybe nothing\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": null\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"none\",\n      \"confidence\": 0.9,\n      \"evidence\": \"Depending on the plan it could cost $50 or $500 or maybe nothing\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": null\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"none\",\n      \"confidence\": 0.9,\n      \"evidence\": \"plus 3 percent or 12 percent, sometime later\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": null\n    },\n    {\n      \"id\": \"u00.m3\",\n      \"role\": \"none\",\n      \"confidence\": 0.9,\n      \"evidence\": \"plus 3 percent or 12 percent, sometime later\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": null\n    }\n  ],\n  \"scenarios\": [],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"explanation\",\n      \"purpose\": \"Presenter mentions hypothetical plan costs\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2661,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 474,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "d2eac75b3540e228f1fa4ad8c8609cf215004216fd8c72afe9321cc783d6b044": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"savings_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"At 30 you save 10 percent\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"SAVINGS RATE\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"savings_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 40 you save 15 percent\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"SAVINGS RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"retire at 67 with about $1 million\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"RETIREMENT BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"START AT 30\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"START AT 40\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"compare retirement outcomes from different start ages and savings rates\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2652,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 451,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ },
+ "338c7d7fb61619fe06166517b94395fedab9db67046e8acb3771c172a036654f": {
+  "text": "<json>\n{\n  \"mentions\": [\n    {\n      \"id\": \"u00.m0\",\n      \"role\": \"savings_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"At 30 you save 10 percent\",\n      \"scenario\": \"S1\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"SAVINGS RATE\"\n    },\n    {\n      \"id\": \"u00.m1\",\n      \"role\": \"savings_rate\",\n      \"confidence\": 1.0,\n      \"evidence\": \"at 40 you save 15 percent\",\n      \"scenario\": \"S2\",\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": null,\n      \"label\": \"SAVINGS RATE\"\n    },\n    {\n      \"id\": \"u00.m2\",\n      \"role\": \"outcome\",\n      \"confidence\": 1.0,\n      \"evidence\": \"retire at 67 with about $1 million\",\n      \"scenario\": null,\n      \"direction\": null,\n      \"cadence\": null,\n      \"metric\": \"end_value\",\n      \"label\": \"RETIREMENT BALANCE\"\n    }\n  ],\n  \"scenarios\": [\n    {\n      \"id\": \"S1\",\n      \"label\": \"START AT 30\"\n    },\n    {\n      \"id\": \"S2\",\n      \"label\": \"START AT 40\"\n    }\n  ],\n  \"scenes\": [\n    {\n      \"unit_ids\": [\"u00\"],\n      \"intent\": \"outcome_comparison\",\n      \"purpose\": \"Compare retirement outcomes from different starting ages and savings rates\",\n      \"from_label\": null,\n      \"to_label\": null\n    }\n  ],\n  \"calculations\": []\n}\n</json>",
+  "usage": {
+   "input_tokens": 2655,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 451,
+   "service_tier": "standard",
+   "inference_geo": "not_available"
+  },
+  "model": "claude-sonnet-4-5-20250929"
+ }
+}
