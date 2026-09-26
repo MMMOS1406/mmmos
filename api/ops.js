@@ -10,12 +10,14 @@
 // intermediate files.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { writeFile, readFile, unlink, stat as fsStat } from 'node:fs/promises';
+import { writeFile, readFile, unlink, stat as fsStat, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
+import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -6410,6 +6412,28 @@ async function heygenListAvatars(req, res) {
   });
 }
 
+// Live Validation Defect #5 — read-only recovery tool. Neither
+// heygenStartRender's caller nor _nwv2PollHeygenJobToCompletion's own
+// timeout path ever persisted the submitted video_id anywhere durable, so
+// a poll timeout on a job HeyGen actually accepted left MMMOS with no
+// record of it at all. This lists recent jobs directly from HeyGen (no
+// generation, no spend) so an already-submitted job can be found and its
+// real status/output checked instead of assuming failure and submitting a
+// duplicate paid generation.
+async function heygenListVideos(req, res) {
+  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
+  const limit = (req.query && req.query.limit) || 20;
+  const r = await _heygenFetch('/v1/video.list?limit=' + encodeURIComponent(limit));
+  const videos = (r.data && r.data.data && r.data.data.videos) || (r.data && r.data.videos) || [];
+  return res.status(r.ok ? 200 : (r.status || 502)).json({
+    ok: r.ok,
+    status: r.status,
+    videos,
+    raw: r.data,
+    error: r.error || null,
+  });
+}
+
 async function heygenListVoices(req, res) {
   if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
   const r = await _heygenFetch('/v2/voices');
@@ -6475,9 +6499,26 @@ async function heygenStartRender(req, res) {
   if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { avatar_id, voice_id, script, background, dimension, test, scale } = body;
-  if (!avatar_id || !voice_id || !script) {
-    return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id','voice_id','script'], got: Object.keys(body) });
+  const { avatar_id, voice_id, script, audio_url, background, dimension, test, scale } = body;
+  // Bounded HeyGen implementation (CEO Decision — NextWave V2 authoritative
+  // ElevenLabs narration) — audio-driven mode. HeyGen's own Create Video V2
+  // "voice" object supports type:'audio' + audio_url as an alternative to
+  // type:'text' + input_text + voice_id (script and audio are mutually
+  // exclusive per HeyGen's documented schema); passing a pre-synthesized
+  // ElevenLabs slice here means HeyGen only lip-syncs to audio it's given,
+  // never independently narrates. Text-mode callers (existing legacy path,
+  // untouched) are unaffected — this only activates when audio_url is present.
+  let voiceBlock;
+  if (audio_url) {
+    voiceBlock = { type: 'audio', audio_url };
+  } else {
+    if (!voice_id || !script) {
+      return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id','voice_id','script (or audio_url for audio-driven mode)'], got: Object.keys(body) });
+    }
+    voiceBlock = { type: 'text', input_text: script, voice_id };
+  }
+  if (!avatar_id) {
+    return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id'], got: Object.keys(body) });
   }
   // Build background block per HeyGen v2 spec. Three valid types: color, image, video.
   // Default to a dark color if no background passed.
@@ -6501,7 +6542,7 @@ async function heygenStartRender(req, res) {
   // v13.75.6 — video_inputs item. background_audio goes at videoBody TOP LEVEL per HeyGen v2 spec.
   const videoInput = {
     character: { type: 'avatar', avatar_id: avatar_id, avatar_style: 'normal', scale: characterScale },
-    voice: { type: 'text', input_text: script, voice_id: voice_id },
+    voice: voiceBlock,
     background: backgroundBlock,
   };
   const videoBody = {
@@ -6662,7 +6703,7 @@ async function submagicCreateProject(req, res) {
   if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { videoUrl, title, language, templateName, magicZooms, magicBrolls, magicBrollsPercentage, dictionary, webhookUrl, music } = body;
+  const { videoUrl, title, language, templateName, magicZooms, magicBrolls, magicBrollsPercentage, dictionary, webhookUrl, music, items } = body;
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'missing_video_url' });
   // v13.52.0 — defaults dialed for short-form publishable output. Hormozi 2 is the
   // viral burn-in caption style. magicBrolls + magicZooms = the P2A requirements.
@@ -6678,6 +6719,12 @@ async function submagicCreateProject(req, res) {
   };
   if (dictionary && Array.isArray(dictionary)) projectBody.dictionary = dictionary;
   if (webhookUrl) projectBody.webhookUrl = webhookUrl;
+  // NextWave V2 hybrid architecture — targeted ai-broll/user-media insertions at
+  // Brain-planned timestamps, passed straight through to Submagic's own documented
+  // `items` field (proven working in the Two-Tool Architecture Validation phase).
+  // Only forwarded when the caller actually supplies a non-empty array — every
+  // existing caller that omits this keeps working exactly as before.
+  if (Array.isArray(items) && items.length) projectBody.items = items;
   // v13.85.1 — background music: { userMediaId, volume, fade }
   if (music && music.userMediaId) projectBody.music = { userMediaId: music.userMediaId, volume: music.volume || 20, fade: music.fade !== false, startFromTime: music.startFromTime || 0 };
   const r = await _submagicFetch('/v1/projects', { method: 'POST', body: projectBody });
@@ -6748,6 +6795,42 @@ async function submagicCreateMedia(req, res) {
     error: r.error || null,
   });
 }
+// Two-Tool Architecture Validation — Submagic's purpose-built direct-file
+// upload endpoint (POST /v1/user-media/upload, multipart/form-data),
+// distinct from the URL-based /v1/user-media above (which this file's own
+// history notes was only ever exercised for audio). Fetches the given URL
+// server-side and re-uploads the bytes as multipart form data — the exact
+// same "fetch external asset, re-host via multipart" shape already proven
+// elsewhere in this file for Ideogram asset banking, not a new pattern.
+async function submagicUploadMediaFromUrl(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { url, filename } = body;
+  if (!url) return res.status(400).json({ ok: false, error: 'missing_url' });
+  try {
+    const srcRes = await fetch(url);
+    if (!srcRes.ok) return res.status(502).json({ ok: false, error: `source_fetch_failed_${srcRes.status}` });
+    const buf = Buffer.from(await srcRes.arrayBuffer());
+    const contentType = srcRes.headers.get('content-type') || 'application/octet-stream';
+    const form = new FormData();
+    form.append('file', new Blob([buf], { type: contentType }), filename || 'asset.png');
+    const upRes = await fetch(SUBMAGIC_BASE + '/v1/user-media/upload', {
+      method: 'POST',
+      headers: { 'x-api-key': SUBMAGIC_API_KEY },
+      body: form,
+    });
+    const text = await upRes.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (_) { data = { raw: text }; }
+    return res.status(upRes.ok ? 200 : (upRes.status || 502)).json({
+      ok: upRes.ok, status: upRes.status, userMediaId: (data && data.userMediaId) || null, raw: data,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
 async function submagicListMedia(req, res) {
   if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
   const type  = (req.query && req.query.type)  || 'AUDIO'; // VIDEO | AUDIO | IMAGE
@@ -6763,6 +6846,35 @@ async function submagicListMedia(req, res) {
     raw: r.data,
     error: r.error || null,
   });
+}
+
+// ── Two-Tool Architecture Validation — Submagic custom-media/AI-broll
+// insertion. Purely additive: exposes Submagic's own documented `items`
+// (PUT /v1/projects/:id) and export (POST /v1/projects/:id/export)
+// endpoints through the same _submagicFetch/CEO-gating pattern every other
+// Submagic action here already uses. Does not change submagicCreateProject
+// or any existing behavior — this is capability validation, not a renderer.
+// CEO-gated: writes to a real project and can trigger a real re-export.
+async function submagicUpdateProject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
+  if (req.method !== 'POST' && req.method !== 'PUT') return res.status(405).json({ ok: false, error: 'post_or_put_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { project_id, items } = body;
+  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ ok: false, error: 'missing_items_array' });
+  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id), { method: 'PUT', body: { items } });
+  return res.status(r.ok ? 200 : (r.status || 502)).json({ ok: r.ok, status: r.status, raw: r.data, error: r.error || null });
+}
+async function submagicExportProject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { project_id } = body;
+  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
+  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id) + '/export', { method: 'POST', body: {} });
+  return res.status(r.ok ? 200 : (r.status || 502)).json({ ok: r.ok, status: r.status, raw: r.data, error: r.error || null });
 }
 
 // v13.86.1 — EVL video verification helpers
@@ -11128,11 +11240,12 @@ async function smSynthesizeNarration(text) {
 // and returns it to the caller; does not persist any artifact server-side. Where/how NextWave
 // should store the resulting audio long-term is a follow-up decision for whoever reviews this
 // PR, once NextWave's actual asset-storage conventions are confirmed — not guessed at here.
-async function nextwaveSynthesizeNarrationElevenLabs(text) {
+async function nextwaveSynthesizeNarrationElevenLabs(text, voiceId) {
   if (!ELEVENLABS_API_KEY) return { ok: false, error: 'elevenlabs_not_configured' };
   if (!text || typeof text !== 'string' || !text.trim()) return { ok: false, error: 'text_required' };
+  const useVoiceId = (voiceId && typeof voiceId === 'string') ? voiceId : ELEVENLABS_VOICE_ID;
   try {
-    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(ELEVENLABS_VOICE_ID)}`, {
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(useVoiceId)}`, {
       method: 'POST',
       headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
       body: JSON.stringify({
@@ -11153,20 +11266,229 @@ async function nextwaveSynthesizeNarrationElevenLabs(text) {
   }
 }
 
+// PM correction (Continuous Visual Storytelling proof) — the comment above
+// this function previously stated ElevenLabs "does not return per-word
+// timestamps without a separate forced-alignment call." That was checked
+// against only the base /v1/text-to-speech endpoint. ElevenLabs' OWN account
+// (same API key, confirmed no separate subscription tier required) also
+// exposes /v1/text-to-speech/{voice_id}/with-timestamps, which returns the
+// identical audio PLUS character-level start/end timestamps for the exact
+// text sent, in one call — not a new vendor, not incremental cost versus the
+// narration synthesis NextWave already pays for. This gives a deterministic,
+// local way to find the real spoken timestamp of any substring of the
+// script (a dollar amount, a percentage, a specific phrase) via a plain
+// string search against the returned `characters` array — no ASR, no
+// forced-alignment service, no ML inference of our own.
+async function nextwaveSynthesizeNarrationElevenLabsWithTimestamps(text, voiceId) {
+  if (!ELEVENLABS_API_KEY) return { ok: false, error: 'elevenlabs_not_configured' };
+  if (!text || typeof text !== 'string' || !text.trim()) return { ok: false, error: 'text_required' };
+  const useVoiceId = (voiceId && typeof voiceId === 'string') ? voiceId : ELEVENLABS_VOICE_ID;
+  try {
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(useVoiceId)}/with-timestamps`, {
+      method: 'POST',
+      headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.15, use_speaker_boost: true },
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return { ok: false, error: `elevenlabs_error_${r.status}: ${t.slice(0, 200)}` };
+    }
+    const data = await r.json();
+    if (!data.audio_base64 || !data.alignment) return { ok: false, error: 'elevenlabs_with_timestamps_missing_fields' };
+    const buf = Buffer.from(data.audio_base64, 'base64');
+    if (!buf || buf.length < 512) return { ok: false, error: 'elevenlabs_returned_empty_audio' };
+    return {
+      ok: true,
+      buffer: buf,
+      provider: 'elevenlabs',
+      alignment: {
+        characters: data.alignment.characters || [],
+        character_start_times_seconds: data.alignment.character_start_times_seconds || [],
+        character_end_times_seconds: data.alignment.character_end_times_seconds || [],
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: `elevenlabs_request_failed: ${e.message}` };
+  }
+}
+
+// Deterministic, local lookup — no vendor call. Given the alignment returned
+// by nextwaveSynthesizeNarrationElevenLabsWithTimestamps and the EXACT text
+// string that was synthesized (character-for-character, since alignment
+// indices are positions in that exact string), finds the first match of
+// `pattern` at or after `fromCharIndex` and returns the real spoken
+// start/end time of that match. Returns null if the alignment doesn't cover
+// the match (defensive — caller should fall back to beat-level timing).
+function nwv2FindMeaningEventTime(alignment, fullText, pattern, fromCharIndex) {
+  if (!alignment || !Array.isArray(alignment.characters) || !alignment.characters.length) return null;
+  const searchFrom = Math.max(0, fromCharIndex || 0);
+  const re = (pattern instanceof RegExp) ? pattern : new RegExp(String(pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const sub = fullText.slice(searchFrom);
+  const m = sub.match(re);
+  if (!m || m.index == null) return null;
+  const startIdx = searchFrom + m.index;
+  const endIdx = startIdx + m[0].length - 1;
+  const starts = alignment.character_start_times_seconds;
+  const ends = alignment.character_end_times_seconds;
+  if (startIdx < 0 || startIdx >= starts.length || endIdx < 0 || endIdx >= ends.length) return null;
+  return {
+    matchedText: m[0],
+    charIndex: startIdx,
+    startSec: starts[startIdx],
+    endSec: ends[endIdx],
+  };
+}
+
+// ============================================================================
+// BOUNDED HEYGEN IMPLEMENTATION — CEO Decision (NextWave V2 authoritative
+// ElevenLabs narration). Locked target: ONE continuous ElevenLabs master
+// narration is the sole authoritative audio track for the whole video;
+// HeyGen only ever receives a short audio slice (driving, not synthesizing)
+// for the beats where the avatar is actually visible. This keeps every
+// existing segment-builder function (calc card, illustration, comparison,
+// timeline — all of which already only ever pull [0:a?] from their source
+// file, never [0:v], for non-avatar beats — confirmed by reading each one
+// before this change) completely UNCHANGED: each beat still gets its own
+// independent source file via seekSec/dur exactly as before, the only
+// difference is WHICH file that source now is per beat (see the client-side
+// per-beat source selection in nwv2ProductionStartComposite).
+//
+// Generates the full master narration ONCE (never per-beat), uploads it,
+// and returns its REAL measured duration — beat timing is then derived from
+// this real duration (still a char-weighted proportional split between
+// beats, the same method already proven for the estimated-duration case,
+// just now calibrated against real audio length instead of a wpm guess;
+// ElevenLabs' base TTS endpoint does not return per-word timestamps without
+// a separate forced-alignment call, which this bounded correction does not
+// add — noted explicitly as a limitation, not hidden).
+async function nextwaveV2PrepareMasterNarration(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script, voice_id: voiceIdOverride } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script_required' });
+  if (script.length > 5000) return res.status(400).json({ ok: false, error: 'script too long for one narration call (max 5000 characters)' });
+  // Live Validation Defect #12 — this real production narration path never
+  // read the CEO's already-saved voice selection (nextwaveV2GetVoiceConfig,
+  // set via nextwave_v2_set_voice — the exact mechanism built for this
+  // purpose and already used by the deprecated Phase 5.3 nextwaveV2BuildRender)
+  // and always fell through to the hardcoded ELEVENLABS_VOICE_ID default
+  // ("Rachel", female) since the client never sends an explicit voice_id.
+  // Same reuse-saved-config pattern as nextwaveV2BuildRender, now wired into
+  // the real bounded pipeline: an explicit request-body override still wins,
+  // otherwise the CEO's saved choice applies automatically.
+  const savedVoice = await nextwaveV2GetVoiceConfig();
+  const voice_id = voiceIdOverride || savedVoice.voice_id || null;
+  // PM correction (Continuous Visual Storytelling proof) — meaning-event
+  // synchronization needs real spoken timestamps for specific script
+  // substrings (a dollar amount, a percentage, a phrase), not just the
+  // proportional beat-level split below. Same ElevenLabs account/API key,
+  // same cost as the plain synthesis call this function always made — the
+  // with-timestamps endpoint returns identical audio plus character-level
+  // alignment in one call. `alignment` is returned to the caller so it can
+  // be persisted alongside the rest of the pipeline state (same pattern as
+  // every other nextwaveV2* field) and used by nwv2FindMeaningEventTime.
+  const result = await nextwaveSynthesizeNarrationElevenLabsWithTimestamps(script, voice_id);
+  if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
+  const renderId = randomBytes(6).toString('hex');
+  const localPath = join(tmpdir(), `nwv2-master-narration-${renderId}.mp3`);
+  try {
+    await writeFile(localPath, result.buffer);
+    await smAssertValidMediaFile(localPath, 'ElevenLabs master narration');
+    const durationSec = await nextwaveV2GetDurationSec(localPath);
+    const url = await sbStorageUpload(`nextwave-v2-preview/narration-${renderId}.mp3`, result.buffer, 'audio/mpeg');
+    return res.status(200).json({
+      ok: true,
+      master_audio_url: url,
+      duration_sec: Number(durationSec.toFixed(2)),
+      render_id: renderId,
+      alignment: result.alignment || null,
+      aligned_script: script,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(localPath).catch(() => {});
+  }
+}
+
+// Slices an exact interval out of the master narration — used both for the
+// short audio HeyGen lip-syncs to (avatar-visible beats) and for every
+// non-avatar beat's own authoritative audio (replacing what used to be a
+// slice of a full-length HeyGen render). Re-downloads the master per call
+// rather than caching across requests — this file is stateless like every
+// other compositor action in this codebase, and a Long has at most 2-3
+// avatar-visible slices plus per-beat non-avatar slices, so the repeat
+// download cost is small and bounded.
+async function nextwaveV2SliceNarration(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { master_audio_url, start_sec, dur_sec, render_id, slice_id, pad_to_sec } = req.body || {};
+  if (!master_audio_url || start_sec == null || !dur_sec || !render_id || slice_id == null) {
+    return res.status(400).json({ ok: false, error: 'missing_required_fields' });
+  }
+  const srcPath = join(tmpdir(), `nwv2-master-src-${render_id}.mp3`);
+  const outPath = join(tmpdir(), `nwv2-slice-${render_id}-${slice_id}.mp3`);
+  try {
+    await smDownloadToFile(master_audio_url, srcPath);
+    await smAssertValidMediaFile(srcPath, 'master narration (slice source)');
+    // Storyboard Implementation Proof v5 — CEO: proof felt too compressed
+    // (19.86s); target ~27-32s "without slowing narration unnaturally."
+    // Optional pad_to_sec appends trailing SILENCE (via apad) after the real
+    // spoken content ends, so a beat's visual can hold/develop longer on
+    // screen while every word is still spoken at its exact natural pace —
+    // no re-synthesis, no ElevenLabs call, same real narration audio.
+    // Omitted (the default for every existing caller), this is unchanged.
+    // IMPORTANT: dur_sec must stay an INPUT-side trim (before -i) here so
+    // only the real narration content for THIS beat is ever read — without
+    // that, the pad would just keep reading further real speech from the
+    // next beat rather than adding silence.
+    // apad's `whole_dur` option doesn't exist on the actual deployed ffmpeg
+    // build (linux-x64 N-47683, 2018 — confirmed live: "Option 'whole_dur'
+    // not found") even though current ffmpeg docs list it — that option
+    // postdates this build, same class of gap hit earlier with scale/crop's
+    // `t` support. Plain `apad` (no args, pads indefinitely) combined with
+    // an explicit output `-t` to cap the total duration is universally
+    // supported across ffmpeg versions and produces the identical result.
+    const shouldPad = typeof pad_to_sec === 'number' && pad_to_sec > Number(dur_sec);
+    const outputArgs = shouldPad
+      ? ['-af', 'apad', '-t', String(Number(pad_to_sec).toFixed(2))]
+      : [];
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-ss', String(Number(start_sec).toFixed(2)), '-t', String(Number(dur_sec).toFixed(2)), '-i', srcPath,
+      ...outputArgs,
+      '-c:a', 'libmp3lame', '-b:a', '192k',
+      outPath,
+    ], { timeout: 30000 });
+    await smAssertValidMediaFile(outPath, 'narration slice');
+    const buf = await readFile(outPath);
+    const url = await sbStorageUpload(`nextwave-v2-preview/slice-${render_id}-${slice_id}.mp3`, buf, 'audio/mpeg');
+    return res.status(200).json({ ok: true, slice_url: url });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(srcPath).catch(() => {});
+    await unlink(outPath).catch(() => {});
+  }
+}
+
 // HTTP action — CEO-session-gated, same requirement as every other action that spends money or
 // reaches an external paid API (P0/P0.1 pattern: privileged/costly actions must be authenticated
 // first). script_text is capped to keep a single call's cost bounded and predictable.
 async function nextwaveNarrationSynthesize(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { script_text } = req.body || {};
+  const { script_text, voice_id } = req.body || {};
   if (!script_text || typeof script_text !== 'string' || !script_text.trim()) {
     return res.status(400).json({ ok: false, error: 'script_text is required' });
   }
   if (script_text.length > 5000) {
     return res.status(400).json({ ok: false, error: 'script_text too long (max 5000 characters per call)' });
   }
-  const result = await nextwaveSynthesizeNarrationElevenLabs(script_text);
+  const result = await nextwaveSynthesizeNarrationElevenLabs(script_text, voice_id);
   if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
   return res.status(200).json({
     ok: true,
@@ -11174,6 +11496,6025 @@ async function nextwaveNarrationSynthesize(req, res) {
     audio_base64: result.buffer.toString('base64'),
     audio_bytes: result.buffer.length,
   });
+}
+
+// ── NextWave V2 — visual planning (meaning-unit segmentation, visual-intent
+// classification, generalized asset resolution) ────────────────────────────
+// Ported from local prototype validation (nextwave-v2-visualdna/), adapted
+// to this current codebase. Read/compute-only: no database writes, no
+// external API calls, no cost — so, per this codebase's own P0/P0.1
+// authentication convention (which gates actions that spend money, reach a
+// paid external API, or touch sensitive business data — see
+// nextwaveNarrationSynthesize above, plaidLink, heygenStartRender, etc. for
+// that pattern), this is deliberately NOT requireCeoSession-gated. If that
+// judgment call is wrong for this codebase's conventions, flag it for a
+// one-line addition rather than reworking the function.
+//
+// Does not touch, call, or duplicate nextwaveSynthesizeNarrationElevenLabs /
+// nextwaveNarrationSynthesize above, or SMM's smSynthesizeNarration* --
+// narration stays exactly as it already exists in this file.
+
+// Phase 5 — maps an existing concept tag to one of the 5 Ideogram-generated
+// illustrated objects (see NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS below).
+// Deliberately reuses the concept vocabulary already proven by
+// nextwaveClassifyVisualIntent instead of inventing a second taxonomy.
+const NEXTWAVE_V2_CONCEPT_TO_OBJECT = {
+  home: 'house', car: 'house',
+  growth: 'money_stack', accumulation: 'money_stack', income: 'money_stack',
+  opportunity_cost: 'money_stack', cash_flow: 'money_stack', compounding: 'money_stack',
+  market_movement: 'money_stack', goal_progress: 'money_stack',
+  tax: 'document_folder', retirement: 'document_folder', savings: 'document_folder',
+  bills: 'document_folder', bank_account: 'document_folder', credit_card: 'document_folder',
+  time: 'calendar_time', delay: 'calendar_time',
+  decision: 'decision_signpost', risk: 'decision_signpost', tradeoff: 'decision_signpost',
+  control: 'decision_signpost', loss: 'decision_signpost', debt: 'decision_signpost',
+};
+// Phase 5.1 Section 5 — real-frame QA found `nextwaveClassifyVisualIntent`'s
+// hit-count ranking sometimes ranked growth/compounding ahead of time/delay
+// on a sentence that was semantically ABOUT a time span ("...over time").
+// Object resolution now checks tags in this fixed semantic-specificity
+// order rather than the classifier's generic ranking -- decision/time
+// concepts are usually the actual point of a sentence when present at all,
+// while the growth/money family co-occurs with almost everything financial
+// and should only win when nothing more specific is present. Generalizable
+// (a fixed priority over the existing tag vocabulary, not a per-script
+// rule) -- applies to every script, not just the one that surfaced this.
+const NEXTWAVE_V2_OBJECT_TAG_PRIORITY = [
+  'decision', 'risk', 'tradeoff', 'control', 'loss', 'debt',
+  'time', 'delay',
+  'tax', 'retirement', 'savings', 'bills', 'bank_account', 'credit_card',
+  'home', 'car',
+  'growth', 'accumulation', 'income', 'opportunity_cost', 'cash_flow', 'compounding', 'market_movement', 'goal_progress',
+];
+// `excludeRole` (Phase 5.2 real-candidate QA) lets a second comparison
+// side skip a role its counterpart already claimed -- see the
+// comparisonObjectPaths loop below for why this is needed: two slots can
+// share one unit_index (one sentence expressing both comparison values),
+// which means they share the exact same concept_tags array, so without
+// this a shared incidental tag ("payoff time... saving $5,000 in
+// interest" both being on the SAME unit) silently gave both sides the
+// identical object -- a real defect found on a real rendered frame.
+function _nextwaveV2ResolveObjectRole(tags, excludeRole) {
+  const tagSet = new Set(tags || []);
+  for (const tag of NEXTWAVE_V2_OBJECT_TAG_PRIORITY) {
+    if (tagSet.has(tag)) {
+      const role = NEXTWAVE_V2_CONCEPT_TO_OBJECT[tag];
+      if (excludeRole && role === excludeRole) continue;
+      return role;
+    }
+  }
+  return null;
+}
+
+const NEXTWAVE_V2_CONCEPT_KEYWORDS = {
+  debt: ['debt', 'owe', 'balance', 'loan', 'borrowed'],
+  credit_card: ['credit card', 'minimum payment', 'interest rate on your card'],
+  bank_account: ['bank account', 'checking account', 'your bank'],
+  tax: ['tax', 'taxes', 'irs', 'withholding'],
+  growth: ['grow', 'growing', 'compound', 'compounding', 'accumulate'],
+  loss: ['lose', 'lost', 'losing', 'leak', 'drain', 'gone', 'disappear'],
+  comparison: ['versus', ' vs ', 'compare', 'compared', 'comparing', 'compares',
+    'which one', 'side by side', 'two paths', 'two options'],
+  // Phase 5.2 real-candidate QA — "that payoff time drops to about four
+  // years" carried no concept tag at all under the original keyword list
+  // (none of these phrases matched), so its comparison slot fell through
+  // to a plain color-fill card instead of the calendar_time illustration
+  // -- exactly the card-first regression this whole architecture exists
+  // to prevent. "years"/"months" alone are common enough duration words
+  // in finance narration (loan terms, payoff time, retirement horizons)
+  // that they're a reliable generalizable signal here, not a per-script
+  // keyword.
+  time: ['years from now', 'over time', 'eventually', 'someday', 'payoff time', 'years', 'months'],
+  delay: ['wait', 'delay', 'later', 'put off', 'procrastinate'],
+  retirement: ['retire', 'retirement', '401k', '401(k)', 'ira'],
+  home: ['home', 'house', 'mortgage', 'rent'],
+  car: ['car', 'auto loan', 'vehicle'],
+  bills: ['bill', 'bills', 'utility', 'subscription'],
+  income: ['paycheck', 'salary', 'income', 'your pay'],
+  savings: ['savings', 'save', 'emergency fund', 'rainy day'],
+  risk: ['risk', 'risky', 'volatile', 'volatility'],
+  decision: ['decide', 'decision', 'choice', 'choose'],
+  opportunity_cost: ['instead of', 'opportunity cost', 'what you give up'],
+  market_movement: ['market', 'stock price', 'index', 'portfolio value'],
+  goal_progress: ['goal', 'progress', 'on track', 'milestone'],
+  // Phase 5.2 real-candidate QA — "paying one hundred fifty dollars a
+  // month" carried no concept tag either (no keyword here matched
+  // "pay"/"paying"/"payment"), so this comparison slot also fell through
+  // to a plain card. A recurring payment amount is a real cash-flow
+  // concept (money moving out each period), which already maps to
+  // money_stack.
+  cash_flow: ['cash flow', 'money in', 'money out', 'spend', 'spending', 'pay', 'paying', 'payment', 'payments'],
+  control: ['control', 'bracket', 'in your hands', 'decide how much'],
+  tradeoff: ['tradeoff', 'trade-off', 'give up', 'sacrifice'],
+  accumulation: ['stack up', 'pile up', 'add up', 'build up'],
+  compounding: ['compound interest', 'compounding'],
+  transaction_cost: ['closing cost', 'closing costs', 'realtor commission',
+    'selling costs', 'transaction cost', 'transaction costs'],
+};
+
+function _nextwaveKeywordMatches(keyword, text) {
+  if (keyword.trim().includes(' ')) return text.includes(keyword);
+  const re = new RegExp('\\b' + keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+  return re.test(text);
+}
+
+function nextwaveClassifyVisualIntent(phrase, topN = 2) {
+  const text = String(phrase || '').toLowerCase();
+  const scores = [];
+  for (const [concept, keywords] of Object.entries(NEXTWAVE_V2_CONCEPT_KEYWORDS)) {
+    const hits = keywords.filter((kw) => _nextwaveKeywordMatches(kw, text)).length;
+    if (hits > 0) scores.push([concept, hits]);
+  }
+  scores.sort((a, b) => b[1] - a[1]);
+  const ranked = scores.slice(0, topN).map(([c]) => c);
+  return ranked.length ? ranked : ['none_detected'];
+}
+
+// The real Colin/NextWave prompt format uses [BRACKET] for two DIFFERENT
+// things: timestamped section headers ([0:00 HOOK]) and an inline
+// compliance meta-marker ([DISCLAIMER: <text>]) whose <text> is real,
+// spoken narration content, not a label. Unwrapping known non-section
+// meta-markers to their inner text before section-splitting keeps the
+// mandatory disclaimer sentence from being silently dropped.
+const NEXTWAVE_V2_META_MARKER_RE = /\[DISCLAIMER:\s*([^\]]+)\]/gi;
+
+function nextwaveSegmentMeaningUnits(script, minWords = 4) {
+  const text = String(script || '').replace(NEXTWAVE_V2_META_MARKER_RE, (_, inner) => ' ' + inner.trim());
+  const sectionRe = /\[([^\]]+)\]/g;
+  const sections = [];
+  let match, lastIndex = 0, lastLabel = 'UNMARKED';
+  while ((match = sectionRe.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      sections.push({ label: lastLabel, text: text.slice(lastIndex, match.index) });
+    }
+    lastLabel = match[1];
+    lastIndex = sectionRe.lastIndex;
+  }
+  sections.push({ label: lastLabel, text: text.slice(lastIndex) });
+
+  const units = [];
+  let n = 0;
+  for (const section of sections) {
+    const sentences = section.text
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    let buffer = '';
+    for (const s of sentences) {
+      buffer = buffer ? `${buffer} ${s}` : s;
+      if (buffer.split(/\s+/).filter(Boolean).length >= minWords) {
+        units.push({ unit: `u${String(n).padStart(2, '0')}`, section: section.label, text: buffer });
+        n += 1;
+        buffer = '';
+      }
+    }
+    if (buffer) {
+      units.push({ unit: `u${String(n).padStart(2, '0')}`, section: section.label, text: buffer });
+      n += 1;
+    }
+  }
+  return units;
+}
+
+const NEXTWAVE_V2_NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +
+  'fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|' +
+  'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion';
+// Phase 4.5C — generalized to cover every form the real bond-duration
+// candidate exposed as missing: percent SIGNS (7%, 0.5%, 4.5%) had no
+// branch at all (only the spelled word "percent" was recognized); the
+// digit-currency branch (`\$\s?\d`) matched only the dollar sign plus a
+// single digit -- "$400,000" would only ever capture "$4" -- fixed to
+// capture the full run of digits/commas/decimals; duration quantities (6
+// months, 10 years) and multipliers (3x, three times) had no branch at
+// all. Kept fully generalized (regex forms, not a per-script lookup) and
+// verified against a real test matrix (percentage/currency/duration/
+// rate-change/mixed-number sentences) before being written here — see
+// scratchpad phase45c_extractor_test.mjs.
+const NEXTWAVE_V2_DYNAMIC_NUMBER_RE = new RegExp(
+  '\\$\\s?\\d[\\d,]*(?:\\.\\d+)?(?:\\s?(?:k|m|b|thousand|million|billion))?\\b|' + // $400, $400,000, $1,250.50, $2.3 million
+  '\\d+(?:\\.\\d+)?\\s?%|' +                                                     // 7%, 0.5%, 4.5% (symbol form)
+  '\\d[\\d,]*(?:\\.\\d+)?\\s*(?:dollars?|percent)\\b|' +                          // 400 dollars, 7 percent (digit + spelled unit)
+  '\\d+(?:\\.\\d+)?\\s*(?:days?|weeks?|months?|years?)\\b|' +                     // 6 months, 10 years (digit duration)
+  '\\d+\\s?x\\b|\\d+\\s*times\\b|' +                                             // 3x, 3 times (digit multiplier)
+  '\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b(?:[\\s,-]+(?:' + NEXTWAVE_V2_NUMBER_WORDS + '))*' +
+  // Phase 4.1B fix: the gap before the unit word must not cross into
+  // another separate number-word -- that's what merged two distinct nearby
+  // quantities ("seven percent...outruns three and a half percent") into
+  // one garbled span. Negative lookahead blocks the gap from stepping onto
+  // a new number word; 15-char cap keeps it to connective words only.
+  // Phase 4.5C: the unit-word alternation widened from dollars?/percent to
+  // also include duration words and "times", so "six months" and "three
+  // times" are recognized the same way "seven percent" already was.
+  // Phase 5.2 — real-candidate QA found "one hundred fifty dollars a
+  // month" extracted as "151 MONTHS": the GREEDY {0,15} gap skipped right
+  // past the first valid unit word ("dollars") to grab a LATER, wrong one
+  // ("month") within the 15-char window, and "dollars a" then got
+  // mis-parsed as extra number-words (_nextwaveWordsToNumber has no
+  // "dollars"/"a" tokens of its own, but the stray "a" reads as the
+  // number-word "a" = 1, corrupting 150 into 151). Made LAZY ({0,15}?) so
+  // the gap stops at the FIRST valid unit word it reaches instead of the
+  // furthest one within range -- verified against a real regex test: "one
+  // hundred fifty dollars a month" now correctly stops at "...dollars",
+  // and a second latent case this same bug would have hit ("ten thousand
+  // dollars a year" -> would have read as a duration) is fixed the same
+  // way. The negative-lookahead behavior Phase 4.1B needed (never cross
+  // into a NEW number word) is unaffected -- lazy vs. greedy only changes
+  // which valid unit word wins when more than one appears in range, and
+  // the nearest one is always the correct one.
+  '(?:(?!\\b(?:' + NEXTWAVE_V2_NUMBER_WORDS + ')\\b)[^.!?]){0,15}?' +
+  '\\b(?:dollars?|percent|days?|weeks?|months?|years?|times)\\b',
+  'i',
+);
+
+// True only when the phrase actually SPEAKS a real number tied to money/
+// percent -- concept-independent, since real dynamic financial data must
+// always render programmatically regardless of which concept tag also
+// happens to match.
+function nextwaveHasDynamicNumbers(phrase) {
+  return NEXTWAVE_V2_DYNAMIC_NUMBER_RE.test(String(phrase || ''));
+}
+
+const NEXTWAVE_V2_RESULT_CUE_WORDS = [
+  'ahead', 'behind', 'gap', 'difference', 'advantage', 'save', 'saves',
+  'saved', 'savings', 'wins', 'winning', 'outpaces', 'outruns', 'more',
+  'less', 'favor', 'tips', 'beat', 'beats',
+];
+
+// A bounded structural heuristic (proximity to a small fixed cue-word list,
+// a same-clause "by <amount>" pattern, a mild recency tiebreak) for which
+// number in a multi-number sentence is the narratively important one --
+// not semantic understanding, documented as such.
+function nextwaveRankNumberPhrase(text) {
+  text = String(text || '');
+  const re = new RegExp(NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, 'gi');
+  const matches = [...text.matchAll(re)];
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0][0].trim();
+
+  let bestScore = -Infinity, bestText = null;
+  matches.forEach((m, i) => {
+    const start = m.index;
+    const windowStart = Math.max(0, start - 50);
+    const before = text.slice(windowStart, start).toLowerCase();
+    let score = i * 0.1;
+    if (NEXTWAVE_V2_RESULT_CUE_WORDS.some((cue) => before.includes(cue))) score += 10;
+    const byWindow = text.slice(Math.max(0, start - 15), start).toLowerCase();
+    if (/\bby\s*$/.test(byWindow)) score += 5;
+    if (score >= bestScore) { bestScore = score; bestText = m[0].trim(); }
+  });
+  return bestText;
+}
+
+// Phase 4.1B, Defect 2: concise financial notation ($1,122,717, 6.5%)
+// instead of literally reproducing spelled-out narration wording on a
+// display card. Generic English-number-words parser -- not a lookup
+// table -- so it works for any future Finance/Growth/Wealth amount.
+const NEXTWAVE_V2_ONES = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+  fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const NEXTWAVE_V2_TENS = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
+  eighty: 80, ninety: 90,
+};
+const NEXTWAVE_V2_SCALES = { thousand: 1000, million: 1000000, billion: 1000000000 };
+
+function _nextwaveWordsToNumber(phrase) {
+  let text = String(phrase || '').trim().toLowerCase();
+  let suffix = null;
+  if (/dollars?$/.test(text)) { suffix = 'dollar'; text = text.replace(/\s*dollars?$/, '').trim(); }
+  else if (/percent$/.test(text)) { suffix = 'percent'; text = text.replace(/\s*percent$/, '').trim(); }
+  // Phase 4.5C: duration ("six months"/"6 months"/"ten years") and
+  // multiplier ("three times") suffixes -- generalized word forms, not a
+  // per-script lookup. "3x" (digit+x, no space) deliberately isn't handled
+  // here since it already displays correctly via the raw-phrase fallback
+  // in nextwaveFormatFinancialNumber.
+  else if (/times$/.test(text)) { suffix = 'times'; text = text.replace(/\s*times$/, '').trim(); }
+  else {
+    const durMatch = text.match(/\b(days?|weeks?|months?|years?)$/);
+    if (durMatch) { suffix = 'duration:' + durMatch[1].replace(/s$/, ''); text = text.replace(/\s*(days?|weeks?|months?|years?)$/, '').trim(); }
+  }
+
+  const digitMatch = text.match(/^\$?\s?([\d,]+(?:\.\d+)?)$/);
+  if (digitMatch) return { value: parseFloat(digitMatch[1].replace(/,/g, '')), suffix };
+
+  let tokens = text.split(/[\s,-]+/).filter((t) => t && t !== 'and');
+  let halfBonus = 0;
+  if (tokens.slice(-2).join(' ') === 'a half') { halfBonus = 0.5; tokens = tokens.slice(0, -2); }
+  else if (tokens.slice(-2).join(' ') === 'a quarter') { halfBonus = 0.25; tokens = tokens.slice(0, -2); }
+
+  let result = 0, current = 0;
+  for (const tok of tokens) {
+    if (tok in NEXTWAVE_V2_ONES) current += NEXTWAVE_V2_ONES[tok];
+    else if (tok in NEXTWAVE_V2_TENS) current += NEXTWAVE_V2_TENS[tok];
+    else if (tok === 'hundred') current = (current || 1) * 100;
+    else if (tok in NEXTWAVE_V2_SCALES) { result += (current || 1) * NEXTWAVE_V2_SCALES[tok]; current = 0; }
+    else if (tok === 'a') current += 1;
+  }
+  result += current + halfBonus;
+  return { value: result, suffix };
+}
+
+function nextwaveFormatFinancialNumber(phrase) {
+  try {
+    const { value, suffix } = _nextwaveWordsToNumber(phrase);
+    if (suffix === 'dollar') return '$' + Math.round(value).toLocaleString('en-US');
+    if (suffix === 'percent') {
+      const s = String(value);
+      return (Number.isInteger(value) ? value.toString() : s) + '%';
+    }
+    if (suffix === 'times') return Math.round(value) + 'X';
+    if (suffix && suffix.indexOf('duration:') === 0) {
+      const unit = suffix.slice('duration:'.length);
+      const n = Math.round(value);
+      return n + ' ' + unit.toUpperCase() + (n === 1 ? '' : 'S');
+    }
+  } catch (e) { /* fall through to raw phrase */ }
+  return String(phrase || '').toUpperCase();
+}
+
+// Phase 4.5D — evidence-hierarchy fix: nextwaveRankNumberPhrase collapses a
+// unit's text down to the SINGLE structurally-best-guess number, which is
+// exactly what silently dropped "68%"/"2%" in favor of "18 MONTHS" on the
+// real Phase 4.5C candidate whenever one unit's sentence carried more than
+// one real quantity. This instead returns EVERY distinct extracted value in
+// a unit (deduped, in order of appearance, already run through the same
+// proven formatter), so the storyboard mapper can be given genuine
+// visibility into all of a unit's evidence and choose which is load-bearing
+// -- never inventing a value, only selecting among ones this function
+// already proved exist in the real script text.
+function nextwaveExtractAllNumbers(text) {
+  text = String(text || '');
+  const re = new RegExp(NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, 'gi');
+  const seen = new Set();
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    const formatted = nextwaveFormatFinancialNumber(m[0].trim());
+    if (formatted && !seen.has(formatted)) { seen.add(formatted); out.push(formatted); }
+  }
+  return out;
+}
+
+// Phase 5.1 Section 2/3 — chart grammar needs a real numeric MAGNITUDE, not
+// just the already-validated display string (numberLabel is always one of
+// nextwaveFormatFinancialNumber's own output shapes: "$135,000", "12%",
+// "3X", "10 YEARS"), so this only ever strips formatting back off a value
+// this file already validated against the script's real evidence -- it
+// never re-parses or re-derives a number from scratch. Returns null (not
+// 0) when nothing numeric is found, so callers can distinguish "no value"
+// from "value of zero" and fall back to the pre-chart card behavior.
+function _nextwaveV2ParseChartMagnitude(numberLabel) {
+  if (!numberLabel) return null;
+  const m = String(numberLabel).match(/-?[\d,]+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = parseFloat(m[0].replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+// Phase 5.1 Section 2/3 — a semantic (not per-script) signal for "this
+// buildup is a progression along TIME" (year 1/5/10, month 3, age 40...),
+// which reads better as a line chart's trajectory than a bar chart's
+// side-by-side magnitudes. Checked against the slot's own label AND its
+// unit's real narration text, never a fixed list of scripts.
+const NEXTWAVE_V2_TIME_SERIES_RE = /\b(year|yr|month|week|day|age)s?\s*\d+\b|\bby\s+(year|month|week|day|age)\s*\d+\b/i;
+
+// Generalized resolver: real dynamic financial figures resolve to
+// programmatic class B FIRST regardless of concept, then a genuinely
+// reusable COMPOSED SCENE (matched on the asset's `primary_concepts` when
+// present, so an incidental secondary tag on one scene can't hijack an
+// unrelated topic's video), then character, then metaphor_graphic /
+// metaphor_illustration, then plain programmatic annotation, else D.
+// Nothing here is specific to any one candidate/topic.
+function nextwaveResolveAsset(conceptType, needsCharacter, manifest, phrase) {
+  const assets = Array.isArray(manifest) ? manifest : [];
+
+  if (phrase !== undefined && phrase !== null && nextwaveHasDynamicNumbers(phrase)) {
+    return {
+      class: 'B', asset_id: null,
+      reason: 'real dynamic financial figure spoken -- renders programmatically regardless of concept, never AI-illustrated',
+    };
+  }
+
+  const sceneHits = assets.filter((a) => a.category === 'composed_scene' &&
+    (a.primary_concepts || a.concept_tags || []).includes(conceptType));
+  const reusableScene = sceneHits.filter((a) => a.reusable);
+  if (reusableScene.length) {
+    return { class: 'A', asset_id: reusableScene[0].asset_id, reason: `banked composed scene already covers '${conceptType}'` };
+  }
+  if (sceneHits.length) {
+    return {
+      class: 'D', asset_id: sceneHits[0].asset_id,
+      reason: `composed-scene spec exists for '${conceptType}' but is not yet reusable -- needs generation/re-roll, not build capability`,
+    };
+  }
+
+  if (needsCharacter) {
+    const charHits = assets.filter((a) => a.category === 'character' && (a.concept_tags || []).includes(conceptType));
+    const reusableChar = charHits.filter((a) => a.reusable);
+    if (reusableChar.length) {
+      return { class: 'A', asset_id: reusableChar[0].asset_id, reason: `banked character pose tagged for '${conceptType}'` };
+    }
+    if (charHits.length) {
+      return {
+        class: 'D', asset_id: charHits[0].asset_id,
+        reason: `pose spec exists for '${conceptType}' but is pending_human_generation -- Ideogram Character API access, not build capability`,
+      };
+    }
+  }
+  const metaHits = assets.filter((a) => (a.category === 'metaphor_graphic' || a.category === 'metaphor_illustration') &&
+    (a.concept_tags || []).includes(conceptType) && a.reusable);
+  metaHits.sort((a, b) => (a.local_path ? 0 : 1) - (b.local_path ? 0 : 1));
+  if (metaHits.length) {
+    return { class: 'C', asset_id: metaHits[0].asset_id, reason: `reusable metaphor illustration/graphic already covers '${conceptType}'` };
+  }
+  const progOk = assets.filter((a) => a.category === 'annotation_graphic' && a.reusable);
+  if (progOk.length && conceptType === 'emphasis') {
+    return { class: 'B', asset_id: progOk[0].asset_id, reason: 'pure programmatic annotation, no asset lookup needed' };
+  }
+  return { class: 'D', asset_id: null, reason: `no reusable or programmatic coverage exists yet for '${conceptType}'` };
+}
+
+// Safe, narrow fallback for a generic closer/summary line (no keyword hits
+// at all) inside a CLOSE/TAKEAWAY section -- NOT a broader keyword list
+// (risks false-positiving elsewhere). Falls back to 'closer_summary' ONLY
+// when the classifier found nothing AND the script's own structural section
+// marker says this unit is a wrap-up beat. Any other none_detected unit is
+// left exactly as none_detected.
+function nextwaveResolveFallbackConcept(sectionLabel, conceptTags) {
+  const isNoneDetected = Array.isArray(conceptTags) && conceptTags.length === 1 && conceptTags[0] === 'none_detected';
+  const section = String(sectionLabel || '').trim().toUpperCase();
+  if (isNoneDetected && (section === 'CLOSE' || section === 'TAKEAWAY')) return 'closer_summary';
+  return null;
+}
+
+// Single read/compute-only entry point: segment -> classify -> fallback ->
+// resolve, in one call. No side effects, no auth required (nothing here
+// reads or writes anything sensitive).
+async function nextwaveV2PlanVisuals(req, res) {
+  try {
+    const body = req.body || {};
+    const { script, manifest, needs_character_default } = body;
+    if (!script || typeof script !== 'string') {
+      return res.status(400).json({ ok: false, error: 'script (string) required' });
+    }
+    const units = nextwaveSegmentMeaningUnits(script);
+    const plan = units.map((u) => {
+      const tags = nextwaveClassifyVisualIntent(u.text);
+      const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+      const top = fallback || (tags[0] !== 'none_detected' ? tags[0] : null);
+      const resolution = top
+        ? nextwaveResolveAsset(top, needs_character_default !== false, manifest, u.text)
+        : { class: null, asset_id: null, reason: 'no concept detected for this unit' };
+      return { ...u, concept_tags: tags, fallback_concept: fallback, resolution };
+    });
+    return res.status(200).json({ ok: true, unit_count: plan.length, plan });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── NextWave V2 — Build renderer (Phase 4.4) ────────────────────────────────
+// NextWave-only replacement for the HeyGen+Submagic Build step. Every other
+// engine's Build path (heygenStartRender etc.) is untouched. Reuses proven
+// production infrastructure rather than inventing a parallel system:
+//   - @ffmpeg-installer/ffmpeg + SMM_FONT_PATH (same binary/font SMM's real
+//     video assembly already uses in production — see smSegEndCard etc.)
+//   - smAssertValidMediaFile / smConcatSegments (same validation + concat
+//     pattern, called directly, not duplicated)
+//   - sbStorageUpload (same Supabase Storage path SMM video already uses)
+//   - nextwaveSegmentMeaningUnits / nextwaveClassifyVisualIntent /
+//     nextwaveHasDynamicNumbers / nextwaveRankNumberPhrase /
+//     nextwaveFormatFinancialNumber (Phase 4 / 4.1B, unchanged)
+//   - nextwaveSynthesizeNarrationElevenLabs (real ElevenLabs, now accepting
+//     an optional voiceId — the only change made to that function)
+// Icon/background/host assets are original, programmatically-drawn PNGs at
+// api/assets/nextwave-v2/ (same directory pattern as api/assets/smm-font.ttf
+// so they are bundled into this function the same proven way).
+
+const NEXTWAVE_V2_ASSETS_DIR = join(process.cwd(), 'api', 'assets', 'nextwave-v2');
+const NEXTWAVE_V2_BG = join(NEXTWAVE_V2_ASSETS_DIR, 'bg_environment_1920x1080.png');
+const NEXTWAVE_V2_HOST_POINTING = join(NEXTWAVE_V2_ASSETS_DIR, 'host_hud_pointing.png');
+const NEXTWAVE_V2_HOST_DEFAULT = join(NEXTWAVE_V2_ASSETS_DIR, 'host_hud_default.png');
+
+// Keyed to the exact same concept tags NEXTWAVE_V2_CONCEPT_KEYWORDS already
+// produces (Phase 4) — no new mapping/taxonomy to keep in sync separately.
+const NEXTWAVE_V2_ICON_MAP = {
+  home: 'icon_home.png', debt: 'icon_credit_card.png', credit_card: 'icon_credit_card.png',
+  bank_account: 'icon_bank.png', tax: 'icon_dollar_generic.png', growth: 'icon_growth.png',
+  loss: 'icon_loss.png', comparison: 'icon_scale.png', time: 'icon_calendar.png',
+  delay: 'icon_calendar.png', retirement: 'icon_savings.png', car: 'icon_car.png',
+  bills: 'icon_calendar.png', income: 'icon_income.png', savings: 'icon_savings.png',
+  risk: 'icon_risk.png', decision: 'icon_scale.png', opportunity_cost: 'icon_scale.png',
+  market_movement: 'icon_growth.png', goal_progress: 'icon_growth.png',
+  cash_flow: 'icon_income.png', control: 'icon_scale.png', tradeoff: 'icon_scale.png',
+};
+const NEXTWAVE_V2_ICON_FALLBACK = 'icon_dollar_generic.png';
+function nextwaveV2IconPath(conceptTag) {
+  return join(NEXTWAVE_V2_ASSETS_DIR, NEXTWAVE_V2_ICON_MAP[conceptTag] || NEXTWAVE_V2_ICON_FALLBACK);
+}
+
+// Same escaping class as smSanitizeForDrawtext (quotes/colons/brackets are
+// ffmpeg filter-syntax metacharacters — this is a correctness/injection
+// concern, not just cosmetic), but without that helper's 60-char cap since
+// caption lines run longer than end-card labels.
+function nextwaveV2SanitizeDrawtext(s, maxLen) {
+  return String(s || '').replace(/['":\\\[\],;]/g, '').slice(0, maxLen || 110);
+}
+
+// Groups meaning units into scenes generically — a new scene starts once the
+// current one already holds 3+ units, or the next unit's concept tags share
+// nothing with the scene so far (a real topic shift). Nothing here is
+// hardcoded to any one script; this is the same grouping logic validated
+// locally in Phase 4.4's dry-run test before being written here.
+function nextwaveV2GroupScenes(plan) {
+  const scenes = [];
+  let cur = null;
+  for (const u of plan) {
+    const tags = (u.concept_tags || []).filter((t) => t !== 'none_detected');
+    const shift = cur && cur.units.length >= 1 && tags.length && cur.conceptSet.size &&
+      !tags.some((t) => cur.conceptSet.has(t));
+    if (!cur || cur.units.length >= 3 || shift) {
+      cur = { units: [], conceptSet: new Set() };
+      scenes.push(cur);
+    }
+    cur.units.push(u);
+    tags.forEach((t) => cur.conceptSet.add(t));
+  }
+  return scenes;
+}
+
+// Top 1-2 concepts by frequency within the scene -> at most 2 distinct icon
+// assets (never more, to avoid clutter) -> generic fallback icon if the
+// scene's units carried no recognized concept at all (so no scene is ever a
+// bare background with nothing on it).
+function nextwaveV2SceneIcons(scene) {
+  const freq = {};
+  scene.units.forEach((u) => (u.concept_tags || []).forEach((t) => {
+    if (t === 'none_detected') return;
+    freq[t] = (freq[t] || 0) + 1;
+  }));
+  const top = Object.keys(freq).sort((a, b) => freq[b] - freq[a]).slice(0, 2);
+  const icons = [...new Set(top.map(nextwaveV2IconPath))];
+  return icons.length ? icons : [nextwaveV2IconPath(null)];
+}
+
+// No ffprobe binary is vendored — same technique smAssertValidMediaFile
+// already relies on (a decode pass's own stderr reports real stream info).
+// `ffmpeg -i <file>` always exits non-zero with no output specified; the
+// Duration line is on stderr regardless of that exit code.
+async function nextwaveV2GetDurationSec(path) {
+  try {
+    await execFileAsync(ffmpegInstaller.path, ['-i', path], { timeout: 15000, maxBuffer: 1024 * 1024 * 5 });
+    throw new Error('unexpected: ffmpeg -i exited 0 with no output specified');
+  } catch (e) {
+    const stderr = String((e && e.stderr) || '');
+    const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+    if (!m) throw new Error(`could not determine duration for ${path}: ${stderr.slice(-300)}`);
+    return (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+  }
+}
+
+// ── Phase 4.6 — ONE continuous narration synthesis per Short ───────────────
+// CEO rejection: narration sounded "broken/choppy... abrupt cadence resets."
+// Root-cause investigation (real audio, not assumption): downloaded and
+// waveform-compared (a) raw ElevenLabs output, (b) the same audio through
+// the exact production silenceremove filter, (c) a per-scene rendered
+// segment, (d) the final concatenated MP4. The raw ElevenLabs waveform
+// already has the same word-by-word amplitude-envelope shape as the
+// processed audio at this zoom level (normal for any speech, not itself
+// evidence of damage), and silenceremove only trimmed ~100ms on a real
+// sample with two borderline pauses, confirming it isn't the chopping
+// culprit either. Two REAL, confirmed problems: (1) the silenceremove
+// ffmpeg call had no explicit output bitrate, so libmp3lame silently
+// dropped from ElevenLabs' 128kbps down to a 64kbps default -- a real,
+// avoidable quality loss, fixed below with an explicit -b:a; (2) the
+// architecture itself: Phase 4.4-4.5D called ElevenLabs ONCE PER SCENE
+// (4 separate synthesis calls per Short), so each scene's prosody/pacing
+// was decided independently by the model with no knowledge it was
+// continuing a thought -- exactly what produces an audible cadence reset
+// at every scene cut, and exactly what the order's own hypothesis named.
+// Fixed generally, not per-script: synthesize the FULL approved script as
+// one continuous ElevenLabs call, trim once, then map every scene's
+// visual timing onto slices of this single real master track (see
+// nextwaveV2BuildRender) instead of re-synthesizing narration per scene.
+// ── Phase 4.7 — financial speech normalizer ─────────────────────────────
+// CEO rejection: "number narration is particularly unnatural." Root-cause
+// check: nothing between script text and the ElevenLabs call guarded
+// against compact display-style notation ($291K, $2.6M) reaching the
+// narration engine verbatim -- that's a chart/label convention, not a
+// prose convention (the real Wealth Logic benchmark's own captions spell
+// "$2.6 million" as words, never a letter suffix -- inspected directly,
+// not assumed). The display string and the spoken string are allowed to
+// diverge from one shared factual value: this only ever touches the text
+// sent to ElevenLabs, never the on-screen card text (nextwaveExtractAllNumbers
+// / nextwaveFormatFinancialNumber run on the pre-normalization unit text,
+// earlier in the pipeline, so visual number extraction is unaffected).
+function _nextwaveNumberToWords(n) {
+  n = Math.round(n);
+  if (n === 0) return 'zero';
+  const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+    'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  function threeDigits(x) {
+    let s = '';
+    if (x >= 100) { s += ones[Math.floor(x / 100)] + ' hundred'; x %= 100; if (x) s += ' '; }
+    if (x >= 20) { s += tens[Math.floor(x / 10)]; if (x % 10) s += '-' + ones[x % 10]; }
+    else if (x > 0) { s += ones[x]; }
+    return s;
+  }
+  const scales = [[1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
+  let parts = [];
+  for (const [scale, name] of scales) {
+    if (n >= scale) { parts.push(threeDigits(Math.floor(n / scale)) + ' ' + name); n %= scale; }
+  }
+  if (n > 0 || !parts.length) parts.push(threeDigits(n));
+  return parts.join(' ').trim();
+}
+// Handles dollars+thousands/millions/billions (the confirmed-risk case)
+// and digit multipliers ("3x" -> "three times"). Deliberately does NOT
+// touch plain "$3,477"-style comma-formatted amounts, bare percentages,
+// decimals, or "15-year" -- standard TTS already reads those naturally;
+// rewriting them would add risk without an observed problem to fix.
+function nextwaveV2NormalizeForSpeech(text) {
+  text = String(text || '');
+  text = text.replace(/\$\s?(\d+(?:\.\d+)?)\s?([kmb])\b/gi, (m, num, suffix) => {
+    const mult = { k: 1e3, m: 1e6, b: 1e9 }[suffix.toLowerCase()];
+    return _nextwaveNumberToWords(parseFloat(num) * mult) + ' dollars';
+  });
+  text = text.replace(/\b(\d+(?:\.\d+)?)\s?x\b/gi, (m, num) => _nextwaveNumberToWords(parseFloat(num)) + ' times');
+  return text;
+}
+
+async function nextwaveV2SynthesizeMasterNarration(fullText, voiceId, renderId) {
+  fullText = nextwaveV2NormalizeForSpeech(fullText);
+  const narration = await nextwaveSynthesizeNarrationElevenLabs(fullText, voiceId);
+  if (!narration.ok) throw new Error(`master narration failed: ${narration.error}`);
+
+  const rawPath = join(tmpdir(), `nwv2-${renderId}-master-raw.mp3`);
+  await writeFile(rawPath, narration.buffer);
+  await smAssertValidMediaFile(rawPath, 'master narration audio');
+
+  // Phase 4.6 — more conservative than the old per-scene pass (longer
+  // stop_duration, stricter/lower stop_threshold): with one continuous
+  // take there is far less need to trim aggressively, and the CEO
+  // explicitly warned against "damaging natural speech" / "artificial
+  // silence chopping." This only caps genuinely long embedded pauses
+  // (>=0.8s) down to a still-natural 0.6s, leaving normal speech rhythm
+  // (including any pause under 0.8s) completely untouched. Explicit
+  // -b:a preserves ElevenLabs' own 128kbps instead of silently dropping
+  // to libmp3lame's low default (the confirmed real quality-loss bug).
+  const trimmedPath = join(tmpdir(), `nwv2-${renderId}-master.mp3`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', rawPath,
+      '-af', 'silenceremove=stop_periods=-1:stop_duration=0.8:stop_threshold=-40dB:stop_silence=0.6',
+      '-b:a', '192k',
+      trimmedPath,
+    ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+    await smAssertValidMediaFile(trimmedPath, 'trimmed master narration audio');
+    await unlink(rawPath).catch(() => {});
+  } catch (e) {
+    // Safe fallback: never block a render on a pacing improvement -- fall
+    // back to the untouched real ElevenLabs audio if trimming fails.
+    await copyFile(rawPath, trimmedPath);
+    await unlink(rawPath).catch(() => {});
+  }
+  const durationSec = await nextwaveV2GetDurationSec(trimmedPath);
+  return { path: trimmedPath, durationSec };
+}
+
+// ── Phase 4.5 — narration-to-visual storyboard mapper ──────────────────────
+// CEO rejection: icon + mostly-empty background + tiny caption does not
+// TEACH the argument. Deriving "what should the viewer see to understand
+// this statement" (the CEO's own examples — "WHEN SHOULD YOU CONVERT? /
+// MARKET PRICE vs TAXABLE INCOME") is a reading-comprehension task, not a
+// keyword match — a regex classifier cannot generalize to arbitrary future
+// finance topics the way the order requires. Reuses the exact Anthropic
+// call pattern already proven elsewhere in this file (smBuildVideoCreative
+// etc. — <tag>JSON</tag> response, x-api-key header, claude-sonnet-4-5,
+// validated then parsed) rather than adding a new vendor or a second
+// pattern. Never asked to invent numbers/facts — only structure (which
+// screen_type, a short heading, which existing unit each slot's LABEL
+// corresponds to, host role) — every number that actually appears on
+// screen is still attached afterward from the same proven
+// nextwaveRankNumberPhrase/nextwaveFormatFinancialNumber extractors Phase
+// 4.1B already validated, never from the model's own text.
+// Phase 5.2 — nextwaveV2BindEvidenceDeterministically lives in
+// lib/nextwaveV2EvidenceBinding.mjs (imported at the top of this file,
+// not inline here) specifically so the evidence-integrity test matrix can
+// exercise it directly without importing this whole file (which pulls in
+// @ffmpeg-installer/ffmpeg at module load).
+async function nextwaveV2GenerateStoryboard(plan, scenes) {
+  // Phase 4.5D — the deterministic fallback has no semantic understanding
+  // of which value is load-bearing, so it keeps the pre-4.5D behavior
+  // (the single structurally-best-ranked value) as primary_value, never a
+  // secondary one. This is a safe, unchanged default for the no-API path;
+  // the real evidence-hierarchy improvement is the model path below, which
+  // sees every candidate value and can pick two when both matter.
+  const primaryForUnit = (i) => {
+    const u = plan[i];
+    if (!u || !u.__hasNumber) return null;
+    return nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text));
+  };
+  const deterministicFallback = () => scenes.map((scene, sceneIdx) => {
+    const idxs = scene.units.map((u) => u.__idx);
+    const numberIdxs = idxs.filter((i) => plan[i].__hasNumber);
+    const joined = scene.units.map((u) => u.text).join(' ').toLowerCase();
+    let screen_type = 'single';
+    if (/\bversus\b|\bvs\.?\b|instead of|rather than|compared to/.test(joined)) screen_type = 'comparison';
+    else if (/\bbefore\b.*\bafter\b|\bnow\b.*\blater\b|used to\b/.test(joined)) screen_type = 'before_after';
+    else if (numberIdxs.length >= 3) screen_type = 'buildup';
+    const topConcept = [...scene.conceptSet].filter((c) => c !== 'none_detected')[0] || 'the numbers';
+    const heading = topConcept.replace(/_/g, ' ').toUpperCase();
+    // Phase 5.3 — deterministic defaults for the new declared-storyboard
+    // fields (scene_purpose/illustration_concept/chart_required/
+    // progressive_reveal/motion_intent/text_hierarchy_primary_slot/
+    // safe_framing), so the no-API fallback path never leaves them
+    // undefined -- BUILD reads all seven unconditionally.
+    const scene_purpose = sceneIdx === 0 ? 'hook' : (sceneIdx === scenes.length - 1 ? 'resolve' : (screen_type === 'comparison' || screen_type === 'before_after') ? 'contrast' : (screen_type === 'buildup' ? 'build_tension' : 'reveal_evidence'));
+    const illustration_concept = topConcept === 'the numbers' ? null : topConcept;
+    const chart_required = screen_type === 'buildup' && numberIdxs.length >= 2;
+    const motion_intent = sceneIdx === 0 ? 'push_in' : (sceneIdx === scenes.length - 1 ? 'push_out' : 'push_in');
+    let slots;
+    if (screen_type === 'comparison' || screen_type === 'before_after') {
+      const pick = (numberIdxs.length ? numberIdxs : idxs).slice(0, 2);
+      const labels = screen_type === 'before_after' ? ['BEFORE', 'AFTER'] : ['OPTION A', 'OPTION B'];
+      slots = pick.map((i, k) => ({ unit_index: i, label: labels[k] || `POINT ${k + 1}`, primary_value: primaryForUnit(i), secondary_value: null }));
+    } else if (screen_type === 'buildup') {
+      const pick = numberIdxs.slice(0, 4);
+      slots = pick.map((i, k) => ({ unit_index: i, label: k === pick.length - 1 ? 'RESULT' : `FACTOR ${k + 1}`, primary_value: primaryForUnit(i), secondary_value: null }));
+    } else {
+      slots = [{ unit_index: idxs[0], label: heading, primary_value: primaryForUnit(idxs[0]), secondary_value: null }];
+    }
+    // Phase 4.6 — the no-API fallback also varies host choreography by
+    // scene position instead of defaulting to the same small role every
+    // time: first scene gets a large hero intro, last scene gets a large
+    // outro, a comparison/before_after scene puts the host beside the
+    // contrast, a number-heavy scene puts it beside the calculation,
+    // otherwise a plain single scene goes data_only so the host isn't
+    // parked in every frame.
+    let host_role;
+    if (sceneIdx === 0) host_role = 'hero_intro';
+    else if (sceneIdx === scenes.length - 1) host_role = 'outro_host';
+    else if (screen_type === 'comparison' || screen_type === 'before_after') host_role = 'beside_comparison';
+    else if (screen_type === 'buildup') host_role = 'beside_calculation';
+    else host_role = numberIdxs.length ? 'reaction_emphasis' : 'data_only';
+    return {
+      screen_type, heading, slots, host_role, teaching_objective: '',
+      scene_purpose, illustration_concept, chart_required,
+      chart_type_hint: chart_required ? 'bar' : 'none',
+      progressive_reveal: numberIdxs.length >= 2,
+      motion_intent,
+      text_hierarchy_primary_slot: slots.length ? 0 : null,
+      safe_framing: 'standard',
+    };
+  });
+
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return deterministicFallback();
+
+  // Phase 4.5D — each unit now lists every value this file's own extractor
+  // already proved is really in that unit's text, so the model can choose
+  // which is load-bearing to the teaching point instead of the renderer
+  // arbitrarily keeping only one (which is what silently dropped "68%" in
+  // favor of "18 MONTHS" on the real Phase 4.5C candidate).
+  const scriptUnitsBlock = plan.map((u, i) => {
+    const vals = (u.__candidateValues && u.__candidateValues.length) ? ` (values available: ${u.__candidateValues.join(', ')})` : '';
+    return `[${i}]${vals} ${u.text}`;
+  }).join('\n');
+  const scenesBlock = scenes.map((s, i) => `Scene ${i}: units [${s.units.map((u) => u.__idx).join(',')}]`).join('\n');
+  const prompt = `You are a visual storyboard planner for a short finance-explainer video. You will be given the full narration, split into numbered units, and a grouping of those units into SCENES (consecutive units that will share one visual scene).
+
+For EACH scene, decide:
+- screen_type: one of "comparison" (contrasts two options/paths/amounts), "before_after" (contrasts an earlier state vs a later/eventual one), "buildup" (several factors accumulate toward one result, e.g. base + bonus + gains -> total), or "single" (explains one concept, no clear structural contrast).
+- heading: 2-6 words, ALL CAPS, a punchy question or statement capturing what the viewer should learn from this scene — never a restatement of the narration sentence itself. Base it ONLY on what the script actually says.
+- slots: 1-4 items, each {"unit_index": <a unit index from THIS scene>, "label": "1-4 word ALL CAPS label for what that slot represents, e.g. 'MARKET PRICE', 'BASE INCOME', 'BEFORE'", "primary_value": "...", "secondary_value": "..."}.
+- host_role: choose the one that actually matches this scene's moment, not a default — one of:
+  - "hero_intro" (host is LARGE and central — use for the opening hook/attention-grabbing scene)
+  - "presenter_large" (host is LARGE, actively presenting/explaining — use when the host IS the explanation, not just decoration)
+  - "point_left" (host gestures toward content on the left side of the frame)
+  - "point_right" (host gestures toward content on the right side of the frame)
+  - "beside_comparison" (host stands between/near a two-sided comparison)
+  - "beside_calculation" (host stands near a running calculation/buildup)
+  - "reaction_emphasis" (host has a brief, larger emphasis beat at the scene's key punchline moment)
+  - "data_only" (no host at all — the data/illustration deserves full, undivided attention)
+  - "outro_host" (host is LARGE for a closing/CTA scene)
+  - "intro" (small supporting host, only default when nothing else fits — do not use this as the automatic choice for every scene)
+  Vary this across the script's scenes — a real video does not use the same host size/position in every scene. At least one scene should use a LARGE role (hero_intro/presenter_large/outro_host) and at least one scene (if the script has 3+ scenes) should use data_only or reaction_emphasis. Never park the host in the same small corner scene after scene.
+- teaching_objective: one sentence — what the viewer should understand even with audio muted.
+- scene_purpose: one of "hook" (opens the video, earns attention), "build_tension" (accumulates factors toward a result), "contrast" (sets two things against each other), "reveal_evidence" (lands one concrete fact), "resolve" (closes the video's argument or gives the takeaway/CTA). Pick the one that actually describes this scene's job in the argument, not just its screen_type.
+- illustration_concept: 2-4 words naming the ONE concrete thing that should be illustrated behind/beside the host for this scene (e.g. "credit card debt", "house purchase", "retirement savings", "a fork in the road decision") — grounded in what this scene's own units are actually about, never generic ("finance", "money" alone). Set to null only when the scene is purely transitional with nothing concrete to illustrate.
+- chart_required: true only when this scene's own numeric evidence is best shown as a real chart (a buildup of 2+ comparable magnitudes, a value changing over time, or a percentage split that sums near 100) rather than as plain text/cards. false otherwise — do not force a chart onto a scene with only one number or non-comparable values.
+- chart_type_hint: when chart_required is true, one of "bar" (2-4 comparable magnitudes), "line" (a value across a time progression), "donut" (a two-way percentage split); "none" when chart_required is false.
+- progressive_reveal: true when this scene's evidence should build up piece by piece as the narration reaches each one (almost always true for buildup/comparison scenes with 2+ real values); false when the scene makes one single point that should appear all at once.
+- motion_intent: one of "push_in" (slow zoom in — use for most scenes, and always for the opening hook), "push_out" (slow zoom out — reserved for a closing/resolving scene so the frame visibly settles/widens), "static" (no zoom — use only when a chart or fine detail needs a still frame to stay readable).
+- text_hierarchy_primary_slot: the 0-based index into THIS scene's own slots array naming which single slot is the most important evidence to visually emphasize (larger/first) — null if slots is empty.
+- safe_framing: "standard" for a normal scene, or "tight" only when this scene already has a large host role (hero_intro/presenter_large/outro_host) AND 2+ slots, since that combination is the one real case where the frame gets crowded and needs extra edge margin.
+
+EVIDENCE HIERARCHY — primary_value / secondary_value:
+Some units list one or more "values available" — real quantities this unit's own text already contains. For each slot:
+- If its unit has values available, decide which is actually LOAD-BEARING to the teaching point (the evidence the conclusion depends on), not just whichever appears first or last. Copy that value's EXACT text into "primary_value".
+- Only set "secondary_value" (also copied exactly from that unit's list) when a SECOND value from the same list is also materially necessary to understand the point — e.g. a rate AND the time period it applies over. Do not set it just because a second value exists.
+- If a unit has no values available, or none are load-bearing enough to feature, set both to null.
+- NEVER write a value that is not verbatim in that unit's own "values available" list. NEVER invent a dollar amount, percentage, or fact not already in the script.
+- Do not try to display every value across the scene — pick the evidence that actually supports the conclusion, not number density.
+- CROSS-CHECK PAIRING: when two or more slots reference the SAME unit_index (e.g. one sentence like "X costs $A over N years versus $B over M years" split into a slot per side of the comparison), re-read that unit's actual sentence carefully and confirm each slot's primary_value is the value that TRUE sentence associates with THAT slot's own label — never assign a value to a label it doesn't actually go with, and never let two differently-labeled slots end up with the same value unless the sentence genuinely repeats it.
+
+Only choose structure/labels/which-values-matter — never invent values, and never mismatch a value to the wrong label.
+
+NARRATION UNITS:
+<script_units>
+${scriptUnitsBlock}
+</script_units>
+
+SCENES:
+<scenes>
+${scenesBlock}
+</scenes>
+
+Respond with ONLY:
+<storyboard>
+{"scenes":[{"screen_type":"...","heading":"...","slots":[{"unit_index":0,"label":"...","primary_value":null,"secondary_value":null}],"host_role":"...","teaching_objective":"...","scene_purpose":"...","illustration_concept":"...","chart_required":false,"chart_type_hint":"none","progressive_reveal":true,"motion_intent":"push_in","text_hierarchy_primary_slot":0,"safe_framing":"standard"}]}
+</storyboard>`;
+
+  try {
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!claudeRes.ok) return deterministicFallback();
+    const d = await claudeRes.json();
+    const text = (d.content && d.content[0] && d.content[0].text) || '';
+    const m = text.match(/<storyboard>([\s\S]*?)<\/storyboard>/);
+    if (!m) return deterministicFallback();
+    const parsed = JSON.parse(m[1]);
+    if (!parsed || !Array.isArray(parsed.scenes) || parsed.scenes.length !== scenes.length) return deterministicFallback();
+    const validTypes = new Set(['comparison', 'before_after', 'buildup', 'single']);
+    // Phase 4.6 — richer host choreography palette (legacy point_at_comparison/
+    // step_back kept as accepted synonyms so nothing already in flight breaks).
+    const validRoles = new Set(['hero_intro', 'presenter_large', 'point_left', 'point_right', 'beside_comparison', 'beside_calculation', 'reaction_emphasis', 'data_only', 'outro_host', 'intro', 'point_at_comparison', 'step_back']);
+    const out = parsed.scenes.map((s, i) => {
+      const validIdxs = new Set(scenes[i].units.map((u) => u.__idx));
+      const slots = Array.isArray(s.slots) ? s.slots.filter((sl) => sl && validIdxs.has(sl.unit_index) && typeof sl.label === 'string').slice(0, 4).map((sl) => {
+        // Phase 4.5D — the model chooses WHICH extracted value is
+        // load-bearing, but every value it names must already be verbatim
+        // in that unit's own real candidate list (computed straight from
+        // the script, never from the model). Anything that doesn't match
+        // — hallucinated, reformatted, or just absent — becomes null
+        // rather than being guessed at, which safely falls through to the
+        // Step-3 real-text panel fallback instead of ever inventing or
+        // silently substituting a different number.
+        const unit = plan[sl.unit_index];
+        const candidates = (unit && unit.__candidateValues) || [];
+        const primary_value = (typeof sl.primary_value === 'string' && candidates.includes(sl.primary_value)) ? sl.primary_value : null;
+        const secondary_value = (typeof sl.secondary_value === 'string' && candidates.includes(sl.secondary_value) && sl.secondary_value !== primary_value) ? sl.secondary_value : null;
+        return { unit_index: sl.unit_index, label: sl.label, primary_value, secondary_value };
+      }) : [];
+      // Phase 5.2 — DETERMINISTIC EVIDENCE BINDING. See
+      // nextwaveV2BindEvidenceDeterministically (imported at the top of
+      // this file, from lib/nextwaveV2EvidenceBinding.mjs) for the full
+      // rationale and mechanism: the storyboard model may still choose
+      // scene structure, labels, and which units/values are load-bearing,
+      // but it no longer has final authority over WHICH unit a label's
+      // slot actually binds to, or which value that unit contributes.
+      nextwaveV2BindEvidenceDeterministically(slots, plan, validIdxs);
+      // Phase 4.5D — deterministic guard against value/label cross-wiring.
+      // A real candidate showed "$135K" under BOTH a "30-YEAR INTEREST"
+      // and a "15-YEAR INTEREST" label from the same unit (whose text
+      // genuinely contains "$291K... over 30 years versus $135K... over
+      // 15 years") -- the model occasionally pairs a real, verbatim value
+      // with the wrong slot, which the hallucination guard above can't
+      // catch since the value IS real. Two corrections, in order:
+      //
+      // 1. Proximity pairing: __candidateValues is already in the order
+      //    each value appears in the real sentence. If a slot's label
+      //    names a number that also appears in one of this unit's own
+      //    candidates (e.g. "30-YEAR" matching "30 YEARS"), the natural
+      //    "$AMOUNT ... over N years" phrasing means the money-like value
+      //    immediately BEFORE that duration in extraction order is
+      //    almost always its true pair (falling back to immediately
+      //    after, for phrasings that put the duration first) -- this
+      //    exactly corrects the real failure case above ("30 years"
+      //    pairs with the preceding "$291K", not the following "$135K").
+      // 2. Duplicate guard: if two differently-labeled slots on the same
+      //    unit still end up identical after (1), the duplicate is
+      //    reassigned to a different, unused, same-type candidate, or
+      //    nulled (safe Step-3 text fallback) if none exists.
+      const valType = (v) => /^\$/.test(v) ? 'dollar' : /%$/.test(v) ? 'percent' : /^\d+X$/.test(v) ? 'multiplier' : /(DAYS?|WEEKS?|MONTHS?|YEARS?)$/.test(v) ? 'duration' : 'other';
+      const moneyLike = (v) => valType(v) === 'dollar' || valType(v) === 'percent';
+      slots.forEach((sl) => {
+        const candidates = ((plan[sl.unit_index] || {}).__candidateValues) || [];
+        const labelNum = (sl.label.match(/\d+/) || [])[0];
+        if (!labelNum || candidates.length < 2) return;
+        const anchorIdx = candidates.findIndex((c) => c.includes(labelNum));
+        if (anchorIdx === -1) return;
+        const prev = candidates[anchorIdx - 1], next = candidates[anchorIdx + 1];
+        const pick = (prev && moneyLike(prev)) ? prev : (next && moneyLike(next)) ? next : null;
+        if (pick) sl.primary_value = pick;
+      });
+      const usedByUnit = {};
+      slots.forEach((sl) => {
+        if (!sl.primary_value) return;
+        const used = usedByUnit[sl.unit_index] || (usedByUnit[sl.unit_index] = new Set());
+        if (used.has(sl.primary_value)) {
+          const candidates = ((plan[sl.unit_index] || {}).__candidateValues) || [];
+          const wanted = valType(sl.primary_value);
+          sl.primary_value = candidates.find((c) => !used.has(c) && valType(c) === wanted) || candidates.find((c) => !used.has(c)) || null;
+        }
+        if (sl.primary_value) used.add(sl.primary_value);
+      });
+      if (!slots.length) return deterministicFallback()[i];
+      // Phase 5.2A — a scene the model itself called "comparison"/
+      // "before_after" that only has ONE usable slot after validation
+      // would otherwise fall through the >= 2 comparison guard in
+      // nextwaveV2BuildSceneSegment entirely and land on the generic
+      // bordered-card structural safety net -- the rejected card-first
+      // look. Attempts deterministic recovery of a genuine second side
+      // from evidence already extracted from THIS scene's own real units
+      // (see nextwaveV2RecoverComparisonSecondSide) before falling back;
+      // if recovery still can't find a real second value, this scene has
+      // exactly one real fact and is downgraded to 'single' so it renders
+      // through the tested illustrated-object/chart path instead of a
+      // forced two-sided layout or a bare card.
+      let effectiveScreenType = validTypes.has(s.screen_type) ? s.screen_type : 'single';
+      if (effectiveScreenType === 'comparison' || effectiveScreenType === 'before_after') {
+        nextwaveV2RecoverComparisonSecondSide(slots, effectiveScreenType, scenes[i], plan);
+        if (slots.length < 2) effectiveScreenType = 'single';
+      }
+      let host_role = validRoles.has(s.host_role) ? s.host_role : 'intro';
+      // Phase 4.6 — the model's prompt-only compliance with the new host
+      // choreography roles proved unreliable in testing (it repeatedly
+      // chose "intro"/"point_at_comparison" for the first and last scenes
+      // even when explicitly instructed to use a large role there), which
+      // would have silently defeated both Step 3 (host prominence) and
+      // Step 5 (the outro_host-gated CTA redesign). The opening hook and
+      // closing CTA are structurally predictable regardless of script
+      // content, so they're deterministically enforced here rather than
+      // left to prompt compliance: the first scene always gets a large
+      // intro role, the last scene always gets outro_host, unless the
+      // model already chose an equally large role on its own.
+      const largeRoles = new Set(['hero_intro', 'presenter_large', 'outro_host']);
+      if (i === 0 && !largeRoles.has(host_role)) host_role = 'hero_intro';
+      else if (i === scenes.length - 1 && scenes.length > 1 && host_role !== 'outro_host') host_role = 'outro_host';
+      // Phase 5.3 — validate the new declared fields exactly like every
+      // other model-authored field above: never trust the model's own
+      // string/type outright, fall back to a deterministic, generalizable
+      // default (never a value the model invented for THIS script) when
+      // it's missing, malformed, or outside the allowed vocabulary.
+      const validPurposes = new Set(['hook', 'build_tension', 'contrast', 'reveal_evidence', 'resolve']);
+      const scene_purpose = validPurposes.has(s.scene_purpose) ? s.scene_purpose
+        : (i === 0 ? 'hook' : (i === scenes.length - 1 ? 'resolve' : (effectiveScreenType === 'comparison' || effectiveScreenType === 'before_after') ? 'contrast' : (effectiveScreenType === 'buildup' ? 'build_tension' : 'reveal_evidence')));
+      const illustration_concept = (typeof s.illustration_concept === 'string' && s.illustration_concept.trim() && s.illustration_concept.trim().toLowerCase() !== 'null')
+        ? s.illustration_concept.trim().toLowerCase().slice(0, 40) : null;
+      const chart_required = typeof s.chart_required === 'boolean' ? s.chart_required : (effectiveScreenType === 'buildup' && slots.length >= 2);
+      const validChartHints = new Set(['bar', 'line', 'donut', 'none']);
+      const chart_type_hint = chart_required && validChartHints.has(s.chart_type_hint) && s.chart_type_hint !== 'none' ? s.chart_type_hint : (chart_required ? 'bar' : 'none');
+      const progressive_reveal = typeof s.progressive_reveal === 'boolean' ? s.progressive_reveal : (slots.filter((sl) => sl.primary_value).length >= 2);
+      const validMotion = new Set(['push_in', 'push_out', 'static']);
+      const motion_intent = validMotion.has(s.motion_intent) ? s.motion_intent : (i === scenes.length - 1 && scenes.length > 1 ? 'push_out' : 'push_in');
+      const text_hierarchy_primary_slot = (Number.isInteger(s.text_hierarchy_primary_slot) && s.text_hierarchy_primary_slot >= 0 && s.text_hierarchy_primary_slot < slots.length) ? s.text_hierarchy_primary_slot : (slots.length ? 0 : null);
+      const safe_framing = (s.safe_framing === 'tight' && largeRoles.has(host_role) && slots.length >= 2) ? 'tight' : 'standard';
+      return {
+        screen_type: effectiveScreenType,
+        heading: (typeof s.heading === 'string' && s.heading.trim()) ? s.heading.trim().slice(0, 60) : 'THE KEY IDEA',
+        slots,
+        host_role,
+        teaching_objective: typeof s.teaching_objective === 'string' ? s.teaching_objective.slice(0, 200) : '',
+        scene_purpose, illustration_concept, chart_required, chart_type_hint,
+        progressive_reveal, motion_intent, text_hierarchy_primary_slot, safe_framing,
+      };
+    });
+    return out;
+  } catch (e) {
+    return deterministicFallback();
+  }
+}
+
+// ── NextWave V2 Production Architecture Freeze — hybrid visual-routing plan ──
+// Replaces nextwaveV2GenerateStoryboard as the BUILD-facing plan for the
+// frozen HeyGen+Submagic architecture. Reuses the exact same proven inputs
+// (segmentation, classification, evidence extraction — all untouched) and
+// the exact same "model chooses structure, code enforces values" pattern,
+// but the OUTPUT schema is now what nextwaveV2BuildHybridRender actually
+// needs: which beats stay on the HeyGen presenter, which get Submagic's
+// automatic B-roll, which get a targeted ai-broll prompt at a planned
+// timestamp, and which carry exact financial evidence that must go through
+// caption/emphasis rather than ever being asked of generative B-roll.
+//
+// The "never fabricate/approximate precise evidence" rule is enforced in
+// CODE, not just prompted: any beat with 2+ real comparable values is
+// deterministically forced to 'exact_evidence' + unsupported_precise=true
+// regardless of what the model chose, exactly mirroring how
+// nextwaveV2BindEvidenceDeterministically already overrides the model on
+// evidence questions elsewhere in this file.
+async function nextwaveV2GenerateVisualPlan(plan, scenes) {
+  const deterministicFallback = () => scenes.map((scene, i) => {
+    const idxs = scene.units.map((u) => u.__idx);
+    const numberIdxs = idxs.filter((k) => plan[k].__hasNumber);
+    const realValues = numberIdxs.flatMap((k) => plan[k].__candidateValues || []);
+    const topConcept = [...scene.conceptSet].filter((c) => c !== 'none_detected')[0] || null;
+    const unsupported_precise = realValues.length >= 2;
+    let visual_treatment;
+    if (unsupported_precise) visual_treatment = 'exact_evidence';
+    else if (realValues.length === 1) visual_treatment = topConcept ? 'targeted_broll' : 'exact_evidence';
+    else if (topConcept) visual_treatment = (i === 0 || i === scenes.length - 1) ? 'host' : 'targeted_broll';
+    else visual_treatment = 'host';
+    return {
+      visual_treatment,
+      broll_prompt: (visual_treatment === 'targeted_broll' && topConcept)
+        ? `a real, professional photo/video shot illustrating the financial concept of ${topConcept.replace(/_/g, ' ')}, no on-screen text, no logos, natural lighting`
+        : null,
+      emphasis_values: realValues,
+      unsupported_precise,
+      unsupported_reason: unsupported_precise ? `${realValues.length} comparable values in this beat are best shown as a chart; the current architecture has no reliable precise-chart mechanism, so exact values are shown via caption emphasis instead.` : null,
+    };
+  });
+
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return deterministicFallback();
+
+  const scriptUnitsBlock = plan.map((u, i) => {
+    const vals = (u.__candidateValues && u.__candidateValues.length) ? ` (values available: ${u.__candidateValues.join(', ')})` : '';
+    return `[${i}]${vals} ${u.text}`;
+  }).join('\n');
+  const scenesBlock = scenes.map((s, i) => {
+    const idxs = s.units.map((u) => u.__idx);
+    const realValueCount = idxs.reduce((sum, k) => sum + ((plan[k].__candidateValues || []).length), 0);
+    return `Beat ${i}: units [${idxs.join(',')}]${realValueCount >= 2 ? ' (2+ real values present — visual_treatment MUST be "exact_evidence")' : ''}`;
+  }).join('\n');
+  const prompt = `You are planning the visual treatment for a short finance-explainer video. The video is produced by: a HeyGen presenter avatar speaking the full narration (always available as the base video), and Submagic (which adds captions, automatic transcript-matched B-roll, and can insert a TARGETED B-roll clip you describe with a text prompt at a specific beat).
+
+You are given the full narration split into numbered units, grouped into BEATS (consecutive units sharing one visual treatment). For EACH beat, decide "visual_treatment" — exactly one of:
+- "host": the presenter carries this beat with no special visual — use for hooks, thesis statements, direct address, disclaimers, calls to action. Real narration importance, not decoration, is what earns this.
+- "auto_broll": let Submagic's own automatic transcript-matched B-roll handle it — use for ordinary connective narrative with no single strong concept or number worth targeting deliberately.
+- "targeted_broll": this beat is clearly ABOUT one concrete, illustratable concept (a house, a credit card, a decision, a calendar/timeline, a specific financial instrument) and deserves a deliberately-chosen visual, not whatever automatic matching finds. If you choose this, also write "broll_prompt": a single concrete visual description (one sentence, describing a real photo/video shot — no on-screen text, no logos, no invented numbers) of that concept.
+- "exact_evidence": this beat's job is to land a specific number/fact and the number itself is the point — captions/emphasis carry it, not B-roll.
+
+CRITICAL RULE: any beat marked "(2+ real values present...)" below MUST use visual_treatment "exact_evidence" — never ask a targeted B-roll prompt to depict comparative numbers, a generated clip cannot reliably render exact financial figures.
+
+NARRATION UNITS:
+<script_units>
+${scriptUnitsBlock}
+</script_units>
+
+BEATS:
+<beats>
+${scenesBlock}
+</beats>
+
+Respond with ONLY:
+<visualplan>
+{"beats":[{"visual_treatment":"host","broll_prompt":null}]}
+</visualplan>`;
+
+  try {
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!claudeRes.ok) return deterministicFallback();
+    const d = await claudeRes.json();
+    const text = (d.content && d.content[0] && d.content[0].text) || '';
+    const m = text.match(/<visualplan>([\s\S]*?)<\/visualplan>/);
+    if (!m) return deterministicFallback();
+    const parsed = JSON.parse(m[1]);
+    if (!parsed || !Array.isArray(parsed.beats) || parsed.beats.length !== scenes.length) return deterministicFallback();
+    const validTreatments = new Set(['host', 'auto_broll', 'targeted_broll', 'exact_evidence']);
+    const fb = deterministicFallback();
+    return parsed.beats.map((b, i) => {
+      const idxs = scenes[i].units.map((u) => u.__idx);
+      const realValues = idxs.flatMap((k) => (plan[k].__candidateValues || []));
+      // Deterministic override — never trust the model on the precise-evidence
+      // rule, exactly like every other evidence decision in this file.
+      const unsupported_precise = realValues.length >= 2;
+      let visual_treatment = validTreatments.has(b.visual_treatment) ? b.visual_treatment : fb[i].visual_treatment;
+      if (unsupported_precise) visual_treatment = 'exact_evidence';
+      const broll_prompt = (visual_treatment === 'targeted_broll' && typeof b.broll_prompt === 'string' && b.broll_prompt.trim())
+        ? b.broll_prompt.trim().slice(0, 400) : (visual_treatment === 'targeted_broll' ? fb[i].broll_prompt : null);
+      return {
+        visual_treatment,
+        broll_prompt,
+        emphasis_values: realValues,
+        unsupported_precise,
+        unsupported_reason: unsupported_precise ? fb[i].unsupported_reason : null,
+      };
+    });
+  } catch (e) {
+    return deterministicFallback();
+  }
+}
+
+// Builds one scene's MP4 segment: branded environment + a storyboard-driven
+// EXPLANATORY SCREEN (comparison / before-after / buildup / single, per
+// nextwaveV2GenerateStoryboard) + the recurring host positioned/sized per
+// its storyboard-assigned role + a real ElevenLabs audio track + a slow
+// zoompan (the same technique already proven for SMM's Ken Burns segments)
+// + drawtext captions timed to each unit's real, proportional share of the
+// scene's actual spoken duration.
+// Phase 4.5C Step 3 — deterministic greedy word-wrap for drawtext (ffmpeg's
+// drawtext has no native line-wrapping), used only to reflow a unit's OWN
+// narration text into a panel/card when it has no real extracted number.
+// Never invents or paraphrases -- same source text the caption band shows.
+function nextwaveV2WrapLines(text, fontSize, maxWidthPx, maxLines) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  let truncated = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const trial = cur ? cur + ' ' + w : w;
+    const estW = trial.length * fontSize * 0.56;
+    if (estW <= maxWidthPx || !cur) {
+      cur = trial;
+    } else {
+      lines.push(cur);
+      cur = w;
+      if (lines.length >= maxLines) { truncated = true; cur = ''; break; }
+    }
+  }
+  if (cur) {
+    if (lines.length < maxLines) lines.push(cur);
+    else truncated = true;
+  }
+  if (truncated && lines.length) lines[lines.length - 1] = lines[lines.length - 1].replace(/\.*$/, '') + '...';
+  return lines.filter(Boolean);
+}
+
+// Phase 4.5D — dedicated fitter for NextWave V2 panel/card LABELS. The
+// shared smFitFontSize (also used by SMM — left untouched here) estimates
+// width at 0.56*fontSize per character, which undercounts a short, wide
+// ALL-CAPS phrase enough that "NO LIQUIDITY STAGING" clipped past its
+// 320px box edge on the real Phase 4.5C candidate. This uses a more
+// conservative per-character estimate and, if the label still doesn't fit
+// even at the font floor, wraps it onto a second line instead of ever
+// letting it clip.
+function nextwaveV2FitLabel(text, baseFontSize, maxWidthPx, minFontSize) {
+  minFontSize = minFontSize || Math.round(baseFontSize * 0.62);
+  const estWidth = (s, fs) => s.length * fs * 0.62;
+  let fontSize = baseFontSize;
+  if (estWidth(text, fontSize) > maxWidthPx) {
+    fontSize = Math.max(minFontSize, Math.floor(baseFontSize * (maxWidthPx / estWidth(text, baseFontSize))));
+  }
+  if (estWidth(text, fontSize) <= maxWidthPx) return { fontSize, lines: [text] };
+  const lines = nextwaveV2WrapLines(text, fontSize, maxWidthPx, 2);
+  return { fontSize, lines: lines.length ? lines : [text] };
+}
+
+// Phase 4.6 — video-only per scene. Narration is no longer synthesized or
+// trimmed here at all: nextwaveV2BuildRender synthesizes ONE continuous
+// master narration for the whole script and computes each unit's GLOBAL
+// start/end as a proportional slice of that single real track, then
+// passes this scene's own [sceneStart, sceneEnd) window in. This is what
+// closes the CEO's "broken/choppy... abrupt cadence resets" rejection:
+// there is only ever one ElevenLabs call per Short now, so prosody never
+// resets at a scene cut. The master audio is muxed onto the final
+// concatenated video once, in nextwaveV2BuildRender — never per scene.
+async function nextwaveV2BuildSceneSegment(scene, sceneIdx, renderId, storyboard, sceneStart, sceneEnd, ideogramBudget) {
+  // Phase 5.3 — ideogramBudget is a mutable {remaining, spent_usd, generated}
+  // object shared across every scene of ONE render (owned/created by
+  // nextwaveV2BuildRender), so a per-render dynamic-illustration cost
+  // ceiling is enforced across the whole video, not reset per scene.
+  // Optional (defaults to a single-generation allowance) so any other
+  // caller of this function — nextwaveV2DebugStoryboard, tests — keeps
+  // working unchanged without passing one.
+  ideogramBudget = ideogramBudget || { remaining: 1, spent_usd: 0, generated: [] };
+  const dur = Math.max(0.1, sceneEnd - sceneStart);
+  // Frame-count rounding safety margin only (zoompan quantizes to whole
+  // frames at 25fps, ~20-40ms) — not the old 1.2s hack, which existed to
+  // paper over per-scene audio/video duration mismatches that no longer
+  // exist now that no audio is synthesized or muxed per scene.
+  const durEnd = (dur + 0.15).toFixed(2);
+
+  // Phase 4.5D bugfix — real-candidate QA found "$135K" rendered under
+  // BOTH a "30-YEAR INTEREST" and "15-YEAR INTEREST" slot despite the
+  // storyboard's own (proximity-corrected) primary_value being different
+  // for each slot. Root cause: this used to key a lookup map by
+  // unit_index alone (slotByUnitIdx[sl.unit_index] = sl), so when TWO
+  // slots reference the SAME unit — exactly the case a single sentence
+  // comparing two figures produces — the second slot silently overwrote
+  // the first in that map, and both slots then inherited the SAME
+  // shared unit object's one numberLabel. timedUnits now only carries
+  // the unit-level fallback (rankedNumberLabel, safe to share since it's
+  // deterministic from the unit's own text); each SLOT's actual
+  // numberLabel/secondaryLabel is attached below, per slot, from that
+  // slot's own primary_value/secondary_value.
+  // Phase 4.6 — start/end are now each unit's GLOBAL time (from the
+  // master narration) minus this scene's own start, instead of being
+  // re-derived from a per-scene character-count split.
+  const timedUnits = scene.units.map((u) => {
+    const start = Math.max(0, u.__start - sceneStart);
+    const end = Math.max(start, u.__end - sceneStart);
+    const hasNumber = nextwaveHasDynamicNumbers(u.text);
+    const rankedNumberLabel = hasNumber ? nextwaveFormatFinancialNumber(nextwaveRankNumberPhrase(u.text)) : null;
+    return { idx: u.__idx, text: u.text, start, end, hasNumber, rankedNumberLabel, concept_tags: u.concept_tags || [] };
+  });
+  const byIdx = {};
+  timedUnits.forEach((u) => { byIdx[u.idx] = u; });
+
+  const screenType = storyboard.screen_type;
+  // Real extracted number attached per SLOT (never from the storyboard
+  // model's own generated text — primary_value was already validated
+  // against this unit's real candidate list in nextwaveV2GenerateStoryboard).
+  // Falls back to the unit's own single-best-ranked value only when this
+  // specific slot has no explicit primary_value.
+  const slots = storyboard.slots.map((sl) => {
+    const unit = byIdx[sl.unit_index];
+    if (!unit) return null;
+    const numberLabel = sl.primary_value || unit.rankedNumberLabel || null;
+    const secondaryLabel = sl.primary_value ? (sl.secondary_value || null) : null;
+    return { ...sl, unit: { ...unit, numberLabel, secondaryLabel } };
+  }).filter((sl) => sl && sl.unit);
+
+  const W = 1920, H = 1080;
+  const hostRole = storyboard.host_role;
+  // Phase 4.6 Step 3 — CEO rejection: host was "too small and mostly
+  // parked in a corner." data_only/step_back are the only roles that
+  // hide the host entirely (data/illustration earns full attention);
+  // every other role now has a genuinely distinct size/position instead
+  // of the old 2-role (point_at_comparison/beside_calculation) + tiny
+  // 'intro' default.
+  const includeHost = hostRole !== 'step_back' && hostRole !== 'data_only';
+  const largeHostRoles = new Set(['hero_intro', 'presenter_large', 'outro_host']);
+  // ── Phase 5 — CEO rejection of Phase 4.7: "adding host poses to a card-
+  // first renderer does not solve the problem." A 'single' scene (one
+  // concept, no structural comparison/buildup) is exactly the case that
+  // used to fall through to a bare card -- the CEO's most specific
+  // complaint. Before deciding to render cards at all, check whether this
+  // scene's own concept tags map to a real generated illustrated object
+  // (house/money_stack/document_folder/calendar_time/decision_signpost);
+  // if one exists, this scene uses the new character_object branch below
+  // instead -- the object becomes the visual anchor, the host gestures at
+  // it, and the number/text sits near the object rather than in a card.
+  // Deterministic (not dependent on the storyboard model choosing
+  // correctly), and gracefully degrades to the original card behavior
+  // whenever no object is available yet, so this can never break a render.
+  // Computed BEFORE host-pose selection below so a character_object scene
+  // can force the presenting_pointing pose regardless of its assigned
+  // host_role -- the object is what's being pointed at now.
+  const sceneConceptTags = [...new Set(scene.units.flatMap((u) => u.concept_tags || []))];
+  let characterObjectRole = null;
+  let characterObjectLocalPath = null;
+  if (screenType === 'single' && slots.length === 1) {
+    characterObjectRole = _nextwaveV2ResolveObjectRole(sceneConceptTags);
+    if (characterObjectRole) {
+      characterObjectLocalPath = await nextwaveV2ResolveObjectLocalPath(characterObjectRole, renderId);
+    } else if (storyboard.illustration_concept) {
+      // Phase 5.3 — none of the 5 fixed roles matched this scene's tags,
+      // but the storyboard model named a concrete concept to illustrate.
+      // Generate (or reuse a prior script's banked asset for) a
+      // topic-specific object instead of falling through to a bare card.
+      const dyn = await nextwaveV2ResolveOrGenerateIllustratedObject(storyboard.illustration_concept, ideogramBudget);
+      if (dyn) { characterObjectRole = dyn.role; characterObjectLocalPath = dyn.path; }
+    }
+  }
+  const useCharacterObjectForm = !!characterObjectLocalPath;
+  // Phase 5.1 Section 6 — sampled once per object per render (cheap, local
+  // ffmpeg call, no new vendor) so the object's own flat generation
+  // background can be keyed transparent at composite time instead of
+  // compositing as a visible rectangle. null when sampling fails, which
+  // degrades to the pre-Section-6 flat-square behavior.
+  const characterObjectKeyColor = characterObjectLocalPath
+    ? await _nextwaveV2SampleCornerColor(characterObjectLocalPath)
+    : null;
+  // Phase 5 Section B — money/cause-effect concepts (the same set already
+  // mapped to money_stack) get a left-to-right FLOW composition (object ->
+  // arrow -> result) instead of the generic object-on-top/number-beneath
+  // layout: growth/accumulation/income are inherently about a value MOVING
+  // or becoming a result, which a flow communicates and a static object
+  // does not.
+  const useMoneyFlowForm = useCharacterObjectForm && characterObjectRole === 'money_stack';
+
+  // Phase 4.7 — real gesture/interaction poses (Ideogram-generated,
+  // character-referenced against the original host so identity is
+  // preserved) replace the old two near-identical headshot crops for the
+  // roles the Wealth Logic benchmark forensics flagged as needing genuine
+  // host-object interaction, not just repositioning. Falls back to the
+  // original headshot crops (same as Phase 4.6) whenever a pose asset
+  // isn't available yet, so a render never fails or looks worse for it.
+  const pointingRoles = new Set(['point_left', 'point_right', 'beside_comparison', 'point_at_comparison']);
+  const calculationRoles = new Set(['beside_calculation', 'reaction_emphasis']);
+  let poseTag = null;
+  // Phase 5.1 Section 1 — character_object scenes now use the SAME
+  // holding_calculation pose (both hands holding a blank ledger/notepad in
+  // front of chest -- see NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS) already used
+  // for beside_calculation, instead of presenting_pointing. Pointing from
+  // across the frame at a separately-positioned object was exactly the
+  // Phase 5 gap this section exists to close; a holding pose lets the
+  // object composite directly where the held notepad already is (see the
+  // object-position override below) so the two read as one integrated
+  // "here's the evidence in my hands" composition instead of two unrelated
+  // regions of the frame.
+  if (useCharacterObjectForm) poseTag = 'holding_calculation';
+  else if (pointingRoles.has(hostRole)) poseTag = 'presenting_pointing';
+  else if (calculationRoles.has(hostRole)) poseTag = 'holding_calculation';
+  else if (hostRole === 'outro_host') poseTag = 'reaction_outro';
+  const useHost = poseTag
+    ? await nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, pointingRoles.has(hostRole) ? NEXTWAVE_V2_HOST_POINTING : NEXTWAVE_V2_HOST_DEFAULT)
+    : NEXTWAVE_V2_HOST_DEFAULT;
+  // Icons are now only used by the 'single' fallback layout — comparison/
+  // before_after/buildup are built from drawbox panels + drawtext below,
+  // which is what actually gives structure instead of a lone icon on an
+  // otherwise-empty frame (the exact CEO rejection). Phase 4.6 — suppressed
+  // when the host role is large (hero_intro/presenter_large/outro_host):
+  // the host itself is the visual anchor for that scene now, so a second
+  // decorative icon competing for the same "concept" role is clutter.
+  const icons = (screenType === 'single' && slots.length && !useCharacterObjectForm && !largeHostRoles.has(storyboard.host_role)) ? nextwaveV2SceneIcons(scene).slice(0, 1) : [];
+
+  // Phase 5 Section A — comparison/before_after sides get their OWN
+  // illustrated object (resolved from that SLOT's own unit concept_tags,
+  // not the scene's aggregate tags, since the two sides of a real
+  // comparison are usually two different concepts) instead of a plain
+  // color fill. Resolved per-slot, independently, so one side can have an
+  // object while the other falls back to the old color-fill treatment if
+  // its own concept isn't covered yet -- this never blocks or risks the
+  // evidence-hierarchy label/number pairing established in Phase 4.5D-4.6,
+  // which is untouched by this change.
+  let comparisonObjectPaths = [null, null];
+  let comparisonObjectKeyColors = [null, null];
+  if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+    // Phase 5.2 real-candidate QA — a real render showed BOTH sides of a
+    // comparison resolving to the same object twice, from two different
+    // causes: (1) one side's unit mentioned "balance" -- a debt-tag hit --
+    // purely as an incidental callback, not because that side was
+    // actually about debt; (2) two slots sharing ONE unit_index (a single
+    // sentence expressing both comparison values, e.g. "that payoff time
+    // drops to four years, saving $5,000 in interest") share the exact
+    // same concept_tags array, so the generic resolver always returns the
+    // identical role for both. Both defeat "comparisons visually tell the
+    // comparison." Fixed two ways below: a slot whose own displayed value
+    // is already a duration (its numberLabel is "N YEARS"/"N MONTHS"/etc,
+    // the same real, already-validated value it renders on screen) is
+    // unambiguously about time regardless of incidental tags and takes
+    // calendar_time outright; and the second side is never allowed to
+    // silently duplicate whatever role the first side already claimed --
+    // it re-resolves excluding that role, falling back to a plain card
+    // for just that side if nothing else in its own tags fits, which is
+    // still strictly better than showing the wrong duplicate object.
+    let firstRole = null;
+    for (let i = 0; i < 2; i++) {
+      const sl = slots[i];
+      if (!sl) continue;
+      const isDurationValue = /^\d+\s+(DAYS?|WEEKS?|MONTHS?|YEARS?)$/i.test(sl.unit.numberLabel || '');
+      let role;
+      if (isDurationValue) {
+        role = 'calendar_time';
+      } else {
+        role = _nextwaveV2ResolveObjectRole(sl.unit.concept_tags, i === 1 ? firstRole : null);
+        // Phase 5.2A — a slot created by nextwaveV2RecoverComparisonSecondSide
+        // has no real narration text of its own to pull concept tags from
+        // (its label is derived purely from its value's type, e.g.
+        // "AMOUNT"), so the generic tag resolver above always returns null
+        // for it and it would otherwise fall back to a bare card -- exactly
+        // the outcome this recovery exists to avoid. A dollar or percent
+        // value is still a real, generalizable money concept even with no
+        // descriptive text attached, so it gets money_stack as a
+        // deterministic value-type fallback (never for a normal
+        // model-authored slot, which keeps its existing card fallback
+        // exactly as before).
+        if (!role && sl.__recovered) {
+          const v = sl.unit.numberLabel || '';
+          if ((/^\$/.test(v) || /%$/.test(v) || /^\d+X$/i.test(v)) && firstRole !== 'money_stack') role = 'money_stack';
+        }
+      }
+      if (i === 0) firstRole = role;
+      if (role) {
+        comparisonObjectPaths[i] = await nextwaveV2ResolveObjectLocalPath(role, renderId + '-cmp' + i);
+      } else if (!sl.__recovered && storyboard.illustration_concept && i === 0) {
+        // Phase 5.3 — only the first (real-narration) side gets a dynamic
+        // topic-specific object attempt; a recovered/synthetic second side
+        // has no real concept of its own to name and keeps its existing
+        // card fallback rather than misusing the scene's overall concept.
+        const dyn = await nextwaveV2ResolveOrGenerateIllustratedObject(storyboard.illustration_concept, ideogramBudget);
+        if (dyn) { comparisonObjectPaths[i] = dyn.path; firstRole = dyn.role; }
+      }
+      comparisonObjectKeyColors[i] = comparisonObjectPaths[i] ? await _nextwaveV2SampleCornerColor(comparisonObjectPaths[i]) : null;
+    }
+  }
+
+  // Phase 5.1 Sections 2/3 — real programmatic chart/diagram grammar,
+  // detected from this scene's own already-evidence-validated slot values
+  // (never invented, never a per-script rule): a buildup scene (3+ numeric
+  // units) becomes a BAR chart once at least two of its slots carry a
+  // parseable magnitude, or a LINE chart instead when those slots' own
+  // labels/text read as a time progression (year/month/week/day/age N --
+  // a semantic pattern, checked against every scene, not one script); a
+  // two-sided comparison/before_after becomes a DONUT allocation chart
+  // specifically when BOTH sides are percentages that sum close to 100 (a
+  // genuine allocation split, not just any two percentages). Any scene
+  // that doesn't match this falls through to the pre-existing card/panel
+  // rendering untouched below -- this can never break or regress a scene
+  // whose values don't support a real chart.
+  const isLargeHostSceneChart = largeHostRoles.has(storyboard.host_role);
+  let chartPlan = null;
+  // Phase 5.3 — chart_required is a declared storyboard field, but the
+  // renderer keeps its own real value-shape validation as the final
+  // authority (never draw a chart from data that doesn't actually support
+  // one, regardless of what the model said). chart_required===false is
+  // still respected as an explicit downgrade: when the model has decided
+  // this scene's numbers don't deserve a chart, skip detection outright
+  // even if the shapes would technically qualify.
+  const chartAllowed = storyboard.chart_required !== false;
+  if (chartAllowed && screenType === 'buildup' && slots.length >= 2) {
+    const chartSlots = slots.slice(0, 4).map((sl) => ({ sl, magnitude: _nextwaveV2ParseChartMagnitude(sl.unit.numberLabel) }));
+    const usable = chartSlots.filter((c) => c.magnitude !== null);
+    if (usable.length >= 2) {
+      // chart_type_hint==='line' biases a genuinely ambiguous buildup
+      // toward the time-series interpretation the model saw in the real
+      // narration text (e.g. "year 1... year 3... year 5" phrased loosely
+      // enough to miss the regex) — the underlying magnitude/usable-count
+      // validation above is unchanged, so this can only pick which real,
+      // already-qualified chart type to draw, never force a chart onto
+      // data that doesn't support one.
+      const isTimeSeries = (storyboard.chart_type_hint === 'line') || chartSlots.some((c) =>
+        NEXTWAVE_V2_TIME_SERIES_RE.test(c.sl.label || '') || NEXTWAVE_V2_TIME_SERIES_RE.test(c.sl.unit.text || ''));
+      const chartX0 = 300, chartX1 = 1620;
+      const chartY0 = isLargeHostSceneChart ? 230 : 320, chartY1 = isLargeHostSceneChart ? 480 : 680;
+      const plotTop = chartY0 + 50, baseline = chartY1 - 70;
+      const maxVal = Math.max(...usable.map((c) => c.magnitude), 0.0001);
+      const minVal = Math.min(0, ...usable.map((c) => c.magnitude));
+      const valRange = Math.max(0.0001, maxVal - minVal);
+      const n = usable.length;
+      // Phase 5.1 Section 4 principle applied to charts too — real-frame QA
+      // found every bar/point landing together whenever a buildup scene's
+      // slots share one narration unit (a real, common case: "$1,200 in
+      // rent, $300 in utilities, and $150 in insurance" is naturally ONE
+      // sentence/unit split into 3 slots). Forces each point to wait at
+      // least a minimum gap after the previous one regardless of the
+      // underlying units' own timing, so the chart visibly builds instead
+      // of appearing all at once.
+      const chartMinGap = Math.min(0.5, dur * 0.15);
+      usable.forEach((c, i) => {
+        const raw = c.sl.unit.start;
+        c.startT = i === 0 ? raw : Math.max(raw, usable[i - 1].startT + chartMinGap);
+      });
+      if (isTimeSeries) {
+        const marginX = 80;
+        const stepX = n > 1 ? (chartX1 - chartX0 - marginX * 2) / (n - 1) : 0;
+        const points = usable.map((c, i) => ({
+          x: chartX0 + marginX + i * stepX,
+          y: baseline - ((c.magnitude - minVal) / valRange) * (baseline - plotTop),
+          startT: c.startT, magnitude: c.magnitude, numberLabel: c.sl.unit.numberLabel, label: c.sl.label,
+        }));
+        chartPlan = { type: 'line', points, chartX0, chartX1, chartY0, chartY1, baseline };
+      } else {
+        chartPlan = { type: 'bar', points: usable, chartX0, chartX1, chartY0, chartY1, baseline, plotTop, maxVal };
+      }
+    }
+  } else if (chartAllowed && (screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+    const magA = _nextwaveV2ParseChartMagnitude(slots[0].unit.numberLabel);
+    const magB = _nextwaveV2ParseChartMagnitude(slots[1].unit.numberLabel);
+    const isPercentA = /%\s*$/.test(String(slots[0].unit.numberLabel || '').trim());
+    const isPercentB = /%\s*$/.test(String(slots[1].unit.numberLabel || '').trim());
+    if (magA !== null && magB !== null && isPercentA && isPercentB && Math.abs((magA + magB) - 100) <= 8) {
+      const cx = 560, cy = isLargeHostSceneChart ? 400 : 500, outerR = isLargeHostSceneChart ? 170 : 220, innerR = isLargeHostSceneChart ? 95 : 125;
+      chartPlan = { type: 'donut', fracA: magA / (magA + magB), sl0: slots[0], sl1: slots[1], cx, cy, outerR, innerR };
+    }
+  }
+
+  const inputs = ['-loop', '1', '-i', NEXTWAVE_V2_BG];
+  let nextInputIdx = 1; // input [0] is the background
+  icons.forEach((p) => { inputs.push('-i', p); nextInputIdx++; });
+  const objectIdx = useCharacterObjectForm ? nextInputIdx : -1;
+  if (useCharacterObjectForm) { inputs.push('-i', characterObjectLocalPath); nextInputIdx++; }
+  const comparisonObjectIdx = [-1, -1];
+  comparisonObjectPaths.forEach((p, i) => {
+    if (p) { comparisonObjectIdx[i] = nextInputIdx; inputs.push('-i', p); nextInputIdx++; }
+  });
+  // Phase 5.1 Section 2 — line-chart segments are real diagonal lines (a
+  // thin solid-color lavfi source rotated to each segment's own angle),
+  // not an approximation -- so each segment needs its own generated input,
+  // added here before the host input like every other compositing source.
+  let lineSegmentInputIdx = [];
+  if (chartPlan && chartPlan.type === 'line') {
+    for (let i = 0; i < chartPlan.points.length - 1; i++) {
+      const p0 = chartPlan.points[i], p1 = chartPlan.points[i + 1];
+      const len = Math.max(2, Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y)));
+      lineSegmentInputIdx.push(nextInputIdx);
+      inputs.push('-f', 'lavfi', '-i', `color=c=0xC99E4C:s=${len}x7`);
+      nextInputIdx++;
+    }
+  }
+  // Phase 5.1 Section 2 — the donut is generated per-pixel (geq, angle +
+  // radius test against this scene's own real allocation fraction) onto a
+  // transparent canvas input, same "no new vendor" constraint as the line
+  // segments above.
+  let donutInputIdx = -1;
+  if (chartPlan && chartPlan.type === 'donut') {
+    donutInputIdx = nextInputIdx;
+    inputs.push('-f', 'lavfi', '-i', `color=c=black@0.0:s=${chartPlan.outerR * 2}x${chartPlan.outerR * 2}`);
+    nextInputIdx++;
+  }
+  const hostIdx = nextInputIdx;
+  if (includeHost) inputs.push('-i', useHost);
+  // Phase 4.6 — no audio input here at all: narration is muxed once onto
+  // the final concatenated video in nextwaveV2BuildRender, not per scene.
+
+  const frames = Math.max(1, Math.round(dur * 25));
+  // Phase 5.3 — motion_intent is now a declared storyboard field (see
+  // nextwaveV2GenerateStoryboard) instead of one hardcoded constant for
+  // every scene in every script. "push_in" keeps the exact original Ken
+  // Burns expression unchanged (zero regression for the default/most-common
+  // case); "push_out" starts at the same 1.06 ceiling and counts back down
+  // to 1.0 so a closing/resolving scene visibly widens instead of
+  // tightening; "static" skips zoompan's per-frame recompute entirely
+  // (a still, unmoving background) for a chart/fine-detail scene that
+  // needs to stay perfectly readable.
+  const motionIntent = storyboard.motion_intent === 'push_out' ? 'push_out' : (storyboard.motion_intent === 'static' ? 'static' : 'push_in');
+  const zoomExpr = motionIntent === 'push_out' ? `if(eq(on,1),1.06,max(zoom-0.0004,1.0))`
+    : motionIntent === 'static' ? '1.0'
+    : `min(zoom+0.0004,1.06)`;
+  const bgFilter = motionIntent === 'static'
+    ? `[0:v]scale=${W}:${H}[bg]`
+    : `[0:v]scale=${W}:${H},zoompan=z='${zoomExpr}':d=${frames}:s=${W}x${H}:fps=25[bg]`;
+  const filters = [bgFilter];
+  let last = 'bg';
+
+  if (icons.length) {
+    // Phase 4.5C Step 4 — icon shrunk and moved to the left third so the
+    // right two-thirds of the frame is real estate for explanatory cards
+    // (previously the icon dominated the center-left with nothing else on
+    // screen except the heading/caption, which was the exact CEO rejection).
+    const iconH = 320, groundY = Math.round(H * 0.72);
+    filters.push(`[1:v]scale=-1:${iconH}[ic0]`);
+    filters.push(`[${last}][ic0]overlay=x='300-overlay_w/2':y='${groundY}-overlay_h':enable='between(t,0,${durEnd})'[vic]`);
+    last = 'vic';
+  }
+
+  if (useCharacterObjectForm) {
+    // Phase 5.1 Section 1 — reversed from Phase 5: the host (now holding a
+    // blank notepad, see poseTag above) is already standing there from
+    // t=0, then the object "arrives in their hands" 0.3s later -- reads as
+    // "here's the evidence" rather than an object appearing first with the
+    // host wandering in afterward. The number (further below) still holds
+    // back its own extra beat.
+    const objectEnable = useMoneyFlowForm ? `between(t,0,${durEnd})` : `between(t,${Math.min(0.3, dur * 0.3).toFixed(2)},${durEnd})`;
+    // Phase 5.1 Section 6 — key out the object's own flat generation
+    // background (verified via real-frame sampling: a colorkey against
+    // that image's own sampled corner color, generous similarity/blend to
+    // absorb the ~3/255 in-image noise found during sampling, cleanly
+    // removes the visible navy square without eating into the
+    // illustration's own dark shading) before scaling/compositing. Skips
+    // cleanly (old flat-square behavior) when sampling failed.
+    const objKeyPart = characterObjectKeyColor ? `format=rgba,colorkey=${characterObjectKeyColor}:0.15:0.08,` : '';
+    if (useMoneyFlowForm) {
+      // Section B — smaller object, pushed further left, to leave the
+      // center-right open for the arrow -> result flow instead of a
+      // number sitting directly beneath the object.
+      const objH = 360, objCenterY = 520;
+      filters.push(`[${objectIdx}:v]${objKeyPart}scale=-1:${objH}[objimg]`);
+      filters.push(`[${last}][objimg]overlay=x='260-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='${objectEnable}'[vobj]`);
+    } else {
+      // The illustrated object IS the scene, not a decoration next to a
+      // card: large (~550px), left-of-center, roughly where Wealth
+      // Logic's own object compositions place the evidence, so the host
+      // (added below, right side, presenting_pointing) reads as gesturing
+      // toward it rather than the two elements sitting unrelated. Sized to
+      // leave a clear band below it (y 860-970) for the number/text, and
+      // clear of the host's right-side column (x 1380+).
+      const objH = 550, objCenterY = 560;
+      filters.push(`[${objectIdx}:v]${objKeyPart}scale=-1:${objH}[objimg]`);
+      filters.push(`[${last}][objimg]overlay=x='560-overlay_w/2':y='${objCenterY}-overlay_h/2':enable='${objectEnable}'[vobj]`);
+    }
+    last = 'vobj';
+  }
+
+  if ((comparisonObjectIdx[0] !== -1 || comparisonObjectIdx[1] !== -1) && !(chartPlan && chartPlan.type === 'donut')) {
+    // Phase 5 Section A — fills most of each panel with the resolved
+    // illustrated object instead of a flat color; the label/legibility
+    // scrim drawn later (in the comparison content branch below) sits on
+    // top, on ONLY the text's own strip, not the whole panel.
+    const isLargeHostSceneCmp = largeHostRoles.has(storyboard.host_role);
+    const panelY0Cmp = 260, panelY1Cmp = isLargeHostSceneCmp ? 545 : 760, panelWCmp = 760, panelXsCmp = [140, 1020];
+    // Object takes the top ~62% of the panel; the bottom ~38% stays clear
+    // for the label/number band drawn in the content branch below.
+    const cmpTextBandH = Math.round((panelY1Cmp - panelY0Cmp) * 0.38);
+    comparisonObjectIdx.forEach((idx, i) => {
+      if (idx === -1) return;
+      const objH = (panelY1Cmp - panelY0Cmp) - cmpTextBandH - 20;
+      const cx = panelXsCmp[i] + panelWCmp / 2;
+      const en = `between(t,${slots[i].unit.start.toFixed(2)},${durEnd})`;
+      // Phase 5.1 Section 6 — same per-image corner-sampled colorkey as the
+      // single-object composite above, applied per side independently.
+      const cmpKeyPart = comparisonObjectKeyColors[i] ? `format=rgba,colorkey=${comparisonObjectKeyColors[i]}:0.15:0.08,` : '';
+      filters.push(`[${idx}:v]${cmpKeyPart}scale=-1:${objH}[cmpobj${i}]`);
+      filters.push(`[${last}][cmpobj${i}]overlay=x='${cx}-overlay_w/2':y='${panelY0Cmp + 15}':enable='${en}'[vcmp${i}]`);
+      last = `vcmp${i}`;
+    });
+  }
+
+  // Phase 5.1 Section 2 — line chart: each segment is a real solid-color
+  // rectangle rotated to that segment's own atan2 angle (verified against
+  // a real rendered test frame -- a clean diagonal line, not an
+  // approximation), overlaid at its own segment's narration timing so the
+  // line visibly draws itself point-by-point rather than appearing
+  // pre-drawn (Section 4's progressive-reveal principle applied here too).
+  if (chartPlan && chartPlan.type === 'line') {
+    chartPlan.points.forEach((p, i) => {
+      if (i === 0) return;
+      const p0 = chartPlan.points[i - 1];
+      const dx = p.x - p0.x, dy = p.y - p0.y;
+      const angleRad = Math.atan2(dy, dx).toFixed(5);
+      const midX = (p0.x + p.x) / 2, midY = (p0.y + p.y) / 2;
+      const idx = lineSegmentInputIdx[i - 1];
+      const en = `between(t,${p.startT.toFixed(2)},${durEnd})`;
+      filters.push(`[${idx}:v]format=rgba,rotate=${angleRad}:fillcolor=none:ow=rotw(${angleRad}):oh=roth(${angleRad})[lineseg${i}]`);
+      filters.push(`[${last}][lineseg${i}]overlay=x='${midX}-overlay_w/2':y='${midY}-overlay_h/2':enable='${en}'[vline${i}]`);
+      last = `vline${i}`;
+    });
+  }
+
+  // Phase 5.1 Section 2 — donut/pie: a real per-pixel angle+radius test
+  // (geq) against this scene's own validated allocation fraction, not a
+  // decorative icon -- verified against a real rendered test frame (a
+  // clean two-slice ring at the exact tested fraction). Starts at 12
+  // o'clock and sweeps clockwise, the conventional pie-chart reading
+  // direction. Slice A appears first (the primary/first-mentioned side),
+  // slice B fills the remainder a beat later so the split visibly forms.
+  if (chartPlan && chartPlan.type === 'donut') {
+    const { cx, cy, outerR, innerR, fracA } = chartPlan;
+    const lcx = outerR, lcy = outerR; // center within the generated square canvas
+    // Progressive reveal (Section 4 principle) happens on the OVERLAY's own
+    // enable window, matching every other composited element in this file
+    // (objects/host above) -- the ring itself is generated once, statically,
+    // and simply appears when the comparison's evidence begins.
+    const enA = `between(t,${chartPlan.sl0.unit.start.toFixed(2)},${durEnd})`;
+    const ring = `between(hypot(X-${lcx},Y-${lcy}),${innerR},${outerR})`;
+    const angleFrac = `mod(atan2(X-${lcx},-(Y-${lcy}))+2*PI,2*PI)/(2*PI)`;
+    const inSliceA = `lt(${angleFrac},${fracA.toFixed(4)})`;
+    // Gold (0xC99E4C) for slice A, muted green (0x2E5A3A, the same
+    // secondary comparison fill already used elsewhere in this file) for
+    // slice B -- brand palette, not arbitrary chart-library defaults.
+    // Verified locally against a real ffmpeg geq render (plain commas,
+    // each expression individually single-quoted -- no backslash-escaping
+    // needed here since these are semicolon-chained `filters` entries, not
+    // the comma-chained `ov` drawtext list, which is the only place this
+    // file's existing code needs the \, escape convention).
+    filters.push([
+      `[${donutInputIdx}:v]format=rgba,geq=`,
+      `r='if(${ring},if(${inSliceA},201,46),0)':`,
+      `g='if(${ring},if(${inSliceA},158,90),0)':`,
+      `b='if(${ring},if(${inSliceA},76,58),0)':`,
+      `a='if(${ring},255,0)'`,
+      `[donutimg]`,
+    ].join(''));
+    filters.push(`[${last}][donutimg]overlay=x='${cx - outerR}':y='${cy - outerR}':enable='${enA}'[vdonut]`);
+    last = 'vdonut';
+  }
+
+  if (includeHost) {
+    let hx, hy, hh, hostWindows;
+    const wholeScene = [{ start: 0, end: dur + 0.15 }];
+    // Phase 4.6 Step 3 — host choreography: size/position now follows the
+    // storyboard's own choice of role instead of one fixed small corner
+    // spot. Large roles (hero_intro/presenter_large/outro_host) are
+    // genuinely large (~45-50% of frame height) so the host visibly
+    // participates instead of decorating a corner; point_left/point_right
+    // anchor toward the side of the frame their content occupies;
+    // reaction_emphasis is a deliberately brief larger beat at this
+    // scene's own punchline (its last unit), not present for the whole
+    // scene, so it reads as emphasis rather than a static presence.
+    if (useCharacterObjectForm && !useMoneyFlowForm) {
+      // Phase 5.1 Section 1 — moved in from the far-right corner (Phase 5)
+      // to stand directly adjacent to the object's right edge (object is
+      // ~550px tall centered at x=560, so its right edge sits around
+      // x=835) instead of pointing at it from across the frame. Combined
+      // with the reversed timing above (host present from t=0, object
+      // arrives into frame at their side 0.3s later) and the
+      // holding_calculation pose, this reads as one integrated
+      // "presenting the evidence" composition rather than two separate
+      // regions of the frame gesturing at each other.
+      hh = 480; hx = '820'; hy = `${H}-overlay_h`;
+      hostWindows = [{ start: 0, end: dur + 0.15 }];
+    } else if (useMoneyFlowForm) {
+      // Money-flow keeps the original far-right position: the flow's own
+      // arrow -> result content (drawn in the content branch below) needs
+      // the center-right of the frame clear, so the host stays out of it
+      // the way Phase 5 already placed it.
+      hh = 480; hx = `${W}-overlay_w-60`; hy = `${H}-overlay_h`;
+      hostWindows = [{ start: Math.min(0.3, dur * 0.3), end: dur + 0.15 }];
+    } else if (hostRole === 'hero_intro') {
+      hh = 520; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'presenter_large') {
+      hh = 460; hx = `${W}-overlay_w-30`; hy = `${H}-overlay_h`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'outro_host') {
+      hh = 500; hx = `${Math.round(W * 0.62)}-overlay_w/2`; hy = `${H}-overlay_h`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'point_left') {
+      hh = 300; hx = '50'; hy = `${H}-overlay_h-20`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'point_right') {
+      hh = 300; hx = `${W}-overlay_w-50`; hy = `${H}-overlay_h-20`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'beside_comparison' || hostRole === 'point_at_comparison') {
+      hh = 260; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h-26`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'beside_calculation') {
+      hh = 240; hx = `${W}-overlay_w-40`; hy = `${H}-overlay_h-40`;
+      hostWindows = wholeScene;
+    } else if (hostRole === 'reaction_emphasis') {
+      hh = 360; hx = `${Math.round(W / 2)}-overlay_w/2`; hy = `${H}-overlay_h-20`;
+      const punchline = timedUnits[timedUnits.length - 1];
+      hostWindows = punchline ? [{ start: punchline.start, end: dur + 0.15 }] : [];
+    } else { // 'intro' — visible only on units NOT carrying a hard number, matching the locked "character never defaults to the whole scene" rule
+      hh = 210; hx = '40'; hy = `${H}-overlay_h-40`;
+      hostWindows = timedUnits.filter((u) => !u.hasNumber).map((u) => ({ start: u.start, end: u.end }));
+    }
+    if (hostWindows.length) {
+      const expr = hostWindows.map((w) => `between(t,${w.start.toFixed(2)},${w.end.toFixed(2)})`).join('+');
+      filters.push(`[${hostIdx}:v]scale=-1:${hh}[hud]`);
+      filters.push(`[${last}][hud]overlay=x='${hx}':y='${hy}':enable='${expr}'[vh]`);
+      last = 'vh';
+    }
+  }
+
+  // ── explanatory screen-content layer + caption layer, combined as one
+  // comma-chained overlay pass (drawbox panels first so drawtext labels
+  // composite on top of them, matching the proven working pattern already
+  // used for the caption band below). ──────────────────────────────────
+  const ov = [];
+  const headingSafe = nextwaveV2SanitizeDrawtext(storyboard.heading || 'THE KEY IDEA', 60);
+  ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${headingSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(headingSafe, 56, 1700)}:box=1:boxcolor=black@0.55:boxborderw=20:x=(w-text_w)/2:y=90:enable='between(t\\,0\\,${durEnd})'`);
+
+  // Phase 4.5C Step 3 — a structured panel/card body may never render
+  // empty. If the unit carries a real extracted number, show it (large,
+  // gold). Otherwise fall back to the unit's OWN narration text, wrapped
+  // to fit -- never a fabricated number, never a blank box. `enableExpr`
+  // must already be the comma-escaped form used inside this comma-chained
+  // filter list (e.g. 'between(t\\,0\\,5\\,)'). Returns which content type
+  // was actually drawn so the caller can report/QA-gate that no slot was
+  // ever left with neither -- rather than merely assuming this by design.
+  const slotContentReport = [];
+  function drawPanelContent(x0, contentTop, contentBottom, panelWidth, unit, enableExpr, opts) {
+    opts = opts || {};
+    const numFontBase = opts.numFontBase || 62;
+    const textFontBase = opts.textFontBase || 28;
+    const numColor = opts.numColor || '0xC99E4C';
+    const textColor = opts.textColor || 'white';
+    if (unit.numberLabel) {
+      const val = nextwaveV2SanitizeDrawtext(unit.numberLabel, 30);
+      if (unit.secondaryLabel) {
+        // Phase 4.5D — evidence hierarchy: a second value is only ever set
+        // when the storyboard judged both materially necessary (e.g. a
+        // rate and the period it applies over), so it renders smaller,
+        // beneath the primary value — never a third value, never equal
+        // visual weight (that would just be number density again).
+        const secVal = nextwaveV2SanitizeDrawtext(unit.secondaryLabel, 30);
+        const secFontBase = Math.max(18, Math.round(numFontBase * 0.45));
+        const primY = Math.round((contentTop + contentBottom) / 2 - numFontBase * 0.5);
+        const secY = primY + Math.round(numFontBase * 0.95);
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${numColor}:fontsize=${smFitFontSize(val, numFontBase, panelWidth - 60)}:x=${x0 + panelWidth / 2}-text_w/2:y=${primY}:enable='${enableExpr}'`);
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${secVal}':fontcolor=${textColor}:fontsize=${smFitFontSize(secVal, secFontBase, panelWidth - 60)}:x=${x0 + panelWidth / 2}-text_w/2:y=${secY}:enable='${enableExpr}'`);
+        slotContentReport.push({ unitIdx: unit.idx, type: 'number', value: `${unit.numberLabel} + ${unit.secondaryLabel}` });
+        return;
+      }
+      const cy = Math.round((contentTop + contentBottom) / 2);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${numColor}:fontsize=${smFitFontSize(val, numFontBase, panelWidth - 60)}:x=${x0 + panelWidth / 2}-text_w/2:y=${cy}-text_h/2:enable='${enableExpr}'`);
+      slotContentReport.push({ unitIdx: unit.idx, type: 'number', value: unit.numberLabel });
+      return;
+    }
+    const maxLines = 3;
+    const lines = nextwaveV2WrapLines(unit.text, textFontBase, panelWidth - 60, maxLines);
+    if (!lines.length) { slotContentReport.push({ unitIdx: unit.idx, type: 'empty' }); return; }
+    const lineH = Math.round(textFontBase * 1.35);
+    const blockH = lines.length * lineH;
+    let y = Math.round((contentTop + contentBottom) / 2 - blockH / 2);
+    lines.forEach((line) => {
+      const safe = nextwaveV2SanitizeDrawtext(line, 60);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${textColor}:fontsize=${textFontBase}:x=${x0 + panelWidth / 2}-text_w/2:y=${y}:enable='${enableExpr}'`);
+      y += lineH;
+    });
+    slotContentReport.push({ unitIdx: unit.idx, type: 'text', value: lines.join(' ') });
+  }
+
+  // Phase 4.5D — Step 4: a card/panel label may never clip past its edge.
+  // Wraps onto a second line (via nextwaveV2FitLabel) when even the font
+  // floor doesn't fit, and returns the pixel height it consumed so the
+  // caller can push the content region below it down accordingly instead
+  // of a fixed offset that assumed a single line.
+  function drawFittedLabel(x0, topY, panelWidth, rawText, enableExpr, opts) {
+    opts = opts || {};
+    const baseFontSize = opts.baseFontSize || 32;
+    const color = opts.color || 'white';
+    const fit = nextwaveV2FitLabel(nextwaveV2SanitizeDrawtext(rawText, 40), baseFontSize, panelWidth - 50);
+    const lineH = Math.round(fit.fontSize * 1.2);
+    fit.lines.forEach((line, i) => {
+      const safe = nextwaveV2SanitizeDrawtext(line, 40);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${color}:fontsize=${fit.fontSize}:x=${x0 + panelWidth / 2}-text_w/2:y=${topY + i * lineH}:enable='${enableExpr}'`);
+    });
+    return fit.lines.length * lineH;
+  }
+
+  if (chartPlan && chartPlan.type === 'donut') {
+    // Phase 5.1 Section 2 — the ring itself is composited above (filters
+    // phase); this draws the legend: a colored swatch + label + this
+    // scene's own real percentage value per slice, staggered to each
+    // slice's own narration start so the split's two sides still read as
+    // a progressive reveal even though the ring geometry appears as a
+    // whole (Section 4 principle -- info develops, not just geometry).
+    const { cx, cy, outerR, sl0, sl1 } = chartPlan;
+    const legendX = Math.min(cx + outerR + 70, W - 620);
+    // Phase 5.1 Section 4 — same forced-minimum-gap fix as the card
+    // comparison branch: real-frame QA on this exact scene type found both
+    // legend rows landing together when sl0/sl1 share one narration unit
+    // (a real, common case -- a single sentence like "60% to X versus 40%
+    // to Y" is one unit split into two slots), which is precisely the
+    // "not simultaneously" defect this section exists to fix.
+    const donutMinGap = Math.min(0.6, dur * 0.2);
+    const legendStarts = [sl0.unit.start, Math.max(sl1.unit.start, sl0.unit.start + donutMinGap)];
+    const rows = [
+      { sl: sl0, color: '0xC99E4C', y: cy - 110, start: legendStarts[0] },
+      { sl: sl1, color: '0x2E5A3A', y: cy + 20, start: legendStarts[1] },
+    ];
+    rows.forEach((row) => {
+      const en = `between(t,${row.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${row.start.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${legendX}:y=${row.y}:w=36:h=36:color=${row.color}@0.95:t=fill:enable='${en}'`);
+      const labelSafe = nextwaveV2SanitizeDrawtext(row.sl.label, 30);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${labelSafe}':fontcolor=white:fontsize=30:x=${legendX + 50}:y=${row.y - 4}:enable='${enQ}'`);
+      const valSafe = nextwaveV2SanitizeDrawtext(row.sl.unit.numberLabel || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${valSafe}':fontcolor=0xC99E4C:fontsize=44:x=${legendX + 50}:y=${row.y + 34}:enable='${enQ}'`);
+    });
+  } else if ((screenType === 'comparison' || screenType === 'before_after') && slots.length >= 2) {
+    // Phase 4.6 fix (post-candidate QA): a large host role (hero_intro is
+    // centered, bottom-anchored, ~520px tall) visibly overlapped and
+    // clipped into the bottom corners of both side-by-side cards here —
+    // confirmed on a real rendered frame. Shrinks the panels' bottom edge
+    // above the host's top edge (the tightest of the three large roles)
+    // when this scene's host role is large, same mitigation already
+    // applied to the 'single' layout below.
+    const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
+    // Phase 5.3 — safe_framing is a declared field naming the one real case
+    // this file already had to hand-fix above (a large host role sharing
+    // the frame with 2+ evidence panels): 'tight' pulls both panels in from
+    // the outer edges and narrows them slightly for extra clearance,
+    // 'standard' (the default) keeps the exact original layout unchanged.
+    const isTightFraming = storyboard.safe_framing === 'tight';
+    const panelY0 = 260, panelY1 = isLargeHostScene ? 545 : 760;
+    const panelW = isTightFraming ? 700 : 760, panelXs = isTightFraming ? [170, 1050] : [140, 1020];
+    const cmpTextBandH = Math.round((panelY1 - panelY0) * 0.38);
+    // Phase 4.5 local dry-run found the navy fill nearly invisible against
+    // the (also navy) background — lightened + given a gold border so each
+    // panel reads as a distinct card regardless of background proximity.
+    const fills = ['0x2A3A5C', '0x2E5A3A'];
+    // Phase 5.1 Section 4 — progressive comparison reveal. Real-frame QA on
+    // Phase 5 found both sides could appear together whenever their
+    // underlying units' narration timing happened to coincide (e.g. two
+    // slots split from the same sentence -- a real, common case per the
+    // Phase 4.5D evidence-hierarchy pairing). Side B is now FORCED to wait
+    // at least minGap after side A regardless of the units' own timing, and
+    // each side's own VALUE lands a further beat after that side's
+    // panel/label appears -- "A appears -> A's evidence -> B appears -> B's
+    // evidence -> difference emphasized", not two simultaneous reveals.
+    const minGap = Math.min(0.6, dur * 0.2);
+    const valueGap = Math.min(0.35, dur * 0.12);
+    const panelStarts = [slots[0].unit.start, Math.max(slots[1].unit.start, slots[0].unit.start + minGap)];
+    const valueStarts = panelStarts.map((s) => s + valueGap);
+    // Phase 5.3 — text_hierarchy_primary_slot is a declared field naming
+    // which slot is the load-bearing evidence for this scene; the primary
+    // side's value gets a real size boost (not just a color/order cue) so
+    // hierarchy is visible even muted, the secondary side steps down
+    // slightly so the two never compete as equals when the model has
+    // explicitly named one as more important. Defaults to a 1.0x/1.0x
+    // no-op when the field is absent or points elsewhere, matching the
+    // exact original sizes on both sides.
+    const hierarchyIdx = storyboard.text_hierarchy_primary_slot;
+    const emphasisScale = (i) => hierarchyIdx === 0 || hierarchyIdx === 1 ? (i === hierarchyIdx ? 1.12 : 0.92) : 1.0;
+    slots.slice(0, 2).forEach((sl, i) => {
+      const x0 = panelXs[i];
+      const en = `between(t\\,${panelStarts[i].toFixed(2)}\\,${durEnd})`;
+      const enPlain = `between(t,${panelStarts[i].toFixed(2)},${durEnd})`;
+      const valueEnQ = `between(t\\,${valueStarts[i].toFixed(2)}\\,${durEnd})`;
+      const sc = emphasisScale(i);
+      if (comparisonObjectIdx[i] !== -1) {
+        // Phase 5 Section A — the object (composited above, filling the
+        // top of this panel) IS the primary visual now; only a small
+        // legibility scrim sits behind the label/number band beneath it,
+        // never a full-panel color fill or a generic rectangle "card".
+        const bandY = panelY1 - cmpTextBandH;
+        ov.push(`drawbox=x=${x0}:y=${bandY}:w=${panelW}:h=${cmpTextBandH}:color=0x0d1226@0.72:t=fill:enable='${enPlain}'`);
+        const labelH = drawFittedLabel(x0, bandY + 12, panelW, sl.label, en, { baseFontSize: Math.round(30 * sc), color: '0xC99E4C' });
+        drawPanelContent(x0, bandY + 12 + labelH + 6, panelY1 - 10, panelW, sl.unit, valueEnQ, { numFontBase: Math.round(44 * sc), textFontBase: Math.round(22 * sc) });
+      } else {
+        ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=${fills[i]}@0.95:t=fill:enable='${enPlain}'`);
+        ov.push(`drawbox=x=${x0}:y=${panelY0}:w=${panelW}:h=${panelY1 - panelY0}:color=0xC99E4C@0.9:t=4:enable='${enPlain}'`);
+        const labelH = drawFittedLabel(x0, panelY0 + 55, panelW, sl.label, en, { baseFontSize: Math.round(36 * sc), color: 'white' });
+        drawPanelContent(x0, panelY0 + 55 + labelH + 15, panelY1 - 20, panelW, sl.unit, valueEnQ, { numFontBase: Math.round(62 * sc), textFontBase: Math.round(28 * sc) });
+      }
+    });
+    const bothEn = `between(t\\,${Math.max(valueStarts[0], valueStarts[1]).toFixed(2)}\\,${durEnd})`;
+    const connector = screenType === 'before_after' ? '->' : 'VS';
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=0xC99E4C:fontsize=48:box=1:boxcolor=black@0.7:boxborderw=14:x=(w-text_w)/2:y=${Math.round((panelY0 + panelY1) / 2) - 24}:enable='${bothEn}'`);
+  } else if (chartPlan && chartPlan.type === 'bar') {
+    // Phase 5.1 Sections 2/3 — real proportional bar chart from this
+    // scene's own validated magnitudes, replacing the old card-chain
+    // default for a buildup scene whose slots carry real comparable
+    // values. Each bar rises and its value lands at that slot's own
+    // narration start, matching the progressive-reveal pattern used
+    // everywhere else in this file.
+    const { points, chartX0, chartX1, baseline, plotTop, maxVal } = chartPlan;
+    const n = points.length, gap = 50;
+    const barW = Math.floor((chartX1 - chartX0 - (n - 1) * gap) / n);
+    points.forEach((c, i) => {
+      const bx = chartX0 + i * (barW + gap);
+      const barH = Math.max(8, Math.round((c.magnitude / maxVal) * (baseline - plotTop)));
+      const by = baseline - barH;
+      const en = `between(t,${c.startT.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${c.startT.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${bx}:y=${by}:w=${barW}:h=${barH}:color=0xC99E4C@0.92:t=fill:enable='${en}'`);
+      const valSafe = nextwaveV2SanitizeDrawtext(c.sl.unit.numberLabel || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${valSafe}':fontcolor=0xC99E4C:fontsize=${smFitFontSize(valSafe, 34, barW)}:x=${bx + barW / 2}-text_w/2:y=${by - 46}:enable='${enQ}'`);
+      drawFittedLabel(bx, baseline + 14, barW, c.sl.label, enQ, { baseFontSize: 24, color: 'white' });
+    });
+    ov.push(`drawbox=x=${chartX0}:y=${baseline}:w=${chartX1 - chartX0}:h=3:color=0xC99E4C@0.8:t=fill:enable='between(t,0,${durEnd})'`);
+  } else if (chartPlan && chartPlan.type === 'line') {
+    // Phase 5.1 Sections 2/3 — real line chart, segments already
+    // composited above (filters phase, each one a rotated solid bar at
+    // its own real slope); this draws the axis, point markers, and each
+    // point's own real value/time label, revealed as its segment arrives.
+    const { points, chartX0, chartX1, baseline } = chartPlan;
+    ov.push(`drawbox=x=${chartX0}:y=${baseline}:w=${chartX1 - chartX0}:h=3:color=0xC99E4C@0.5:t=fill:enable='between(t,0,${durEnd})'`);
+    points.forEach((p) => {
+      const en = `between(t,${p.startT.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${p.startT.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${p.x - 8}:y=${p.y - 8}:w=16:h=16:color=0xC99E4C@0.95:t=fill:enable='${en}'`);
+      const valSafe = nextwaveV2SanitizeDrawtext(p.numberLabel || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${valSafe}':fontcolor=0xC99E4C:fontsize=32:x=${p.x}-text_w/2:y=${p.y - 50}:enable='${enQ}'`);
+      const labelSafe = nextwaveV2SanitizeDrawtext(p.label || '', 20);
+      ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${labelSafe}':fontcolor=white:fontsize=22:x=${p.x}-text_w/2:y=${baseline + 16}:enable='${enQ}'`);
+    });
+  } else if (screenType === 'buildup' && slots.length) {
+    const picked = slots.slice(0, 4);
+    const n = picked.length;
+    const boxW = 360, gap = 40, totalW = n * boxW + (n - 1) * gap;
+    const startX = Math.round((W - totalW) / 2);
+    // Phase 4.6 fix (post-candidate QA): a large host role's box (bottom-
+    // anchored, top edge as high as y=560) visibly clipped into the
+    // bottom of these cards when they sat at their default y0/y1 — same
+    // confirmed defect as the comparison/before_after layout above.
+    // Shifted the whole row up (same height, not compressed) so it clears
+    // every large role's top edge instead.
+    const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
+    const y0 = isLargeHostScene ? 230 : 430, y1 = isLargeHostScene ? 450 : 650;
+    picked.forEach((sl, i) => {
+      const x0 = startX + i * (boxW + gap);
+      const isLast = i === n - 1;
+      const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=${isLast ? '0xC99E4C' : '0x2A3A5C'}@0.95:t=fill:enable='${en}'`);
+      if (!isLast) ov.push(`drawbox=x=${x0}:y=${y0}:w=${boxW}:h=${y1 - y0}:color=0xC99E4C@0.9:t=3:enable='${en}'`);
+      const labelH = drawFittedLabel(x0, y0 + 40, boxW, sl.label, enQ, { baseFontSize: 28, color: isLast ? '0x121A30' : 'white' });
+      drawPanelContent(x0, y0 + 40 + labelH + 15, y1 - 15, boxW, sl.unit, enQ, {
+        numFontBase: 46, textFontBase: 22,
+        numColor: isLast ? '0x121A30' : '0xC99E4C', textColor: isLast ? '0x121A30' : 'white',
+      });
+      if (i > 0) {
+        const prevEn = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
+        const connector = isLast ? '->' : '+';
+        ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${connector}':fontcolor=white:fontsize=44:x=${x0 - gap / 2}-text_w/2:y=${Math.round((y0 + y1) / 2)}:enable='${prevEn}'`);
+      }
+    });
+  } else if (useMoneyFlowForm && slots.length) {
+    // Phase 5 Section B — object -> arrow -> result FLOW instead of
+    // object-on-top/number-beneath: growth/accumulation/income concepts
+    // are inherently about a value moving or becoming a result, which a
+    // left-to-right flow communicates directly. Section F progressive
+    // reveal: arrow and result each hold back an extra beat so the flow
+    // visibly happens rather than appearing pre-assembled.
+    const sl = slots[0];
+    const baseStart = sl.unit.start;
+    const arrowStart = baseStart + Math.min(0.3, dur * 0.15);
+    const resultStart = baseStart + Math.min(0.6, dur * 0.3);
+    const arrowEnQ = `between(t\\,${arrowStart.toFixed(2)}\\,${durEnd})`;
+    const resultEnQ = `between(t\\,${resultStart.toFixed(2)}\\,${durEnd})`;
+    // '->' not a unicode arrow glyph -- verified against a real rendered
+    // frame that the unicode arrow silently doesn't render at all with
+    // this font (the font has no glyph for it), matching why every other
+    // connector in this file already uses the plain-ASCII form.
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='->':fontcolor=0xC99E4C:fontsize=64:x=470:y=490:enable='${arrowEnQ}'`);
+    drawPanelContent(560, 400, 640, 700, sl.unit, resultEnQ, { numFontBase: 72, textFontBase: 34 });
+  } else if (useCharacterObjectForm && slots.length) {
+    // Phase 5 — the illustrated object (composited above, left-of-center)
+    // is the visual anchor; the host (right side, presenting_pointing)
+    // gestures toward it. The unit's number/text sits directly under the
+    // object instead of in a bordered card -- no drawbox panel at all,
+    // matching the benchmark's own "object + label beneath it" pattern
+    // (Wealth Logic's folder/calendar/coin-stack scenes never wrap their
+    // objects in a UI panel). Section F progressive reveal: the number
+    // holds back until just after the host enters (see hostWindows above).
+    // Real-frame QA found a duplicate-text defect: when a unit has no
+    // number, drawPanelContent's text-fallback path wrapped the SAME
+    // sentence already shown in the caption bar directly on top of it,
+    // stacked and overlapping. The caption already carries that text --
+    // only draw this band when there's an actual number to show, which is
+    // the only case a number/label beneath the object adds anything.
+    //
+    // Phase 5.2 real-candidate QA — this used to draw ONLY slots[0]'s
+    // number, enabled for the whole scene. A character-object scene can
+    // span several narration units (the object/host anchor the scene as a
+    // structural whole -- a legitimate, intentional persistence -- but a
+    // real render showed the number band frozen on the first unit for the
+    // scene's full ~15-21s while later units' real numbers never
+    // appeared at all). Iterates every timed unit instead, matching the
+    // caption band's own granularity, so each unit's own real number
+    // lands in sequence as its narration plays.
+    timedUnits.forEach((u, i) => {
+      if (!u.rankedNumberLabel) return;
+      const endT = i < timedUnits.length - 1 ? timedUnits[i + 1].start.toFixed(2) : durEnd;
+      const numberStart = i === 0 ? u.start + Math.min(0.6, dur * 0.3) : u.start;
+      const enQ = `between(t\\,${numberStart.toFixed(2)}\\,${endT})`;
+      const unitForContent = { idx: u.idx, text: u.text, numberLabel: u.rankedNumberLabel, secondaryLabel: null };
+      drawPanelContent(220, 860, 970, 680, unitForContent, enQ, { numFontBase: 56, textFontBase: 30 });
+    });
+  } else if (screenType === 'single' && slots.length && storyboard.host_role === 'outro_host') {
+    // Phase 4.6 Step 5 — CTA/outro correction: the CEO rejected the
+    // oversized static "HOUSING FINANCE"-style card as a large mostly-
+    // empty panel. Replaces it with a concise, host-forward composition:
+    // no drawbox panel at all, just a real (never invented) short line of
+    // script text placed high/left, since the host is now large in the
+    // lower-right (see the outro_host host-role window above).
+    const ctaX = 140, ctaW = 980;
+    // Phase 5.2 real-candidate QA — this branch used to draw ONLY
+    // slots[0], enabled for the whole scene duration. A real candidate's
+    // closing scene can genuinely span several narration UNITS (disclaimer
+    // + metaphor + CTA all landing in one final outro_host scene, a
+    // legitimate storyboard grouping) while the storyboard names only ONE
+    // (or few) load-bearing evidence SLOT for that scene -- slots track
+    // evidence, not narration granularity. Iterating slots alone still
+    // froze on one unit's content while later units' captions kept
+    // advancing underneath (confirmed on a real render: content froze at
+    // unit 6 while captions correctly advanced through units 6 and 7).
+    // Iterates every TIMED UNIT in the scene instead -- exactly the same
+    // set the caption band below advances through -- so the content card
+    // always tracks the same granularity captions do, showing that unit's
+    // own real number when it has one (never invented -- same
+    // rankedNumberLabel extractor used everywhere else) or its own
+    // wrapped text otherwise.
+    timedUnits.forEach((u, i) => {
+      // Same duplicate-text guard already established for the
+      // character-object branch above: a text-only unit's wrapped
+      // sentence would just repeat what the caption band already shows
+      // directly underneath it. Only draw this band when the unit has a
+      // real number to show, which is the only case it adds anything.
+      if (!u.rankedNumberLabel) return;
+      const endT = i < timedUnits.length - 1 ? timedUnits[i + 1].start.toFixed(2) : durEnd;
+      const enQ = `between(t\\,${u.start.toFixed(2)}\\,${endT})`;
+      const unitForContent = { idx: u.idx, text: u.text, numberLabel: u.rankedNumberLabel, secondaryLabel: null };
+      drawPanelContent(ctaX, 300, 560, ctaW, unitForContent, enQ, { numFontBase: 56, textFontBase: 36 });
+    });
+  } else if (screenType === 'single' && slots.length) {
+    // Phase 4.5C Step 4 — 'single' no longer defaults to small host + bare
+    // icon + heading + large unused canvas (the CEO's specific rejection).
+    // The icon (moved left, see the overlay block above) now acts as the
+    // "labeled object," and 1-3 real explanatory cards fill the right two-
+    // thirds of the frame with the unit's actual number or its own wrapped
+    // narration text -- concept (icon) -> consequence/detail (cards).
+    // Phase 4.6 — the card region shrinks vertically when this scene's
+    // host role is large (hero_intro/presenter_large/outro_host), which
+    // now occupies real space in the lower part of the frame, so cards
+    // don't visually collide with the host. Threshold tightened from 620
+    // to 545 (post-candidate QA on a real render): 620 was flush with
+    // presenter_large's top edge but still overlapped hero_intro's
+    // (560) and outro_host's (580), which this region's x-span (620-1860)
+    // can horizontally reach.
+    const picked = slots.slice(0, 3);
+    const n = picked.length;
+    const isLargeHostScene = largeHostRoles.has(storyboard.host_role);
+    const regionX0 = 620, regionX1 = 1860, regionY0 = 260, regionY1 = isLargeHostScene ? 545 : 820, gap = 30;
+    const cardW = Math.round((regionX1 - regionX0 - (n - 1) * gap) / n);
+    picked.forEach((sl, i) => {
+      const x0 = regionX0 + i * (cardW + gap);
+      const en = `between(t,${sl.unit.start.toFixed(2)},${durEnd})`;
+      const enQ = `between(t\\,${sl.unit.start.toFixed(2)}\\,${durEnd})`;
+      ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0x2A3A5C@0.95:t=fill:enable='${en}'`);
+      ov.push(`drawbox=x=${x0}:y=${regionY0}:w=${cardW}:h=${regionY1 - regionY0}:color=0xC99E4C@0.9:t=4:enable='${en}'`);
+      const labelH = drawFittedLabel(x0, regionY0 + 45, cardW, sl.label, enQ, { baseFontSize: 32, color: 'white' });
+      drawPanelContent(x0, regionY0 + 45 + labelH + 15, regionY1 - 20, cardW, sl.unit, enQ, { numFontBase: 58, textFontBase: 26 });
+    });
+  } else if (timedUnits.length) {
+    // Phase 4.5D — structural safety net found via real-candidate QA: a
+    // scene can be assigned e.g. screen_type "comparison" by the model
+    // while only having ONE unit available in that scene, so only one slot
+    // ever survives validation -- failing the ">= 2" comparison guard
+    // without matching buildup/single either, and falling through every
+    // branch above to a bare heading+host+caption on empty canvas (found
+    // on the real "WHAT DRIP LOOKS LIKE" scene, t=0-4s). Whatever the
+    // reason no branch above matched, the frame must never be left with
+    // nothing but a heading — render one real card from the scene's own
+    // first unit directly, independent of the storyboard's (already
+    // unusable) slots for this scene.
+    const fx0 = 610, fw = 700, fy0 = 300, fy1 = 760;
+    // rankedNumberLabel -> numberLabel: this fallback has no slot of its
+    // own (that's exactly why it fired), so it uses the unit's
+    // single-best-ranked value directly rather than going through the
+    // slots array.
+    const fu = { ...timedUnits[0], numberLabel: timedUnits[0].rankedNumberLabel, secondaryLabel: null };
+    const fen = `between(t,${fu.start.toFixed(2)},${durEnd})`;
+    const fenQ = `between(t\\,${fu.start.toFixed(2)}\\,${durEnd})`;
+    ov.push(`drawbox=x=${fx0}:y=${fy0}:w=${fw}:h=${fy1 - fy0}:color=0x2A3A5C@0.95:t=fill:enable='${fen}'`);
+    ov.push(`drawbox=x=${fx0}:y=${fy0}:w=${fw}:h=${fy1 - fy0}:color=0xC99E4C@0.9:t=4:enable='${fen}'`);
+    const fLabelH = drawFittedLabel(fx0, fy0 + 45, fw, storyboard.heading || 'THE KEY IDEA', fenQ, { baseFontSize: 32, color: 'white' });
+    drawPanelContent(fx0, fy0 + 45 + fLabelH + 15, fy1 - 20, fw, fu, fenQ, { numFontBase: 58, textFontBase: 26 });
+  }
+
+  // Caption band — every unit, real timing, unchanged mechanism. Only the
+  // LAST unit's end is extended to durEnd (Phase 4.5D) — captions are
+  // sequential by design, so widening every unit's window would overlap
+  // two captions at once; the last one has no following caption to clash
+  // with, so it safely gets the same end-of-segment safety margin.
+  timedUnits.forEach((u, idx) => {
+    const capTxt = nextwaveV2SanitizeDrawtext(u.text, 110);
+    const endT = idx === timedUnits.length - 1 ? durEnd : u.end.toFixed(2);
+    ov.push(`drawtext=fontfile=${SMM_FONT_PATH}:text='${capTxt}':fontcolor=white:fontsize=${smFitFontSize(capTxt, 32, 1700)}:box=1:boxcolor=black@0.6:boxborderw=16:x=(w-text_w)/2:y=${H}-130:enable='between(t\\,${u.start.toFixed(2)}\\,${endT})'`);
+  });
+
+  const vf = filters.join(';') + (ov.length ? `;[${last}]` + ov.join(',') + '[vout]' : `;[${last}]null[vout]`);
+
+  // Phase 4.6 — video-only output: no audio track, no -shortest (nothing
+  // to match against); an explicit -t caps it at exactly this scene's
+  // real allotted duration since zoompan's own frame count already
+  // determines it precisely.
+  const outPath = join(tmpdir(), `nwv2-${renderId}-s${sceneIdx}.mp4`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', ...inputs,
+      '-filter_complex', vf,
+      '-map', '[vout]',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+      '-t', dur.toFixed(2),
+      '-an',
+      outPath,
+    ], { timeout: 90000, maxBuffer: 1024 * 1024 * 40 });
+  } catch (e) {
+    throw new Error(`scene ${sceneIdx} ffmpeg failed: ${String((e && e.stderr) || e.message).slice(-500)}`);
+  }
+  await smAssertValidMediaFile(outPath, `scene ${sceneIdx} segment`);
+  return {
+    path: outPath, durationSec: dur,
+    screenType, heading: storyboard.heading, hostRole: storyboard.host_role,
+    // Phase 4.5D — reflects what each SLOT actually rendered (accurate
+    // now that numbers are attached per slot, not collapsed per unit).
+    numbersShown: slots.filter((sl) => sl.unit.numberLabel).map((sl) => sl.unit.numberLabel),
+    slotCount: slots.length,
+    // Phase 4.5C Step 6 — per-slot proof (not an assumption) of what was
+    // actually drawn in every structured panel/card, so the pre-CEO gate
+    // can verify "no empty panel" against real output instead of trusting
+    // the renderer's own design intent.
+    slotContent: slotContentReport,
+  };
+}
+
+// app_settings-backed voice selection (same key-value table/pattern already
+// used for ceo_login_security_production — no new schema). Namespaced to
+// 'preview' explicitly per Step 10/PM instruction: this is not promoted to
+// production automatically.
+const NEXTWAVE_V2_VOICE_SETTING_KEY = 'nextwave_v2_voice_id_preview';
+async function nextwaveV2GetVoiceConfig() {
+  try {
+    const rows = await sbGet(`app_settings?key=eq.${NEXTWAVE_V2_VOICE_SETTING_KEY}&select=value&limit=1`);
+    if (rows && rows[0]) { try { return JSON.parse(rows[0].value || '{}'); } catch { return {}; } }
+  } catch {}
+  return {};
+}
+async function nextwaveV2SetVoiceConfig(state) {
+  const existing = await sbGetSafe(`app_settings?key=eq.${NEXTWAVE_V2_VOICE_SETTING_KEY}&select=key&limit=1`);
+  const body = { key: NEXTWAVE_V2_VOICE_SETTING_KEY, value: JSON.stringify(state), updated_at: new Date().toISOString() };
+  if (existing.length) await sbPatch('app_settings', `key=eq.${NEXTWAVE_V2_VOICE_SETTING_KEY}`, body);
+  else await sbInsert('app_settings', body);
+}
+
+// Read-only, CEO-gated, zero-cost voice catalog lookup. Returns only
+// name/id/labels/description/preview_url — never the API key, never touches
+// generation (no billable ElevenLabs call; GET /v1/voices is a free list
+// endpoint). This is the "single required CEO action" surfaced in the Phase
+// 4.3 checkpoint: the CEO triggers this once, logged into Preview, to pick a
+// real male voice from the actual account instead of Claude guessing one.
+async function nextwaveListElevenLabsVoices(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!ELEVENLABS_API_KEY) return res.status(200).json({ ok: false, error: 'elevenlabs_not_configured' });
+  try {
+    // Phase 4.4F — this previously discarded ElevenLabs' own response body on
+    // failure (just the bare numeric status), unlike nextwaveSynthesizeNarrationElevenLabs
+    // above, which already captures and returns it (t.slice(0,200)). ElevenLabs'
+    // error body (e.g. {"detail":{"status":"...","message":"..."}}) is what
+    // actually explains a 401 (bad key vs. expired vs. missing permission vs.
+    // wrong header) — never the key itself, safe to return. Matching that
+    // proven pattern here so a real 401 is diagnosable instead of opaque.
+    const r = await fetch(`${ELEVENLABS_BASE}/v1/voices`, { headers: { 'xi-api-key': ELEVENLABS_API_KEY, 'Accept': 'application/json' } });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      return res.status(502).json({ ok: false, error: `elevenlabs_error_${r.status}: ${t.slice(0, 300)}`, key_present: true, key_length: ELEVENLABS_API_KEY.length });
+    }
+    const data = await r.json();
+    const voices = (data.voices || []).map((v) => ({
+      voice_id: v.voice_id, name: v.name, category: v.category,
+      labels: v.labels || {}, description: v.description || '', preview_url: v.preview_url || null,
+    }));
+    return res.status(200).json({ ok: true, voices });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `elevenlabs_request_failed: ${e.message}` });
+  }
+}
+
+// Not CEO-gated, same reasoning as nextwave_v2_plan_visuals: read-only,
+// zero-cost, and the voice ID/name themselves are not sensitive (the API
+// key never appears here) — only setting it requires CEO auth.
+async function nextwaveV2GetVoice(req, res) {
+  const cfg = await nextwaveV2GetVoiceConfig();
+  return res.status(200).json({ ok: true, voice_id: cfg.voice_id || null, name: cfg.name || null, savedAt: cfg.savedAt || null });
+}
+
+// CEO-gated: persists the CEO's chosen voice as the NextWave V2 preview
+// candidate's voice configuration. Zero-cost (no generation call), does not
+// touch production narration's default ELEVENLABS_VOICE_ID constant at all.
+async function nextwaveV2SetVoice(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { voice_id, name } = req.body || {};
+  if (!voice_id || typeof voice_id !== 'string') return res.status(400).json({ ok: false, error: 'voice_id required' });
+  await nextwaveV2SetVoiceConfig({ voice_id, name: name || '', savedAt: new Date().toISOString() });
+  return res.status(200).json({ ok: true, voice_id, name: name || '' });
+}
+
+// ── Phase 4.7 — Ideogram adapter (host pose generation) ────────────────────
+// PM-authorized minimum vendor-isolated adapter for the NextWave V2 host-
+// pose gap (Wealth Logic benchmark forensics: the host has no gesture/
+// interaction poses, only two near-identical headshot crops). Investigation
+// confirmed no prior Ideogram integration exists anywhere reachable (git
+// history on every branch, Engineering Brain tasks/evidence, Supabase asset
+// tables, Vercel env) -- this is new, not a port. Reuses existing
+// infrastructure rather than building parallel systems: the credential
+// lives in the SAME ceo_auth_config table (RLS enabled, zero policies,
+// service-role-only) already proven for the CEO session secret and PIN
+// hash, under a new key rather than a new table; generated assets are
+// recorded in the EXISTING production_assets_library table rather than a
+// new one. The API key is never sent to the browser, logged, or returned
+// in any response -- only a boolean "configured" status is ever exposed
+// client-side, mirroring the ElevenLabs voice-config pattern.
+const IDEOGRAM_GENERATE_URL = 'https://api.ideogram.ai/v1/ideogram-v3/generate';
+// TURBO + character reference = $0.10/image (vs $0.15 DEFAULT / $0.20
+// QUALITY) -- cheapest tier that still gets character-consistent output,
+// appropriate for a bounded proof-scope of 2-3 poses.
+const IDEOGRAM_COST_PER_IMAGE_USD = 0.10;
+// Phase 5.3 — per-render ceiling on brand-new dynamic illustrated-object
+// generations (nextwaveV2ResolveOrGenerateIllustratedObject). Reused
+// (already-banked) assets never count against this. At $0.03/image
+// (no character reference — objects don't use one), 3 new generations is
+// $0.09/render worst case, well inside the already-approved Ideogram
+// ceiling for this proof scope; raise only with explicit CEO authorization.
+const NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING = 3;
+
+let _ideogramKeyCache = null;
+async function _ideogramLoadKey() {
+  if (_ideogramKeyCache) return _ideogramKeyCache;
+  const rows = await sbGetSafe(`ceo_auth_config?key=eq.ideogram_api_key_production&select=value&limit=1`);
+  const key = rows && rows[0] && rows[0].value;
+  if (!key) return null;
+  _ideogramKeyCache = key;
+  return key;
+}
+
+async function nextwaveV2IdeogramStatus(req, res) {
+  const key = await _ideogramLoadKey().catch(() => null);
+  return res.status(200).json({ ok: true, configured: !!key });
+}
+
+// CEO-gated, mirrors nextwaveV2SetVoice: the plaintext key is written
+// once, straight from the CEO's browser to this table, and is never
+// echoed back, logged, or included in any subsequent response.
+async function nextwaveV2SetIdeogramKey(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { api_key } = req.body || {};
+  if (!api_key || typeof api_key !== 'string' || api_key.length < 10) {
+    return res.status(400).json({ ok: false, error: 'api_key required' });
+  }
+  const existing = await sbGetSafe(`ceo_auth_config?key=eq.ideogram_api_key_production&select=key&limit=1`);
+  const body = { key: 'ideogram_api_key_production', value: api_key };
+  if (existing.length) await sbPatch('ceo_auth_config', `key=eq.ideogram_api_key_production`, body);
+  else await sbInsert('ceo_auth_config', body);
+  _ideogramKeyCache = null; // force re-fetch next call rather than trust the just-written value in-process
+  return res.status(200).json({ ok: true });
+}
+
+// Reuse-before-generate: checks the existing production_assets_library
+// table for an already-approved NextWave host pose with this exact role
+// tag before spending on a new Ideogram call. Nothing new is created here
+// -- same table every other engine's approved-asset lookups already use.
+async function _nextwaveV2FindExistingAsset(assetType, roleTag) {
+  const rows = await sbGetSafe(
+    `production_assets_library?engine=eq.NextWave&asset_type=eq.${assetType}&status=eq.approved&tags=cs.{role:${roleTag}}&select=id,asset_name,asset_url,tags&order=created_at.desc&limit=1`
+  );
+  return rows && rows[0] ? rows[0] : null;
+}
+async function _nextwaveV2FindExistingPose(poseRole) {
+  return _nextwaveV2FindExistingAsset('host_pose', poseRole);
+}
+
+// Real Ideogram v3 generate call (POST multipart/form-data, Api-Key header
+// -- verified against Ideogram's own current API reference, not guessed).
+// characterReferencePath, when given, is the existing host headshot so the
+// new pose keeps NextWave's real host identity instead of inventing a new
+// face -- this is the whole reason Character Reference exists as a field.
+async function nextwaveV2IdeogramCall({ prompt, characterReferencePath, aspectRatio }) {
+  const key = await _ideogramLoadKey();
+  if (!key) return { ok: false, error: 'ideogram_not_configured' };
+  const form = new FormData();
+  form.append('prompt', prompt);
+  form.append('rendering_speed', 'TURBO');
+  // Storyboard Implementation Proof v3 — full-frame 16:9 scene backgrounds
+  // need a landscape generation, not the 1x1 square this call always used
+  // for small object icons. Optional and defaults to the original '1x1' so
+  // every existing caller (icon objects, host poses) is unaffected.
+  form.append('aspect_ratio', aspectRatio || '1x1');
+  if (characterReferencePath) {
+    const refBytes = await readFile(characterReferencePath);
+    form.append('character_reference_images', new Blob([refBytes], { type: 'image/png' }), 'host_reference.png');
+  }
+  const res = await fetch(IDEOGRAM_GENERATE_URL, {
+    method: 'POST',
+    headers: { 'Api-Key': key },
+    body: form,
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    return { ok: false, error: `ideogram_http_${res.status}: ${t.slice(0, 300)}` };
+  }
+  const data = await res.json();
+  const img = data && data.data && data.data[0];
+  if (!img || !img.url) return { ok: false, error: 'ideogram_no_image_returned' };
+  // TURBO is $0.03/image normally, $0.10 with a character reference attached
+  // (Ideogram's own character-reference pricing tier) -- tracked per call so
+  // "cumulative spend" is exact rather than a flat assumed rate.
+  const cost = characterReferencePath ? IDEOGRAM_COST_PER_IMAGE_USD : 0.03;
+  return { ok: true, url: img.url, seed: img.seed, resolution: img.resolution, cost_usd: cost };
+}
+
+// Orchestrator: reuse if an approved pose with this role already exists,
+// otherwise generate via Ideogram (character-referenced against the
+// existing host headshot for identity continuity), download the
+// ephemeral Ideogram URL immediately (same reasoning as every other
+// vendor asset in this file -- those links expire), upload to permanent
+// Supabase Storage, and record it in production_assets_library so the
+// NEXT call for this same role reuses it instead of paying again.
+async function nextwaveV2IdeogramResolvePose(poseRole, promptText) {
+  const existing = await _nextwaveV2FindExistingPose(poseRole);
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, characterReferencePath: NEXTWAVE_V2_HOST_DEFAULT });
+  if (!gen.ok) return gen;
+
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const assetName = `nextwave_host_pose_${poseRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'host_pose',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'approved',
+    tags: [`role:${poseRole}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
+  });
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+// ── Phase 5 — illustrated OBJECT generation (not character poses) ──────────
+// CEO rejection of Phase 4.7: adding host poses to a card-first renderer
+// didn't change the mechanism. Benchmark forensics (Wealth Logic: folder,
+// pie chart, calendar, coin stack, bank statement, signpost) show the
+// actual gap is a missing library of concept-matched illustrated OBJECTS
+// that replace cards as the default. The old api/assets/nextwave-v2/icon_*
+// files were checked and are too simplistic (flat single-color silhouette
+// clip-art, no shading/detail) to read as part of the same illustrated
+// scene as the host -- reusing them as-is would not close the gap the CEO
+// identified, so these are new assets, not a port. No character reference
+// is used here (objects don't need identity consistency the way the host
+// does); a consistent style descriptor is baked into every prompt instead
+// so objects read as one coherent illustrated world together.
+async function _nextwaveV2FindExistingObject(objectRole) {
+  return _nextwaveV2FindExistingAsset('illustrated_object', objectRole);
+}
+async function nextwaveV2IdeogramResolveObject(objectRole, promptText, aspectRatio) {
+  const existing = await _nextwaveV2FindExistingObject(objectRole);
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, aspectRatio }); // no character reference for objects
+  if (!gen.ok) return gen;
+
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const assetName = `nextwave_object_${objectRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'illustrated_object',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'approved',
+    tags: [`role:${objectRole}`, 'model:ideogram-v3-turbo', `cost_usd:${gen.cost_usd}`],
+  });
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+async function nextwaveV2ResolveObjectLocalPath(objectRole, renderId) {
+  try {
+    const existing = await _nextwaveV2FindExistingObject(objectRole);
+    if (!existing || !existing.asset_url) return null;
+    const res = await fetch(existing.asset_url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const localPath = join(tmpdir(), `nwv2-${renderId}-object-${objectRole}.png`);
+    await writeFile(localPath, buf);
+    return localPath;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Phase 5.3 — GENERALIZED topic-specific illustrated-object resolution.
+// The fixed NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS/CONCEPT_TO_OBJECT map (5
+// roles: house/money_stack/document_folder/calendar_time/decision_signpost)
+// stays exactly as-is and is always tried FIRST — this function only fires
+// when a scene's own storyboard-declared `illustration_concept` names a
+// real, concrete thing that doesn't map to any of those 5 fixed roles.
+// Same reuse-first/generate-and-bank pattern as nextwaveV2IdeogramResolveObject
+// (which this calls unchanged, not a copy of it): the new role is a
+// deterministic slug of the concept text itself, so the SECOND script that
+// ever mentions e.g. "car loan" reuses the exact same banked asset the
+// first script generated — the illustrated-object vocabulary grows with
+// real content instead of staying capped at 5 forever, without a human
+// ever hand-adding a new prompt to a fixed dictionary.
+//
+// Cost control (per the Phase 5.3 order): bounded by a per-render counter
+// the caller owns (see `budget` param) so one script can never trigger
+// unbounded new Ideogram spend — once the cap is hit this returns null
+// (never throws), which degrades that scene to the existing card/chart
+// fallback exactly like "no object available yet" already does today.
+function _nextwaveV2SlugifyConcept(concept) {
+  return String(concept || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || null;
+}
+// White-Canvas Motion Structure phase — bgStyle lets a caller request a
+// 'white' background variant for the new light-canvas compositor, distinct
+// from the default 'navy' variant the dark-canvas compositors use. The role
+// slug is tagged per bgStyle so the reuse-first cache never returns a
+// navy-background image into a white-canvas render (or vice versa) — the
+// colorkey sampling in either compositor assumes its own matching bg color.
+async function nextwaveV2ResolveOrGenerateIllustratedObject(illustrationConcept, budget, bgStyle) {
+  const style = bgStyle === 'white' ? 'white' : 'navy';
+  const role = _nextwaveV2SlugifyConcept(illustrationConcept + (style === 'white' ? ' whitebg' : ''));
+  if (!role) return null;
+  // Reuse-first: an approved asset already banked under this exact concept
+  // slug (from ANY prior script, not just this render) costs nothing.
+  const existing = await _nextwaveV2FindExistingObject(role);
+  if (existing && existing.asset_url) {
+    return { role, path: await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`), reused: true, cost_usd: 0 };
+  }
+  if (!budget || budget.remaining <= 0) return null; // cost ceiling reached — degrade gracefully, never block the render
+  // Full-Frame Production Candidate fix C — Ideogram does not reliably obey a
+  // simple "no text" instruction when the CONCEPT phrase itself implies a
+  // labeled/inscribed object (confirmed on a real render: "jar labeled
+  // savings" came back with genuine, truncated on-image text, "SAVINGS,
+  // RETI…"). Strip any label-implying wording from the concept before it
+  // reaches the prompt, and make the negative instruction explicit and
+  // repeated rather than a single "no text" clause. Deterministic overlay
+  // text is applied separately by the compositor when a beat needs one —
+  // this illustration itself must never be asked to carry load-bearing text.
+  const deLabeled = illustrationConcept
+    .replace(/\b(labeled|labelled|that says|with the words?|with a (sign|label|tag) (that says|reading)|reading)\b[^,.]*/gi, '')
+    .replace(/["\n]/g, ' ')
+    .slice(0, 60);
+  const bgClause = style === 'white'
+    ? 'isolated on a plain white background'
+    : 'isolated on a plain dark navy background';
+  const prompt = `Flat 2D vector illustration representing the concept of "${deLabeled}" in a personal-finance context, soft shading, clean bold outlines, navy and gold accent color palette, ${bgClause}, professional financial-explainer illustration style, single clear central subject. Absolutely no text, no words, no letters, no numbers, no labels, no signage, no typography of any kind anywhere in the image — a pure wordless visual metaphor only. No people.`;
+  try {
+    const gen = await nextwaveV2IdeogramResolveObject(role, prompt);
+    if (!gen.ok) return null;
+    budget.remaining -= 1;
+    budget.spent_usd = (budget.spent_usd || 0) + (gen.cost_usd || 0);
+    (budget.generated || (budget.generated = [])).push({ role, concept: illustrationConcept, cost_usd: gen.cost_usd || 0, reused: !!gen.reused });
+    const localPath = await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`);
+    return localPath ? { role, path: localPath, reused: !!gen.reused, cost_usd: gen.cost_usd || 0 } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Storyboard Implementation Proof v3 — PM rejection was explicit: small
+// icons composited into flat ffmpeg cards is "more boxes," not the target.
+// The approved storyboard's financial scenes are full-frame illustrated
+// ENVIRONMENTS (a glowing money-flow cityscape, a dramatic clock/calendar
+// scene, an illuminated chart dashboard) with the actual numbers/motion
+// layered on top — a genuine hybrid, not another isolated-object icon.
+// This resolves a full-bleed 16:9 background for exactly that: same
+// reuse-first/cost-bounded pattern as nextwaveV2ResolveOrGenerateIllustratedObject
+// (a distinct 'scene_bg:' role namespace so these never collide with or
+// get returned in place of a small icon lookup), but a landscape aspect
+// ratio and a cinematic-environment prompt instead of "isolated on a flat
+// background, single central subject."
+// Storyboard Implementation Proof v6 — PM rejected the v3 prompt style
+// outright: "dark navy... dramatic... glowing" reads as sci-fi/futuristic,
+// not the CEO-approved "premium illustrated financial explainer" target.
+// Same function/pipeline, corrected art direction: warm, bright, editorial-
+// illustration style (think a modern finance magazine spread), matching
+// NextWave's own cream/gold identity instead of fighting it with a dark
+// competing palette.
+async function nextwaveV2ResolveOrGenerateSceneBackground(sceneConcept, budget) {
+  const role = _nextwaveV2SlugifyConcept('scenebgv2 ' + sceneConcept);
+  if (!role) return null;
+  const existing = await _nextwaveV2FindExistingObject(role);
+  if (existing && existing.asset_url) {
+    return { role, path: await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`), reused: true, cost_usd: 0 };
+  }
+  if (!budget || budget.remaining <= 0) return null;
+  // Proof A v6.1 Creative QC cleanup — real renders showed Ideogram
+  // hallucinating garbled pseudo-text on objects whose real-world form
+  // conventionally carries text (calendar grids, ribbons/banners), despite
+  // the existing "no text" instruction. Excluding that whole OBJECT CLASS
+  // (not just asking for "no text" again) is the actual fix: a scene with
+  // no ribbon/banner/sign/plaque has nowhere for pseudo-text to appear.
+  const prompt = `Premium editorial illustration for a modern finance explainer video: ${sceneConcept}. Warm, bright, clean environment with soft natural daylight, cream and warm gold color palette with navy accents, professional financial-magazine illustration style, shallow depth with a clear foreground subject, high production value. Absolutely NOT dark, NOT futuristic, NOT sci-fi, NOT a dashboard or screen interface. No text, no words, no letters, no numbers, no typography of any kind anywhere in the image, no people, no logos. Do not include ribbons, banners, plaques, signs, labels, pennants, or any object whose real-world form conventionally displays text or writing.`;
+  try {
+    const gen = await nextwaveV2IdeogramResolveObject(role, prompt, '16x9');
+    if (!gen.ok) return null;
+    budget.remaining -= 1;
+    budget.spent_usd = (budget.spent_usd || 0) + (gen.cost_usd || 0);
+    (budget.generated || (budget.generated = [])).push({ role, concept: sceneConcept, cost_usd: gen.cost_usd || 0, reused: !!gen.reused });
+    const localPath = await nextwaveV2ResolveObjectLocalPath(role, `dyn-${Date.now()}`);
+    return localPath ? { role, path: localPath, reused: !!gen.reused, cost_usd: gen.cost_usd || 0 } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Phase 5.1 Section 6 — every Ideogram object is generated "isolated on a
+// plain dark navy background" (see NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS)
+// specifically so this works: the object's own corner is that flat
+// background color, not part of the illustration, so sampling one pixel
+// gives a reliable per-image key color without any new vendor/library.
+// Verified against a real 4x4px corner sample on all 5 generated objects:
+// variance within a single image was only ~3/255 (a flat fill, not a
+// gradient), but the fill color itself differs 20-30/255 between separate
+// generations -- so this must be sampled PER OBJECT IMAGE, never a single
+// hardcoded constant. Returns null (never throws) on any failure so a
+// composite always degrades to the old flat-square behavior instead of
+// breaking the render.
+async function _nextwaveV2SampleCornerColor(localPath) {
+  try {
+    const rawPath = join(tmpdir(), `nwv2-cornerpx-${Date.now()}-${Math.random().toString(36).slice(2)}.raw`);
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-i', localPath,
+      '-vf', 'crop=4:4:0:0,scale=1:1',
+      '-frames:v', '1',
+      '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+      rawPath,
+    ], { timeout: 15000 });
+    const buf = await readFile(rawPath);
+    unlink(rawPath).catch(() => {});
+    if (buf.length < 3) return null;
+    const hex = (n) => n.toString(16).padStart(2, '0');
+    return `0x${hex(buf[0])}${hex(buf[1])}${hex(buf[2])}`;
+  } catch (e) {
+    return null;
+  }
+}
+// Bounded to the Phase 5 five-scene proof's object roles. Style descriptor
+// ("flat 2D vector illustration... navy and gold accent palette, clean
+// outlines, soft shading") is repeated in every prompt so objects read as
+// one coherent illustrated world together, matching the existing host art.
+const NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS = {
+  house: 'Flat 2D vector illustration of a single-family house, three-quarter angle, navy blue roof, warm beige walls, gold front door, soft shading, clean bold outlines, no text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  money_stack: 'Flat 2D vector illustration of a neat stack of gold coins beside a bound stack of dollar bills, soft shading, clean bold outlines, gold and cream color palette, no text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  document_folder: 'Flat 2D vector illustration of a manila folder holding a financial statement with a visible dollar sign on the paper, soft shading, clean bold outlines, tan and white color palette with a gold accent, no readable text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  calendar_time: 'Flat 2D vector illustration of a desk calendar with a bold number visible on the page and a small clock beside it, soft shading, clean bold outlines, cream and gold color palette, no readable text, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+  decision_signpost: 'Flat 2D vector illustration of a wooden signpost at a fork in a dirt road, two arrow signs pointing in opposite directions, soft shading, clean bold outlines, brown and gold color palette, no text on the signs, no people, isolated on a plain dark navy background, professional financial-explainer illustration style.',
+};
+async function nextwaveV2IdeogramGenerateObject(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { object_role } = req.body || {};
+  const prompt = NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS[object_role];
+  if (!prompt) return res.status(400).json({ ok: false, error: `unknown object_role -- must be one of: ${Object.keys(NEXTWAVE_V2_IDEOGRAM_OBJECT_PROMPTS).join(', ')}` });
+  try {
+    const result = await nextwaveV2IdeogramResolveObject(object_role, prompt);
+    if (!result.ok) return res.status(502).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// Downloads an approved Ideogram host pose to a per-render local file so
+// ffmpeg (which needs a real file path, not a remote URL) can composite
+// it exactly like the two original static host images. Never generates —
+// generation only happens through the explicit CEO-gated action above, so
+// a real render can never silently trigger new Ideogram spend. Falls back
+// to the given default local path if no approved asset exists yet or the
+// download fails, so a missing/broken pose degrades to Phase 4.6 behavior
+// rather than failing the render.
+async function nextwaveV2ResolveHostPoseLocalPath(poseTag, renderId, fallbackLocalPath) {
+  try {
+    const existing = await _nextwaveV2FindExistingPose(poseTag);
+    if (!existing || !existing.asset_url) return fallbackLocalPath;
+    const res = await fetch(existing.asset_url);
+    if (!res.ok) return fallbackLocalPath;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const localPath = join(tmpdir(), `nwv2-${renderId}-pose-${poseTag}.png`);
+    await writeFile(localPath, buf);
+    return localPath;
+  } catch (e) {
+    return fallbackLocalPath;
+  }
+}
+
+// CEO-gated (real Ideogram spend when not already reused). Bounded to the
+// Phase 4.7 proof-scope pose roles only -- this is not a general-purpose
+// "generate anything" endpoint, matching "no parallel production lifecycle".
+const NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS = {
+  presenting_pointing: 'Flat 2D vector illustration, financial educator character, same identity as reference: short dark brown hair, tan skin, navy blazer over white collared shirt. Three-quarter body, standing, one arm raised and pointing to the right toward off-screen data, friendly confident expression, clean navy background, no text, no logo, professional explainer-video style, high detail flat illustration.',
+  holding_calculation: 'Flat 2D vector illustration, financial educator character, same identity as reference: short dark brown hair, tan skin, navy blazer over white collared shirt. Three-quarter body, standing, both hands holding up a plain blank ledger/notepad in front of chest as if showing a calculation to the viewer, engaged expression, clean navy background, no text, no logo, professional explainer-video style, high detail flat illustration.',
+  reaction_outro: 'Flat 2D vector illustration, financial educator character, same identity as reference: short dark brown hair, tan skin, navy blazer over white collared shirt. Three-quarter body, standing, one hand gesturing outward in a welcoming conclusive wrap-up gesture, warm confident smile, clean navy background, no text, no logo, professional explainer-video style, high detail flat illustration.',
+};
+async function nextwaveV2IdeogramGeneratePose(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { pose_role } = req.body || {};
+  const prompt = NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS[pose_role];
+  if (!prompt) return res.status(400).json({ ok: false, error: `unknown pose_role -- must be one of: ${Object.keys(NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS).join(', ')}` });
+  try {
+    const result = await nextwaveV2IdeogramResolvePose(pose_role, prompt);
+    if (!result.ok) return res.status(502).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// Phase 4.5D diagnostic — reproduces the exact plan/scene/storyboard data a
+// real Build would use (including the one real Claude storyboard call),
+// WITHOUT touching ElevenLabs or ffmpeg, so a scene-composition defect can
+// be inspected without spending on a full paid render. Read-only, no
+// video/audio produced, no package/task touched. Not CEO-gated (same
+// reasoning as nextwave_v2_plan_visuals — read-only, bounded token cost,
+// no secret or financial-account action).
+async function nextwaveV2DebugStoryboard(req, res) {
+  try {
+    const { script } = req.body || {};
+    if (!script || typeof script !== 'string' || !script.trim()) {
+      return res.status(400).json({ ok: false, error: 'script is required' });
+    }
+    const units = nextwaveSegmentMeaningUnits(script);
+    const plan = units.map((u, idx) => {
+      const tags = nextwaveClassifyVisualIntent(u.text);
+      const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+      const candidateValues = nextwaveExtractAllNumbers(u.text);
+      return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+    });
+    const scenes = nextwaveV2GroupScenes(plan);
+    const storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
+    return res.status(200).json({
+      ok: true,
+      unit_count: plan.length,
+      units: plan.map((u) => ({ idx: u.__idx, text: u.text, hasNumber: u.__hasNumber, candidateValues: u.__candidateValues })),
+      scene_count: scenes.length,
+      scenes: scenes.map((s, i) => ({
+        sceneIndex: i,
+        unit_indices: s.units.map((u) => u.__idx),
+        storyboard: storyboards[i],
+      })),
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── Phase 5.3 — GENERATE-stage scene package (persisted, reviewable) ──────
+// Promotes the exact same segmentation -> classification -> grouping ->
+// storyboard(+evidence-binding) computation nextwaveV2DebugStoryboard
+// already reproduces read-only, into a standing GENERATE-stage artifact:
+// this is what makes the automatic storyboard a first-class, reviewable
+// object instead of a value that only ever existed transiently inside one
+// BUILD call. Spends nothing but one Anthropic call (same budget/path
+// nextwaveV2GenerateStoryboard already uses) — no Ideogram, no ElevenLabs,
+// no ffmpeg — so it is safe to run at GENERATE time, before a human has
+// approved anything for BUILD to spend real render cost on.
+async function nextwaveV2GenerateScenePackage(script) {
+  const units = nextwaveSegmentMeaningUnits(script);
+  const plan = units.map((u, idx) => {
+    const tags = nextwaveClassifyVisualIntent(u.text);
+    const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+    const candidateValues = nextwaveExtractAllNumbers(u.text);
+    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+  });
+  const scenes = nextwaveV2GroupScenes(plan);
+  if (!scenes.length) throw new Error('no meaning units resolved from script');
+  const storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
+  return {
+    script,
+    generated_at: new Date().toISOString(),
+    unit_count: plan.length,
+    units: plan.map((u) => ({
+      idx: u.__idx, text: u.text, section: u.section, hasNumber: u.__hasNumber,
+      candidateValues: u.__candidateValues, concept_tags: u.concept_tags, fallback_concept: u.fallback_concept,
+    })),
+    scene_count: scenes.length,
+    scenes: scenes.map((s, i) => ({
+      sceneIndex: i,
+      unit_indices: s.units.map((u) => u.__idx),
+      storyboard: storyboards[i],
+    })),
+  };
+}
+// Not CEO-gated — same reasoning as nextwave_v2_debug_storyboard/
+// nextwave_v2_plan_visuals (read/compute-only, one bounded Anthropic call,
+// no vendor spend, no secret or financial-account action).
+async function nextwaveV2GenerateScenePackageAction(req, res) {
+  try {
+    const { script } = req.body || {};
+    if (!script || typeof script !== 'string' || !script.trim()) {
+      return res.status(400).json({ ok: false, error: 'script is required' });
+    }
+    if (script.length > 3000) {
+      return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 3000 characters)' });
+    }
+    const pkg = await nextwaveV2GenerateScenePackage(script);
+    return res.status(200).json({ ok: true, scene_package: pkg });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+// Rebuilds the exact {plan, scenes, storyboards} shape nextwaveV2BuildRender
+// needs, from a previously-generated (and possibly human-reviewed) scene
+// package, WITHOUT re-running segmentation/classification/the Claude
+// storyboard call. Returns null (never throws) on any structural mismatch
+// so the caller can safely fall back to a fresh recompute rather than
+// rendering from a corrupt/foreign package. Guarantees BUILD renders
+// EXACTLY the scenes/evidence that were reviewed in GENERATE — no silent
+// re-derivation from the raw script at render time.
+function _nextwaveV2ReconstructFromScenePackage(pkg) {
+  try {
+    if (!pkg || !Array.isArray(pkg.units) || !Array.isArray(pkg.scenes) || !pkg.units.length || !pkg.scenes.length) return null;
+    const plan = pkg.units.map((u) => ({
+      text: u.text, section: u.section,
+      __idx: u.idx, __hasNumber: !!u.hasNumber,
+      concept_tags: Array.isArray(u.concept_tags) ? u.concept_tags : [],
+      fallback_concept: u.fallback_concept,
+      __candidateValues: Array.isArray(u.candidateValues) ? u.candidateValues : [],
+    }));
+    if (plan.some((u) => typeof u.__idx !== 'number' || !plan[u.__idx])) return null;
+    const scenes = pkg.scenes.map((s) => ({
+      units: (s.unit_indices || []).map((i) => plan[i]).filter(Boolean),
+    }));
+    if (scenes.some((s) => !s.units.length)) return null;
+    const storyboards = pkg.scenes.map((s) => s.storyboard);
+    if (storyboards.some((s) => !s || !Array.isArray(s.slots))) return null;
+    return { plan, scenes, storyboards };
+  } catch (e) {
+    return null;
+  }
+}
+
+// ── NextWave V2 Production Architecture Freeze — GENERATE-stage hybrid
+// visual plan (persisted, reviewable, approve-then-build). Same reuse-first
+// shape as nextwaveV2GenerateScenePackage above (segmentation ->
+// classification -> grouping -> one planning call), producing the NEW
+// visual_treatment/broll_prompt/emphasis_values schema instead of the
+// retired full-scene storyboard. Spends nothing but one Anthropic call —
+// no HeyGen, no Submagic, no Ideogram — safe to run before BUILD spend.
+async function nextwaveV2GenerateVisualPlanPackage(script) {
+  const units = nextwaveSegmentMeaningUnits(script);
+  const plan = units.map((u, idx) => {
+    const tags = nextwaveClassifyVisualIntent(u.text);
+    const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+    const candidateValues = nextwaveExtractAllNumbers(u.text);
+    return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+  });
+  const scenes = nextwaveV2GroupScenes(plan);
+  if (!scenes.length) throw new Error('no meaning units resolved from script');
+  const beats = await nextwaveV2GenerateVisualPlan(plan, scenes);
+  return {
+    script,
+    architecture: 'heygen_submagic_hybrid_v1',
+    generated_at: new Date().toISOString(),
+    unit_count: plan.length,
+    units: plan.map((u) => ({
+      idx: u.__idx, text: u.text, section: u.section, hasNumber: u.__hasNumber,
+      candidateValues: u.__candidateValues, concept_tags: u.concept_tags, fallback_concept: u.fallback_concept,
+    })),
+    beat_count: scenes.length,
+    beats: scenes.map((s, i) => ({
+      beatIndex: i,
+      unit_indices: s.units.map((u) => u.__idx),
+      unit_texts: s.units.map((u) => u.text),
+      visual: beats[i],
+    })),
+  };
+}
+async function nextwaveV2GenerateVisualPlanPackageAction(req, res) {
+  try {
+    const { script } = req.body || {};
+    if (!script || typeof script !== 'string' || !script.trim()) {
+      return res.status(400).json({ ok: false, error: 'script is required' });
+    }
+    // Live Validation Defect #2 — this endpoint is now the real production
+    // path for BOTH Short and Long (nwv2ProductionStartBuild calls it for
+    // both), not just the original Short-only candidate testing this 3000
+    // cap was set for. A real Long script runs ~950-1100 words per the
+    // approved script architecture (~7 min at ~140wpm), which lands at
+    // 5000-6000+ characters including its own [MM:SS LABEL] segment
+    // markers — confirmed live: a real approved Long task's script hit
+    // this cap at 4779 characters (cleaned) and silently blocked Build
+    // with no visible error (the caller's early-return path on this
+    // specific failure never touched pkg.renderStatus). Raised to a limit
+    // that comfortably covers a real Long script with headroom, while
+    // still bounding the downstream classifier/Anthropic call. Short
+    // scripts (~100-150 words) are far under this either way.
+    if (script.length > 8000) {
+      return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 8000 characters)' });
+    }
+    const pkg = await nextwaveV2GenerateVisualPlanPackage(script);
+    return res.status(200).json({ ok: true, visual_plan_package: pkg });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// Main entry point: real approved package script -> V2 plan -> scenes ->
+// real ElevenLabs narration per scene -> composited segments -> concatenated
+// final MP4 -> uploaded to the same Supabase Storage path SMM video already
+// uses. CEO-gated (spends real ElevenLabs money). Stateless per call, same
+// as nextwaveNarrationSynthesize — the caller (Build button) is responsible
+// for persisting the returned video_url onto the package row, exactly like
+// autoStartHeygenRender already does for pkg.videoUrl today.
+// Phase 4.6 — concatenates VIDEO-ONLY scene segments (no audio track in
+// any of them — see nextwaveV2BuildSceneSegment) into one continuous
+// video stream. Kept separate from muxing so the master narration audio
+// (synthesized once, untouched by any per-scene process) is combined
+// exactly once, at the very end, in nextwaveV2MuxMasterAudio.
+async function nextwaveV2ConcatVideoOnly({ paths, id }) {
+  for (let i = 0; i < paths.length; i++) {
+    await smAssertValidMediaFile(paths[i], `segment ${i + 1}/${paths.length} before concat`);
+  }
+  const outPath = join(tmpdir(), `nwv2-concat-${id}.mp4`);
+  const inputArgs = [];
+  paths.forEach((p) => { inputArgs.push('-i', p); });
+  const streamRefs = paths.map((_, i) => `[${i}:v:0]`).join('');
+  const filter = `${streamRefs}concat=n=${paths.length}:v=1:a=0[outv]`;
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filter,
+    '-map', '[outv]',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'concatenated video-only master');
+  return outPath;
+}
+
+// Phase 4.6 — muxes the ONE master narration track onto the fully
+// concatenated video, exactly once. -shortest trims to the shorter of
+// the two (they should already closely match, since every scene's video
+// length was itself derived from a slice of this same audio's real
+// duration). Explicit -b:a 192k is the confirmed real audio-quality fix
+// from the Step 2 investigation (the old per-scene silenceremove call had
+// no explicit bitrate and silently dropped to a 64kbps default).
+async function nextwaveV2MuxMasterAudio({ videoPath, audioPath, id }) {
+  const outPath = join(tmpdir(), `nwv2-final-${id}.mp4`);
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-i', videoPath, '-i', audioPath,
+    '-map', '0:v:0', '-map', '1:a:0',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '44100', '-ac', '2',
+    '-shortest',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'final muxed candidate');
+  return outPath;
+}
+
+// ── NextWave V2 Visual Composition Correction ──────────────────────────────
+// CEO rejection of the hybrid pipeline's first candidate: Submagic's B-roll
+// (automatic AND targeted) replaces the ENTIRE frame on every cutaway, which
+// reads as unrelated stock clips stitched together, not one designed video.
+// Root cause: Submagic's `items`/`magicBrolls` are edit-level operations
+// (replace the shot for a time range) — there is no Submagic parameter that
+// keeps a persistent background/presenter-window while a supporting visual
+// plays in a smaller region. That is spatial compositing, a different
+// capability than anything Submagic's documented API exposes. Per the CEO's
+// own instruction ("if Submagic cannot provide the required composition
+// control, do not force it"), composition moves to a small, deterministic
+// ffmpeg layer — reusing the EXACT proven techniques from the retired
+// Phase 5.3 renderer (safe-framed text fitting, Ideogram corner-color
+// keying, segment+concat assembly) applied to completely different content:
+// a real HeyGen presenter video positioned/scaled within a defined window,
+// not static illustrated poses. Submagic's role shrinks to captions only —
+// magicBrolls/magicZooms both off, no items — exactly the parts the CEO
+// confirmed passed (captions, emphasis, transcript timing).
+//
+// Persistent canvas: 1080x1920, deep navy background + a thin gold top/
+// bottom brand bar that never changes for the whole video — the "one
+// designed video" identity the CEO asked for. Two layout states (not the
+// full 6 described in the order — an honest, smaller scope for this pass,
+// documented in the checkpoint):
+//   - "host" beats: presenter window LARGE and centered (contain-fit, the
+//     full HeyGen frame visible, never cropped).
+//   - "targeted_broll"/"exact_evidence" beats: presenter window shrinks to
+//     a bordered panel (bottom-left, ~40% width — a real window, not a tiny
+//     corner icon) and a large evidence zone (top-right, most of the frame)
+//     shows either a contain-fit Ideogram illustration (targeted_broll) or
+//     a big fitted evidence-number treatment (exact_evidence), reusing the
+//     same nextwaveV2FitLabel/nextwaveV2WrapLines text-fitting already
+//     proven in Phase 5.
+const NEXTWAVE_V2_CANVAS_BG = '0x12141c';
+const NEXTWAVE_V2_CANVAS_ACCENT = '0xc99e4c';
+const NEXTWAVE_V2_CANVAS_W = 1080;
+const NEXTWAVE_V2_CANVAS_H = 1920;
+// Presenter window geometry (large/host vs small/evidence-sharing).
+const NEXTWAVE_V2_PRESENTER_LARGE = { x: 90, y: 300, w: 900, h: 1200 };
+const NEXTWAVE_V2_PRESENTER_SMALL = { x: 50, y: 1280, w: 460, h: 580 };
+// Evidence zone geometry (only used on non-host beats).
+const NEXTWAVE_V2_EVIDENCE_ZONE = { x: 40, y: 300, w: 1000, h: 940 };
+
+async function nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, beatStart, beatEnd, renderId, beatIdx, ideogramBudget) {
+  const dur = Math.max(0.3, beatEnd - beatStart);
+  const outPath = join(tmpdir(), `nwv2canvas-seg-${renderId}-${beatIdx}.mp4`);
+  const treatment = (beat.visual && beat.visual.visual_treatment) || 'host';
+  const isLarge = treatment === 'host';
+  const pWin = isLarge ? NEXTWAVE_V2_PRESENTER_LARGE : NEXTWAVE_V2_PRESENTER_SMALL;
+
+  // Evidence-zone content resolution (only for non-host beats).
+  let evidenceImagePath = null;
+  if (!isLarge && treatment === 'targeted_broll' && beat.visual.broll_prompt) {
+    const concept = beat.visual.broll_prompt.split(/[,.]/)[0].slice(0, 40); // short concept slug source
+    const dyn = await nextwaveV2ResolveOrGenerateIllustratedObject(concept, ideogramBudget);
+    if (dyn && dyn.path) evidenceImagePath = dyn.path;
+  }
+  let evidenceKeyColor = null;
+  if (evidenceImagePath) evidenceKeyColor = await _nextwaveV2SampleCornerColor(evidenceImagePath);
+
+  const inputs = ['-y', '-ss', String(beatStart.toFixed(2)), '-i', heygenLocalPath];
+  let nextIdx = 1;
+  const presenterIdx = 0; // input 0 is the trimmed heygen segment itself (seek applied to input)
+  let evidenceIdx = -1;
+  if (evidenceImagePath) { inputs.push('-i', evidenceImagePath); evidenceIdx = nextIdx; nextIdx++; }
+
+  const filters = [];
+  // Persistent canvas background + brand bars — identical on every beat.
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[bg0]`);
+  let lastBg = 'bg0';
+  filters.push(`[${lastBg}]drawbox=x=0:y=0:w=${NEXTWAVE_V2_CANVAS_W}:h=10:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.9:t=fill[bg1]`);
+  filters.push(`[bg1]drawbox=x=0:y=${NEXTWAVE_V2_CANVAS_H - 10}:w=${NEXTWAVE_V2_CANVAS_W}:h=10:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.9:t=fill[bg2]`);
+  lastBg = 'bg2';
+
+  // Evidence zone (drawn BEFORE the presenter window so the presenter window
+  // always sits visually on top, consistent stacking every beat).
+  if (evidenceIdx !== -1) {
+    const z = NEXTWAVE_V2_EVIDENCE_ZONE;
+    filters.push(`[${lastBg}]drawbox=x=${z.x - 6}:y=${z.y - 6}:w=${z.w + 12}:h=${z.h + 12}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.6:t=4[bg3]`);
+    lastBg = 'bg3';
+    // contain-fit: scale to fit inside the zone without cropping, pad the rest transparent-ish via the zone's own box.
+    const keyOpt = evidenceKeyColor ? `,colorkey=color=${evidenceKeyColor}:similarity=0.18:blend=0.06` : '';
+    filters.push(`[${evidenceIdx}:v]scale=${z.w}:${z.h}:force_original_aspect_ratio=decrease${keyOpt}[evimg]`);
+    filters.push(`[${lastBg}][evimg]overlay=x=${z.x}+(${z.w}-overlay_w)/2:y=${z.y}+(${z.h}-overlay_h)/2:enable='between(t,0,${dur.toFixed(2)})'[bg4]`);
+    lastBg = 'bg4';
+  } else if (!isLarge && treatment === 'exact_evidence') {
+    const z = NEXTWAVE_V2_EVIDENCE_ZONE;
+    filters.push(`[${lastBg}]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=0x1c2030@0.92:t=fill[bgE0]`);
+    filters.push(`[bgE0]drawbox=x=${z.x}:y=${z.y}:w=${z.w}:h=${z.h}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[bgE1]`);
+    lastBg = 'bgE1';
+    // Phase: Visual Composition Correction QA fix (round 6, root cause
+    // confirmed via ffmpeg stderr capture) — rounds 4 and 5 both correctly
+    // identified drawtext's %-expansion as the culprit ("50%"/"6%" missing,
+    // "$60,000"/"$1,800" fine) but both fix attempts (text_expansion=none,
+    // then the standard '%%' escape) failed: a captured real stderr showed
+    // "[Parsed_drawtext_5] Stray % near '%'" for BOTH the bare '%' and the
+    // '%%'-escaped version — this ~2018 static ffmpeg build's drawtext
+    // %-parser doesn't honor the documented escape at all, on any '%'
+    // count. The only build-proof fix is to never hand it a literal '%'.
+    // Font glyph check (fonttools) confirmed smm-font.ttf has no fullwidth/
+    // lookalike percent glyph (only 103 basic-Latin glyphs), ruling out a
+    // Unicode-substitute trick, so '%' is spelled out as ' PCT' instead —
+    // ASCII-only, every needed glyph confirmed present in the font.
+    const values = (beat.visual.emphasis_values || []).slice(0, 4);
+    if (values.length) {
+      const safeValues = values.map((v) => String(v).replace(/['":\\\[\]]/g, '').slice(0, 24).replace(/%/g, ' PCT'));
+      const lineH = 90;
+      const blockH = safeValues.length * lineH;
+      const startY = Math.round(z.y + (z.h - blockH) / 2);
+      const textOv = safeValues.map((val, vi) => {
+        const y = startY + vi * lineH;
+        return `drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=white:fontsize=68:box=0:x=(${z.w}-text_w)/2+${z.x}:y=${y}`;
+      });
+      filters.push(`[${lastBg}]${textOv.join(',')}[bgVals]`);
+      lastBg = 'bgVals';
+    }
+  }
+
+  // Presenter window: bordered frame + the trimmed HeyGen segment, contain-fit
+  // (scaled to fit the WHOLE frame inside the window, never cropped).
+  filters.push(`[${lastBg}]drawbox=x=${pWin.x - 5}:y=${pWin.y - 5}:w=${pWin.w + 10}:h=${pWin.h + 10}:color=${NEXTWAVE_V2_CANVAS_ACCENT}:t=5[bgP0]`);
+  filters.push(`[${presenterIdx}:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS,scale=${pWin.w}:${pWin.h}:force_original_aspect_ratio=decrease[pvid]`);
+  filters.push(`[bgP0][pvid]overlay=x=${pWin.x}+(${pWin.w}-overlay_w)/2:y=${pWin.y}+(${pWin.h}-overlay_h)/2:shortest=1[outv]`);
+
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    ...inputs,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]',
+    '-map', `${presenterIdx}:a?`,
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, `canvas segment ${beatIdx}`);
+  return outPath;
+}
+
+// Concats beat segments preserving BOTH video and audio this time — unlike
+// nextwaveV2ConcatVideoOnly (which deliberately dropped audio because Phase
+// 5.3 muxed one separate master track at the very end), each canvas segment
+// already carries its own correct trimmed slice of the ONE continuous HeyGen
+// narration track, so concatenating both streams together reproduces the
+// original continuous voice with no separate mux step needed.
+async function nextwaveV2ConcatCanvasSegments({ paths, id }) {
+  for (let i = 0; i < paths.length; i++) {
+    await smAssertValidMediaFile(paths[i], `canvas segment ${i + 1}/${paths.length} before concat`);
+  }
+  const outPath = join(tmpdir(), `nwv2canvas-concat-${id}.mp4`);
+  const inputArgs = [];
+  paths.forEach((p) => { inputArgs.push('-i', p); });
+  const streamRefs = paths.map((_, i) => `[${i}:v:0][${i}:a:0]`).join('');
+  const filter = `${streamRefs}concat=n=${paths.length}:v=1:a=1[outv][outa]`;
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filter,
+    '-map', '[outv]', '-map', '[outa]',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 90000, maxBuffer: 1024 * 1024 * 60 });
+  await smAssertValidMediaFile(outPath, 'concatenated canvas master');
+  return outPath;
+}
+
+// Live Validation Defect #11 — nextwaveV2ConcatCanvasSegments (above) re-encodes
+// the ENTIRE output via filter_complex + libx264, which is correct for its other
+// three callers (Phase 5.3's deprecated illustrated renderer, the Proof builder,
+// and the FullFrame builder) because those mix genuinely heterogeneous segment
+// sources. But confirmed live on the real Finance/Long task: a real 27-segment
+// concat (~389s combined) hit execFileAsync's 90s timeout partway through the
+// re-encode (frame progress still climbing, no ffmpeg error, killed by Node's
+// child_process timeout) — the encode simply needs more wall-clock than a single
+// serverless call can spend. The 27 segments here are NOT heterogeneous uploads;
+// every one was produced by this SAME session's own per-beat composers with
+// identical encode settings, confirmed empirically via ffprobe on all 27 real
+// inputs (h264 High, yuv420p, 1920x1080, 25fps/25tbr/12800tbn/50tbc, aac 44100Hz
+// mono — byte-identical across every segment). A re-encode is not technically
+// required for compatible inputs like these, so this Long-only path tries a
+// stream-copy concat (ffmpeg's concat DEMUXER, `-c copy`) first — a few seconds
+// of I/O instead of ~3 minutes of encoding, comfortably inside any serverless
+// ceiling — and only falls back to the existing re-encode function, completely
+// unchanged, if the fast copy path fails validation. `-loglevel error -nostats`
+// suppresses ffmpeg's default per-frame progress spam (the cause of the
+// multi-hundred-KB unreadable renderError persisted by the timeout above) so a
+// real failure here stays diagnosable in a single production run.
+async function nextwaveV2ConcatLongSegmentsFast({ paths, id }) {
+  for (let i = 0; i < paths.length; i++) {
+    await smAssertValidMediaFile(paths[i], `long segment ${i + 1}/${paths.length} before fast concat`);
+  }
+  const listPath = join(tmpdir(), `nwv2longconcat-list-${id}.txt`);
+  const listContents = paths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+  await writeFile(listPath, listContents, 'utf8');
+  const outPath = join(tmpdir(), `nwv2longconcat-fast-${id}.mp4`);
+  try {
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-loglevel', 'error', '-nostats',
+      '-f', 'concat', '-safe', '0', '-i', listPath,
+      '-c', 'copy', '-movflags', '+faststart',
+      outPath,
+    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 5 });
+    await smAssertValidMediaFile(outPath, 'fast-concatenated long master');
+    return outPath;
+  } finally {
+    await unlink(listPath).catch(() => {});
+  }
+}
+
+// BUILD step — composites the persistent-canvas video from the already-
+// completed HeyGen render + the reviewed visual plan, uploads it, and
+// returns its URL for the caller (the frontend) to hand to Submagic in
+// captions-only mode. CEO-gated (real ffmpeg + Ideogram spend possible).
+async function nextwaveV2CompositeCanvasRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, visual_plan_package, real_duration_sec } = body;
+  if (!heygen_video_url || !visual_plan_package || !real_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_visual_plan_package_or_real_duration_sec' });
+  }
+  const vp = visual_plan_package;
+  if (!Array.isArray(vp.beats) || !vp.beats.length || !Array.isArray(vp.units) || !vp.units.length) {
+    return res.status(400).json({ ok: false, error: 'invalid_visual_plan_package' });
+  }
+  const renderId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2canvas-src-${renderId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const totalChars = Math.max(1, vp.units.reduce((sum, u) => sum + String(u.text || '').length, 0));
+    let cursor = 0;
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const beatReports = [];
+    for (let i = 0; i < vp.beats.length; i++) {
+      const beat = vp.beats[i];
+      const beatChars = (beat.unit_texts || []).reduce((sum, t) => sum + String(t || '').length, 0);
+      const beatDur = real_duration_sec * (beatChars / totalChars);
+      const start = cursor;
+      const end = Math.min(real_duration_sec, cursor + beatDur);
+      cursor = end;
+      const segPath = await nextwaveV2CompositeBeatSegment(heygenLocalPath, beat, start, end, renderId, i, ideogramBudget);
+      segPaths.push(segPath);
+      beatReports.push({ beatIndex: i, treatment: beat.visual && beat.visual.visual_treatment, start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+    }
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/canvas-${renderId}.mp4`, finalBuf, 'video/mp4');
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      beat_count: vp.beats.length,
+      beats: beatReports,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      render_id: renderId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// ============================================================================
+// CEO Creative Rejection / Visual Architecture Correction phase — the
+// split-screen/evidence-zone design above (nextwaveV2CompositeCanvasRender)
+// was rejected for still reading as a presenter+evidence split rather than
+// one true full-frame 9:16 composition. This is a CHEAP, STANDALONE proof
+// of a different mechanism: one continuous full-frame canvas where the
+// avatar, a card, and an illustration each take the WHOLE frame in turn,
+// entering/holding/exiting via a fade-to-the-canvas's-own-navy-color trick
+// (confirmed via a live `ffmpeg -h filter=fade` probe that the bundled
+// ~2018 static build supports fade's `color` option) rather than any real
+// alpha-channel compositing — sidesteps every unverified-option risk that
+// burned three separate deploy cycles in the prior phase (text_align,
+// text_expansion, drawtext's %/%% escape all turned out unsupported on
+// this exact build). Deliberately NOT wired into the package/task/
+// lifecycle system — this is an internal PM/Creative gate, not a candidate.
+const NWV2_PROOF_HOOK_DUR = 2.2;
+const NWV2_PROOF_CARD_DUR = 4.4;
+const NWV2_PROOF_ILLU_DUR = 4.0;
+const NWV2_PROOF_CLOSE_DUR = 2.4;
+
+function nwv2ProofBrandMarkFilter(input, output) {
+  return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NEXTWAVE_V2_CANVAS_ACCENT}@0.55:fontsize=30:x=${NEXTWAVE_V2_CANVAS_W}-tw-30:y=${NEXTWAVE_V2_CANVAS_H}-th-30[${output}]`;
+}
+
+// Avatar segment: the HeyGen source already renders at exactly 1080x1920
+// (confirmed via ffprobe on the same cached source used throughout this
+// project), so the avatar fills the true full 9:16 frame with no crop —
+// intentional full-canvas presenter time, not the "no permanent split"
+// evidence zone the CEO rejected. Fades to the canvas's own navy at
+// whichever end borders a non-avatar segment, so the concat cut reads as
+// a dissolve into the persistent background rather than a hard swap.
+async function nwv2ProofBuildAvatarSegment({ heygenLocalPath, seekSec, dur, fadeEdge, outPath }) {
+  const filters = [];
+  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[av0]`);
+  filters.push(nwv2ProofBrandMarkFilter('av0', 'av1'));
+  const fadeArg = fadeEdge === 'in'
+    ? `fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+    : fadeEdge === 'out'
+      ? `fade=t=out:st=${(dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+      : null;
+  if (fadeArg) filters.push(`[av1]${fadeArg}[outv]`);
+  const lastLabel = fadeArg ? 'outv' : 'av1';
+  const filterComplex = filters.join(';') + (fadeArg ? '' : `;[${lastLabel}]null[outv]`);
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'proof avatar segment');
+  return outPath;
+}
+
+// Card segment: sandwiched fade in/out to navy on both ends (no avatar, no
+// separate overlay compositing needed). Evidence values reveal one at a
+// time (progressive development, not a static slide) via staggered
+// drawtext `enable` timeline windows on the same persistent canvas.
+async function nwv2ProofBuildCardSegment({ title, values, dur, outPath }) {
+  const boxW = 820, boxH = 900;
+  const boxX = Math.round((NEXTWAVE_V2_CANVAS_W - boxW) / 2);
+  const boxY = Math.round((NEXTWAVE_V2_CANVAS_H - boxH) / 2);
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[c0]`);
+  filters.push(`[c0]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=0x1c2030@0.95:t=fill[c1]`);
+  filters.push(`[c1]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[c2]`);
+  let last = 'c2', idx = 3;
+  const safeTitle = String(title || '').replace(/['":\\\[\],;%]/g, '').slice(0, 40);
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NEXTWAVE_V2_CANVAS_ACCENT}:fontsize=44:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 70}:enable='gte(t,0.5)'[c${idx}]`);
+  last = `c${idx}`; idx++;
+  const lineH = 130;
+  const startY = boxY + 260;
+  const safeValues = (values || []).slice(0, 3).map((v) => String(v).replace(/['":\\\[\],;%]/g, '').slice(0, 30));
+  safeValues.forEach((val, vi) => {
+    const y = startY + vi * lineH;
+    const revealAt = (1.0 + vi * 0.8).toFixed(2);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=white:fontsize=58:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${y}:enable='gte(t,${revealAt})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  });
+  filters.push(nwv2ProofBrandMarkFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG},fade=t=out:st=${(dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y',
+    '-f', 'lavfi', '-i', `anullsrc=r=48000:cl=stereo`,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'proof card segment');
+  return outPath;
+}
+
+// Illustration segment: same sandwiched fade, a different visual element
+// (Ideogram illustration) taking over the SAME canvas the card just
+// vacated — contain-fit, colorkeyed against its own sampled corner color
+// (same proven technique as the persistent-canvas compositor), never
+// cropped.
+async function nwv2ProofBuildIllustrationSegment({ illustrationPath, keyColor, dur, outPath }) {
+  const zoneW = 900, zoneH = 1100;
+  const zoneX = Math.round((NEXTWAVE_V2_CANVAS_W - zoneW) / 2);
+  const zoneY = Math.round((NEXTWAVE_V2_CANVAS_H - zoneH) / 2);
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.18:blend=0.06` : '';
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[i0]`);
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[img]`);
+  filters.push(`[i0][img]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[i1]`);
+  filters.push(nwv2ProofBrandMarkFilter('i1', 'i2'));
+  filters.push(`[i2]fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG},fade=t=out:st=${(dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y',
+    '-f', 'lavfi', '-i', `anullsrc=r=48000:cl=stereo`,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'proof illustration segment');
+  return outPath;
+}
+
+// CEO-gated. Self-contained: takes only a HeyGen source URL, reuses the
+// existing illustrated-object cache/generator, never touches
+// D.packages/D.tasks or any lifecycle stage — this is explicitly an
+// internal PM/Creative architecture gate, not a candidate.
+async function nextwaveV2CompositionProofRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, close_seek_sec } = body;
+  if (!heygen_video_url) return res.status(400).json({ ok: false, error: 'missing_heygen_video_url' });
+  const proofId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2proof-src-${proofId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject('a hand placing a coin into a glass jar labeled savings, retirement growth', ideogramBudget);
+    if (!illustration || !illustration.path) return res.status(500).json({ ok: false, error: 'illustration_resolve_failed' });
+    const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+
+    const seg1 = join(tmpdir(), `nwv2proof-seg1-${proofId}.mp4`);
+    const seg2 = join(tmpdir(), `nwv2proof-seg2-${proofId}.mp4`);
+    const seg3 = join(tmpdir(), `nwv2proof-seg3-${proofId}.mp4`);
+    const seg4 = join(tmpdir(), `nwv2proof-seg4-${proofId}.mp4`);
+
+    await nwv2ProofBuildAvatarSegment({ heygenLocalPath, seekSec: 0, dur: NWV2_PROOF_HOOK_DUR, fadeEdge: 'out', outPath: seg1 });
+    segPaths.push(seg1);
+    await nwv2ProofBuildCardSegment({
+      title: 'YOUR 401K MATCH',
+      values: ['50 PCT EMPLOYER MATCH', '$60,000 SALARY', '$1,800 PER YEAR FREE'],
+      dur: NWV2_PROOF_CARD_DUR,
+      outPath: seg2,
+    });
+    segPaths.push(seg2);
+    await nwv2ProofBuildIllustrationSegment({ illustrationPath: illustration.path, keyColor, dur: NWV2_PROOF_ILLU_DUR, outPath: seg3 });
+    segPaths.push(seg3);
+    const closeSeek = Number.isFinite(close_seek_sec) ? close_seek_sec : 30;
+    await nwv2ProofBuildAvatarSegment({ heygenLocalPath, seekSec: closeSeek, dur: NWV2_PROOF_CLOSE_DUR, fadeEdge: 'in', outPath: seg4 });
+    segPaths.push(seg4);
+
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: proofId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/proof-${proofId}.mp4`, finalBuf, 'video/mp4');
+
+    let t = 0;
+    const timeline = [];
+    timeline.push({ segment: 'hook_avatar', start: t, end: t + NWV2_PROOF_HOOK_DUR, detail: 'full-frame avatar, fades to canvas navy over final 0.4s' }); t += NWV2_PROOF_HOOK_DUR;
+    timeline.push({ segment: 'evidence_card', start: t, end: t + NWV2_PROOF_CARD_DUR, detail: 'fades in from navy (0.4s), title at +0.5s, 3 values staggered at +1.0/1.8/2.6s, fades out to navy over final 0.4s' }); t += NWV2_PROOF_CARD_DUR;
+    timeline.push({ segment: 'illustration', start: t, end: t + NWV2_PROOF_ILLU_DUR, detail: 'fades in from navy (0.4s), contain-fit colorkeyed illustration holds, fades out to navy over final 0.4s' }); t += NWV2_PROOF_ILLU_DUR;
+    timeline.push({ segment: 'closing_avatar', start: t, end: t + NWV2_PROOF_CLOSE_DUR, detail: 'full-frame avatar fades in from canvas navy over first 0.4s' }); t += NWV2_PROOF_CLOSE_DUR;
+
+    return res.status(200).json({
+      ok: true,
+      proof_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      timeline,
+      illustration_reused: !!illustration.reused,
+      illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      proof_id: proofId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// ============================================================================
+// FULL-FRAME PRODUCTION CANDIDATE — generalizes the accepted 13s mechanism
+// proof onto real beat data (from nextwaveV2GenerateVisualPlanPackage) with
+// real synchronized narration audio throughout, and applies all 5 defects
+// the CEO ordered fixed before any real candidate:
+//  A. HeyGen scale reverted to 2.0 (the value this exact avatar family was
+//     already proven to need for full-frame — 1.4 was chosen specifically
+//     for the now-rejected small bordered presenter window).
+//  B. wider colorkey tolerance on illustrations (softer edge, less seam).
+//  C. illustration prompt strips label-implying phrasing and repeats the
+//     no-text instruction — see nextwaveV2ResolveOrGenerateIllustratedObject.
+//  D. comma-preserving, percent-safe value sanitizer (matches the fix
+//     already proven correct in the split-screen compositor — the proof's
+//     own sanitizer over-stripped commas, e.g. "$60,000" -> "$60000").
+//  E. caption safe zone re-verified against this full-frame layout
+//     specifically (checked via real frames after Submagic, not assumed).
+//
+// Design note on avatar placement: the real visual-plan classifier groups
+// the hook/closing sentences INTO the neighboring exact_evidence beat
+// (confirmed empirically — asking it to isolate them as separate "host"
+// beats fights its own merge heuristics). Rather than fight the classifier,
+// beat 0 and the LAST beat are each split in two: an avatar segment for the
+// hook/closing portion of that beat's own narration, then the evidence
+// card for the rest of it — same fade-to-navy transition proven in the
+// mechanism proof, just now carrying that beat's REAL audio slice instead
+// of the whole beat's audio going to one visual.
+const NWV2_FULLFRAME_HOOK_DUR = 2.0;
+const NWV2_FULLFRAME_CLOSE_DUR = 2.0;
+const NWV2_FULLFRAME_HEYGEN_SCALE = 2.0;
+
+function nwv2FullFrameSanitizeValue(v) {
+  return String(v).replace(/['":\\\[\]]/g, '').slice(0, 30).replace(/%/g, ' PCT');
+}
+
+// Full-frame avatar segment — identical mechanism to the accepted proof
+// (nwv2ProofBuildAvatarSegment), duplicated rather than shared so the proof
+// path stays untouched/reproducible while this one evolves independently.
+async function nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec, dur, fadeEdge, outPath }) {
+  const filters = [];
+  filters.push(`[0:v]trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[av0]`);
+  filters.push(nwv2ProofBrandMarkFilter('av0', 'av1'));
+  const fadeArg = fadeEdge === 'in'
+    ? `fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+    : fadeEdge === 'out'
+      ? `fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`
+      : null;
+  if (fadeArg) filters.push(`[av1]${fadeArg}[outv]`);
+  const filterComplex = filters.join(';') + (fadeArg ? '' : `;[av1]null[outv]`);
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'full-frame avatar segment');
+  return outPath;
+}
+
+// Full-frame evidence card — carries REAL narration audio (trimmed from the
+// same continuous HeyGen source at this beat's own offset), unlike the
+// proof's silent anullsrc card. Final value is visually emphasized (larger,
+// gold) — the "important result emphasized" step the CEO's calculation
+// example calls for.
+async function nwv2FullFrameCardSegment({ heygenLocalPath, seekSec, title, values, dur, fadeIn, fadeOut, outPath }) {
+  // Fix E (caption safe zone), round 2 — a real render showed Submagic's
+  // Hormozi 2 captions landing right on the card's own visible border
+  // (~y=1130-1420 observed on real frames), unlike the illustration
+  // segment which never collided because contain-fit content sits well
+  // inside its zone with natural clear space below. The card's drawn
+  // border is what's visually present at its full boxH, so it needs to
+  // stay clear of that band explicitly rather than just be numerically
+  // centered on the canvas — boxH shrunk and boxY biased upward so the
+  // bottom edge lands at 920, comfortably above the observed caption band.
+  const boxW = 860, boxH = 680;
+  const boxX = Math.round((NEXTWAVE_V2_CANVAS_W - boxW) / 2);
+  const boxY = 240;
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[c0]`);
+  filters.push(`[c0]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=0x1c2030@0.95:t=fill[c1]`);
+  filters.push(`[c1]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NEXTWAVE_V2_CANVAS_ACCENT}@0.7:t=4[c2]`);
+  let last = 'c2', idx = 3;
+  const safeTitle = String(title || '').replace(/['":\\\[\],;%]/g, '').slice(0, 40);
+  if (safeTitle) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NEXTWAVE_V2_CANVAS_ACCENT}:fontsize=42:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 66}:enable='gte(t,0.4)'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
+  const safeValues = (values || []).slice(0, 4).map(nwv2FullFrameSanitizeValue);
+  const lineH = 128;
+  const blockH = safeValues.length * lineH;
+  const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 60 : 0);
+  const revealSpan = Math.max(0.6, (dur - 1.6) / Math.max(1, safeValues.length));
+  safeValues.forEach((val, vi) => {
+    const y = startY + vi * lineH;
+    const revealAt = (0.6 + vi * revealSpan).toFixed(2);
+    const isLast = vi === safeValues.length - 1;
+    const fontsize = isLast ? 66 : 54;
+    const color = isLast ? NEXTWAVE_V2_CANVAS_ACCENT : 'white';
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${color}:fontsize=${fontsize}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${y}:enable='gte(t,${revealAt})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  });
+  filters.push(nwv2ProofBrandMarkFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeParts.length) {
+    filters.push(`[${last}]${fadeParts.join(',')}[outv]`);
+  } else {
+    filters.push(`[${last}]null[outv]`);
+  }
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'full-frame card segment');
+  return outPath;
+}
+
+// Full-frame illustration — same real-audio pattern as the card. Wider
+// colorkey tolerance (fix B) than the split-screen compositor's original
+// 0.18/0.06 to reduce the visible background seam observed on the proof.
+async function nwv2FullFrameIllustrationSegment({ heygenLocalPath, seekSec, illustrationPath, keyColor, dur, fadeIn, fadeOut, outPath }) {
+  const zoneW = 880, zoneH = 1080;
+  const zoneX = Math.round((NEXTWAVE_V2_CANVAS_W - zoneW) / 2);
+  const zoneY = Math.round((NEXTWAVE_V2_CANVAS_H - zoneH) / 2);
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.26:blend=0.12` : '';
+  const filters = [];
+  filters.push(`color=c=${NEXTWAVE_V2_CANVAS_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[i0]`);
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[img]`);
+  filters.push(`[i0][img]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[i1]`);
+  filters.push(nwv2ProofBrandMarkFilter('i1', 'i2'));
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NEXTWAVE_V2_CANVAS_BG}`);
+  if (fadeParts.length) {
+    filters.push(`[i2]${fadeParts.join(',')}[outv]`);
+  } else {
+    filters.push(`[i2]null[outv]`);
+  }
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'full-frame illustration segment');
+  return outPath;
+}
+
+// CEO-gated. Mirrors nextwaveV2CompositeCanvasRender's interface
+// (heygen_video_url, visual_plan_package, real_duration_sec) so the
+// existing frontend BUILD-stage wiring pattern carries over unchanged.
+async function nextwaveV2CompositeFullFrameRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { heygen_video_url, visual_plan_package, real_duration_sec } = body;
+  if (!heygen_video_url || !visual_plan_package || !real_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_heygen_video_url_or_visual_plan_package_or_real_duration_sec' });
+  }
+  const vp = visual_plan_package;
+  if (!Array.isArray(vp.beats) || !vp.beats.length || !Array.isArray(vp.units) || !vp.units.length) {
+    return res.status(400).json({ ok: false, error: 'invalid_visual_plan_package' });
+  }
+  const renderId = randomBytes(6).toString('hex');
+  const heygenLocalPath = join(tmpdir(), `nwv2ff-src-${renderId}.mp4`);
+  const segPaths = [];
+  try {
+    await smDownloadToFile(heygen_video_url, heygenLocalPath);
+    await smAssertValidMediaFile(heygenLocalPath, 'downloaded HeyGen source video');
+
+    const totalChars = Math.max(1, vp.units.reduce((sum, u) => sum + String(u.text || '').length, 0));
+    let cursor = 0;
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const timeline = [];
+
+    for (let i = 0; i < vp.beats.length; i++) {
+      const beat = vp.beats[i];
+      const beatChars = (beat.unit_texts || []).reduce((sum, t) => sum + String(t || '').length, 0);
+      const beatDur = real_duration_sec * (beatChars / totalChars);
+      const start = cursor;
+      const end = Math.min(real_duration_sec, cursor + beatDur);
+      cursor = end;
+      const dur = end - start;
+      const treatment = (beat.visual && beat.visual.visual_treatment) || 'exact_evidence';
+      const isFirst = i === 0;
+      const isLast = i === vp.beats.length - 1;
+
+      if (treatment === 'host') {
+        const segPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}.mp4`);
+        await nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec: start, dur, fadeEdge: isFirst ? null : (isLast ? null : null), outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'host_avatar', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+        continue;
+      }
+
+      if (treatment === 'targeted_broll' && beat.visual && beat.visual.broll_prompt) {
+        const concept = beat.visual.broll_prompt.split(/[,.]/)[0].slice(0, 60);
+        const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(concept, ideogramBudget);
+        if (illustration && illustration.path) {
+          const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+          const segPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}.mp4`);
+          await nwv2FullFrameIllustrationSegment({
+            heygenLocalPath, seekSec: start, illustrationPath: illustration.path, keyColor,
+            dur, fadeIn: true, fadeOut: true, outPath: segPath,
+          });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'illustration', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), concept });
+          continue;
+        }
+        // falls through to card treatment if illustration resolve failed — never blocks the render
+      }
+
+      // exact_evidence (default) — split beat 0 / last beat so the avatar
+      // gets its hook/closing moment from that beat's own real narration
+      // before/after the evidence card, rather than inventing a separate
+      // beat the classifier didn't produce (see file-header note above).
+      const values = (beat.visual && beat.visual.emphasis_values) || [];
+      const title = (beat.unit_texts && beat.unit_texts[0]) ? beat.unit_texts[0].replace(/[^A-Za-z0-9 ]/g, '').slice(0, 30).toUpperCase() : '';
+      if (isFirst && dur > NWV2_FULLFRAME_HOOK_DUR + 1.5) {
+        const hookDur = NWV2_FULLFRAME_HOOK_DUR;
+        const cardDur = dur - hookDur;
+        const hookPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}a.mp4`);
+        const cardPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}b.mp4`);
+        await nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec: start, dur: hookDur, fadeEdge: 'out', outPath: hookPath });
+        segPaths.push(hookPath);
+        timeline.push({ beatIndex: i, segment: 'hook_avatar', start: Number(start.toFixed(2)), end: Number((start + hookDur).toFixed(2)) });
+        await nwv2FullFrameCardSegment({
+          heygenLocalPath, seekSec: start + hookDur, title, values, dur: cardDur,
+          fadeIn: true, fadeOut: !isLast, outPath: cardPath,
+        });
+        segPaths.push(cardPath);
+        timeline.push({ beatIndex: i, segment: 'evidence_card', start: Number((start + hookDur).toFixed(2)), end: Number(end.toFixed(2)), values });
+      } else if (isLast && dur > NWV2_FULLFRAME_CLOSE_DUR + 1.5) {
+        const closeDur = NWV2_FULLFRAME_CLOSE_DUR;
+        const cardDur = dur - closeDur;
+        const cardPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}a.mp4`);
+        const closePath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}b.mp4`);
+        await nwv2FullFrameCardSegment({
+          heygenLocalPath, seekSec: start, title, values, dur: cardDur,
+          fadeIn: !isFirst, fadeOut: true, outPath: cardPath,
+        });
+        segPaths.push(cardPath);
+        timeline.push({ beatIndex: i, segment: 'evidence_card', start: Number(start.toFixed(2)), end: Number((start + cardDur).toFixed(2)), values });
+        await nwv2FullFrameAvatarSegment({ heygenLocalPath, seekSec: start + cardDur, dur: closeDur, fadeEdge: 'in', outPath: closePath });
+        segPaths.push(closePath);
+        timeline.push({ beatIndex: i, segment: 'closing_avatar', start: Number((start + cardDur).toFixed(2)), end: Number(end.toFixed(2)) });
+      } else {
+        const segPath = join(tmpdir(), `nwv2ff-seg-${renderId}-${i}.mp4`);
+        await nwv2FullFrameCardSegment({
+          heygenLocalPath, seekSec: start, title, values, dur,
+          fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
+        });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'evidence_card', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), values });
+      }
+    }
+
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/fullframe-${renderId}.mp4`, finalBuf, 'video/mp4');
+
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      timeline,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      render_id: renderId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(heygenLocalPath).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// ============================================================================
+// WHITE-CANVAS MOTION STRUCTURE — CEO-approved Short visual structure V1.
+// Replaces the dark navy full-frame canvas with a persistent white/light
+// canvas, moves the avatar from hook+close to CLOSE ONLY, and adds real
+// motion (zoompan Ken-Burns on illustrations, slide+settle entrances and a
+// discrete size-pop emphasis on card values) instead of hard appear/
+// disappear cuts. zoompan and boxblur confirmed supported on the bundled
+// ~2018 static ffmpeg build via a live `ffmpeg -h filter=X` probe before
+// this was written (see the removed debug action in the dispatch table's
+// history) — the same discipline that avoided a repeat of the text_align/
+// text_expansion/drawtext-%-escape surprises from earlier phases.
+const NWV2_WHITE_BG = '0xf7f4ee';
+const NWV2_WHITE_CARD = '0xffffff';
+const NWV2_NAVY = '0x1a2744';
+const NWV2_GOLD = '0xc99e4c';
+const NWV2_GOLD_DARK = '0xa67c2e';
+const NWV2_SHADOW = '0x1a2744@0.16';
+// Production Lifecycle Release — avatar-duration correction. Caps how long
+// the avatar itself stays visible within its own beat (narration/beat
+// timing untouched) — see the correction note on nwv2WhiteBuildCloseSegment
+// / nwv2LongAvatarPanelSegment for the mechanism.
+const NWV2_AVATAR_CAP_SEC_SHORT = 3.0;
+const NWV2_AVATAR_CAP_SEC_LONG = 4.0;
+
+function nwv2WhiteBrandMarkFilter(input, output) {
+  return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NWV2_NAVY}@0.45:fontsize=28:x=${NEXTWAVE_V2_CANVAS_W}-tw-30:y=${NEXTWAVE_V2_CANVAS_H}-th-30[${output}]`;
+}
+
+// Proof A v6.1 — PM flagged visible punctuation damage ("That's" rendering
+// as "Thats", em dashes vanishing entirely). Apostrophes were being
+// stripped outright because the ASCII apostrophe is ffmpeg drawtext's own
+// text='...' delimiter — a raw one breaks the filter string. Tested
+// ffmpeg's documented close-quote/escaped-quote/reopen-quote idiom
+// ('\'') against this production ffmpeg build directly: it does not
+// behave as documented here and corrupts the filter chain. Fix instead
+// with a typographic curly apostrophe (U+2019) — a normal glyph, not a
+// delimiter, confirmed present in this font and confirmed rendering
+// correctly, and the more correct character for contractions in
+// commercial text anyway. Em/en dashes normalize to a plain hyphen
+// (proven to render — "2-3 DAYS", "-3 SHARES" already do).
+function nwv2WhiteSanitize(v, maxLen) {
+  let s = String(v).replace(/[":\\\[\]]/g, '');
+  s = s.replace(/[—–]/g, ' - ');
+  s = s.replace(/'/g, '’');
+  s = s.slice(0, maxLen || 40);
+  s = s.replace(/%/g, ' PCT');
+  return s;
+}
+
+// HOOK segment — headline directly on the white canvas (no card/box), a
+// gold highlight rect behind the emphasized phrase, thin gold underline.
+// Slide+settle entrance. No avatar. This replaces the old design's avatar
+// hook entirely, per the CEO's locked avatar rule (close only).
+async function nwv2WhiteBuildHookSegment({ heygenLocalPath, seekSec, headline, emphasisWord, dur, outPath }) {
+  const lines = nwv2ProofWrapText(headline, 22);
+  const lineH = 92;
+  const blockH = lines.length * lineH;
+  const startY = Math.round((NEXTWAVE_V2_CANVAS_H - blockH) / 2) - 80;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[h0]`);
+  let last = 'h0', idx = 1;
+  // Gold highlight box behind the emphasis word — placed under the LAST
+  // line (matches the reference design's "COSTING YOU" highlight), sized
+  // generously since exact text_w isn't known at filter-build time.
+  const lastLine = lines[lines.length - 1] || '';
+  const hlW = Math.min(1000, lastLine.length * 44 + 40);
+  const hlX = Math.round((NEXTWAVE_V2_CANVAS_W - hlW) / 2);
+  const hlY = startY + (lines.length - 1) * lineH - 14;
+  filters.push(`[${last}]drawbox=x=${hlX}:y=${hlY}:w=${hlW}:h=96:color=${NWV2_GOLD}@0.9:t=fill:enable='gte(t,0.15)'[h${idx}]`);
+  last = `h${idx}`; idx++;
+  lines.forEach((line, li) => {
+    const safe = line.replace(/['":\\\[\],;%]/g, '');
+    const y0 = startY + li * lineH;
+    const yExpr = `if(lt(t,0.5),${y0}+24*(1-t/0.5),${y0})`;
+    const color = li === lines.length - 1 ? NWV2_NAVY : NWV2_NAVY;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${color}:fontsize=68:box=0:x=(${NEXTWAVE_V2_CANVAS_W}-text_w)/2:y='${yExpr}'[h${idx}]`);
+    last = `h${idx}`; idx++;
+  });
+  // Thin gold underline beneath the whole headline block.
+  const ulY = startY + blockH + 30;
+  filters.push(`[${last}]drawbox=x=${Math.round(NEXTWAVE_V2_CANVAS_W / 2 - 90)}:y=${ulY}:w=180:h=6:color=${NWV2_GOLD}:t=fill:enable='gte(t,0.6)'[h${idx}]`);
+  last = `h${idx}`; idx++;
+  filters.push(nwv2WhiteBrandMarkFilter(last, `h${idx}`));
+  last = `h${idx}`; idx++;
+  filters.push(`[${last}]fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white hook segment');
+  return outPath;
+}
+
+// Simple greedy word-wrap for headline text — SMM_FONT_PATH has no metrics
+// API exposed here, so this wraps by character-count heuristic (matches
+// the font's roughly-monospace-at-this-size behavior closely enough for a
+// 2-3 line headline; safe-margined by the generous highlight-box sizing).
+function nwv2ProofWrapText(text, maxCharsPerLine) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const next = cur ? cur + ' ' + w : w;
+    if (next.length > maxCharsPerLine && cur) { lines.push(cur); cur = w; }
+    else cur = next;
+  }
+  if (cur) lines.push(cur);
+  return lines.slice(0, 3);
+}
+
+// Calculation card — white card, soft blurred shadow, navy title, values
+// slide+settle into place one at a time, final value gets a discrete
+// size-pop (two drawtext instances swapping at reveal+0.15s) as the
+// "development: subtle push, number emphasis" motion the CEO ordered.
+async function nwv2WhiteBuildCalcCardSegment({ heygenLocalPath, seekSec, title, values, dur, fadeIn, fadeOut, outPath }) {
+  const boxW = 860, boxH = 620;
+  const boxX = Math.round((NEXTWAVE_V2_CANVAS_W - boxW) / 2);
+  const boxY = 500;
+  const shadowOff = 10;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[k0]`);
+  // Soft shadow: draw offset dark box, blur JUST this layer, THEN draw the
+  // crisp white card on top unblurred — boxblur applies to the whole
+  // stream at the point it's inserted, so ordering here is what keeps the
+  // card itself sharp while the shadow beneath it reads as soft.
+  filters.push(`[k0]drawbox=x=${boxX + shadowOff}:y=${boxY + shadowOff}:w=${boxW}:h=${boxH}:color=${NWV2_SHADOW}:t=fill[k1]`);
+  filters.push(`[k1]boxblur=10:2[k2]`);
+  filters.push(`[k2]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[k3]`);
+  filters.push(`[k3]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.6:t=3[k4]`);
+  let last = 'k4', idx = 5;
+  // Dynamic fontsize by text length — a real render showed a 27-char value
+  // ("8 PCT AVG RETURN (ASSUMED)") overflowing the card's right edge at a
+  // fixed 50px fontsize (~780px usable width only fits ~18-20 chars at that
+  // size). A second real render then showed the SAME class of overflow on
+  // the title text (moving "(ASSUMED)" there made it 40 chars at a fixed
+  // 40px fontsize) — so this scaling applies to title AND values, not just
+  // the one value string that failed first. Scales down proportionally
+  // past the given char threshold, floored so text never becomes
+  // illegibly small.
+  const nwv2FitFontsize = (text, base, threshold) => {
+    const len = text.length;
+    const t = threshold || 18;
+    if (len <= t) return base;
+    return Math.max(Math.round(base * (t / len)), Math.round(base * 0.62));
+  };
+  const safeTitle = nwv2WhiteSanitize(title, 46).replace(/[,;]/g, '');
+  if (safeTitle) {
+    const titleFs = nwv2FitFontsize(safeTitle, 40, 26);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=${titleFs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 56}:enable='gte(t,0.35)'[k${idx}]`);
+    last = `k${idx}`; idx++;
+  }
+  const safeValues = (values || []).slice(0, 4).map((v) => nwv2WhiteSanitize(v, 28));
+  const lineH = 118;
+  const blockH = safeValues.length * lineH;
+  const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 40 : 0);
+  const revealSpan = Math.max(0.55, (dur - 1.4) / Math.max(1, safeValues.length));
+  safeValues.forEach((val, vi) => {
+    const targetY = startY + vi * lineH;
+    const revealAt = 0.5 + vi * revealSpan;
+    const isLast = vi === safeValues.length - 1;
+    const yExpr = `if(lt(t,${revealAt.toFixed(2)}+0.22),${targetY}+16*(1-(t-${revealAt.toFixed(2)})/0.22),${targetY})`;
+    if (!isLast) {
+      const fs = nwv2FitFontsize(val, 50);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=${fs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+    } else {
+      // Size-pop emphasis: smaller instance shows briefly, then a larger
+      // gold instance takes over at the same target position — a discrete
+      // 100% -> ~112% scale step standing in for a smooth zoom on text
+      // (drawtext has no continuous scale parameter on this ffmpeg build).
+      const fs1 = nwv2FitFontsize(val, 52);
+      const fs2 = nwv2FitFontsize(val, 60);
+      const popAt = (revealAt + 0.15).toFixed(2);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs1}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fs2}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
+      last = `k${idx + 1}`; idx += 2;
+    }
+  });
+  filters.push(nwv2WhiteBrandMarkFilter(last, `k${idx}`));
+  last = `k${idx}`; idx++;
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`);
+  filters.push(fadeParts.length ? `[${last}]${fadeParts.join(',')}[outv]` : `[${last}]null[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white calc card segment');
+  return outPath;
+}
+
+// Illustration segment — real Ken-Burns zoompan motion (1.0 -> ~1.06 zoom
+// across the full segment), white-background illustration (matching the
+// white canvas, requested via bgStyle:'white' at resolve time) so no
+// colorkey seam is visible even where sampling isn't pixel-perfect.
+async function nwv2WhiteBuildIllustrationSegment({ heygenLocalPath, seekSec, illustrationPath, keyColor, dur, fadeIn, fadeOut, outPath }) {
+  const zoneW = 860, zoneH = 1000;
+  const zoneX = Math.round((NEXTWAVE_V2_CANVAS_W - zoneW) / 2);
+  const zoneY = 480;
+  const fps = 25;
+  const totalFrames = Math.max(1, Math.round(dur * fps));
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.26:blend=0.12` : '';
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=${dur.toFixed(2)}[l0]`);
+  // zoompan on the static illustration image: continuous slow zoom across
+  // this whole clip's own frame count (the standard documented pattern for
+  // applying zoompan to one looped image rather than a multi-shot video).
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[limg0]`);
+  filters.push(`[limg0]zoompan=z='min(zoom+0.0009,1.06)':d=${totalFrames}:s=${zoneW}x${zoneH}:fps=${fps}[limg]`);
+  filters.push(`[l0][limg]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[l1]`);
+  filters.push(nwv2WhiteBrandMarkFilter('l1', 'l2'));
+  const fadeParts = [];
+  if (fadeIn) fadeParts.push(`fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`);
+  if (fadeOut) fadeParts.push(`fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`);
+  filters.push(fadeParts.length ? `[l2]${fadeParts.join(',')}[outv]` : `[l2]null[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white illustration segment');
+  return outPath;
+}
+
+// Close segment — the ONLY beat where the avatar appears, per the CEO's
+// locked avatar rule. Full-frame, fades in from the white canvas.
+// Production Lifecycle Release — avatar-duration correction. The CEO
+// accepted the whole visual/narration/caption system but flagged avatar
+// screen time as too long. Smallest deterministic fix: cap how long the
+// avatar itself stays visible within its existing beat — narration/audio
+// and beat boundaries are untouched, so content flow doesn't change. Once
+// avatarCapSec elapses, the segment dissolves back to the plain branded
+// white canvas (the same fade-to-white motif already used at every other
+// segment boundary in this system) rather than holding the avatar for the
+// whole beat. avatarCapSec is optional so any other caller keeps the prior
+// unconditional-full-duration behavior.
+// Bounded HeyGen implementation — heygenLocalPath is now a SHORT clip
+// (exactly avatarCapSec long, or the beat's own duration if shorter — never
+// the full beat length), generated by HeyGen's audio-driven mode from a
+// slice of the ElevenLabs master narration. audioLocalPath is that SAME
+// beat's full-duration slice of the master narration, used as the sole
+// audio track here so the HeyGen clip's own audio (which HeyGen embeds
+// alongside the video it produces) never becomes a second, competing
+// narration source — the master track stays authoritative end to end.
+// tpad clones the clip's last frame to cover the gap between the short
+// avatar clip and the beat's full duration; irrelevant visually since the
+// avatar fade-out at `cap` already hides everything past that point.
+async function nwv2WhiteBuildCloseSegment({ heygenLocalPath, audioLocalPath, dur, avatarCapSec, outPath }) {
+  const cap = (typeof avatarCapSec === 'number' && avatarCapSec > 0 && avatarCapSec < dur) ? avatarCapSec : null;
+  const padSec = Math.max(0, dur - (cap || dur));
+  const filters = [];
+  filters.push(`[0:v]tpad=stop_mode=clone:stop_duration=${padSec.toFixed(2)},trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS[c0]`);
+  filters.push(nwv2WhiteBrandMarkFilter('c0', 'c1'));
+  const fadeParts = [`fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`];
+  if (cap) fadeParts.push(`fade=t=out:st=${cap.toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`);
+  filters.push(`[c1]${fadeParts.join(',')}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-i', heygenLocalPath, '-i', audioLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '1:a',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'white close segment');
+  return outPath;
+}
+
+// ============================================================================
+// LONG-FORMAT LANDSCAPE VALIDATION — 1920x1080 16:9. Reuses the Short's
+// white-canvas color system and fade-to-white transition mechanism, adds:
+// a persistent TOP-LEFT NextWave logo lockup (the Short used a small
+// bottom-right corner mark; this format's own requirement is top-left), and
+// two new visual treatments — comparison and timeline — so the body of a
+// long video isn't just calc-card-after-calc-card ("slideshow of cards" is
+// exactly what this phase's order forbids).
+//
+// Avatar design note: the proven HeyGen source stays PORTRAIT (1080x1920,
+// scale 2.0 — the exact settings already validated) rather than requesting
+// a landscape render from HeyGen itself (untested, and this avatar's own
+// footage is inherently a tall seated-portrait composition, so forcing
+// HeyGen to output 16:9 risks either cropping the subject or a same-result
+// pillarbox HeyGen would produce internally anyway). Instead the portrait
+// footage is contain-fit into a bordered zone on ONE side of the 16:9
+// canvas, and the OTHER side carries real semantic content — the hook
+// question or the CTA line — rather than empty brand-colored space. This
+// is deliberately NOT the "half avatar / half visualization" split screen
+// the CEO has repeatedly rejected: that rule was about two competing video
+// sources side by side; here one side is the presenter and the other is
+// the actual narration text for that exact beat, same persistent canvas,
+// same single visual idea per beat.
+const NWV2L_W = 1920;
+const NWV2L_H = 1080;
+
+// `dark` (optional, defaults false — every pre-existing caller is
+// unaffected) switches the wordmark to white for the Storyboard
+// Implementation Proof's full-frame dark scene backgrounds, where the
+// original navy text would be nearly invisible against a dark illustration.
+function nwv2LongLogoFilter(input, output, dark) {
+  const mid = `${output}_lgm`;
+  const color = dark ? 'white' : NWV2_NAVY;
+  return `[${input}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${color}:fontsize=34:x=48:y=42[${mid}];[${mid}]drawbox=x=48:y=84:w=150:h=4:color=${NWV2_GOLD}:t=fill[${output}]`;
+}
+
+// Avatar + text panel — used for both the opening hook (headline) and the
+// closing CTA (cta text), the ONLY two beats where the avatar appears at
+// all, per the CEO's sparing-avatar policy for this Long proof.
+//
+// Storyboard Implementation Proof v4 — PM item 7: "Raul should feel
+// integrated into the NextWave composition," not "video pasted into
+// PowerPoint." No new HeyGen call authorized or needed: the existing clip
+// was rendered with background:{type:'color',value:NWV2_PRODUCTION_BG_COLOR}
+// ('#f7f4ee', the exact same flat color as NWV2_WHITE_BG) — a single flat
+// fill that colorkey can remove reliably from footage already in hand.
+// With that background gone, the avatar is composited directly onto a
+// large NAVY accent panel (no visible bounding border — the previous gold
+// rectangle around the video read as "this is a video frame," exactly the
+// pasted-in look being corrected) that now occupies most of the frame
+// height, avatar enlarged to fill more of it, with a thin gold vertical
+// accent bar at the panel's edge for brand identity. Text sits on the
+// white portion but starts close enough to the navy panel to read as one
+// composition rather than two disconnected halves.
+// Storyboard Implementation Proof v6 — A1/A6: PM rejected the ~50% blank
+// cream left column ("don't use ~50% blank cream; integrate ... subtle
+// dividend/investment visual context") and required the closing beat to
+// visually connect back to the three lost shares rather than repeat the
+// exact opening layout. Both needs are met the same way — an optional,
+// reused-asset icon rendered small and low-opacity in the empty column
+// beneath the headline, with an optional one-line caption — driven by
+// whatever the caller passes in (a dividend/coin icon + caption on open,
+// a share/stock icon + "-3 SHARES" caption on close). No new Raul footage;
+// the icon is a zero-cost reuse of an already-generated library asset.
+async function nwv2LongAvatarPanelSegment({ heygenLocalPath, audioLocalPath, dur, text, isCta, fadeEdge, avatarCapSec, contextIconPath, contextIconKeyColor, contextCaption, outPath }) {
+  const panelW = 1000, panelX = NWV2L_W - panelW - 40, panelY = 30, panelH = NWV2L_H - 60;
+  const textColW = panelX - 100;
+  const cap = (typeof avatarCapSec === 'number' && avatarCapSec > 0 && avatarCapSec < dur) ? avatarCapSec : null;
+  const avatarEnable = cap ? `:enable='between(t,0,${cap.toFixed(2)})'` : '';
+  const padSec = Math.max(0, dur - (cap || dur));
+  const lines = nwv2ProofWrapText(text, 22);
+  const lineH = 78;
+  const blockH = lines.length * lineH;
+  const startY = Math.round((NWV2L_H - blockH) / 2);
+  const hasContextIcon = !!contextIconPath;
+  const iconZone = 260;
+  const iconX = 70, iconY = Math.min(NWV2L_H - iconZone - 70, startY + blockH + 90);
+  const filters = [];
+  const inputArgs = ['-i', heygenLocalPath, '-i', audioLocalPath];
+  let contextIconIn = null;
+  if (hasContextIcon) { inputArgs.push('-i', contextIconPath); contextIconIn = 2; }
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[a0]`);
+  filters.push(`[a0]drawbox=x=${panelX - 4}:y=${panelY}:w=4:h=${panelH}:color=${NWV2_GOLD}:t=fill[a0c]`);
+  // The real HeyGen source (1080x1920 portrait) let-boxed into a wide
+  // landscape box previously left large empty margins above/beside Raul —
+  // that mismatch, not a missing background treatment, was the actual
+  // "video pasted into PowerPoint" cause (a colorkey pass to remove his
+  // background was tested and reverted: the real footage is a photographed
+  // room, not a flat fill, and keying it punched holes through his shirt).
+  // Fixed the geometry instead: a modest crop of the portrait source
+  // (tighter on his upper body, less empty ceiling/margin) then
+  // force_original_aspect_ratio=increase + a fill-crop so he occupies the
+  // ENTIRE panel edge to edge, no letterboxing gap, same real footage.
+  filters.push(`[0:v]tpad=stop_mode=clone:stop_duration=${padSec.toFixed(2)},trim=duration=${dur.toFixed(2)},setpts=PTS-STARTPTS,crop=iw*0.88:ih*0.8:iw*0.06:ih*0.06,scale=${panelW}:${panelH}:force_original_aspect_ratio=increase,crop=${panelW}:${panelH}[avid]`);
+  filters.push(`[a0c][avid]overlay=x=${panelX}:y=${panelY}${avatarEnable}[a1]`);
+  let last = 'a1', idx = 2;
+  const textColor = isCta ? NWV2_GOLD_DARK : NWV2_NAVY;
+  lines.forEach((line, li) => {
+    // Proof A v6.1 — same fix as nwv2WhiteSanitize: normalize dashes to a
+    // rendering hyphen and convert apostrophes to the typographic curly
+    // form (U+2019) so real beat text like "That's" and em-dash pauses
+    // survive intact instead of being stripped.
+    let safe = line.replace(/[":\\\[\],;%]/g, '');
+    safe = safe.replace(/[—–]/g, ' - ').replace(/'/g, '’');
+    const y0 = startY + li * lineH;
+    const yExpr = `if(lt(t,0.5),${y0}+22*(1-t/0.5),${y0})`;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${textColor}:fontsize=54:box=0:x=70:y='${yExpr}'[a${idx}]`);
+    last = `a${idx}`; idx++;
+  });
+  if (isCta) {
+    filters.push(`[${last}]drawbox=x=70:y=${startY + blockH + 34}:w=140:h=5:color=${NWV2_GOLD}:t=fill:enable='gte(t,0.6)'[a${idx}]`);
+    last = `a${idx}`; idx++;
+  }
+  if (contextIconIn !== null) {
+    const keyOpt = contextIconKeyColor ? `,colorkey=color=${contextIconKeyColor}:similarity=0.26:blend=0.12` : '';
+    filters.push(`[${contextIconIn}:v]scale=${iconZone}:${iconZone}:force_original_aspect_ratio=decrease${keyOpt},format=rgba,colorchannelmixer=aa=0.6[actxicon]`);
+    filters.push(`[${last}][actxicon]overlay=x=${iconX}:y=${iconY}:enable='gte(t,0.5)'[a${idx}]`);
+    last = `a${idx}`; idx++;
+    const safeCaption = nwv2WhiteSanitize(contextCaption || '', 26);
+    if (safeCaption) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeCaption}':fontcolor=${NWV2_GOLD_DARK}:fontsize=28:box=0:x=${iconX}:y=${iconY + iconZone + 14}:enable='gte(t,0.7)'[a${idx}]`);
+      last = `a${idx}`; idx++;
+    }
+  }
+  filters.push(nwv2LongLogoFilter(last, `a${idx}`));
+  last = `a${idx}`; idx++;
+  const fadeArg = fadeEdge === 'in'
+    ? `fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG}`
+    : fadeEdge === 'out'
+      ? `fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}`
+      : null;
+  filters.push(fadeArg ? `[${last}]${fadeArg}[outv]` : `[${last}]null[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '1:a',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long avatar panel segment');
+  return outPath;
+}
+
+// Comparison scene — two panels slide in from opposite sides (left panel
+// from the left, right panel from the right), each with a method name and
+// one-line definition. Genuinely different visual grammar from a calc
+// card, not a reskin of it.
+async function nwv2LongComparisonSegment({ heygenLocalPath, seekSec, dur, leftTitle, leftBody, rightTitle, rightBody, outPath }) {
+  // gap widened from 60->130 after a real render showed the "VS" divider
+  // straddling both panels' colored edges at the narrower gap (readable,
+  // but visually awkward) — panelW trimmed slightly to compensate so the
+  // total composition width is unchanged.
+  const panelW = 745, panelH = 560, panelY = 260, gap = 130;
+  const leftX = NWV2L_W / 2 - gap / 2 - panelW;
+  const rightX = NWV2L_W / 2 + gap / 2;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[c0]`);
+  const leftXExpr = `if(lt(t,0.5),${leftX}-160*(1-t/0.5),${leftX})`;
+  const rightXExpr = `if(lt(t,0.5),${rightX}+160*(1-t/0.5),${rightX})`;
+  filters.push(`[c0]drawbox=x=${leftX + 8}:y=${panelY + 8}:w=${panelW}:h=${panelH}:color=${NWV2_SHADOW}:t=fill[c1]`);
+  filters.push(`[c1]boxblur=10:2[c2]`);
+  filters.push(`[c2]drawbox=x='${leftXExpr}':y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_WHITE_CARD}:t=fill[c3]`);
+  filters.push(`[c3]drawbox=x='${leftXExpr}':y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_NAVY}@0.5:t=3[c4]`);
+  filters.push(`[c4]drawbox=x=${rightX - 8}:y=${panelY + 8}:w=${panelW}:h=${panelH}:color=${NWV2_SHADOW}:t=fill[c5]`);
+  filters.push(`[c5]boxblur=10:2[c6]`);
+  filters.push(`[c6]drawbox=x='${rightXExpr}':y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_GOLD}@0.92:t=fill[c7]`);
+  let last = 'c7', idx = 8;
+  const safeLT = nwv2WhiteSanitize(leftTitle, 26).replace(/[,;]/g, '');
+  const safeLB = nwv2WhiteSanitize(leftBody, 34).replace(/[,;]/g, '');
+  const safeRT = nwv2WhiteSanitize(rightTitle, 26).replace(/[,;]/g, '');
+  const safeRB = nwv2WhiteSanitize(rightBody, 34).replace(/[,;]/g, '');
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLT}':fontcolor=${NWV2_NAVY}:fontsize=48:box=0:x='${leftXExpr}'+(${panelW}-text_w)/2:y=${panelY + 90}:enable='gte(t,0.4)'[c${idx}]`);
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLB}':fontcolor=${NWV2_NAVY}@0.8:fontsize=34:box=0:x='${leftXExpr}'+(${panelW}-text_w)/2:y=${panelY + 220}:enable='gte(t,0.7)'[c${idx + 1}]`);
+  last = `c${idx + 1}`; idx += 2;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeRT}':fontcolor=white:fontsize=48:box=0:x='${rightXExpr}'+(${panelW}-text_w)/2:y=${panelY + 90}:enable='gte(t,0.4)'[c${idx}]`);
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeRB}':fontcolor=white@0.9:fontsize=34:box=0:x='${rightXExpr}'+(${panelW}-text_w)/2:y=${panelY + 220}:enable='gte(t,0.7)'[c${idx + 1}]`);
+  last = `c${idx + 1}`; idx += 2;
+  filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='VS':fontcolor=${NWV2_NAVY}:fontsize=44:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + panelH / 2 - 26}[c${idx}]`);
+  last = `c${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long comparison segment');
+  return outPath;
+}
+
+// Calculation card — landscape-sized version of the Short's proven card
+// (same shadow/fontsize-fit techniques), positioned to leave the bottom
+// ~230px clear for captions.
+async function nwv2LongCalcCardSegment({ heygenLocalPath, seekSec, title, values, dur, outPath }) {
+  const boxW = 1040, boxH = 620;
+  const boxX = Math.round((NWV2L_W - boxW) / 2);
+  const boxY = 160;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[k0]`);
+  filters.push(`[k0]drawbox=x=${boxX + 10}:y=${boxY + 10}:w=${boxW}:h=${boxH}:color=${NWV2_SHADOW}:t=fill[k1]`);
+  filters.push(`[k1]boxblur=10:2[k2]`);
+  filters.push(`[k2]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[k3]`);
+  filters.push(`[k3]drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.6:t=3[k4]`);
+  let last = 'k4', idx = 5;
+  const nwv2FitFontsizeL = (text, base, threshold) => {
+    const len = text.length; const t = threshold || 20;
+    if (len <= t) return base;
+    return Math.max(Math.round(base * (t / len)), Math.round(base * 0.62));
+  };
+  // ONE font size for every value line (the longest line decides), the last (result)
+  // line emphasised; the title is fitted to the box. Nothing is truncated.
+  const CHAR_W = 0.68, INNER_W = boxW - 120;
+  const safeTitle = nwv2WhiteSanitize(title, 60).replace(/[,;]/g, '');
+  if (safeTitle) {
+    const fs = Math.max(28, Math.min(42, Math.floor(INNER_W / (safeTitle.length * CHAR_W))));
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=${fs}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${boxY + 56}:enable='gte(t,0.35)'[k${idx}]`);
+    last = `k${idx}`; idx++;
+  }
+  const safeValues = (values || []).slice(0, 4).map((v) => nwv2WhiteSanitize(v, 60));
+  const maxLen = Math.max(1, ...safeValues.map((v) => v.length));
+  const fsBase = Math.max(28, Math.min(46, Math.floor(INNER_W / (maxLen * CHAR_W))));
+  const fsLast = Math.min(fsBase + 8, Math.max(fsBase, Math.floor(INNER_W / (Math.max(1, (safeValues[safeValues.length - 1] || '').length) * CHAR_W))));
+  const lineH = 108;
+  const blockH = safeValues.length * lineH;
+  const startY = Math.round(boxY + (boxH - blockH) / 2) + (safeTitle ? 40 : 0);
+  const revealSpan = Math.max(0.5, (dur - 1.4) / Math.max(1, safeValues.length));
+  safeValues.forEach((val, vi) => {
+    const targetY = startY + vi * lineH;
+    const revealAt = 0.5 + vi * revealSpan;
+    const isLast = vi === safeValues.length - 1;
+    const yExpr = `if(lt(t,${revealAt.toFixed(2)}+0.22),${targetY}+16*(1-(t-${revealAt.toFixed(2)})/0.22),${targetY})`;
+    if (!isLast) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_NAVY}:fontsize=${fsBase}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='gte(t,${revealAt.toFixed(2)})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+    } else {
+      const popAt = (revealAt + 0.15).toFixed(2);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fsBase}:box=0:x=(${boxW}-text_w)/2+${boxX}:y='${yExpr}':enable='between(t,${revealAt.toFixed(2)},${popAt})'[k${idx}]`);
+      last = `k${idx}`; idx++;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${val}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${fsLast}:box=0:x=(${boxW}-text_w)/2+${boxX}:y=${targetY}:enable='gte(t,${popAt})'[k${idx + 1}]`);
+      last = `k${idx + 1}`; idx += 2;
+    }
+  });
+  filters.push(nwv2LongLogoFilter(last, `k${idx}`));
+  last = `k${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long calc card segment');
+  return outPath;
+}
+
+// Illustration — same Ken-Burns zoompan mechanism as the Short, resized
+// for the wider canvas.
+async function nwv2LongIllustrationSegment({ heygenLocalPath, seekSec, illustrationPath, keyColor, dur, outPath }) {
+  const zoneW = 820, zoneH = 780;
+  const zoneX = Math.round((NWV2L_W - zoneW) / 2);
+  const zoneY = 150;
+  const fps = 25;
+  const totalFrames = Math.max(1, Math.round(dur * fps));
+  const keyOpt = keyColor ? `,colorkey=color=${keyColor}:similarity=0.26:blend=0.12` : '';
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[l0]`);
+  filters.push(`[1:v]scale=${zoneW}:${zoneH}:force_original_aspect_ratio=decrease${keyOpt}[limg0]`);
+  filters.push(`[limg0]zoompan=z='min(zoom+0.0009,1.06)':d=${totalFrames}:s=${zoneW}x${zoneH}:fps=${fps}[limg]`);
+  filters.push(`[l0][limg]overlay=x=${zoneX}+(${zoneW}-overlay_w)/2:y=${zoneY}+(${zoneH}-overlay_h)/2[l1]`);
+  filters.push(nwv2LongLogoFilter('l1', 'l2'));
+  filters.push(`[l2]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-loop', '1', '-t', dur.toFixed(2), '-i', illustrationPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long illustration segment');
+  return outPath;
+}
+
+// Timeline scene — a genuinely different visual grammar again: a
+// horizontal line draws itself in (width-animated drawbox), then two
+// labeled point markers pop in at their positions along it as the
+// narration reaches them. Real "diagram construction" motion, not a card.
+async function nwv2LongTimelineSegment({ heygenLocalPath, seekSec, title, points, dur, outPath }) {
+  const lineY = 560, lineX0 = 280, lineX1 = 1640, lineW = lineX1 - lineX0;
+  const filters = [];
+  filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[t0]`);
+  let last = 't0', idx = 1;
+  const safeTitle = nwv2WhiteSanitize(title, 50).replace(/[,;]/g, '');
+  if (safeTitle) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${NWV2_NAVY}:fontsize=46:box=0:x=(${NWV2L_W}-text_w)/2:y=150:enable='gte(t,0.2)'[t${idx}]`);
+    last = `t${idx}`; idx++;
+  }
+  // Progressive line draw over the first 1.0s.
+  filters.push(`[${last}]drawbox=x=${lineX0}:y=${lineY}:w='min(${lineW},${lineW}*t/1.0)':h=6:color=${NWV2_GOLD}:t=fill:enable='gte(t,0.5)'[t${idx}]`);
+  last = `t${idx}`; idx++;
+  const pts = (points || []).slice(0, 3);
+  pts.forEach((p, pi) => {
+    const pxFinal = pts.length === 1 ? Math.round(lineX0 + lineW / 2) : Math.round(lineX0 + (lineW * pi) / (pts.length - 1));
+    const revealAt = 1.2 + pi * 1.0;
+    const safeLabel = nwv2WhiteSanitize(p.label || '', 22).replace(/[,;]/g, '');
+    const safeSub = nwv2WhiteSanitize(p.sub || '', 26).replace(/[,;]/g, '');
+    filters.push(`[${last}]drawbox=x=${pxFinal - 13}:y=${lineY - 13}:w=26:h=26:color=${NWV2_GOLD_DARK}:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${NWV2_NAVY}:fontsize=36:box=0:x=${pxFinal}-text_w/2:y=${lineY - 90}:enable='gte(t,${revealAt.toFixed(2)})'[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeSub) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeSub}':fontcolor=${NWV2_NAVY}@0.75:fontsize=26:box=0:x=${pxFinal}-text_w/2:y=${lineY + 40}:enable='gte(t,${revealAt.toFixed(2)})'[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+  });
+  filters.push(nwv2LongLogoFilter(last, `t${idx}`));
+  last = `t${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', '-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long timeline segment');
+  return outPath;
+}
+
+// Shared subtle push-in, applied as the LAST step before each new financial-
+// motion segment's logo+fade.
+// Attempt 1 (zoompan) broke: it assumes a single REPEATING input frame (the
+// Ken-Burns case in nwv2LongIllustrationSegment, which correctly still uses
+// it on a `-loop 1` static image), not a real multi-second video stream —
+// it silently froze every enable-gated drawtext/drawbox on this continuously
+// time-varying canvas.
+// Attempt 2 (scale with eval=frame, w/h expressions referencing `t`) passed
+// a local test against a NEWER ffmpeg build but failed for real in
+// production against the actual older deployed build (linux-x64 N-47683,
+// libavfilter 7.46.101 — this codebase's real ffmpeg): "Undefined constant
+// ... in 't/...'".
+// Attempt 3 (crop instead of scale, same `t`-based w/h expression) also
+// failed on this exact build with the identical class of error — this old
+// libavfilter's crop w/h expression evaluator doesn't expose `t` either,
+// contrary to current ffmpeg documentation (which describes `t` support for
+// crop — that support evidently postdates this 2018 build).
+// Given real vendor jobs (HeyGen avatar clips) were already in flight
+// during this discovery, reverted to a plain passthrough rather than risk
+// a fourth untested expression variant — the new financial-motion scenes'
+// own object motion (a marker traveling, a chart drawing itself, a grid
+// building up) already provides real purposeful movement without a camera
+// effect layered on top. A frame-number(`n`)-based push-in is a reasonable
+// follow-up to test in isolation (outside a live proof-generation window)
+// before reintroducing this.
+function nwv2LongCameraPushFilter(input, output, dur, fps) {
+  return `[${input}]null[${output}]`;
+}
+
+// Money/dividend-flow scene — CEO Continuous Visual Storytelling proof.
+// Answers "what should the viewer see happening" for narration like "the
+// portfolio pays a $3,000 dividend": a labeled source box and a labeled
+// destination box, a connecting path that draws itself in, and a small
+// gold "money" marker that visibly travels from source to destination —
+// arriving, and popping the amount text, at the exact real spoken moment
+// (meaningEventAtSec, a beat-relative second from nwv2FindMeaningEventTime)
+// rather than an arbitrary fixed offset. Falls back to a fixed 65%-of-
+// duration arrival when no meaning-event timestamp was resolvable, so the
+// scene degrades gracefully instead of failing.
+// Storyboard Implementation Proof — v2. The PM's rejection was specific:
+// "two empty rectangles connected by a line" reads as a diagram, not a
+// financial scene. This version puts a real Ideogram-generated illustration
+// (dividend/coins on the source card, brokerage/bank on the destination
+// card — resolved by the caller via the same nextwaveV2ResolveOrGenerateIllustratedObject
+// pipeline nwv2LongIllustrationSegment already uses, reuse-first/cost-
+// bounded) inside each card, and replaces the single traveling square with
+// a staggered trail of 3 coin markers so money visibly FLOWS rather than
+// one dot sliding. fromIconPath/toIconPath/*KeyColor are optional — the
+// scene still renders correctly (cards with labels only) if icon
+// generation was skipped or unavailable, so this never hard-fails a beat.
+// Storyboard Implementation Proof — v4. PM rejection of v3 was explicit:
+// the full-frame AI cityscape read as "sci-fi finance documentary," not
+// the CEO-approved clean/modern/premium reference, and buried the
+// information under the artwork. v4 drops the full-frame environment
+// entirely and goes back to the clean NextWave white/navy/gold canvas
+// (item 1: "information must be the hero" / item 10: "prefer illustrated
+// asset + clean programmatic information + motion over complex AI
+// background + text overlay") — but with real, LARGE illustrated coin/
+// brokerage icons (fromIconPath/toIconPath) at the path's two ends
+// instead of either flat boxes (v2) or a full scene (v3). Reuses the
+// exact coin-stack/brokerage-building assets already banked from the v2
+// round at zero cost (the dispatcher's reuse-first check returns them for
+// free — no new Ideogram spend). The destination icon visibly "receives"
+// the money: it scales up briefly the instant the coin trail arrives,
+// synchronized with the $3,000 hero number. icon params are optional —
+// omitting them still renders correctly with text-only path ends.
+// Storyboard Implementation Proof v5 — CEO review of v4: visual subjects
+// too small, too much dead space, PORTFOLIO/BROKERAGE labels collided with
+// the coin trail. Icons enlarged 260->440 (a real hero visual, not a small
+// icon), and the whole layout re-stacked with generous vertical separation
+// (icon zone / label row / coin-trail row are now three fully distinct
+// bands, not overlapping) so the collision cannot recur regardless of
+// label/path length. $3,000 also enlarged further as the dominant element.
+// Storyboard Implementation Proof v6 — PM: "coin icon | blank space | bank
+// icon" is not enough; needs to be a real SCENE (environment + object +
+// data + motion), not isolated icons on cream. bgPath (optional) is now a
+// full-frame illustrated environment again — but with corrected art
+// direction (warm/bright/premium, resolved via
+// nextwaveV2ResolveOrGenerateSceneBackground's v6 prompt), not v3's
+// rejected dark cityscape. Because the new backgrounds are light-toned,
+// the existing navy/gold text and icon treatment works unchanged on top
+// of it — no separate dark-mode color branch needed this time. Omitting
+// bgPath still renders correctly on the flat cream canvas.
+async function nwv2LongMoneyFlowSegment({ heygenLocalPath, seekSec, fromLabel, toLabel, amountText, dur, meaningEventAtSec, fromIconPath, fromIconKeyColor, toIconPath, toIconKeyColor, bgPath, outPath }) {
+  const iconZone = 440;
+  const iconTop = 260;
+  const labelY = iconTop + iconZone + 30;
+  const pathY = labelY + 110;
+  const pathX0 = 340, pathX1 = NWV2L_W - 340;
+  const pathW = pathX1 - pathX0;
+  const arriveAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 0.6 && meaningEventAtSec < dur - 0.3)
+    ? meaningEventAtSec : Math.max(0.8, dur * 0.65);
+  const travelStart = Math.max(0.3, arriveAt - 1.4);
+  const travelSpan = Math.max(0.4, arriveAt - travelStart);
+  const landEnd = (arriveAt + 0.4).toFixed(2);
+
+  const inputArgs = ['-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath];
+  let nextIdx = 1;
+  let bgIn = null, fromIconIn = null, toIconIn = null;
+  if (bgPath) { inputArgs.push('-loop', '1', '-t', dur.toFixed(2), '-i', bgPath); bgIn = nextIdx++; }
+  if (fromIconPath) { inputArgs.push('-i', fromIconPath); fromIconIn = nextIdx++; }
+  if (toIconPath) { inputArgs.push('-i', toIconPath); toIconIn = nextIdx++; }
+
+  const filters = [];
+  let last, idx = 1;
+  if (bgIn !== null) {
+    const totalFrames = Math.max(1, Math.round(dur * 25));
+    filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[m0pre]`);
+    // Proof A v6.1 — a soft blur keeps large scene shapes (buildings,
+    // furniture, environment) recognizable while making any residual
+    // Ideogram pseudo-text illegible, and reads as intentional shallow
+    // depth-of-field rather than a defect.
+    filters.push(`[m0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[m0blur]`);
+    filters.push(`[m0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[m0scaled]`);
+    filters.push(`[m0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.30:t=fill[m0]`);
+  } else {
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[m0]`);
+  }
+  last = 'm0';
+  const safeFrom = nwv2WhiteSanitize(fromLabel || '', 22);
+  const safeTo = nwv2WhiteSanitize(toLabel || '', 22);
+
+  if (fromIconIn !== null) {
+    const keyOpt = fromIconKeyColor ? `,colorkey=color=${fromIconKeyColor}:similarity=0.26:blend=0.12` : '';
+    const ix = pathX0 - iconZone / 2;
+    filters.push(`[${fromIconIn}:v]scale=${iconZone}:${iconZone}:force_original_aspect_ratio=decrease${keyOpt}[m${idx}icon]`);
+    filters.push(`[${last}][m${idx}icon]overlay=x=${ix}+(${iconZone}-overlay_w)/2:y=${iconTop}+(${iconZone}-overlay_h)/2[m${idx}]`);
+    last = `m${idx}`; idx++;
+  }
+  if (safeFrom) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFrom}':fontcolor=${NWV2_NAVY}:fontsize=40:box=0:x=${pathX0}-text_w/2:y=${labelY}:enable='gte(t,0.2)'[m${idx}]`);
+    last = `m${idx}`; idx++;
+  }
+
+  // Destination icon "receives" the money: scales up briefly the instant
+  // the trail arrives, synchronized with the hero number popping in.
+  if (toIconIn !== null) {
+    const keyOpt = toIconKeyColor ? `,colorkey=color=${toIconKeyColor}:similarity=0.26:blend=0.12` : '';
+    const baseZone = iconZone;
+    const bigZone = Math.round(iconZone * 1.14);
+    const ix0 = pathX1 - baseZone / 2;
+    filters.push(`[${toIconIn}:v]scale=${baseZone}:${baseZone}:force_original_aspect_ratio=decrease${keyOpt}[m${idx}iconbase]`);
+    filters.push(`[${toIconIn}:v]scale=${bigZone}:${bigZone}:force_original_aspect_ratio=decrease${keyOpt}[m${idx}iconbig]`);
+    filters.push(`[${last}][m${idx}iconbase]overlay=x=${ix0}+(${baseZone}-overlay_w)/2:y=${iconTop}+(${baseZone}-overlay_h)/2:enable='lt(t,${arriveAt.toFixed(2)})'[m${idx}a]`);
+    const ix1 = pathX1 - bigZone / 2, iy1 = iconTop - (bigZone - baseZone) / 2;
+    filters.push(`[m${idx}a][m${idx}iconbig]overlay=x=${ix1}+(${bigZone}-overlay_w)/2:y=${iy1}+(${bigZone}-overlay_h)/2:enable='gte(t,${arriveAt.toFixed(2)})'[m${idx}]`);
+    last = `m${idx}`; idx++;
+  }
+  if (safeTo) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTo}':fontcolor=${NWV2_GOLD_DARK}:fontsize=40:box=0:x=${pathX1}-text_w/2:y=${labelY}:enable='gte(t,0.2)'[m${idx}]`);
+    last = `m${idx}`; idx++;
+  }
+
+  // Path draws in just ahead of the coin trail — its own row, well below
+  // the icon+label band so it can never collide with either.
+  filters.push(`[${last}]drawbox=x=${pathX0}:y=${pathY - 4}:w='min(${pathW},${pathW}*max(0,t-${travelStart.toFixed(2)})/1.2)':h=8:color=${NWV2_GOLD}@0.6:t=fill:enable='gte(t,${travelStart.toFixed(2)})'[m${idx}]`);
+  last = `m${idx}`; idx++;
+
+  // A staggered trail of 3 large coin markers (not one dot) so money
+  // visibly FLOWS — bigger again so the movement reads clearly at this scale.
+  for (let c = 0; c < 3; c++) {
+    const cStart = travelStart + (travelSpan * 0.18 * c);
+    const cSpan = Math.max(0.3, travelSpan - travelSpan * 0.18 * c);
+    const cx = `${pathX0}+(${pathX1}-${pathX0})*min(1,max(0,(t-${cStart.toFixed(2)})/${cSpan.toFixed(2)}))`;
+    const r = 32 - c * 5;
+    filters.push(`[${last}]drawbox=x='${cx}'-${r}:y=${pathY - r}:w=${r * 2}:h=${r * 2}:color=${NWV2_GOLD_DARK}@${(0.95 - c * 0.15).toFixed(2)}:t=fill:enable='between(t,${cStart.toFixed(2)},${landEnd})'[m${idx}]`);
+    last = `m${idx}`; idx++;
+  }
+
+  // Amount pops as the dominant hero number, above the icon row, at the real meaning-event moment.
+  const safeAmount = nwv2WhiteSanitize(amountText || '', 18);
+  if (safeAmount) {
+    const popEnd = (arriveAt + 0.18).toFixed(2);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=84:box=0:x=(${NWV2L_W}-text_w)/2:y=100:enable='between(t,${arriveAt.toFixed(2)},${popEnd})'[m${idx}]`);
+    last = `m${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAmount}':fontcolor=${NWV2_GOLD_DARK}:fontsize=92:box=0:x=(${NWV2L_W}-text_w)/2:y=92:enable='gte(t,${popEnd})'[m${idx}]`);
+    last = `m${idx}`; idx++;
+  }
+  filters.push(nwv2LongCameraPushFilter(last, `m${idx}`, dur, 25));
+  last = `m${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `m${idx}`));
+  last = `m${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long money-flow segment');
+  return outPath;
+}
+
+// Stock/percentage-movement scene — for narration like "the stock rises
+// 2%". Storyboard Implementation Proof v3: PM rejected the v2 white
+// chart-card as still "a pale card containing another simple staircase" —
+// the chart must dominate the frame inside a real illustrated dashboard
+// environment. bgPath (optional, same nextwaveV2ResolveOrGenerateSceneBackground
+// pipeline as money-flow) becomes the full-frame base; the glowing curve
+// and data points are drawn directly over it, larger, brighter, with a
+// glow-style thicker line. Falls back to the v2 white-card rendering when
+// no background asset is available.
+// Storyboard Implementation Proof v5 — CEO: chart "too empty and visually
+// weak," must occupy most of the frame, with DAY 0/DAY 3 axis labels.
+// Card enlarged to span nearly the full frame width/height.
+// Proof B — NextWave V2 architecture generalization test. Every prior call
+// site (Proof A's 2-3 day price-rise beat) passes no `series`, so that
+// entire code path below is untouched byte-for-byte; this only adds a new
+// OPTIONAL branch for a real data-driven multi-series chart (e.g. two
+// investors' portfolio value over 10 years), where the old version drew a
+// fixed 14-step decorative ramp with hardcoded "DAY 0"/"DAY 3" labels.
+// `series`: [{ label, color, points: (number|null)[] }] — same-length
+// arrays sharing one X axis (points[i] === null/undefined means that
+// series hasn't started yet at that x-index, e.g. an investor who hasn't
+// begun contributing). `axisStartLabel`/`axisEndLabel` replace the
+// hardcoded day labels. `markerIndex`/`markerLabel` optionally calls out
+// one x-index (e.g. "year 5, investor B starts") with a vertical marker.
+async function nwv2LongStockChartSegment({ heygenLocalPath, seekSec, label, subLabel, yTicks, yMax, milestones, changeText, direction, dur, meaningEventAtSec, bgPath, series, axisStartLabel, axisEndLabel, markerIndex, markerLabel, outPath }) {
+  const hasBg = !!bgPath;
+  // A visible margin is left around the chart panel only when a background
+  // exists, so the environmental context (v6) actually shows; with no
+  // background the panel goes nearly full-bleed as in v5.
+  const chartX0 = hasBg ? 220 : 140, chartX1 = NWV2L_W - (hasBg ? 220 : 140), chartW = chartX1 - chartX0;
+  const chartYBase = hasBg ? 820 : 900, chartYTop = hasBg ? 340 : 260, chartH = chartYBase - chartYTop;
+  const rising = direction !== 'down';
+  const steps = 14;
+  const drawEndAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 1.0 && meaningEventAtSec < dur - 0.2)
+    ? meaningEventAtSec : Math.max(1.2, dur * 0.7);
+  const drawStart = 0.5;
+  const drawSpan = Math.max(0.6, drawEndAt - drawStart);
+
+  const inputArgs = ['-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath];
+  let bgIn = null;
+  if (hasBg) { inputArgs.push('-loop', '1', '-t', dur.toFixed(2), '-i', bgPath); bgIn = 1; }
+
+  const filters = [];
+  let last, idx = 1;
+  // Storyboard Implementation Proof v6 — PM: "integrate the chart into a
+  // richer financial scene... do not add competing charts." The chart
+  // panel itself stays exactly as before (the one authoritative chart,
+  // unconditionally opaque white so it's never visually competed with) —
+  // the optional illustrated background (corrected, warm/premium art
+  // direction) now shows only in the MARGIN around that panel, providing
+  // environmental context/depth without ever touching the data itself.
+  if (hasBg) {
+    const totalFrames = Math.max(1, Math.round(dur * 25));
+    filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[s0pre]`);
+    filters.push(`[s0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[s0blur]`);
+    filters.push(`[s0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[s0scaled]`);
+    filters.push(`[s0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.15:t=fill[s0]`);
+  } else {
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[s0]`);
+  }
+  last = 's0';
+  const lineColor = NWV2_GOLD_DARK;
+  const gridColor = `${NWV2_NAVY}@0.10`;
+  const axisColor = `${NWV2_NAVY}@0.3`;
+  const labelColor = NWV2_NAVY;
+  // Multi-series (data-driven) charts get: a labelled y scale, a right-hand
+  // column of DIRECT series labels (value + wrapped name, vertically de-
+  // collided, never overlapping a line and never truncated), and a title/
+  // subtitle block inside the card. `plotX0/plotX1` are the data extents.
+  const hasSeries = !!(series && series.length);
+  const hasMilestones = !!(series && series.length && Array.isArray(milestones) && milestones.length);
+  const LABEL_COL_W = hasMilestones ? 60 : 340, Y_PAD = 130;
+  const hasYScale = Array.isArray(yTicks) && yTicks.length > 0;
+  const plotX0 = chartX0 + (hasYScale ? Y_PAD : 0);
+  const plotX1 = hasSeries ? chartX1 - LABEL_COL_W : chartX1;
+  const plotW = plotX1 - plotX0;
+  let seriesGlobalMax = 0;
+  if (hasSeries) series.forEach((s) => s.points.forEach((v) => { if (typeof v === 'number' && v > seriesGlobalMax) seriesGlobalMax = v; }));
+  if (hasSeries && Number(yMax) > seriesGlobalMax) seriesGlobalMax = Number(yMax); // caller-chosen round axis maximum
+  if (seriesGlobalMax <= 0) seriesGlobalMax = 1;
+  const panelTop = hasSeries ? chartYTop - 140 : chartYTop - 60;
+  // Chart panel — unconditional, opaque, the single authoritative chart.
+  filters.push(`[${last}]drawbox=x=${chartX0 - 60}:y=${panelTop}:w=${chartW + 120}:h=${chartYBase + 60 - panelTop}:color=${NWV2_SHADOW}:t=fill[s${idx}]`); last = `s${idx}`; idx++;
+  filters.push(`[${last}]drawbox=x=${chartX0 - 60}:y=${panelTop}:w=${chartW + 120}:h=${chartYBase + 60 - panelTop}:color=${NWV2_WHITE_CARD}:t=fill[s${idx}]`); last = `s${idx}`; idx++;
+  if (!hasYScale) {
+    for (let g = 1; g <= 3; g++) {
+      const gy = chartYTop + Math.round((chartH * g) / 4);
+      filters.push(`[${last}]drawbox=x=${plotX0}:y=${gy}:w=${plotW}:h=1:color=${gridColor}:t=fill[s${idx}]`); last = `s${idx}`; idx++;
+    }
+  }
+  const safeLabel = nwv2WhiteSanitize(label || '', 48);
+  if (safeLabel) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${labelColor}:fontsize=38:box=0:x=${chartX0}:y=${hasSeries ? chartYTop - 112 : chartYTop - 50}:enable='gte(t,0.2)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  const safeSub = nwv2WhiteSanitize(subLabel || '', 60);
+  if (safeSub) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeSub}':fontcolor=${labelColor}@0.65:fontsize=28:box=0:x=${chartX0}:y=${chartYTop - 62}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  if (hasSeries) {
+    const n = Math.max(...series.map((s) => s.points.length));
+    const globalMax = seriesGlobalMax;
+    const yOf = (v) => Math.round(chartYBase - chartH * 0.85 * (v / globalMax));
+    filters.push(`[${last}]drawbox=x=${plotX0}:y=${chartYBase}:w=${plotW}:h=3:color=${axisColor}:t=fill[s${idx}]`);
+    last = `s${idx}`; idx++;
+    // y scale: guide + right-aligned label at each tick (the caller supplies
+    // the authoritative formatted text; frac 0 is the baseline itself)
+    if (hasYScale) {
+      yTicks.forEach((t) => {
+        const ty = yOf(globalMax * Math.max(0, Math.min(1, Number(t.frac) || 0)));
+        if (t.frac > 0) { filters.push(`[${last}]drawbox=x=${plotX0}:y=${ty}:w=${plotW}:h=1:color=${gridColor}:t=fill[s${idx}]`); last = `s${idx}`; idx++; }
+        const tt = nwv2WhiteSanitize(t.text || '', 14);
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${tt}':fontcolor=${labelColor}@0.7:fontsize=24:box=0:x=${plotX0 - 14}-text_w:y=${ty - 12}:enable='gte(t,0.3)'[s${idx}]`);
+        last = `s${idx}`; idx++;
+      });
+    }
+    const safeStartLabel = nwv2WhiteSanitize(axisStartLabel || 'START', 24);
+    const safeEndLabel = nwv2WhiteSanitize(axisEndLabel || 'END', 24);
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeStartLabel}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${plotX0}:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeEndLabel}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${plotX1}-text_w:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    if (typeof markerIndex === 'number' && markerIndex > 0 && markerIndex < n) {
+      const mx = plotX0 + Math.round((plotW * markerIndex) / (n - 1));
+      filters.push(`[${last}]drawbox=x=${mx}:y=${chartYTop}:w=2:h=${chartH}:color=${NWV2_NAVY}@0.25:t=fill:enable='gte(t,0.4)'[s${idx}]`);
+      last = `s${idx}`; idx++;
+      const safeMarkerLabel = nwv2WhiteSanitize(markerLabel || '', 40);
+      if (safeMarkerLabel) {
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeMarkerLabel}':fontcolor=${NWV2_NAVY}@0.6:fontsize=22:box=0:x=${mx}+10:y=${chartYTop + 10}:enable='gte(t,0.5)'[s${idx}]`);
+        last = `s${idx}`; idx++;
+      }
+    }
+    const lineH = hasBg ? 8 : 5;
+    const ends = [];
+    series.forEach((s) => {
+      const color = s.color || lineColor;
+      let lastDefinedY = null;
+      for (let i = 0; i < s.points.length - 1; i++) {
+        const v0 = s.points[i], v1 = s.points[i + 1];
+        if (v0 == null || v1 == null) continue;
+        const x0 = plotX0 + Math.round((plotW * i) / (n - 1));
+        const x1 = plotX0 + Math.round((plotW * (i + 1)) / (n - 1));
+        const y0 = yOf(v0), y1 = yOf(v1);
+        const segStart = drawStart + (drawSpan * i) / (n - 1);
+        const segDur = drawSpan / (n - 1);
+        const segW = x1 - x0;
+        // Step-chart style: flat segment at the new level, plus a vertical
+        // connector at the transition — an honest read of discrete
+        // year-over-year data, not a smoothed/interpolated curve.
+        filters.push(`[${last}]drawbox=x=${x0}:y=${y1}:w='min(${segW},${segW}*max(0,t-${segStart.toFixed(2)})/${segDur.toFixed(2)})':h=${lineH}:color=${color}:t=fill:enable='gte(t,${segStart.toFixed(2)})'[s${idx}]`);
+        last = `s${idx}`; idx++;
+        const connY0 = Math.min(y0, y1), connH = Math.max(2, Math.abs(y1 - y0));
+        filters.push(`[${last}]drawbox=x=${x0}:y=${connY0}:w=${lineH}:h=${connH}:color=${color}:t=fill:enable='gte(t,${segStart.toFixed(2)})'[s${idx}]`);
+        last = `s${idx}`; idx++;
+        lastDefinedY = y1;
+      }
+      const finalVal = [...s.points].reverse().find((v) => v != null);
+      if (finalVal != null && lastDefinedY != null && !hasMilestones) ends.push({ s, color, endY: lastDefinedY, finalVal });
+    });
+    // Milestones on ONE trajectory: a dot on the curve at each stated time, a thin guide
+    // to the axis, and its value + time label attached above-left of the dot (the
+    // region above-left of a rising curve is empty). Labels that would overlap are
+    // lifted, never dropped or truncated.
+    if (hasMilestones) {
+      const BLOCK_H = 74, boxes = [];
+      const pts0 = series[0].points;
+      [...milestones].sort((x, y) => x.index - y.index).forEach((m) => {
+        const v = pts0[m.index]; if (v == null) return;
+        const px = plotX0 + Math.round((plotW * m.index) / (n - 1)), py = yOf(v);
+        const tSec = drawStart + (drawSpan * m.index) / (n - 1) + 0.1;
+        const valTxt = nwv2WhiteSanitize(m.valueText || '', 20), labTxt = nwv2WhiteSanitize(m.label || '', 40);
+        const w = Math.max(String(valTxt).length * 26, String(labTxt).length * 15) + 12;
+        let top = py - 22 - BLOCK_H;
+        const hit = (t) => boxes.some((b) => !(px + 6 < b.x0 || px + 6 - w > b.x1 || t + BLOCK_H < b.y0 || t > b.y1));
+        while (hit(top) && top > chartYTop - 40) top -= 16;
+        boxes.push({ x0: px + 6 - w, x1: px + 6, y0: top, y1: top + BLOCK_H });
+        filters.push(`[${last}]drawbox=x=${px - 1}:y=${py}:w=2:h=${chartYBase - py}:color=${NWV2_NAVY}@0.25:t=fill:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+        filters.push(`[${last}]drawbox=x=${px - 9}:y=${py - 9}:w=18:h=18:color=${NWV2_GOLD_DARK}:t=fill:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${valTxt}':fontcolor=${NWV2_GOLD_DARK}:fontsize=38:box=0:x=${px + 6}-text_w:y=${Math.round(top)}:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${labTxt}':fontcolor=${NWV2_NAVY}@0.75:fontsize=22:box=0:x=${px + 6}-text_w:y=${Math.round(top) + 44}:enable='gte(t,${tSec.toFixed(2)})'[s${idx}]`); last = `s${idx}`; idx++;
+      });
+    }
+    // Direct labels in the right-hand column: value (the caller's own
+    // authoritative string, never computed here) + the series name wrapped to
+    // at most two lines. Blocks are stacked so none overlaps another and none
+    // leaves the plot area; nothing is truncated.
+    const MAX_CH = 20, VAL_H = 46, LINE_H = 26, GAP = 14;
+    const wrap = (t) => {
+      const words = String(t || '').trim().split(/\s+/).filter(Boolean); const lines = []; let cur = '';
+      for (const w of words) { if (cur && (cur + ' ' + w).length > MAX_CH) { lines.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; }
+      if (cur) lines.push(cur);
+      return lines;
+    };
+    const blocks = ends.map((e) => { const lines = wrap(nwv2WhiteSanitize(e.s.label || '', 80)); return { ...e, lines, h: VAL_H + lines.length * LINE_H, top: e.endY - 22 }; }).sort((a, b) => a.top - b.top);
+    for (let i = 0; i < blocks.length; i++) blocks[i].top = Math.max(i === 0 ? chartYTop - 10 : blocks[i - 1].top + blocks[i - 1].h + GAP, blocks[i].top);
+    const overflow = blocks.length ? blocks[blocks.length - 1].top + blocks[blocks.length - 1].h - (chartYBase - 6) : 0;
+    if (overflow > 0) {
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        blocks[i].top -= overflow;
+        if (i > 0 && blocks[i - 1].top + blocks[i - 1].h + GAP > blocks[i].top) blocks[i - 1].top = blocks[i].top - GAP - blocks[i - 1].h;
+      }
+    }
+    blocks.forEach((b) => {
+      const bx = plotX1 + 22;
+      // leader tick from the line's end to its label
+      filters.push(`[${last}]drawbox=x=${plotX1}:y=${b.endY + 2}:w=18:h=2:color=${b.color}@0.6:t=fill:enable='gte(t,${drawEndAt.toFixed(2)})'[s${idx}]`);
+      last = `s${idx}`; idx++;
+      const safeVal = nwv2WhiteSanitize(b.s.finalValueText || String(b.finalVal), 20);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeVal}':fontcolor=${b.color}:fontsize=40:box=0:x=${bx}:y=${Math.round(b.top)}:enable='gte(t,${drawEndAt.toFixed(2)})'[s${idx}]`);
+      last = `s${idx}`; idx++;
+      b.lines.forEach((ln, li) => {
+        filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${ln}':fontcolor=${b.color}@0.9:fontsize=22:box=0:x=${bx}:y=${Math.round(b.top) + VAL_H + li * LINE_H}:enable='gte(t,${drawEndAt.toFixed(2)})'[s${idx}]`);
+        last = `s${idx}`; idx++;
+      });
+    });
+  } else {
+  // Baseline axis, with DAY 0 / DAY 3 endpoints labeled so the delay-window
+  // relationship (the same 2-3 day span from the timeline scene) is explicit.
+  filters.push(`[${last}]drawbox=x=${plotX0}:y=${chartYBase}:w=${plotW}:h=3:color=${axisColor}:t=fill[s${idx}]`);
+  last = `s${idx}`; idx++;
+  // Axis end labels only when the caller supplies them (the decorative path
+  // used to hardcode "DAY 0"/"DAY 3" from one script's window).
+  // labelled scale (optional): tick text + guide at each fraction of the plotted range
+  if (hasYScale) {
+    yTicks.forEach((t) => {
+      const ty = Math.round(chartYBase - chartH * 0.85 * Math.max(0, Math.min(1, Number(t.frac) || 0)));
+      if (t.frac > 0 && t.frac < 1) { filters.push(`[${last}]drawbox=x=${plotX0}:y=${ty}:w=${plotW}:h=1:color=${gridColor}:t=fill[s${idx}]`); last = `s${idx}`; idx++; }
+      const tt = nwv2WhiteSanitize(t.text || '', 14);
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${tt}':fontcolor=${labelColor}@0.7:fontsize=24:box=0:x=${plotX0 - 14}-text_w:y=${ty - 12}:enable='gte(t,0.3)'[s${idx}]`);
+      last = `s${idx}`; idx++;
+    });
+  }
+  const legacyStart = nwv2WhiteSanitize(axisStartLabel || '', 16), legacyEnd = nwv2WhiteSanitize(axisEndLabel || '', 16);
+  if (legacyStart) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${legacyStart}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${plotX0}:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  if (legacyEnd) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${legacyEnd}':fontcolor=${labelColor}@0.7:fontsize=26:box=0:x=${plotX1}-text_w:y=${chartYBase + 20}:enable='gte(t,0.3)'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  // A finer 14-segment staircase that draws itself in, thicker/glowing when
+  // over a dark background, with a data-point marker popping at each step —
+  // real "chart visibly developing and dominating the frame."
+  const lineH = hasBg ? 8 : 5;
+  for (let i = 0; i < steps; i++) {
+    const segX0 = plotX0 + Math.round((plotW * i) / steps);
+    const segX1 = plotX0 + Math.round((plotW * (i + 1)) / steps);
+    const segW = segX1 - segX0;
+    const levelFrac = rising ? (i + 1) / steps : 1 - (i + 1) / steps;
+    const segY = Math.round(chartYBase - chartH * levelFrac * 0.85);
+    const segStart = drawStart + (drawSpan * i) / steps;
+    const segDur = drawSpan / steps;
+    filters.push(`[${last}]drawbox=x=${segX0}:y=${segY}:w='min(${segW},${segW}*max(0,t-${segStart.toFixed(2)})/${segDur.toFixed(2)})':h=${lineH}:color=${lineColor}:t=fill:enable='gte(t,${segStart.toFixed(2)})'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    if (i % 3 === 2) {
+      const r = hasBg ? 8 : 5;
+      filters.push(`[${last}]drawbox=x=${segX1 - r}:y=${segY - r}:w=${r * 2}:h=${r * 2}:color=${lineColor}:t=fill:enable='gte(t,${(segStart + segDur).toFixed(2)})'[s${idx}]`);
+      last = `s${idx}`; idx++;
+    }
+  }
+  // Change label as a highlighted badge — the visual payoff — pops in
+  // exactly at the real spoken percentage moment.
+  const safeChange = nwv2WhiteSanitize(changeText || '', 14);
+  if (safeChange) {
+    const finalY = Math.round(chartYBase - chartH * 0.85) - 100;
+    const popEnd = (drawEndAt + 0.18).toFixed(2);
+    const changeColor = rising ? lineColor : '0xf87171';
+    const badgeBg = rising ? `${NWV2_GOLD}@0.18` : '0xb0413e@0.12';
+    const badgeW = 190, badgeH = 70, badgeX = plotX1 - badgeW;
+    filters.push(`[${last}]drawbox=x=${badgeX}:y=${finalY - 14}:w=${badgeW}:h=${badgeH}:color=${badgeBg}:t=fill:enable='gte(t,${drawEndAt.toFixed(2)})'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeChange}':fontcolor=${changeColor}:fontsize=44:box=0:x=${badgeX}+(${badgeW}-text_w)/2:y=${finalY}:enable='between(t,${drawEndAt.toFixed(2)},${popEnd})'[s${idx}]`);
+    last = `s${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeChange}':fontcolor=${changeColor}:fontsize=50:box=0:x=${badgeX}+(${badgeW}-text_w)/2:y=${finalY - 4}:enable='gte(t,${popEnd})'[s${idx}]`);
+    last = `s${idx}`; idx++;
+  }
+  }
+  filters.push(nwv2LongCameraPushFilter(last, `s${idx}`, dur, 25));
+  last = `s${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `s${idx}`));
+  last = `s${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long stock chart segment');
+  return outPath;
+}
+
+// Share-accumulation / cause-effect comparison scene — for narration like
+// "now the same cash buys fewer shares": a grid of unit squares on the
+// left (the "before" quantity, present from the start) versus a grid on
+// the right that builds itself up square-by-square (the "after" quantity)
+// — fewer, highlighted in the consequence color the instant the real
+// spoken moment names the new count. Same self-building-diagram principle
+// as the timeline/stock-chart scenes, applied to discrete unit counting
+// instead of a continuous line.
+// Storyboard Implementation Proof v3: PM rejection was explicit that the
+// panels + grids "must be understandable with audio muted" and should not
+// be "two generic text cards" — enlarged panels/cells, an optional full-
+// frame illustrated background (bgPath, same pipeline as the other new
+// scenes) with glass-style translucent panels instead of opaque white
+// cards, and a bigger consequence badge. Falls back to the v2 white-card
+// rendering when no background asset is supplied.
+// Storyboard Implementation Proof v4 — PM's "MAJOR CORRECTION": the grid
+// square-count alone ("8 rectangles versus 4 rectangles") didn't
+// communicate the approved 100 -> 97 example. beforeValue/afterValue are
+// now explicit big hero numbers ("100 SHARES" / "97 SHARES") rendered
+// above each grid — the grid stays a representative (not literally
+// counted) visual, but the actual numbers are unmistakable text, exactly
+// matching the requirement that this scene "pass the mute test
+// immediately." Also drops the v3 full-frame AI background by default
+// (bgPath now genuinely optional and unused by the current dispatcher —
+// PM: "do not add more AI backgrounds," information must be the hero).
+// Storyboard Implementation Proof v5 — CEO: "visually underdeveloped,"
+// "use most of the frame." Panels enlarged 760x420 -> 840x560, cells
+// enlarged, value labels enlarged.
+// Storyboard Implementation Proof v6 — CEO: "two giant white boxes + squares"
+// rejected outright. Replaced the BEFORE/AFTER split-screen with ONE
+// evolving panel of investment-unit chips (filled body + gold ribbon top,
+// standing in for actual share certificates rather than generic squares):
+// all `before` units are visible from the start, the hero number reads
+// beforeValue, and at the reveal moment exactly `delta` units vanish while
+// the number swaps to afterValue and the "-N SHARES" badge appears — a
+// single causal transition (100 -> 97, 3 disappear) instead of two static
+// counts side by side.
+// `displayMode` is 'chips' (a count of discrete interchangeable units) or
+// 'bar' (two raw VALUES, e.g. two final dollar totals — a chip grid is the
+// wrong metaphor for "$91,473 vs $36,738"). The comparison is direction-
+// neutral (after may be below, above or equal to before). Every label
+// (`anchorText`, `deltaSuffix`, header, after-value fallback) is supplied by
+// the caller: this primitive no longer falls back to any literal from an
+// earlier script ("SAME $3,000", "YOUR SHARES", "REMAIN", "SHARES").
+async function nwv2LongShareCompareSegment({ heygenLocalPath, seekSec, beforeLabel, beforeCount, beforeValue, afterLabel, afterCount, afterValue, dur, meaningEventAtSec, bgPath, displayMode, anchorText, deltaSuffix, deltaTextOverride, deltaNote, headerLabel, deltaTone, outPath }) {
+  const hasBg = !!bgPath;
+  const mode = displayMode === 'bar' ? 'bar' : 'chips';
+  // The grid/bar is a representative visual capped at 24 units, not a
+  // literal rendering of beforeCount/afterCount (real content is often
+  // 100 -> 97, or a 0-100 percentage-of-larger-value scale in bar mode,
+  // and clamping each side to 24 independently used to collapse both to
+  // the same 24 and hide the delta entirely). Instead: cap the total at
+  // 24, then scale the real delta proportionally onto that representative
+  // total so the causal "value drops" transition stays visible regardless
+  // of scale. The badge text below still reports the real, unscaled delta.
+  // Direction-neutral: `after` may be below, above, or equal to `before`
+  // (a cost that fell, a balance that grew, a neutral swap). Nothing here
+  // assumes after <= before; the scene shows a decrease, an increase, or no
+  // change according to the actual values. For a decrease this arithmetic is
+  // identical to the previous clamped version.
+  const rawBefore = Math.max(1, Math.round(beforeCount) || 8);
+  const rawAfter = Math.max(0, Number.isFinite(Number(afterCount)) ? Math.round(afterCount) : 5);
+  const direction = rawAfter < rawBefore ? 'down' : rawAfter > rawBefore ? 'up' : 'flat';
+  const bigCount = Math.max(rawBefore, rawAfter);
+  const cells = Math.min(24, bigCount);
+  const rawDelta = Math.abs(rawAfter - rawBefore);
+  const scaledDelta = rawDelta > 0 ? Math.max(1, Math.round(cells * (rawDelta / bigCount))) : 0;
+  const before = direction === 'up' ? cells - scaledDelta : cells;
+  const after = direction === 'up' ? cells : cells - scaledDelta;
+  const delta = rawDelta;
+  // Bars use the real (unrounded, uncapped) magnitudes so their lengths are
+  // exactly proportional whichever side is larger.
+  const barBefore = Number(beforeCount) > 0 ? Number(beforeCount) : rawBefore;
+  const barAfter = Number.isFinite(Number(afterCount)) && Number(afterCount) >= 0 ? Number(afterCount) : rawAfter;
+  const barMax = Math.max(barBefore, barAfter) || 1;
+  const revealAt = (typeof meaningEventAtSec === 'number' && meaningEventAtSec > 0.6 && meaningEventAtSec < dur - 0.3)
+    ? meaningEventAtSec : Math.max(1.0, dur * 0.6);
+
+  const cell = hasBg ? 80 : 90, gap = 18, cols = Math.min(8, cells);
+  const rows = Math.ceil(cells / cols);
+  // Bar mode shows BOTH values at once, each on its own bar (no hero number
+  // that swaps at the reveal: a swapping hero under a fixed header/row label
+  // contradicted the row it was not about). Chips mode keeps the hero swap.
+  // the panel is sized so the longest value text always fits to the right of a
+  // full-length bar (text width estimated at 0.68em of the 52px value font)
+  const BAR_MAX_W = 700;
+  const barValueW = Math.max(String(beforeValue || '').length, String(afterValue || '').length, 6) * 36 + 40;
+  const gridW = mode === 'bar' ? BAR_MAX_W + barValueW : cols * cell + (cols - 1) * gap;
+  const barH = mode === 'bar' ? 120 : (hasBg ? 80 : 90), barGap = mode === 'bar' ? 90 : 40;
+  const topOffset = mode === 'bar' ? 150 : 260;
+  const contentH = mode === 'bar' ? (barH * 2 + barGap) : (rows * cell + (rows - 1) * gap);
+  const panelPad = hasBg ? 70 : 90;
+  const panelW = gridW + panelPad * 2;
+  const panelH = topOffset + contentH + (mode === 'bar' ? 70 : 40);
+  const panelX = Math.round((NWV2L_W - panelW) / 2);
+  const panelY = hasBg ? 300 : 260;
+  const gridX0 = panelX + panelPad;
+  const gridY0 = panelY + topOffset;
+
+  const inputArgs = ['-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath];
+  let bgIn = null;
+  if (hasBg) { inputArgs.push('-loop', '1', '-t', dur.toFixed(2), '-i', bgPath); bgIn = 1; }
+
+  const filters = [];
+  let last, idx = 1;
+  if (hasBg) {
+    const totalFrames = Math.max(1, Math.round(dur * 25));
+    filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[c0pre]`);
+    filters.push(`[c0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[c0blur]`);
+    filters.push(`[c0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[c0scaled]`);
+    filters.push(`[c0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.15:t=fill[c0]`);
+  } else {
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[c0]`);
+  }
+  last = 'c0';
+  // Single panel card.
+  filters.push(`[${last}]drawbox=x=${panelX + 8}:y=${panelY + 8}:w=${panelW}:h=${panelH}:color=${NWV2_SHADOW}:t=fill[c${idx}]`); last = `c${idx}`; idx++;
+  filters.push(`[${last}]drawbox=x=${panelX}:y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_WHITE_CARD}@${hasBg ? 0.92 : 1.0}:t=fill[c${idx}]`); last = `c${idx}`; idx++;
+  filters.push(`[${last}]drawbox=x=${panelX}:y=${panelY}:w=${panelW}:h=${panelH}:color=${NWV2_NAVY}@0.2:t=3[c${idx}]`); last = `c${idx}`; idx++;
+  // `headerLabel` (optional, added with the Autonomous Storyboard Brain): the
+  // panel header does not change at the reveal but the hero value does, so a
+  // scenario-specific beforeLabel used as the header contradicts the swapped
+  // number. Defaults to beforeLabel, so every existing caller is unchanged.
+  const safeHeaderLabel = nwv2WhiteSanitize(headerLabel || beforeLabel || '', 24);
+  if (safeHeaderLabel) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHeaderLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=32:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 35}:enable='gte(t,0.15)'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
+  // Hero count — reads beforeValue until the reveal, then swaps to afterValue.
+  const safeBeforeValue = nwv2WhiteSanitize(beforeValue || String(rawBefore), 20);
+  const safeAfterValue = nwv2WhiteSanitize(afterValue || (String(rawAfter) + (afterLabel ? ' ' + afterLabel : '')), 24);
+  if (mode !== 'bar') {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeValue}':fontcolor=${NWV2_NAVY}:fontsize=72:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 100}:enable='lt(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterValue}':fontcolor=${NWV2_GOLD_DARK}:fontsize=72:box=0:x=(${NWV2L_W}-text_w)/2:y=${panelY + 100}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
+  if (mode === 'chips') {
+    // The units themselves, styled as investment-unit chips (filled body +
+    // gold ribbon top) rather than plain squares. Units beyond `after`
+    // vanish at the reveal moment — the visible causal transition for a
+    // count of discrete, interchangeable units (e.g. shares).
+    for (let i = 0; i < cells; i++) {
+      const col = i % cols, row = Math.floor(i / cols);
+      const cx = gridX0 + col * (cell + gap);
+      const cy = gridY0 + row * (cell + gap);
+      const isLost = direction === 'down' && i >= after;   // visible only before the reveal
+      const isNew = direction === 'up' && i >= before;     // appears at the reveal
+      const appearAt = 0.2 + i * (0.5 / cells);
+      const enableExpr = isLost
+        ? `gte(t,${appearAt.toFixed(2)})*lt(t,${revealAt.toFixed(2)})`
+        : isNew ? `gte(t,${revealAt.toFixed(2)})` : `gte(t,${appearAt.toFixed(2)})`;
+      const bodyColor = isLost ? `${NWV2_NAVY}@0.08` : isNew ? `${NWV2_GOLD}@0.38` : `${NWV2_GOLD}@0.20`;
+      const ribbonColor = isLost ? `${NWV2_NAVY}@0.3` : NWV2_GOLD_DARK;
+      filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${bodyColor}:t=fill:enable='${enableExpr}'[c${idx}]`);
+      last = `c${idx}`; idx++;
+      filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${Math.round(cell * 0.16)}:color=${ribbonColor}:t=fill:enable='${enableExpr}'[c${idx}]`);
+      last = `c${idx}`; idx++;
+      filters.push(`[${last}]drawbox=x=${cx}:y=${cy}:w=${cell}:h=${cell}:color=${ribbonColor}:t=2:enable='${enableExpr}'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+  } else {
+    // Two proportional horizontal bars — for comparing two raw VALUES
+    // (e.g. two final dollar totals) where there's no discrete unit to
+    // visually delete. Before-bar grows in first at full width; after-bar
+    // grows in at the reveal moment, sized to its real proportion of the
+    // before value (same before/after scale already computed above).
+    const bar1Y = gridY0, bar2Y = gridY0 + barH + barGap;
+    const bar1W = Math.max(6, Math.round(BAR_MAX_W * (barBefore / barMax)));
+    const bar2W = Math.max(6, Math.round(BAR_MAX_W * (barAfter / barMax)));
+    // labels are never truncated to a fixed short length (a clipped label
+    // reads as a different label); the caller bounds their length.
+    const safeBeforeRowLabel = nwv2WhiteSanitize(beforeLabel || '', 60);
+    const safeAfterRowLabel = nwv2WhiteSanitize(afterLabel || '', 60);
+    filters.push(`[${last}]drawbox=x=${gridX0}:y=${bar1Y}:w='min(${bar1W},${bar1W}*max(0,t-0.3)/0.6)':h=${barH}:color=${NWV2_GOLD}@0.75:t=fill:enable='gte(t,0.3)'[c${idx}]`);
+    last = `c${idx}`; idx++;
+    if (safeBeforeRowLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeRowLabel}':fontcolor=${NWV2_NAVY}@0.75:fontsize=28:box=0:x=${gridX0}:y=${bar1Y - 38}:enable='gte(t,0.3)'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeBeforeValue}':fontcolor=${NWV2_NAVY}:fontsize=52:box=0:x=${gridX0 + bar1W + 24}:y=${bar1Y + Math.round((barH - 52) / 2)}:enable='gte(t,0.9)'[c${idx}]`);
+    last = `c${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${gridX0}:y=${bar2Y}:w='min(${bar2W},${bar2W}*max(0,t-${revealAt.toFixed(2)})/0.6)':h=${barH}:color=${NWV2_NAVY}@0.55:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+    if (safeAfterRowLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterRowLabel}':fontcolor=${NWV2_NAVY}@0.75:fontsize=28:box=0:x=${gridX0}:y=${bar2Y - 38}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAfterValue}':fontcolor=${NWV2_GOLD_DARK}:fontsize=52:box=0:x=${gridX0 + bar2W + 24}:y=${bar2Y + Math.round((barH - 52) / 2)}:enable='gte(t,${(revealAt + 0.5).toFixed(2)})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
+  // Causal anchor line (optional): whatever stays constant across
+  // before/after. Drawn ONLY when the caller supplies it — the primitive no
+  // longer falls back to a literal from any particular script.
+  const safeAnchor = nwv2WhiteSanitize(anchorText || '', 60);
+  if (safeAnchor) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeAnchor}':fontcolor=${NWV2_NAVY}@0.65:fontsize=30:box=0:x=(${NWV2L_W}-text_w)/2:y=${mode === 'bar' ? panelY - 70 : 70}:enable='gte(t,0.15)'[c${idx}]`);
+    last = `c${idx}`; idx++;
+  }
+  // Consequence badge — the delta, styled as a highlighted pill, below the panel at the reveal moment.
+  if (delta !== 0) {
+    const badgeText = deltaTextOverride
+      ? nwv2WhiteSanitize(deltaTextOverride, 34)
+      : nwv2WhiteSanitize((direction === 'down' ? '-' : '+') + delta + (deltaSuffix ? ' ' + deltaSuffix : ''), 24);
+    const badgeW = Math.max(360, String(badgeText).length * 30 + 70), badgeH = 90, badgeX = (NWV2L_W - badgeW) / 2, badgeY = panelY + panelH + 30;
+    // The renderer cannot know whether a change is good or bad (a payment
+    // that fell is good, a balance that fell is not): the caller states the
+    // tone. Default preserves the earlier look for decreases (red) and uses a
+    // neutral tone for increases.
+    const tone = deltaTone || (direction === 'down' ? 'negative' : 'neutral');
+    const toneColor = tone === 'positive' ? '0x2f7d4f' : tone === 'negative' ? '0xb0413e' : NWV2_NAVY;
+    const toneFillAlpha = tone === 'neutral' ? '0.10' : '0.12';
+    filters.push(`[${last}]drawbox=x=${badgeX}:y=${badgeY}:w=${badgeW}:h=${badgeH}:color=${toneColor}@${toneFillAlpha}:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${badgeText}':fontcolor=${toneColor}:fontsize=48:box=0:x=(${NWV2L_W}-text_w)/2:y=${badgeY + 20}:enable='gte(t,${revealAt.toFixed(2)})'[c${idx}]`);
+    last = `c${idx}`; idx++;
+    // optional second line: a DIFFERENT measure that the caller's verified
+    // calculation ties to the delta (e.g. the same change per year); it is
+    // labelled by the caller and never styled as the delta itself.
+    const safeNote = nwv2WhiteSanitize(deltaNote || '', 48);
+    if (safeNote) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeNote}':fontcolor=${NWV2_NAVY}@0.75:fontsize=40:box=0:x=(${NWV2L_W}-text_w)/2:y=${badgeY + badgeH + 22}:enable='gte(t,${(revealAt + 0.4).toFixed(2)})'[c${idx}]`);
+      last = `c${idx}`; idx++;
+    }
+  }
+  filters.push(nwv2LongCameraPushFilter(last, `c${idx}`, dur, 25));
+  last = `c${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `c${idx}`));
+  last = `c${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long share-compare segment');
+  return outPath;
+}
+
+// Day-progression scene — Storyboard Implementation Proof v3. PM rejection
+// of v2 was explicit: "four small boxes centered inside a mostly empty
+// frame" — time needs to be the visual subject, at dramatically larger
+// scale, with a hero "2-3 DAYS / Until Reinvestment" headline (heroText/
+// heroSub) the way the approved storyboard leads with it, over a full-
+// frame illustrated background (bgPath, same pipeline as the other new
+// scenes) instead of blank canvas. Cards are enlarged and occupy real
+// frame area; falls back to the v2 white-canvas rendering with no hero
+// headline when no background asset is supplied.
+// Storyboard Implementation Proof v5 — CEO: timeline "uses only a small
+// portion of the canvas," cards must "span most of the useful frame
+// width." Cards enlarged 300x220 -> 400x320, spanning ~1750 of 1920px.
+async function nwv2LongDayCardsSegment({ heygenLocalPath, seekSec, title, heroText, heroSub, days, dur, meaningEventAtSec, bgPath, outPath }) {
+  const hasBg = !!bgPath;
+  const items = (days || []).slice(0, 4);
+  const n = Math.max(1, items.length);
+  // A visible margin is left around the cards only when a background
+  // exists, so v6's environmental context actually shows.
+  const cardW = hasBg ? 360 : 400, cardH = hasBg ? 280 : 320, gap = hasBg ? 44 : 50;
+  const totalW = n * cardW + (n - 1) * gap;
+  const startX = Math.round((NWV2L_W - totalW) / 2);
+  const cardY = hasBg ? 640 : 600;
+  const lineY = cardY - 50;
+  const revealSpan = Math.max(0.6, (dur - 1.2) / n);
+
+  const inputArgs = ['-ss', String(seekSec.toFixed(2)), '-i', heygenLocalPath];
+  let bgIn = null;
+  if (hasBg) { inputArgs.push('-loop', '1', '-t', dur.toFixed(2), '-i', bgPath); bgIn = 1; }
+
+  const filters = [];
+  let last, idx = 1;
+  if (hasBg) {
+    const totalFrames = Math.max(1, Math.round(dur * 25));
+    filters.push(`[${bgIn}:v]scale=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}:force_original_aspect_ratio=increase,crop=${Math.round(NWV2L_W * 1.08)}:${Math.round(NWV2L_H * 1.08)}[d0pre]`);
+    filters.push(`[d0pre]boxblur=luma_radius=10:luma_power=1:chroma_radius=10:chroma_power=1[d0blur]`);
+    filters.push(`[d0blur]zoompan=z='min(zoom+0.0007,1.05)':d=${totalFrames}:s=${NWV2L_W}x${NWV2L_H}:fps=25[d0scaled]`);
+    filters.push(`[d0scaled]drawbox=x=0:y=0:w=${NWV2L_W}:h=${NWV2L_H}:color=${NWV2_WHITE_BG}@0.15:t=fill[d0]`);
+  } else {
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${NWV2L_W}x${NWV2L_H}:d=${dur.toFixed(2)}[d0]`);
+  }
+  last = 'd0';
+  const titleColor = NWV2_NAVY;
+  const boxOpt = hasBg ? `box=1:boxcolor=${NWV2_WHITE_BG}@0.55:boxborderw=14` : `box=0`;
+
+  // Hero headline — "2-3 DAYS / Until Reinvestment" — the visual subject,
+  // matching the storyboard's own hierarchy, large and above the cards.
+  const safeHero = nwv2WhiteSanitize(heroText || '', 16);
+  const safeHeroSub = nwv2WhiteSanitize(heroSub || '', 30);
+  if (safeHero) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHero}':fontcolor=${NWV2_GOLD_DARK}:fontsize=${hasBg ? 86 : 100}:${boxOpt}:x=(${NWV2L_W}-text_w)/2:y=${hasBg ? 110 : 130}:enable='gte(t,0.15)'[d${idx}]`);
+    last = `d${idx}`; idx++;
+  }
+  if (safeHeroSub) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeHeroSub}':fontcolor=${titleColor}:fontsize=38:${boxOpt}:x=(${NWV2L_W}-text_w)/2:y=${hasBg ? 220 : 260}:enable='gte(t,0.15)'[d${idx}]`);
+    last = `d${idx}`; idx++;
+  }
+  const safeTitle = nwv2WhiteSanitize(title || '', 40);
+  if (safeTitle && !safeHero) {
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeTitle}':fontcolor=${titleColor}:fontsize=38:${boxOpt}:x=(${NWV2L_W}-text_w)/2:y=280:enable='gte(t,0.15)'[d${idx}]`);
+    last = `d${idx}`; idx++;
+  }
+  // Progress line under the cards, drawing itself in as each day activates.
+  const lineColor = `${NWV2_GOLD}@0.5`;
+  filters.push(`[${last}]drawbox=x=${startX}:y=${lineY}:w='min(${totalW},${totalW}*max(0,t-0.5)/${(revealSpan * n).toFixed(2)})':h=4:color=${lineColor}:t=fill:enable='gte(t,0.5)'[d${idx}]`);
+  last = `d${idx}`; idx++;
+  items.forEach((it, i) => {
+    const x0 = startX + i * (cardW + gap);
+    const revealAt = 0.6 + i * revealSpan;
+    const isLast = i === items.length - 1;
+    const bg = isLast ? `${NWV2_GOLD}@0.20` : `${NWV2_WHITE_CARD}@${hasBg ? 0.85 : 1.0}`;
+    const border = isLast ? NWV2_GOLD_DARK : `${NWV2_NAVY}@0.3`;
+    const labelColor = isLast ? NWV2_GOLD_DARK : titleColor;
+    const safeLabel = nwv2WhiteSanitize(it.label || '', 16);
+    const safeSub = nwv2WhiteSanitize(it.sub || '', 22);
+    filters.push(`[${last}]drawbox=x=${x0}:y=${cardY}:w=${cardW}:h=${cardH}:color=${bg}:t=fill:enable='gte(t,${revealAt.toFixed(2)})'[d${idx}]`);
+    last = `d${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${x0}:y=${cardY}:w=${cardW}:h=${cardH}:color=${border}:t=3:enable='gte(t,${revealAt.toFixed(2)})'[d${idx}]`);
+    last = `d${idx}`; idx++;
+    if (safeLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeLabel}':fontcolor=${labelColor}:fontsize=${hasBg ? 48 : 56}:box=0:x=${x0}+(${cardW}-text_w)/2:y=${cardY + (hasBg ? 90 : 100)}:enable='gte(t,${(revealAt + 0.1).toFixed(2)})'[d${idx}]`);
+      last = `d${idx}`; idx++;
+    }
+    if (safeSub) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeSub}':fontcolor=${titleColor}@0.75:fontsize=30:box=0:x=${x0}+(${cardW}-text_w)/2:y=${cardY + (hasBg ? 170 : 200)}:enable='gte(t,${(revealAt + 0.15).toFixed(2)})'[d${idx}]`);
+      last = `d${idx}`; idx++;
+    }
+  });
+  filters.push(nwv2LongCameraPushFilter(last, `d${idx}`, dur, 25));
+  last = `d${idx}`; idx++;
+  filters.push(nwv2LongLogoFilter(last, `d${idx}`));
+  last = `d${idx}`; idx++;
+  filters.push(`[${last}]fade=t=in:st=0:d=0.4:color=${NWV2_WHITE_BG},fade=t=out:st=${Math.max(0, dur - 0.4).toFixed(2)}:d=0.4:color=${NWV2_WHITE_BG}[outv]`);
+  const filterComplex = filters.join(';');
+  await execFileAsync(ffmpegInstaller.path, [
+    '-y', ...inputArgs,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]', '-map', '0:a?',
+    '-t', dur.toFixed(2),
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast',
+    '-c:a', 'aac', '-b:a', '192k',
+    outPath,
+  ], { timeout: 60000, maxBuffer: 1024 * 1024 * 40 });
+  await smAssertValidMediaFile(outPath, 'long day-cards segment');
+  return outPath;
+}
+
+// CEO-gated orchestrator for the Long-format landscape candidate. Explicit
+// `beats` array (same reasoning as the Short's white-motion orchestrator —
+// precise control over which single beat carries the avatar).
+// Split into per-segment + concat calls (below) rather than one orchestrator
+// — a real render of this 7-beat/~100s candidate hung past 60s with no
+// response, which is the Vercel maxDuration ceiling on this deployment
+// (see the `export const config = { maxDuration: 60 }` a few hundred lines
+// down) killing the function mid-flight. Each segment's own encode is well
+// under that budget individually; the loop across beats is what didn't fit
+// in one request. The client now drives the loop, calling one segment per
+// HTTP request, then a separate concat call once all segments are in
+// storage — mirroring exactly how every segment in this file has already
+// been tested individually throughout this project, just formalized as
+// the real architecture for anything long enough to need it.
+// Bounded HeyGen implementation — request contract changed from
+// {heygen_video_url, start_sec} (seek into one shared full-length HeyGen
+// render) to {narration_audio_url, avatar_clip_url}: narration_audio_url is
+// this beat's own already-sliced segment of the ONE ElevenLabs master
+// narration (always required — used as audio for every beat type, avatar
+// or not), avatar_clip_url is the short HeyGen audio-driven clip (only
+// present for the avatar_panel treatment). Every non-avatar segment builder
+// below is called completely UNCHANGED (heygenLocalPath/seekSec=0 params) —
+// they only ever read audio from that param and construct their own visuals
+// from scratch, confirmed by inspection before this change, so a per-beat
+// narration slice standing in for what used to be a shared-file seek
+// produces an identical result.
+// Storyboard Implementation Proof v3 — shared helper for the four new
+// scene types: resolves ONE full-frame illustrated background per beat
+// via beat.bgConcept (a fresh, single-beat Ideogram budget — never
+// unbounded), returning null when the beat has no bgConcept or generation
+// fails/hits budget, so every caller's existing bgPath-optional fallback
+// keeps working exactly as before.
+async function _nwv2ResolveSceneBg(beat) {
+  if (!beat.bgConcept) return null;
+  const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+  const bg = await nextwaveV2ResolveOrGenerateSceneBackground(beat.bgConcept, ideogramBudget);
+  if (!bg || !bg.path) return null;
+  return { path: bg.path, info: { generated: ideogramBudget.generated, spend_usd: ideogramBudget.spent_usd || 0 } };
+}
+
+// Proof B — NextWave V2 architecture generalization test. This is the
+// "visual classifier" half of the meaning-unit -> treatment pipeline: a
+// GENERAL, keyword/pattern rule set over the section label + unit text
+// (not a lookup table for any one script), reusing the same
+// nextwaveHasDynamicNumbers/NEXTWAVE_V2_DYNAMIC_NUMBER_RE infrastructure
+// nextwaveClassifyVisualIntent already relies on for the older HUD
+// pipeline. Returns one of the Long-format treatments that already exist
+// as reusable render primitives (avatar_panel/money_flow/stock_chart/
+// share_compare/calc_card) — this function decides WHICH one fits a given
+// unit's language, it never decides WHAT specific numbers/labels to put
+// in it (that binding happens separately, per script, since it requires
+// the real verified figures — see Section 7 of the Proof B order).
+const NWV2_LONG_RECURRING_CUES = ['a month', 'each month', 'every month', 'per month', 'monthly', 'a week', 'each week', 'every week', 'per week', 'weekly', 'contribute', 'contributing', 'invest', 'investing', 'deposit', 'depositing'];
+const NWV2_LONG_GROWTH_CUES = ['grow', 'grows', 'growing', 'growth', 'compound', 'compounding', 'return', 'returns', 'annual', 'over the next', 'over time', 'portfolio value', 'balance'];
+const NWV2_LONG_COMPARE_CUES = ['instead of', 'versus', ' vs ', 'compare', 'compared', 'wait', 'waiting', 'delay', 'later', 'gap', 'difference', 'cost you', 'costs you'];
+function nwv2ClassifyLongTreatment(unitText, sectionLabel) {
+  const text = String(unitText || '').toLowerCase();
+  const section = String(sectionLabel || '').toUpperCase();
+  const hasNumber = nextwaveHasDynamicNumbers(text);
+  const hasCue = (list) => list.some((kw) => text.includes(kw));
+  if (section.includes('HOOK') || section.includes('CTA') || section.includes('CLOSE') || section.includes('OUTRO')) {
+    return 'avatar_panel';
+  }
+  // A unit describing a value at MULTIPLE distinct points in time/duration
+  // (e.g. "...after ten years" and "...for the remaining five years" in
+  // the same unit) is describing a TRAJECTORY, not a single before/after
+  // snapshot — that's a time-series chart even if comparison words like
+  // "wait" also appear in the same sentence. General signal (count of
+  // digit-duration mentions), not specific to any one script.
+  // Reuses the same generalized number-phrase matcher nextwaveHasDynamicNumbers
+  // relies on (handles both digit and spelled-out forms, e.g. "10 years" and
+  // "ten years") rather than a narrow digit-only pattern, then filters to the
+  // matches that are actually durations.
+  const allNumberMatches = [...text.matchAll(new RegExp(NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, 'gi'))].map((m) => m[0]);
+  const durationMentions = allNumberMatches.filter((m) => /(?:days?|weeks?|months?|years?)\s*$/i.test(m));
+  if (durationMentions.length >= 2 && hasCue(NWV2_LONG_GROWTH_CUES)) return 'stock_chart';
+  // Comparison language + a number wins over growth language when both are
+  // present (e.g. "you end up with only $36,738" is both a growth AND a
+  // comparison statement) — the comparison framing is the more specific,
+  // more informative classification for a single-snapshot delay/gap
+  // narrative (as opposed to the multi-duration trajectory case above).
+  if (hasCue(NWV2_LONG_COMPARE_CUES) && hasNumber) return 'share_compare';
+  // Recurring-contribution language is checked before growth language: a
+  // sentence like "invest $500 every month, assuming an 8% annual return"
+  // matches both cue sets, but the concrete recurring ACTION (money moving
+  // each period) is the more specific, more visualizable concept — growth/
+  // rate wording alone (with no recurring cue) still correctly falls
+  // through to stock_chart below.
+  if (hasCue(NWV2_LONG_RECURRING_CUES) && hasNumber) return 'money_flow';
+  if (hasCue(NWV2_LONG_GROWTH_CUES) && hasNumber) return 'stock_chart';
+  return hasNumber ? 'calc_card' : 'avatar_panel';
+}
+
+// Server-side, independently callable/testable so the classification can
+// be inspected and verified before any rendering happens — not just
+// asserted. Read-only, no CEO session required (mirrors the existing
+// debug/plan actions' access level).
+async function nextwaveV2ClassifyLongBeats(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script } = req.body || {};
+  if (!script || typeof script !== 'string') return res.status(400).json({ ok: false, error: 'script (string) required' });
+  const units = nextwaveSegmentMeaningUnits(script);
+  const bySection = new Map();
+  units.forEach((u) => {
+    if (!bySection.has(u.section)) bySection.set(u.section, []);
+    bySection.get(u.section).push(u);
+  });
+  const beats = [...bySection.entries()].map(([section, sectionUnits]) => {
+    const combinedText = sectionUnits.map((u) => u.text).join(' ');
+    return {
+      section,
+      units: sectionUnits.map((u) => u.unit),
+      text: combinedText,
+      treatment: nwv2ClassifyLongTreatment(combinedText, section),
+    };
+  });
+  return res.status(200).json({ ok: true, unit_count: units.length, beats });
+}
+// Autonomous Storyboard Brain — inspectable independently of rendering. Pure
+// deterministic computation over the script text: no Anthropic call, no
+// vendor call, no spend, no session required (same access posture as
+// nextwave_v2_classify_long_beats / nextwave_v2_debug_storyboard). The
+// production functions it builds on are passed in, not duplicated.
+async function nextwaveV2StoryboardBrainAction(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script (string) required' });
+  if (script.length > 6000) return res.status(400).json({ ok: false, error: 'script too long (max 6000 characters)' });
+  try {
+    const out = nextwaveV2BuildStoryboard(script, {
+      segmentMeaningUnits: nextwaveSegmentMeaningUnits,
+      wordsToNumber: _nextwaveWordsToNumber,
+      numberRegexSource: NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source,
+      classifyLongTreatment: nwv2ClassifyLongTreatment,
+    });
+    return res.status(out.ok ? 200 : 422).json(out);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+async function nextwaveV2CompositeLongSegmentRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const {
+    narration_audio_url, avatar_clip_url, beat, dur_sec, render_id, beat_index,
+    alignment, aligned_script, beat_start_sec,
+  } = body;
+  if (!narration_audio_url || !beat || !dur_sec || !render_id || beat_index == null) {
+    return res.status(400).json({ ok: false, error: 'missing_required_fields' });
+  }
+  if (beat.treatment === 'avatar_panel' && !avatar_clip_url) {
+    return res.status(400).json({ ok: false, error: 'avatar_clip_url_required_for_avatar_panel_beat' });
+  }
+  // PM correction (Continuous Visual Storytelling proof) — meaning-event
+  // synchronization. The client already has the full master-narration
+  // alignment (from nextwaveV2PrepareMasterNarration) and each beat's real
+  // absolute start second; when a beat carries a meaning_event_pattern (a
+  // dollar amount, a percentage, a specific phrase to find in the script),
+  // this resolves its REAL spoken timestamp via nwv2FindMeaningEventTime
+  // (pure local lookup, no vendor call) and converts it to a time relative
+  // to THIS beat's own local timeline — what the new financial-motion
+  // segment builders' `meaningEventAtSec` parameter expects. Falls through
+  // to undefined (each builder's own fixed-fraction-of-duration default) if
+  // the alignment/pattern/beat_start aren't all present, or if no match is
+  // found — never a hard failure, just a graceful degrade to beat-level timing.
+  let meaningEventAtSec;
+  if (beat.meaning_event_pattern && alignment && aligned_script && beat_start_sec != null) {
+    try {
+      const pattern = new RegExp(beat.meaning_event_pattern);
+      const hit = nwv2FindMeaningEventTime(alignment, aligned_script, pattern, Number(beat.meaning_event_from_char) || 0);
+      if (hit) meaningEventAtSec = hit.startSec - Number(beat_start_sec);
+    } catch (_) { /* malformed pattern — degrade to default timing */ }
+  }
+  const narrationLocalPath = join(tmpdir(), `nwv2longseg-narr-${render_id}-${beat_index}.mp3`);
+  const avatarLocalPath = avatar_clip_url ? join(tmpdir(), `nwv2longseg-avatar-${render_id}-${beat_index}.mp4`) : null;
+  const segPath = join(tmpdir(), `nwv2longseg-out-${render_id}-${beat_index}.mp4`);
+  try {
+    await smDownloadToFile(narration_audio_url, narrationLocalPath);
+    await smAssertValidMediaFile(narrationLocalPath, 'downloaded narration slice');
+    if (avatarLocalPath) {
+      await smDownloadToFile(avatar_clip_url, avatarLocalPath);
+      await smAssertValidMediaFile(avatarLocalPath, 'downloaded HeyGen avatar clip');
+    }
+    const dur = Number(dur_sec);
+    const isFirst = beat_index === 0;
+    let segmentType = 'calc_card';
+    let illustrationInfo = null;
+
+    if (beat.treatment === 'avatar_panel') {
+      // Storyboard Implementation Proof v6 — A1/A6: an optional reused-asset
+      // icon (beat.contextIconConcept) fills the empty left column with
+      // subtle dividend/investment context on open, or visually connects
+      // back to the lost-shares outcome on close (beat.contextCaption e.g.
+      // "-3 SHARES"). Same reuse-first Ideogram pipeline as every other
+      // icon in this file; omitting it still renders correctly.
+      let contextIcon = null;
+      if (beat.contextIconConcept) {
+        const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+        const ic = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.contextIconConcept, ideogramBudget, 'white');
+        if (ic && ic.path) contextIcon = { path: ic.path, keyColor: await _nextwaveV2SampleCornerColor(ic.path) };
+        illustrationInfo = { generated: ideogramBudget.generated, spend_usd: ideogramBudget.spent_usd || 0 };
+      }
+      await nwv2LongAvatarPanelSegment({
+        heygenLocalPath: avatarLocalPath, audioLocalPath: narrationLocalPath, dur, text: beat.text2 || beat.text, isCta: !!beat.isCta,
+        fadeEdge: isFirst ? null : 'in', avatarCapSec: NWV2_AVATAR_CAP_SEC_LONG,
+        contextIconPath: contextIcon && contextIcon.path, contextIconKeyColor: contextIcon && contextIcon.keyColor,
+        contextCaption: beat.contextCaption, outPath: segPath,
+      });
+      segmentType = 'avatar_panel';
+    } else if (beat.treatment === 'comparison') {
+      await nwv2LongComparisonSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        leftTitle: beat.leftTitle, leftBody: beat.leftBody, rightTitle: beat.rightTitle, rightBody: beat.rightBody,
+        outPath: segPath,
+      });
+      segmentType = 'comparison';
+    } else if (beat.treatment === 'timeline') {
+      await nwv2LongTimelineSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, title: beat.title, points: beat.points, dur, outPath: segPath });
+      segmentType = 'timeline';
+    } else if (beat.treatment === 'day_cards') {
+      const bg = await _nwv2ResolveSceneBg(beat);
+      if (bg && bg.info) illustrationInfo = bg.info;
+      await nwv2LongDayCardsSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        title: beat.title, heroText: beat.heroText, heroSub: beat.heroSub, days: beat.days,
+        bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
+      });
+      segmentType = 'day_cards';
+    } else if (beat.treatment === 'money_flow') {
+      // Storyboard Implementation Proof v4 — PM rejected v3's full-frame AI
+      // cityscape as "sci-fi finance documentary," not the CEO-approved
+      // clean/modern reference, and said information must be the hero, not
+      // the background. Back to the clean white canvas, with real large
+      // illustrated coin/brokerage icons (beat.fromIconConcept/toIconConcept)
+      // at the path's two ends via the exact same reuse-first Ideogram
+      // pipeline as the 'illustration' treatment. Optional — omitting them
+      // still renders correctly (nwv2LongMoneyFlowSegment's text-only
+      // fallback), never a hard failure.
+      let fromIcon = null, toIcon = null;
+      if (beat.fromIconConcept || beat.toIconConcept) {
+        const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+        if (beat.fromIconConcept) {
+          const ic = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.fromIconConcept, ideogramBudget, 'white');
+          if (ic && ic.path) fromIcon = { path: ic.path, keyColor: await _nextwaveV2SampleCornerColor(ic.path) };
+        }
+        if (beat.toIconConcept) {
+          const ic = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.toIconConcept, ideogramBudget, 'white');
+          if (ic && ic.path) toIcon = { path: ic.path, keyColor: await _nextwaveV2SampleCornerColor(ic.path) };
+        }
+        illustrationInfo = { generated: ideogramBudget.generated, spend_usd: ideogramBudget.spent_usd || 0 };
+      }
+      // Storyboard Implementation Proof v6 — A2: PM asked for a real
+      // financial-story ENVIRONMENT behind the money's movement, not just
+      // isolated icons on blank canvas. Same reuse-first scene-background
+      // resolver as day_cards/stock_chart, merged into the same
+      // illustrationInfo spend report.
+      const mfBg = await _nwv2ResolveSceneBg(beat);
+      if (mfBg && mfBg.info) {
+        illustrationInfo = {
+          generated: [...(illustrationInfo ? illustrationInfo.generated : []), ...mfBg.info.generated],
+          spend_usd: (illustrationInfo ? illustrationInfo.spend_usd : 0) + mfBg.info.spend_usd,
+        };
+      }
+      await nwv2LongMoneyFlowSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        fromLabel: beat.fromLabel, toLabel: beat.toLabel, amountText: beat.amountText,
+        fromIconPath: fromIcon && fromIcon.path, fromIconKeyColor: fromIcon && fromIcon.keyColor,
+        toIconPath: toIcon && toIcon.path, toIconKeyColor: toIcon && toIcon.keyColor,
+        bgPath: mfBg && mfBg.path, meaningEventAtSec, outPath: segPath,
+      });
+      segmentType = 'money_flow';
+    } else if (beat.treatment === 'stock_chart') {
+      const bg = await _nwv2ResolveSceneBg(beat);
+      if (bg && bg.info) illustrationInfo = bg.info;
+      await nwv2LongStockChartSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        label: beat.label, subLabel: beat.subLabel, yTicks: beat.yTicks, yMax: beat.yMax, milestones: beat.milestones, changeText: beat.changeText, direction: beat.direction,
+        series: beat.series, axisStartLabel: beat.axisStartLabel, axisEndLabel: beat.axisEndLabel,
+        markerIndex: beat.markerIndex, markerLabel: beat.markerLabel,
+        bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
+      });
+      segmentType = 'stock_chart';
+    } else if (beat.treatment === 'share_compare') {
+      // Storyboard Implementation Proof v6 — A5: re-enabled bgConcept (v4
+      // had disabled it entirely; the actual numbers still lead, but a
+      // scene environment is now allowed behind the transaction panel).
+      // beforeValue/afterValue still carry the explicit "100 SHARES" /
+      // "97 SHARES" hero numbers.
+      const bg = await _nwv2ResolveSceneBg(beat);
+      if (bg && bg.info) illustrationInfo = bg.info;
+      await nwv2LongShareCompareSegment({
+        heygenLocalPath: narrationLocalPath, seekSec: 0, dur,
+        beforeLabel: beat.beforeLabel, beforeCount: beat.beforeCount, beforeValue: beat.beforeValue,
+        afterLabel: beat.afterLabel, afterCount: beat.afterCount, afterValue: beat.afterValue,
+        displayMode: beat.displayMode, anchorText: beat.anchorText, deltaSuffix: beat.deltaSuffix, deltaTextOverride: beat.deltaTextOverride, deltaNote: beat.deltaNote, headerLabel: beat.headerLabel, deltaTone: beat.deltaTone,
+        bgPath: bg && bg.path, meaningEventAtSec, outPath: segPath,
+      });
+      segmentType = 'share_compare';
+    } else if (beat.treatment === 'illustration' && beat.concept) {
+      const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+      const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
+      if (illustration && illustration.path) {
+        const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+        await nwv2LongIllustrationSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, illustrationPath: illustration.path, keyColor, dur, outPath: segPath });
+        segmentType = 'illustration';
+        illustrationInfo = { generated: ideogramBudget.generated, spend_usd: ideogramBudget.spent_usd || 0 };
+      } else {
+        await nwv2LongCalcCardSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, title: beat.text, values: beat.values || [], dur, outPath: segPath });
+        segmentType = 'calc_card_fallback';
+      }
+    } else {
+      await nwv2LongCalcCardSegment({ heygenLocalPath: narrationLocalPath, seekSec: 0, title: beat.title || beat.text, values: beat.values || [], dur, outPath: segPath });
+      segmentType = 'calc_card';
+    }
+
+    const buf = await readFile(segPath);
+    const segUrl = await sbStorageUpload(`nextwave-v2-preview/long-${render_id}-seg${beat_index}.mp4`, buf, 'video/mp4');
+    return res.status(200).json({
+      ok: true,
+      segment_url: segUrl,
+      segment_type: segmentType,
+      beat_index,
+      dur: Number(dur.toFixed(2)),
+      illustration: illustrationInfo,
+      meaning_event_at_sec: (typeof meaningEventAtSec === 'number') ? Number(meaningEventAtSec.toFixed(2)) : null,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(narrationLocalPath).catch(() => {});
+    if (avatarLocalPath) await unlink(avatarLocalPath).catch(() => {});
+    await unlink(segPath).catch(() => {});
+  }
+}
+
+async function nextwaveV2ConcatLongRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { segment_urls, render_id } = body;
+  if (!Array.isArray(segment_urls) || !segment_urls.length || !render_id) {
+    return res.status(400).json({ ok: false, error: 'missing_segment_urls_or_render_id' });
+  }
+  const localPaths = [];
+  try {
+    for (let i = 0; i < segment_urls.length; i++) {
+      const p = join(tmpdir(), `nwv2longconcat-${render_id}-${i}.mp4`);
+      await smDownloadToFile(segment_urls[i], p);
+      await smAssertValidMediaFile(p, `long segment ${i + 1}/${segment_urls.length} before concat`);
+      localPaths.push(p);
+    }
+    // Live Validation Defect #11 — try the fast stream-copy concat first (see
+    // nextwaveV2ConcatLongSegmentsFast above: these 27 segments are our own
+    // uniformly-encoded output, not heterogeneous uploads, so a re-encode is
+    // not technically required and the fast path avoids the 90s execFileAsync
+    // timeout a real 27-segment re-encode was confirmed to hit in production).
+    // Falls back to the existing, unchanged re-encode path if the fast path
+    // fails for any reason — no behavior change for that fallback.
+    let concatOut;
+    try {
+      concatOut = await nextwaveV2ConcatLongSegmentsFast({ paths: localPaths, id: render_id });
+    } catch (fastErr) {
+      concatOut = await nextwaveV2ConcatCanvasSegments({ paths: localPaths, id: render_id });
+    }
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/long-${render_id}.mp4`, finalBuf, 'video/mp4');
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      render_id,
+    });
+  } catch (e) {
+    // Live Validation Defect #11 — the prior unbounded e.message persisted a
+    // multi-hundred-KB blob of raw ffmpeg per-frame progress (Node's execFile
+    // error format is "Command failed: <cmd>\n<stderr>", and default ffmpeg
+    // logging writes every frame's progress to stderr), making a real failure
+    // undiagnosable without another blind production run. The actual failure
+    // reason (if any) is always at the tail, not buried in the input banners,
+    // so this keeps only the last 2000 chars — still enough to diagnose a
+    // genuine ffmpeg error, no secrets involved (only /tmp paths and codec info).
+    const _msg = String((e && e.message) || e);
+    const _bounded = _msg.length > 2000 ? '…' + _msg.slice(-2000) : _msg;
+    return res.status(500).json({ ok: false, error: _bounded });
+  } finally {
+    for (const p of localPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// Long-format thumbnail — true 1280x720 16:9. Same deterministic-composition
+// principle as the Short's thumbnail (headline + contrast boxes), sized and
+// laid out for landscape instead of stretching the portrait design.
+async function nextwaveV2GenerateLongThumbnail(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { headline, fromValue, fromLabel, toValue, toLabel } = body;
+  if (!headline || !fromValue || !toValue) return res.status(400).json({ ok: false, error: 'missing_headline_or_values' });
+  const W = 1280, H = 720;
+  const renderId = randomBytes(6).toString('hex');
+  const outPath = join(tmpdir(), `nwv2longthumb-${renderId}.png`);
+  try {
+    const lines = nwv2ProofWrapText(headline, 24);
+    const lineH = 62;
+    const blockH = lines.length * lineH;
+    const startY = 90;
+    const filters = [];
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${W}x${H}:d=1[t0]`);
+    let last = 't0', idx = 1;
+    lines.forEach((line, li) => {
+      const safe = line.replace(/['":\\\[\],;%]/g, '');
+      const y = startY + li * lineH;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${NWV2_NAVY}:fontsize=48:box=0:x=(${W}-text_w)/2:y=${y}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    });
+    const boxW = 300, boxH = 220, gap = 34;
+    const totalW = boxW * 2 + gap;
+    const boxesX = Math.round((W - totalW) / 2);
+    const boxesY = startY + blockH + 60;
+    const fromX = boxesX, toX = boxesX + boxW + gap;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_NAVY}@0.4:t=3[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${toX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.92:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    const safeFromVal = nwv2WhiteSanitize(fromValue, 18);
+    const safeFromLabel = nwv2WhiteSanitize(fromLabel || '', 22).replace(/[,;]/g, '');
+    const safeToVal = nwv2WhiteSanitize(toValue, 18);
+    const safeToLabel = nwv2WhiteSanitize(toLabel || '', 22).replace(/[,;]/g, '');
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromVal}':fontcolor=${NWV2_NAVY}:fontsize=42:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 58}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeFromLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=24:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 130}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToVal}':fontcolor=white:fontsize=42:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 58}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeToLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToLabel}':fontcolor=white@0.85:fontsize=24:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 130}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='>>':fontcolor=${NWV2_GOLD_DARK}:fontsize=40:box=0:x=${fromX + boxW}+(${gap}-text_w)/2:y=${boxesY + boxH / 2 - 22}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='NEXTWAVE':fontcolor=${NWV2_NAVY}:fontsize=30:x=40:y=36[t${idx}]`);
+    last = `t${idx}`;
+    const filterComplex = filters.join(';');
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-filter_complex', filterComplex,
+      '-map', `[${last}]`,
+      '-frames:v', '1',
+      outPath,
+    ], { timeout: 20000 });
+    const buf = await readFile(outPath);
+    const thumbUrl = await sbStorageUpload(`nextwave-v2-preview/longthumb-${renderId}.png`, buf, 'image/png');
+    return res.status(200).json({ ok: true, thumbnail_url: thumbUrl, render_id: renderId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(outPath).catch(() => {});
+  }
+}
+
+// CEO-gated orchestrator. Takes an explicit `beats` array (NOT the
+// automatic visual-plan classifier) because the classifier's own grouping
+// merges hook/close sentences into neighboring evidence beats (confirmed
+// empirically in the prior phase) — this structure needs precise control
+// over which single beat is HOOK (card, never avatar) and which single
+// beat is CLOSE (avatar, never card), so the caller supplies that mapping
+// directly. Each beat: { treatment: 'hook'|'calc'|'illustration'|'close',
+// text, values?, headline?, concept? }.
+// Bounded HeyGen implementation — request contract changed from
+// {heygen_video_url, real_duration_sec} (one shared full-length HeyGen
+// render, seek per beat) to {master_audio_url, master_duration_sec,
+// avatar_clip_url}: master_audio_url/master_duration_sec is the ONE
+// ElevenLabs master narration and its REAL measured duration (beat timing
+// is now derived from that real duration, not an estimate); avatar_clip_url
+// is the short HeyGen audio-driven clip for the Short's only avatar-visible
+// beat ('close'). Slicing per beat now happens locally with ffmpeg against
+// the downloaded master (fast, no extra network round trip — Short has few
+// beats and this stays comfortably inside one request). Every non-close
+// segment builder is called completely UNCHANGED (heygenLocalPath/seekSec=0)
+// — confirmed none of them read [0:v] from that param, only [0:a?].
+async function nextwaveV2CompositeWhiteMotionRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { master_audio_url, master_duration_sec, avatar_clip_url, beats } = body;
+  if (!master_audio_url || !Array.isArray(beats) || !beats.length || !master_duration_sec) {
+    return res.status(400).json({ ok: false, error: 'missing_master_audio_url_or_beats_or_master_duration_sec' });
+  }
+  const renderId = randomBytes(6).toString('hex');
+  const masterLocalPath = join(tmpdir(), `nwv2wm-master-${renderId}.mp3`);
+  const avatarLocalPath = avatar_clip_url ? join(tmpdir(), `nwv2wm-avatar-${renderId}.mp4`) : null;
+  const segPaths = [];
+  const slicePaths = [];
+  try {
+    await smDownloadToFile(master_audio_url, masterLocalPath);
+    await smAssertValidMediaFile(masterLocalPath, 'downloaded ElevenLabs master narration');
+    if (avatarLocalPath) {
+      await smDownloadToFile(avatar_clip_url, avatarLocalPath);
+      await smAssertValidMediaFile(avatarLocalPath, 'downloaded HeyGen avatar clip');
+    }
+    const real_duration_sec = Number(master_duration_sec);
+
+    const totalChars = Math.max(1, beats.reduce((sum, b) => sum + String(b.text || '').length, 0));
+    let cursor = 0;
+    const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+    const timeline = [];
+
+    for (let i = 0; i < beats.length; i++) {
+      const beat = beats[i];
+      const beatChars = String(beat.text || '').length;
+      const beatDur = real_duration_sec * (beatChars / totalChars);
+      const start = cursor;
+      const end = Math.min(real_duration_sec, cursor + beatDur);
+      cursor = end;
+      const dur = end - start;
+      const isFirst = i === 0;
+      const isLast = i === beats.length - 1;
+      const segPath = join(tmpdir(), `nwv2wm-seg-${renderId}-${i}.mp4`);
+      const slicePath = join(tmpdir(), `nwv2wm-slice-${renderId}-${i}.mp3`);
+      await execFileAsync(ffmpegInstaller.path, [
+        '-y', '-ss', start.toFixed(2), '-i', masterLocalPath, '-t', dur.toFixed(2),
+        '-c:a', 'libmp3lame', '-b:a', '192k', slicePath,
+      ], { timeout: 20000 });
+      slicePaths.push(slicePath);
+
+      if (beat.treatment === 'hook') {
+        await nwv2WhiteBuildHookSegment({ heygenLocalPath: slicePath, seekSec: 0, headline: beat.headline || beat.text, dur, outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'hook', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+      } else if (beat.treatment === 'illustration' && beat.concept) {
+        const illustration = await nextwaveV2ResolveOrGenerateIllustratedObject(beat.concept, ideogramBudget, 'white');
+        if (illustration && illustration.path) {
+          const keyColor = await _nextwaveV2SampleCornerColor(illustration.path);
+          await nwv2WhiteBuildIllustrationSegment({
+            heygenLocalPath: slicePath, seekSec: 0, illustrationPath: illustration.path, keyColor,
+            dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
+          });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'illustration', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), concept: beat.concept });
+        } else {
+          await nwv2WhiteBuildCalcCardSegment({ heygenLocalPath: slicePath, seekSec: 0, title: beat.text, values: beat.values || [], dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath });
+          segPaths.push(segPath);
+          timeline.push({ beatIndex: i, segment: 'calc_card_fallback', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+        }
+      } else if (beat.treatment === 'close') {
+        await nwv2WhiteBuildCloseSegment({ heygenLocalPath: avatarLocalPath, audioLocalPath: slicePath, dur, avatarCapSec: NWV2_AVATAR_CAP_SEC_SHORT, outPath: segPath });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'close_avatar', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)) });
+      } else {
+        // 'calc' (default)
+        await nwv2WhiteBuildCalcCardSegment({
+          heygenLocalPath: slicePath, seekSec: 0, title: beat.title || beat.text, values: beat.values || [],
+          dur, fadeIn: !isFirst, fadeOut: !isLast, outPath: segPath,
+        });
+        segPaths.push(segPath);
+        timeline.push({ beatIndex: i, segment: 'calc_card', start: Number(start.toFixed(2)), end: Number(end.toFixed(2)), values: beat.values || [] });
+      }
+    }
+
+    const concatOut = await nextwaveV2ConcatCanvasSegments({ paths: segPaths, id: renderId });
+    const finalDurationSec = await nextwaveV2GetDurationSec(concatOut);
+    const finalBuf = await readFile(concatOut);
+    await unlink(concatOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/whitemotion-${renderId}.mp4`, finalBuf, 'video/mp4');
+
+    return res.status(200).json({
+      ok: true,
+      composited_video_url: videoUrl,
+      duration_sec: Number(finalDurationSec.toFixed(2)),
+      timeline,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+      render_id: renderId,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(masterLocalPath).catch(() => {});
+    if (avatarLocalPath) await unlink(avatarLocalPath).catch(() => {});
+    for (const p of slicePaths) await unlink(p).catch(() => {});
+    for (const p of segPaths) await unlink(p).catch(() => {});
+  }
+}
+
+// Thumbnail — a single deterministically-composed still frame (never the
+// avatar), built from the same white-canvas primitives: headline, gold
+// highlight, two contrast value boxes with a ">>" directional cue between
+// them (the font has no arrow glyph — confirmed via a fonttools check —
+// so a plain, always-available ASCII cue is used instead of risking a
+// missing-glyph box character).
+async function nextwaveV2GenerateThumbnail(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const { headline, fromValue, fromLabel, toValue, toLabel } = body;
+  if (!headline || !fromValue || !toValue) return res.status(400).json({ ok: false, error: 'missing_headline_or_values' });
+  const renderId = randomBytes(6).toString('hex');
+  const outPath = join(tmpdir(), `nwv2thumb-${renderId}.png`);
+  try {
+    const lines = nwv2ProofWrapText(headline, 20);
+    const lineH = 96;
+    const blockH = lines.length * lineH;
+    const startY = 140;
+    const filters = [];
+    filters.push(`color=c=${NWV2_WHITE_BG}:s=${NEXTWAVE_V2_CANVAS_W}x${NEXTWAVE_V2_CANVAS_H}:d=1[t0]`);
+    let last = 't0', idx = 1;
+    lines.forEach((line, li) => {
+      const safe = line.replace(/['":\\\[\],;%]/g, '');
+      const y = startY + li * lineH;
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safe}':fontcolor=${NWV2_NAVY}:fontsize=72:box=0:x=(${NEXTWAVE_V2_CANVAS_W}-text_w)/2:y=${y}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    });
+    const boxW = 420, boxH = 260, gap = 40;
+    const totalW = boxW * 2 + gap;
+    const boxesX = Math.round((NEXTWAVE_V2_CANVAS_W - totalW) / 2);
+    const boxesY = startY + blockH + 100;
+    const fromX = boxesX, toX = boxesX + boxW + gap;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_WHITE_CARD}:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${fromX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_NAVY}@0.4:t=3[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(`[${last}]drawbox=x=${toX}:y=${boxesY}:w=${boxW}:h=${boxH}:color=${NWV2_GOLD}@0.92:t=fill[t${idx}]`);
+    last = `t${idx}`; idx++;
+    const safeFromVal = nwv2WhiteSanitize(fromValue, 20);
+    const safeFromLabel = nwv2WhiteSanitize(fromLabel || '', 24).replace(/[,;]/g, '');
+    const safeToVal = nwv2WhiteSanitize(toValue, 20);
+    const safeToLabel = nwv2WhiteSanitize(toLabel || '', 24).replace(/[,;]/g, '');
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromVal}':fontcolor=${NWV2_NAVY}:fontsize=56:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 70}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeFromLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeFromLabel}':fontcolor=${NWV2_NAVY}@0.7:fontsize=30:box=0:x=(${boxW}-text_w)/2+${fromX}:y=${boxesY + 150}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToVal}':fontcolor=white:fontsize=56:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 70}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    if (safeToLabel) {
+      filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='${safeToLabel}':fontcolor=white@0.85:fontsize=30:box=0:x=(${boxW}-text_w)/2+${toX}:y=${boxesY + 150}[t${idx}]`);
+      last = `t${idx}`; idx++;
+    }
+    filters.push(`[${last}]drawtext=fontfile=${SMM_FONT_PATH}:text='>>':fontcolor=${NWV2_GOLD_DARK}:fontsize=54:box=0:x=${fromX + boxW}+(${gap}-text_w)/2:y=${boxesY + boxH / 2 - 30}[t${idx}]`);
+    last = `t${idx}`; idx++;
+    filters.push(nwv2WhiteBrandMarkFilter(last, `t${idx}`));
+    last = `t${idx}`;
+    const filterComplex = filters.join(';');
+    await execFileAsync(ffmpegInstaller.path, [
+      '-y', '-filter_complex', filterComplex,
+      '-map', `[${last}]`,
+      '-frames:v', '1',
+      outPath,
+    ], { timeout: 20000 });
+    const buf = await readFile(outPath);
+    const thumbUrl = await sbStorageUpload(`nextwave-v2-preview/thumb-${renderId}.png`, buf, 'image/png');
+    return res.status(200).json({ ok: true, thumbnail_url: thumbUrl, render_id: renderId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    await unlink(outPath).catch(() => {});
+  }
+}
+
+async function nextwaveV2BuildRender(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+  const { script, voice_id, scene_package } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) {
+    return res.status(400).json({ ok: false, error: 'script is required' });
+  }
+  if (script.length > 3000) {
+    return res.status(400).json({ ok: false, error: 'script too long for this candidate renderer (max 3000 characters)' });
+  }
+
+  const savedVoice = await nextwaveV2GetVoiceConfig();
+  const useVoiceId = voice_id || savedVoice.voice_id || null; // null -> nextwaveSynthesizeNarrationElevenLabs's own default
+
+  // Phase 5.3 — if the caller passed a GENERATE-stage scene_package (from
+  // nextwave_v2_generate_scene_package, possibly reviewed/approved in the
+  // interim), BUILD renders EXACTLY that reviewed storyboard rather than
+  // silently recomputing a fresh one from the raw script — approve-then-
+  // build integrity: what was reviewed is what gets rendered. Falls back
+  // to the original recompute-from-script behavior whenever no package is
+  // given or it fails structural reconstruction, so every existing caller
+  // (including nextwaveV2DebugStoryboard callers and any in-flight
+  // package without a scene_package field) keeps working unchanged.
+  const reconstructed = scene_package ? _nextwaveV2ReconstructFromScenePackage(scene_package) : null;
+  let plan, scenes, storyboards, usedPregenerated = false;
+  if (reconstructed) {
+    ({ plan, scenes, storyboards } = reconstructed);
+    usedPregenerated = true;
+  } else {
+    const units = nextwaveSegmentMeaningUnits(script);
+    plan = units.map((u, idx) => {
+      const tags = nextwaveClassifyVisualIntent(u.text);
+      const fallback = nextwaveResolveFallbackConcept(u.section, tags);
+      // Phase 4.5D — every distinct real value in this unit's own text, not
+      // just the single structurally-ranked one, so the storyboard mapper can
+      // choose which is load-bearing instead of one being silently dropped.
+      const candidateValues = nextwaveExtractAllNumbers(u.text);
+      return { ...u, __idx: idx, __hasNumber: nextwaveHasDynamicNumbers(u.text), concept_tags: tags, fallback_concept: fallback, __candidateValues: candidateValues };
+    });
+    scenes = nextwaveV2GroupScenes(plan);
+    if (!scenes.length) return res.status(400).json({ ok: false, error: 'no meaning units resolved from script' });
+    // Phase 4.5 — one storyboard-mapping call for the whole script (not
+    // per-scene) so the model can see full context; deterministic, keyword-
+    // based fallback inside nextwaveV2GenerateStoryboard if this fails for
+    // any reason, so a render never blocks on it.
+    storyboards = await nextwaveV2GenerateStoryboard(plan, scenes);
+  }
+
+  // Phase 5.3 — one Ideogram spend ceiling for the WHOLE render (shared
+  // across every scene's dynamic topic-specific illustration attempt), not
+  // per-scene, so a many-scene script can't multiply new-asset spend.
+  // Reuse (existing banked assets) is always free and uncapped; this only
+  // limits genuinely NEW generations. See nextwaveV2ResolveOrGenerateIllustratedObject.
+  const ideogramBudget = { remaining: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING, spent_usd: 0, generated: [] };
+
+  const renderId = randomBytes(6).toString('hex');
+
+  // Phase 4.6 Step 2 — ONE continuous narration synthesis for the whole
+  // script, not one ElevenLabs call per scene (the confirmed real
+  // architectural cause of the CEO's "broken/choppy... abrupt cadence
+  // resets" rejection). See nextwaveV2SynthesizeMasterNarration.
+  const fullText = plan.map((u) => u.text).join(' ');
+  let master;
+  try {
+    master = await nextwaveV2SynthesizeMasterNarration(fullText, useVoiceId, renderId);
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: `master narration failed: ${e.message}` });
+  }
+
+  // Global per-unit timing: a proportional slice of the ONE real master
+  // track's actual duration, in script order — the same technique
+  // previously applied per scene, now applied once across the whole
+  // script so every scene's visual timing maps onto real spoken time.
+  const totalChars = Math.max(1, plan.reduce((sum, u) => sum + u.text.length, 0));
+  let cursor = 0;
+  plan.forEach((u) => {
+    const uDur = master.durationSec * (u.text.length / totalChars);
+    u.__start = cursor;
+    cursor = Math.min(master.durationSec, cursor + uDur);
+    u.__end = cursor;
+  });
+
+  const segPaths = [];
+  const sceneReports = [];
+  try {
+    for (let i = 0; i < scenes.length; i++) {
+      const sceneUnits = scenes[i].units;
+      const sceneStart = sceneUnits[0].__start;
+      const sceneEnd = sceneUnits[sceneUnits.length - 1].__end;
+      const seg = await nextwaveV2BuildSceneSegment(scenes[i], i, renderId, storyboards[i], sceneStart, sceneEnd, ideogramBudget);
+      segPaths.push(seg.path);
+      sceneReports.push({
+        sceneIndex: i, unitCount: scenes[i].units.length, durationSec: Number(seg.durationSec.toFixed(2)),
+        screenType: seg.screenType, heading: seg.heading, hostRole: seg.hostRole,
+        slotCount: seg.slotCount, numbersShown: seg.numbersShown,
+        // Phase 4.6 bugfix — slotContent was computed by every scene
+        // segment (nextwaveV2BuildSceneSegment already returns it) but
+        // was never actually copied onto sceneReports, so the
+        // "no_empty_structured_panels" gate check below was always
+        // iterating an empty array and could never fail on a real empty
+        // panel. Fixed by including it here.
+        slotContent: seg.slotContent,
+        // Phase 5.3 — surface the declared storyboard fields on the same
+        // report a reviewer/QA pass already reads, so "what was the
+        // automatic mechanism's own plan for this scene" is inspectable
+        // from the render response itself, not just from re-reading the
+        // GENERATE-stage package separately.
+        scenePurpose: storyboards[i].scene_purpose,
+        illustrationConcept: storyboards[i].illustration_concept,
+        chartRequired: storyboards[i].chart_required,
+        chartTypeHint: storyboards[i].chart_type_hint,
+        motionIntent: storyboards[i].motion_intent,
+        safeFraming: storyboards[i].safe_framing,
+      });
+    }
+    const concatVideoOut = await nextwaveV2ConcatVideoOnly({ paths: segPaths, id: renderId });
+    const finalOut = await nextwaveV2MuxMasterAudio({ videoPath: concatVideoOut, audioPath: master.path, id: renderId });
+    await unlink(concatVideoOut).catch(() => {});
+    await unlink(master.path).catch(() => {});
+
+    const actualDurationSec = await nextwaveV2GetDurationSec(finalOut);
+    const finalBuf = await readFile(finalOut);
+    await unlink(finalOut).catch(() => {});
+    const videoUrl = await sbStorageUpload(`nextwave-v2-preview/${renderId}.mp4`, finalBuf, 'video/mp4');
+
+    // Meaningful-visual-change count (Step 9 QA metric): every number
+    // reveal + every explanatory slot reveal + one for the scene's own
+    // heading/structure appearing, across scenes — not hand-counted per
+    // script.
+    let meaningfulChanges = 0;
+    sceneReports.forEach((s) => { meaningfulChanges += s.numbersShown.length + s.slotCount + 1; });
+
+    // Phase 4.5C Step 6 — deterministic pre-CEO creative QA gate. Checks
+    // run against the render's OWN reported evidence (slotContent from
+    // every scene, numbersShown, screenType, hostRole) rather than being
+    // re-derived by guesswork, so a gate failure always points at a real,
+    // named scene/slot.
+    const gateFailures = [];
+    sceneReports.forEach((s) => {
+      (s.slotContent || []).forEach((sc) => {
+        if (sc.type === 'empty') gateFailures.push(`scene ${s.sceneIndex}: slot for unit ${sc.unitIdx} rendered with no number and no fallback text`);
+      });
+    });
+    // Phase 4.6 — duration should now closely track the master
+    // narration's own real duration (each scene's video length is
+    // itself derived from a slice of it, and the only remaining audio
+    // step is a single final mux), so a tight tolerance is meaningful
+    // again instead of the old scene-count-scaled allowance.
+    if (Math.abs(actualDurationSec - master.durationSec) > 1.5) {
+      gateFailures.push(`duration mismatch: master narration ${master.durationSec.toFixed(2)}s vs final video ${actualDurationSec.toFixed(2)}s (>1.5s drift)`);
+    }
+    if (!(actualDurationSec > 0)) gateFailures.push('actual final duration could not be verified');
+    const qaGate = {
+      passed: gateFailures.length === 0,
+      failures: gateFailures,
+      checked: ['no_empty_structured_panels', 'no_invented_numbers (structural: values only ever come from nextwaveFormatFinancialNumber on real extracted text)', 'actual_duration_verified'],
+      note: 'Captions/safe-framing/no-Publish/CEO-auth are guaranteed by other code paths already verified separately, not re-checked here.',
+    };
+
+    return res.status(200).json({
+      ok: true,
+      video_url: videoUrl,
+      duration_sec: Number(actualDurationSec.toFixed(2)),
+      master_narration_duration_sec: Number(master.durationSec.toFixed(2)),
+      scene_count: scenes.length,
+      scenes: sceneReports,
+      meaningful_visual_change_count: meaningfulChanges,
+      placeholder_count: 0,
+      voice_id_used: useVoiceId || ELEVENLABS_VOICE_ID,
+      narration_chars_sent: fullText.length,
+      narration_provider: 'elevenlabs',
+      narration_calls: 1,
+      render_id: renderId,
+      qa_gate: qaGate,
+      used_pregenerated_scene_package: usedPregenerated,
+      dynamic_illustration_ceiling: NEXTWAVE_V2_DYNAMIC_ILLUSTRATION_CEILING,
+      dynamic_illustrations_generated: ideogramBudget.generated,
+      dynamic_illustration_spend_usd: Number((ideogramBudget.spent_usd || 0).toFixed(2)),
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    for (const p of segPaths) await unlink(p).catch(() => {});
+    await unlink(master.path).catch(() => {});
+  }
 }
 
 // ── Runway — optional AI motion/enhancement, adapter boundary only ─────────────────────────
@@ -12389,6 +18730,52 @@ export default async function handler(req, res) {
     if (action === 'production_package_review')      return await productionPackageReview(req, res);       // v16.31.0
     if (action === 'ceo_review_queue_list')          return await ceoReviewQueueList(req, res);            // v16.31.0
     if (action === 'nextwave_narration_synthesize')  return await nextwaveNarrationSynthesize(req, res);     // NextWave V2 — ElevenLabs narration, PR pending review, not yet deployed
+    if (action === 'nextwave_v2_prepare_master_narration') return await nextwaveV2PrepareMasterNarration(req, res); // Bounded HeyGen implementation — authoritative ElevenLabs master track
+    if (action === 'nextwave_v2_slice_narration')    return await nextwaveV2SliceNarration(req, res);        // Bounded HeyGen implementation — per-beat audio slice
+    // NextWave V2 Phase 4: read/compute-only visual-planning (segment ->
+    // classify -> resolve). Does not touch narration above in any way.
+    if (action === 'nextwave_v2_plan_visuals')       return await nextwaveV2PlanVisuals(req, res);
+    if (action === 'nextwave_v2_debug_storyboard')   return await nextwaveV2DebugStoryboard(req, res);
+    // Phase 5.3 — GENERATE-stage persisted scene package (segmentation ->
+    // classification -> grouping -> storyboard incl. the new declared
+    // fields + evidence binding), read/compute-only like the two above.
+    if (action === 'nextwave_v2_generate_scene_package') return await nextwaveV2GenerateScenePackageAction(req, res);
+    // NextWave V2 Production Architecture Freeze — GENERATE-stage hybrid
+    // visual plan (HeyGen+Submagic architecture). Read/compute-only, same
+    // reasoning as the scene-package action above.
+    if (action === 'nextwave_v2_generate_visual_plan') return await nextwaveV2GenerateVisualPlanPackageAction(req, res);
+    // NextWave V2 Phase 4.4 — Build-stage renderer (NextWave only, HeyGen/Submagic untouched)
+    if (action === 'nextwave_list_elevenlabs_voices') return await nextwaveListElevenLabsVoices(req, res);
+    if (action === 'nextwave_v2_get_voice')           return await nextwaveV2GetVoice(req, res);
+    if (action === 'nextwave_v2_set_voice')           return await nextwaveV2SetVoice(req, res);
+    if (action === 'nextwave_v2_ideogram_status')     return await nextwaveV2IdeogramStatus(req, res);
+    if (action === 'nextwave_v2_set_ideogram_key')    return await nextwaveV2SetIdeogramKey(req, res);
+    if (action === 'nextwave_v2_ideogram_generate_pose') return await nextwaveV2IdeogramGeneratePose(req, res);
+    if (action === 'nextwave_v2_ideogram_generate_object') return await nextwaveV2IdeogramGenerateObject(req, res);
+    if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
+    // Visual Composition Correction — persistent-canvas compositor (presenter
+    // window + evidence zone), Submagic reduced to captions-only downstream.
+    if (action === 'nextwave_v2_composite_canvas')    return await nextwaveV2CompositeCanvasRender(req, res);
+    // CEO Creative Rejection / Visual Architecture Correction — cheap
+    // standalone full-frame animated-composition proof (avatar/card/
+    // illustration each own the whole 9:16 canvas in turn). Explicitly not
+    // wired into the package/lifecycle system — internal PM gate only.
+    if (action === 'nextwave_v2_composition_proof')   return await nextwaveV2CompositionProofRender(req, res);
+    // Full-Frame Production Candidate — generalizes the accepted proof
+    // mechanism onto real beat data with real synchronized narration audio.
+    if (action === 'nextwave_v2_composite_fullframe') return await nextwaveV2CompositeFullFrameRender(req, res);
+    // White-Canvas Motion Structure — CEO-locked visual structure V1: white
+    // persistent canvas, avatar at close only, real motion on every card/
+    // illustration. See file comment above nextwaveV2CompositeWhiteMotionRender.
+    if (action === 'nextwave_v2_composite_white_motion') return await nextwaveV2CompositeWhiteMotionRender(req, res);
+    if (action === 'nextwave_v2_generate_thumbnail')  return await nextwaveV2GenerateThumbnail(req, res);
+    // Long-Format Landscape Validation — 1920x1080, sparse avatar (open/close
+    // panels only), comparison/timeline treatments for real visual variety.
+    if (action === 'nextwave_v2_classify_long_beats')  return await nextwaveV2ClassifyLongBeats(req, res);
+    if (action === 'nextwave_v2_storyboard_brain')     return await nextwaveV2StoryboardBrainAction(req, res);
+    if (action === 'nextwave_v2_composite_long_segment') return await nextwaveV2CompositeLongSegmentRender(req, res);
+    if (action === 'nextwave_v2_concat_long')         return await nextwaveV2ConcatLongRender(req, res);
+    if (action === 'nextwave_v2_generate_long_thumbnail') return await nextwaveV2GenerateLongThumbnail(req, res);
     if (action === 'sm_video_production_generate')   return await smVideoProductionGenerate(req, res);      // v16.32.0
     if (action === 'sm_video_production_poll')       return await smVideoProductionPoll(req, res);          // v16.32.0
     if (action === 'sm_video_production_list')       return await smVideoProductionList(req, res);          // v16.32.0
@@ -12459,6 +18846,7 @@ export default async function handler(req, res) {
     if (action === 'heygen_test')                return await heygenTest(req, res);
     if (action === 'heygen_list_avatars')        return await heygenListAvatars(req, res);
     if (action === 'heygen_list_voices')         return await heygenListVoices(req, res);
+    if (action === 'heygen_list_videos')         return await heygenListVideos(req, res); // Live Validation Defect #5 — read-only job recovery
     if (action === 'heygen_start_render')        return await heygenStartRender(req, res);
     if (action === 'heygen_render_status')       return await heygenRenderStatus(req, res);
     if (action === 'heygen_group_looks')         return await heygenGroupLooks(req, res); // v13.51.6
@@ -12471,6 +18859,10 @@ export default async function handler(req, res) {
     if (action === 'submagic_list_templates')    return await submagicListTemplates(req, res);
     if (action === 'submagic_create_media')      return await submagicCreateMedia(req, res);      // v13.85.1 upload audio from URL
     if (action === 'submagic_list_media')        return await submagicListMedia(req, res);        // v13.85.0 probe
+    // Two-Tool Architecture Validation — items-array custom-media/ai-broll insertion capability proof
+    if (action === 'submagic_update_project')    return await submagicUpdateProject(req, res);
+    if (action === 'submagic_export_project')    return await submagicExportProject(req, res);
+    if (action === 'submagic_upload_media_from_url') return await submagicUploadMediaFromUrl(req, res);
     if (action === 'submagic_probe_video')       return await submagicProbeVideo(req, res);       // v13.86.1 EVL video verification
     if (action === 'submagic_video_redirect')    return await submagicVideoRedirect(req, res);    // v13.86.1 EVL browser playback
     // v13.54.0 — P5 / Sprint 3 YouTube auto-upload

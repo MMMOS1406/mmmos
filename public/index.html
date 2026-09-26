@@ -4062,6 +4062,13 @@ async function tryLogin(){
       if(j.ok){
         _ceoSetSessionToken(j.ceo_session_token, j.expires_at);
         console.log('[v16.30.0] CEO login — server session established.');
+        // Phase 4.7 security fix — the failure branch below already
+        // cleared pinInput.value, but the success branch never did: the
+        // typed PIN sat readable in the hidden login DOM (loginScreen is
+        // only display:none'd, the input node and its value survive)
+        // for the rest of the session. Only the local `pin` var (already
+        // sent) was ever needed past this point.
+        document.getElementById('pinInput').value='';
         await _activateUser(selectedUser);
       }else{
         const el=document.getElementById('pinErr');
@@ -4079,6 +4086,7 @@ async function tryLogin(){
   }
   if(selectedUser&&selectedUser.pin===pin){
     console.log('[v14.9.0] Login — activating user and loading state...');
+    document.getElementById('pinInput').value=''; // Phase 4.7 security fix — see CEO branch above
     await _activateUser(selectedUser);
   }else{
     document.getElementById('pinErr').textContent='Wrong PIN. Try again.';
@@ -11129,6 +11137,7 @@ function _engineWeeklyTasksThisWeek(engineName){
   const sunMs=sunday.getTime();
   return D.tasks.filter(function(t){
     if(!t)return false;
+    if(t.isTest)return false; // Phase 4.4A — preview/test tasks never count toward the real weekly cap
     const TERM=new Set(['uploaded','verified','done']);
     if(TERM.has(String(t.status||'').toLowerCase()))return false;
     if(!_engineNameMatches(t.engine,engineName))return false;
@@ -11794,7 +11803,30 @@ function renderVAOperatorMode(tab){
   const farsiCurrent=_fFoc||farsiPending[0]||null;
   const engCurrent=_eFoc||engPending[0]||null;
   const aiStudioCurrent=_aiFoc||aiStudioPending[0]||null;
-  const nwCurrent=_nwFoc||nwPending[0]||null; // v13.94.0
+  // Phase 4.4B — vaFocusTaskId is in-memory only (let vaFocusTaskId=null at
+  // module scope) and does not survive a page reload/new tab, at which point
+  // this used to silently fall back to nwPending[0] -- the OLDEST non-done
+  // NextWave task by D.tasks' push-append order, not the newest -- which is
+  // exactly how a stale, already-in-progress task could reopen after
+  // creating a fresh preview-test one. Recomputed fresh from persisted
+  // D.tasks every render (unlike vaFocusTaskId), so this survives a reload.
+  // Real (non-test) tasks are completely unaffected: falls through to the
+  // original nwPending[0] whenever no isTest task exists.
+  const _nwTestTasks=nwPending.filter(function(t){return t&&t.isTest;}).sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0);});
+  // Phase 4.4C — explicit id pointer (set by _nextwaveV2CreatePreviewTestTask
+  // right after a CONFIRMED canonical-state write) outranks every inference
+  // heuristic below it, including newest-isTest — an explicit "this is the
+  // task I just created and verified" signal beats any guess. Only used for
+  // this SUMMARY panel's fallback display (the actual post-creation
+  // navigation already goes straight to the exact task via openExec() and
+  // never reaches this code at all) and for reopening the same task after a
+  // same-tab reload.
+  let _nwPointerId=null; try{_nwPointerId=sessionStorage.getItem('nwv2_preview_task_id');}catch(e){}
+  const _nwPointerTask=_nwPointerId?nwPending.find(function(t){return String(t.id)===String(_nwPointerId);}):null;
+  const _nwPointerStale=!!(_nwPointerId&&!_nwPointerTask); // pointer set, but task no longer in D.tasks at all
+  const nwCurrent=_nwFoc||_nwPointerTask||_nwTestTasks[0]||nwPending[0]||null; // v13.94.0, v16.70.0 Phase 4.4B/4.4C
+  if(nwCurrent)console.log('[NextWave V2] nwCurrent resolved -> id='+nwCurrent.id+' name="'+nwCurrent.name+'" isTest='+(!!nwCurrent.isTest)+' via='+(_nwFoc?'vaFocusTaskId':(_nwPointerTask?'sessionStorage-pointer':(_nwTestTasks[0]?'newest-isTest':'nwPending[0]-fallback'))));
+  if(_nwPointerStale)console.error('[NextWave V2] sessionStorage pointer id='+_nwPointerId+' no longer exists in D.tasks — likely a concurrent-save overwrite conflict, not falling back silently.');
   // current = legacy non-lifecycle tasks only (NextWave and AI Studio now have own panels)
   const current=(vaFocusTaskId?otherPending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null)||otherPending[0]||null;
 
@@ -13041,6 +13073,52 @@ async function _pollHeygenRenders(){
         // v13.52.0 — chain into Submagic enhancement automatically (P2A Sprint 1).
         // v13.84.0 — AI Studio lifecycle: auto-trigger _aiStudioSendToSubmagic (raw HeyGen → Submagic,
         //            canvas removed). Both Short and Long use same direct path.
+        // NextWave V2 Production Architecture Freeze — checked FIRST, ahead of the
+        // generic pkg.lifecycleStage fallback below: a hybrid NextWave V2 package
+        // also carries pkg.lifecycleStage (set by _nextWaveSetStage, same as every
+        // NextWave lifecycle stage), which would otherwise misroute it into
+        // _aiStudioSendToSubmagic — a different engine's post-process path that
+        // knows nothing about this package's visual plan/targeted items.
+        if(pkg.nextwaveV2Hybrid){
+          const _pkgId=String(pkg.id);
+          setTimeout(function(){
+            // Visual Composition Correction — composite the persistent-canvas
+            // video FIRST, then hand it to Submagic in captions-only mode.
+            // (nextwaveV2StartHybridSubmagic, the old direct-to-Submagic-with-
+            // items path, is kept in this file but no longer called here.)
+            if(typeof nextwaveV2StartCanvasComposite==='function'){
+              console.log('[NextWave V2 Canvas] HeyGen complete — starting canvas composite for pkg',_pkgId);
+              nextwaveV2StartCanvasComposite(pkg,data.durationSec||pkg.renderDurationSec||0).then(function(r){
+                if(r&&r.ok){ console.log('[NextWave V2 Canvas] Submagic (captions-only) started for pkg',_pkgId,'· projectId:',r.projectId); }
+                else { console.warn('[NextWave V2 Canvas] composite/Submagic chain failed:',r&&r.detail); }
+                try{ if(typeof saveAppState==='function') saveAppState(); }catch(_){}
+                try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+              });
+            }
+          },1500);
+          continue; // skip the generic branches below entirely for hybrid packages
+        }
+        // Production Lifecycle Release — the REAL (non-preview) white-canvas-
+        // motion / long-format production path. Checked immediately after the
+        // preview-only hybrid branch above, for the same reason: this pkg also
+        // carries pkg.lifecycleStage and must not fall into the generic AI
+        // Studio/SRV auto-Submagic branches below, which know nothing about
+        // nextwaveV2ProductionBeats.
+        if(pkg.nextwaveV2Production){
+          const _pkgId=String(pkg.id);
+          setTimeout(function(){
+            if(typeof nwv2ProductionStartComposite==='function'){
+              console.log('[NextWave V2 Production] HeyGen complete — starting composite for pkg',_pkgId);
+              nwv2ProductionStartComposite(pkg,data.durationSec||pkg.renderDurationSec||0).then(function(r){
+                if(r&&r.ok){ console.log('[NextWave V2 Production] Submagic (captions-only) started for pkg',_pkgId,'· projectId:',r.projectId); }
+                else { console.warn('[NextWave V2 Production] composite/Submagic chain failed:',r&&r.detail); }
+                try{ if(typeof saveAppState==='function') saveAppState(); }catch(_){}
+                try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+              });
+            }
+          },1500);
+          continue; // skip the generic branches below entirely for production packages
+        }
         const _isAIStudioLifecycle = (D.aiStudioLifecycleStages && typeof D.aiStudioLifecycleStages==='object'
           && pkg.taskId && D.aiStudioLifecycleStages[String(pkg.taskId)])
           || !!(pkg.lifecycleStage); // v13.75.9 — fallback: pkg.lifecycleStage is Supabase-persisted; handles Brave refresh where aiStudioLifecycleStages may be empty
@@ -15388,7 +15466,7 @@ function renderExecMode(taskId){
     <div class="card" style="margin-top:4px">
       <div class="card-title">Generate Package</div>
       <p style="font-size:13px;color:var(--dim);margin-bottom:14px;line-height:1.6">MMM OS will send this task to Claude and generate a complete content package.</p>
-      <button class="gen-btn" id="genBtn" onclick="generatePackage(${taskId})"><span id="genBtnText">⚡ Generate Package with Claude</span></button>
+      <button class="gen-btn" id="genBtn" onclick="${t.engine==='NextWave'?'_nextwaveGeneratePackageWithV2Plan':'generatePackage'}(${taskId})"><span id="genBtnText">⚡ Generate Package with Claude</span></button>
       <div id="genError" style="color:var(--red);font-size:12px;margin-top:8px;display:none"></div>
     </div>`}
     ${_sunoBlock}
@@ -15782,6 +15860,980 @@ async function _srvEnglishRegeneratePackage(taskId,pkgId){
   }
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
+// ── NextWave V2 Phase 4 — additive-only planning hook ───────────────────────
+// Calls the existing, UNMODIFIED generatePackage(taskId) exactly as every
+// other engine already does (same wrap-don't-touch pattern as
+// _srvEnglishRegeneratePackage above), then — NextWave tasks only — also
+// calls the new read/compute-only nextwave_v2_plan_visuals action with the
+// real script generatePackage just produced, and attaches the returned
+// plan onto the package object. Does not call, touch, or duplicate the
+// existing nextwave_narration_synthesize action in any way.
+async function _nextwaveGeneratePackageWithV2Plan(taskId){
+  const numericId=Number(taskId);
+  await generatePackage(isNaN(numericId)?taskId:numericId);
+  try{
+    const t=(D.tasks||[]).find(function(x){return String(x.id)===String(taskId);});
+    if(!t||t.engine!=='NextWave')return;
+    const pkg=(D.packages||[]).find(function(p){return String(p.taskId)===String(taskId);});
+    if(!pkg||!pkg.script)return;
+    // Phase 4.4A — generatePackage's own isTest stamp is keyed to a GLOBAL
+    // per-engine test-mode toggle (_getEngineState), not this specific task,
+    // so a task-level isTest flag (from _nextwaveV2CreatePreviewTestTask)
+    // would not otherwise reach the package. Propagate it explicitly here —
+    // the one place both the task and its just-generated package are
+    // already in scope — without touching the global engine-state mechanism.
+    if(t.isTest&&!pkg.isTest){
+      pkg.isTest=true;
+      pkg.workflowNotes=(pkg.workflowNotes?pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST';
+    }
+    const r=await fetch('/api/ops?action=nextwave_v2_plan_visuals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script:pkg.script})});
+    const d=await r.json();
+    if(d.ok){
+      pkg.nextwaveV2Plan=d.plan;
+      if(typeof saveAppState==='function')saveAppState();
+      console.log('[NextWave V2] visual plan attached — units:',d.unit_count);
+    }else{
+      console.warn('[NextWave V2] plan_visuals failed (package still saved normally):',d.error);
+    }
+  }catch(e){
+    console.warn('[NextWave V2] plan_visuals error (non-fatal, package still saved normally):',e.message);
+  }
+}
+// ── NextWave V2 Build renderer (Phase 4.4) — voice picker + Build trigger ──
+// Replaces autoStartHeygenRender for NextWave only. Every other engine's
+// Build trigger (autoStartHeygenRender itself, _srvEnglishBuildTrigger,
+// canvas_renderer_* etc.) is untouched.
+async function _nextwaveV2LoadVoiceStatus(taskId){
+  const el=document.getElementById('nwv2-voice-status-'+taskId);
+  if(!el)return;
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_get_voice');
+    const d=await r.json();
+    if(d.ok&&d.voice_id){
+      el.innerHTML='<span style="color:#22c55e">✓ '+escHTML(d.name||d.voice_id)+'</span> <span style="color:var(--dim);font-family:\'JetBrains Mono\',monospace;font-size:10px">('+escHTML(d.voice_id)+')</span>';
+    }else{
+      el.innerHTML='<span style="color:#f59e0b">No voice selected yet — click List ElevenLabs Voices, then choose a male American voice below.</span>';
+    }
+  }catch(e){
+    el.innerHTML='<span style="color:var(--dim)">Could not check voice status.</span>';
+  }
+}
+// Phase 4.4E — surfaces the EXISTING, already-safe ceo_check_session read
+// (action=ceo_check_session; requireCeoSession internally, always returns
+// 200 {ok:true/false}, never mutates anything) so the operator can see
+// BEFORE clicking Build whether this browser tab actually has a valid CEO
+// session, instead of only discovering it after a failed, misleading-until-
+// 4.4D build attempt. Does not touch _ceoAuthedFetch, requireCeoSession, or
+// any auth code — read-only, additive UI only.
+async function _nextwaveV2CheckCeoStatus(taskId){
+  const el=document.getElementById('nwv2-ceo-status-'+taskId);
+  if(!el)return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=ceo_check_session',{});
+    const d=await r.json();
+    if(d.ok){
+      el.innerHTML='<span style="color:#22c55e">✓ CEO session active — Build/voice actions will work.</span>';
+    }else{
+      el.innerHTML='<span style="color:#ef4444">✗ No valid CEO session in this tab. Log out, select the Admin/CEO profile, and enter your PIN before using Build or the voice picker — this is why "ceo_authorization_required" appears otherwise.</span>';
+    }
+  }catch(e){
+    el.innerHTML='<span style="color:var(--dim)">Could not check CEO session status.</span>';
+  }
+}
+async function _nextwaveV2ListVoices(taskId){
+  const listEl=document.getElementById('nwv2-voice-list-'+taskId);
+  if(!listEl)return;
+  listEl.innerHTML='<div style="font-size:11px;color:var(--dim)">Loading voices…</div>';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_list_elevenlabs_voices',{});
+    const d=await r.json();
+    if(!d.ok){
+      listEl.innerHTML='<div style="font-size:11px;color:#ef4444">'+escHTML(d.error||'failed to load voices')+(d.error==='ceo_authorization_required'?' — log in as CEO first.':'')+'</div>';
+      return;
+    }
+    if(!d.voices||!d.voices.length){listEl.innerHTML='<div style="font-size:11px;color:var(--dim)">No voices found on this account.</div>';return;}
+    listEl.innerHTML=d.voices.map(function(v){
+      const labels=v.labels||{};
+      const labelStr=[labels.gender,labels.accent,labels.description||labels.use_case].filter(Boolean).join(' · ');
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:6px;margin-bottom:6px">'
+        +'<div><div style="font-size:12px;color:#fff;font-weight:700">'+escHTML(v.name)+'</div><div style="font-size:10px;color:var(--dim)">'+escHTML(labelStr||v.category||'')+'</div></div>'
+        +'<button style="padding:6px 10px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:6px;color:#22c55e;font-size:10px;font-weight:700;cursor:pointer" onclick="_nextwaveV2ChooseVoice(\''+taskId+'\',\''+v.voice_id+'\',\''+escHTML(v.name).replace(/'/g,"\\'")+'\')">Use this voice</button>'
+        +'</div>';
+    }).join('');
+  }catch(e){
+    listEl.innerHTML='<div style="font-size:11px;color:#ef4444">'+escHTML(e.message)+'</div>';
+  }
+}
+async function _nextwaveV2ChooseVoice(taskId,voiceId,name){
+  const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_set_voice',{voice_id:voiceId,name:name});
+  const d=await r.json();
+  if(d.ok){
+    await _nextwaveV2LoadVoiceStatus(taskId);
+    const listEl=document.getElementById('nwv2-voice-list-'+taskId);
+    if(listEl)listEl.innerHTML='';
+  }else{
+    alert('Could not save voice selection: '+(d.error||'unknown'));
+  }
+}
+// ── Phase 4.7 — Ideogram host-pose panel ────────────────────────────────
+// Mirrors the ElevenLabs voice panel exactly: a not-CEO-gated status read
+// (never returns the key itself, only whether one is configured) plus a
+// CEO-gated write. The key goes straight from this input to the server
+// action and is never stored in D/localStorage/pkg or logged.
+const NEXTWAVE_V2_IDEOGRAM_POSES=[
+  {role:'presenting_pointing',label:'Presenting / pointing'},
+  {role:'holding_calculation',label:'Holding a calculation'},
+  {role:'reaction_outro',label:'Reaction / outro'},
+];
+async function _nextwaveV2LoadIdeogramStatus(taskId){
+  const el=document.getElementById('nwv2-ideogram-status-'+taskId);
+  if(!el)return;
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_ideogram_status');
+    const d=await r.json();
+    const keyEl=document.getElementById('nwv2-ideogram-keyrow-'+taskId);
+    if(d.ok&&d.configured){
+      el.innerHTML='<span style="color:#22c55e">✓ Ideogram key configured</span>';
+      if(keyEl)keyEl.style.display='none';
+    }else{
+      el.innerHTML='<span style="color:#f59e0b">No Ideogram key configured yet.</span>';
+      if(keyEl)keyEl.style.display='block';
+    }
+  }catch(e){
+    el.innerHTML='<span style="color:var(--dim)">Could not check Ideogram status.</span>';
+  }
+}
+async function _nextwaveV2SetIdeogramKey(taskId){
+  const input=document.getElementById('nwv2-ideogram-keyinput-'+taskId);
+  if(!input||!input.value.trim()){alert('Enter an Ideogram API key first.');return;}
+  const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_set_ideogram_key',{api_key:input.value.trim()});
+  const d=await r.json();
+  input.value=''; // Phase 4.7 — never let the typed key linger in the DOM, same fix as the login PIN
+  if(d.ok){
+    await _nextwaveV2LoadIdeogramStatus(taskId);
+  }else{
+    alert('Could not save Ideogram key: '+(d.error||'unknown'));
+  }
+}
+async function _nextwaveV2GeneratePose(taskId,poseRole){
+  const statusEl=document.getElementById('nwv2-pose-status-'+poseRole+'-'+taskId);
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--dim)">Generating (Ideogram, ~10-20s)…</span>';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_ideogram_generate_pose',{pose_role:poseRole});
+    const d=await r.json();
+    if(d.ok){
+      const costNote=d.reused?'reused existing asset, $0':'$'+(d.cost_usd||0).toFixed(2);
+      if(statusEl)statusEl.innerHTML='<span style="color:#22c55e">✓ '+costNote+'</span><br><img src="'+escHTML(d.asset_url)+'" style="width:80px;height:80px;border-radius:8px;margin-top:6px;object-fit:cover">';
+    }else{
+      if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(d.error||'failed')+'</span>';
+    }
+  }catch(e){
+    if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(e.message)+'</span>';
+  }
+}
+// Phase 5.3 — GENERATE-stage: produces and persists the full automatic
+// scene/storyboard package (segmentation, evidence binding, chart/host/
+// object plan) BEFORE any render spend, so it's reviewable ahead of Build
+// and so Build renders exactly what was reviewed instead of silently
+// recomputing from the raw script. Not CEO-gated server-side (no vendor
+// spend at this stage — see nextwaveV2GenerateScenePackageAction), but
+// only reachable from the isTest preview panel already gated to CEO login.
+async function nextwaveV2GenerateStoryboardPackage(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_generate_scene_package',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({script:pkg.script}),
+    });
+    const data=await r.json();
+    if(data.ok&&data.scene_package){
+      pkg.nextwaveV2ScenePackage=data.scene_package;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      return{ok:true,scene_package:data.scene_package};
+    }
+    return{ok:false,reason:'nextwave_v2_generate_error',detail:data.error};
+  }catch(e){
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+// UI wrapper for the button below — mirrors the existing pose-generation
+// button's status-element/error-handling pattern in this same file.
+async function _nextwaveV2GenerateStoryboardUI(taskId,pkgId){
+  const statusEl=document.getElementById('nwv2-storyboard-status-'+taskId);
+  const p=(D.packages||[]).find(function(q){return String(q.id||'')===String(pkgId);});
+  if(!p){alert('Package not found');return;}
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--dim)">Generating storyboard (segmentation + evidence binding + scene plan, ~5-15s)…</span>';
+  const r=await nextwaveV2GenerateStoryboardPackage(p);
+  if(r.ok){
+    if(typeof saveAppState==='function')saveAppState();
+    if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+  }else{
+    if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(r.detail||r.reason||'failed')+'</span>';
+  }
+}
+// Real, synchronous (single request/response) render — no HeyGen-style
+// polling needed since ffmpeg + ElevenLabs both complete within this one
+// call. Stamps pkg.isTest + a readable workflowNotes marker (Step 10 —
+// reuses the existing pkg.isTest convention already honored elsewhere in
+// this file; no schema change) so this preview candidate is never mistaken
+// for real production output, and never auto-advances real calendars.
+async function nextwaveV2StartBuild(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  // Phase 4.4D Step 6 — refuse to silently fall back to the server's
+  // Rachel/default voice. If the CEO hasn't explicitly picked a voice via
+  // "List ElevenLabs Voices -> Use this voice" yet, stop here and say so,
+  // rather than rendering with an unconfirmed voice and only surfacing that
+  // after spending real ElevenLabs characters.
+  try{
+    const vr=await fetch('/api/ops?action=nextwave_v2_get_voice');
+    const vd=await vr.json();
+    if(!vd.ok||!vd.voice_id){
+      pkg.renderStatus='failed';
+      pkg.renderError='no_voice_selected: pick a voice under "List ElevenLabs Voices" before starting Build.';
+      return{ok:false,reason:'no_voice_selected',detail:pkg.renderError};
+    }
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='voice_check_failed: '+e.message;
+    return{ok:false,reason:'voice_check_failed',detail:pkg.renderError};
+  }
+  try{
+    // Phase 5.3 — pass the reviewed GENERATE-stage scene package, when one
+    // exists, so Build renders exactly that storyboard instead of silently
+    // recomputing a fresh one from the raw script.
+    const buildBody={script:pkg.script};
+    if(pkg.nextwaveV2ScenePackage)buildBody.scene_package=pkg.nextwaveV2ScenePackage;
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_build_render',buildBody);
+    const data=await r.json();
+    if(data.ok&&data.video_url){
+      pkg.videoUrl=data.video_url;
+      pkg.renderStatus='enhanced'; // reuses the existing "publishable MP4 ready" UI state
+      pkg.renderDurationSec=data.duration_sec;
+      pkg.renderStartedAt=new Date().toISOString();
+      pkg.isTest=true; // NEXTWAVE_V2_PREVIEW_TEST — existing convention, keeps this out of real production consumption
+      pkg.workflowNotes=(pkg.workflowNotes?pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST — Phase 4.4 build renderer, voice='+(data.voice_id_used||'default');
+      pkg.nextwaveV2RenderMeta={sceneCount:data.scene_count,scenes:data.scenes,meaningfulVisualChangeCount:data.meaningful_visual_change_count,placeholderCount:data.placeholder_count,narrationCharsSent:data.narration_chars_sent,renderId:data.render_id,usedPregeneratedScenePackage:data.used_pregenerated_scene_package,dynamicIllustrationsGenerated:data.dynamic_illustrations_generated,dynamicIllustrationSpendUsd:data.dynamic_illustration_spend_usd};
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Build] rendered:',data.render_id,'duration:',data.duration_sec+'s','scenes:',data.scene_count);
+      return{ok:true,video_url:data.video_url};
+    }else{
+      pkg.renderStatus='failed';
+      pkg.renderError=data.error||('HTTP '+(data.status||'?'));
+      return{ok:false,reason:'nextwave_v2_error',detail:pkg.renderError};
+    }
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// NextWave V2 PRODUCTION ARCHITECTURE FREEZE — hybrid HeyGen+Submagic path.
+// Replaces the Phase 5.3 custom illustrated renderer (nextwaveV2StartBuild
+// above, kept only for A/B reference — not called by this path) with the
+// CEO-frozen architecture: HeyGen native avatar+voice for the base video,
+// Submagic for captions/auto-B-roll/targeted ai-broll, NextWave's own
+// segmentation+evidence intelligence deciding WHAT Submagic should insert
+// and WHEN. No ElevenLabs anywhere in this path.
+// ══════════════════════════════════════════════════════════════════════
+
+// GENERATE stage — persists the reviewable visual plan (screen types
+// retired; this is visual_treatment/broll_prompt/emphasis_values per beat,
+// see nextwaveV2GenerateVisualPlan in ops.js). Spends nothing.
+async function nextwaveV2GenerateHybridVisualPlan(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  try{
+    const r=await fetch('/api/ops?action=nextwave_v2_generate_visual_plan',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({script:pkg.script}),
+    });
+    const data=await r.json();
+    if(data.ok&&data.visual_plan_package){
+      pkg.nextwaveV2VisualPlan=data.visual_plan_package;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      return{ok:true,visual_plan_package:data.visual_plan_package};
+    }
+    return{ok:false,reason:'nextwave_v2_visual_plan_error',detail:data.error};
+  }catch(e){
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// Validated NextWave presenter config (Two-Tool Architecture Validation —
+// scale 1.4 confirmed to avoid both frame-domination and the rejected
+// tiny-corner look; voice_id is HeyGen's own native catalog, no ElevenLabs).
+// Live Validation — Continuous Visual Storytelling proof: the seated/couch
+// pose (Raul_Sitting_businesssofa_front_close) was rejected. Swapped to the
+// standing variant of the SAME HeyGen stock avatar identity — confirmed via
+// heygen_list_avatars (gender:'male', premium:false — existing account,
+// zero new vendor/subscription) — matching the established "Raul_standing_*"
+// naming HeyGen already provides alongside every "Raul_sitting_*" pose.
+const NEXTWAVE_V2_HYBRID_AVATAR_ID='Raul_standing_office_front';
+const NEXTWAVE_V2_HYBRID_VOICE_ID='40ad2901346b43a099cf179dbca89351'; // "Octavio — Firm & Measured"
+const NEXTWAVE_V2_HYBRID_BG_COLOR='#1a1a24';
+const NEXTWAVE_V2_HYBRID_SCALE=1.4;
+
+// BUILD step 1 — starts the HeyGen presenter render from the REVIEWED
+// visual plan's own script (approve-then-build integrity: this refuses to
+// run without a plan already generated in this stage, matching the CEO's
+// "BUILD must consume the reviewed package" requirement). Relies on the
+// EXISTING, already-running _pollHeygenRenders poller (started globally at
+// app init) to pick up completion — no new polling loop needed.
+async function nextwaveV2StartHybridBuild(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  if(!pkg.nextwaveV2VisualPlan)return{ok:false,reason:'missing_visual_plan',detail:'Generate the visual plan before starting Build.'};
+  const cleanScript=_cleanScriptForRender(pkg.script);
+  if(!cleanScript)return{ok:false,reason:'empty_script'};
+  try{
+    // CEO-gated action — must go through _ceoAuthedFetch (attaches
+    // ceo_session_token) exactly like every other CEO-gated NextWave V2
+    // call in this file. A plain fetch() here always 401s.
+    const r=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
+        avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
+        voice_id:NEXTWAVE_V2_HYBRID_VOICE_ID,
+        script:cleanScript,
+        background:{type:'color',value:NEXTWAVE_V2_HYBRID_BG_COLOR},
+        dimension:{width:1080,height:1920},
+        scale:NEXTWAVE_V2_HYBRID_SCALE,
+        test:false,
+    });
+    const data=await r.json();
+    if(data.ok&&data.videoId){
+      pkg.heygenJobId=data.videoId;
+      pkg.renderStatus='rendering';
+      pkg.renderStartedAt=new Date().toISOString();
+      pkg.renderError=null;
+      pkg.nextwaveV2Hybrid=true; // marks this package for the hybrid Submagic branch in _pollHeygenRenders
+      pkg.isTest=true; // NEXTWAVE_V2_PREVIEW_TEST convention — same as the Phase 5.3 path
+      pkg.workflowNotes=(pkg.workflowNotes?pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST — hybrid HeyGen+Submagic architecture';
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Hybrid] HeyGen render started · jobId:',data.videoId);
+      return{ok:true,jobId:data.videoId};
+    }
+    pkg.renderStatus='failed';
+    pkg.renderError=(data.raw&&data.raw.error&&data.raw.error.message)||data.error||('HTTP '+(data.status||'?'));
+    return{ok:false,reason:'heygen_error',detail:pkg.renderError};
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Visual Composition Correction — CEO rejected the version below
+// (nextwaveV2StartHybridSubmagic, kept only as inert reference, no
+// longer called) because Submagic's own B-roll/items insertion replaces
+// the ENTIRE frame on every cutaway. Composition now happens in a small
+// deterministic ffmpeg layer (nextwave_v2_composite_canvas, ops.js)
+// BEFORE Submagic ever sees the video; Submagic's role shrinks to
+// captions only. See nextwaveV2StartCanvasComposite/
+// nextwaveV2StartCaptionsOnlySubmagic below — THESE are what the poller
+// branch actually calls now.
+// ══════════════════════════════════════════════════════════════════════
+
+// BUILD step 2 (superseded) — called automatically by _pollHeygenRenders once the
+// HeyGen base video is ready (see the nextwaveV2Hybrid branch added to
+// that function below). Computes each beat's real start/end from the
+// REAL HeyGen duration (proportional to narration character count, same
+// technique already used throughout this file, now anchored to actual
+// output length instead of an estimate), builds Submagic's `items` array
+// ONLY for "targeted_broll" beats (never for "exact_evidence" — the CEO's
+// explicit rule that generative B-roll must never be asked to depict
+// exact financial numbers), and creates the Submagic project. Leaves
+// pkg.renderStatus='enhancing' so the EXISTING _pollSubmagicProjects
+// poller (unmodified) picks it up exactly like every other engine.
+async function nextwaveV2StartHybridSubmagic(pkg,realDurationSec){
+  const vp=pkg.nextwaveV2VisualPlan;
+  if(!vp||!Array.isArray(vp.beats)||!vp.beats.length){
+    pkg.submagicError='missing_visual_plan_at_submagic_stage';
+    return{ok:false,reason:'missing_visual_plan'};
+  }
+  const totalChars=Math.max(1,vp.units.reduce(function(sum,u){return sum+String(u.text||'').length;},0));
+  let cursor=0;
+  const items=[];
+  vp.beats.forEach(function(b){
+    const beatChars=b.unit_texts.reduce(function(sum,t){return sum+String(t||'').length;},0);
+    const beatDur=realDurationSec*(beatChars/totalChars);
+    const start=cursor;
+    const end=Math.min(realDurationSec,cursor+beatDur);
+    cursor=end;
+    if(b.visual&&b.visual.visual_treatment==='targeted_broll'&&b.visual.broll_prompt){
+      // Submagic ai-broll items: max 12s each, cannot overlap — beats are
+      // already sequential/non-overlapping by construction above.
+      const itemEnd=Math.min(end,start+12);
+      if(itemEnd-start>=1){
+        items.push({type:'ai-broll',startTime:Number(start.toFixed(2)),endTime:Number(itemEnd.toFixed(2)),prompt:b.visual.broll_prompt});
+      }
+    }
+  });
+  try{
+    // CEO-gated action, same as heygen_start_render above — this function
+    // runs from the automatic poller (not a direct button click), but
+    // _ceoAuthedFetch reads the token from sessionStorage at call time,
+    // which is populated as long as the CEO is still logged in this tab.
+    const r=await _ceoAuthedFetch('/api/ops?action=submagic_create_project',{
+        title:'NextWave V2 Hybrid — '+(pkg.id||''),
+        language:'en',
+        videoUrl:pkg.heygenRawUrl||pkg.videoUrl,
+        templateName:'Hormozi 2',
+        magicZooms:true,
+        magicBrolls:true,
+        magicBrollsPercentage:50,
+        items:items,
+    });
+    const data=await r.json();
+    if(data.ok&&data.projectId){
+      pkg.submagicProjectId=data.projectId;
+      pkg.renderStatus='enhancing';
+      pkg.submagicStartedAt=new Date().toISOString();
+      pkg.submagicError=null;
+      pkg.nextwaveV2TargetedItemsSent=items; // kept for QA/review — exactly what was requested and when
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Hybrid] Submagic project created:',data.projectId,'· targeted items:',items.length);
+      return{ok:true,projectId:data.projectId};
+    }
+    const errMsg=(data.raw&&(data.raw.error||data.raw.message))||data.error||('HTTP '+data.status);
+    pkg.submagicError=String(errMsg).slice(0,300);
+    return{ok:false,reason:'submagic_error',detail:pkg.submagicError};
+  }catch(e){
+    pkg.submagicError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// BUILD step 2 (current) — called automatically by _pollHeygenRenders once
+// the HeyGen presenter video is ready. Runs the deterministic ffmpeg
+// compositor (nextwave_v2_composite_canvas, ops.js): trims the HeyGen
+// video per beat, places it in a large-or-small bordered presenter window
+// on a persistent NextWave canvas, and for non-host beats adds a large
+// evidence zone (a contain-fit Ideogram illustration for targeted_broll,
+// or a big fitted evidence-number treatment for exact_evidence) — never a
+// full-frame B-roll replacement. Real ffmpeg + possible Ideogram spend,
+// so this can take longer than the old direct-to-Submagic path; the UI
+// shows a distinct "compositing" status for it (see the lifecycle panel).
+async function nextwaveV2StartCanvasComposite(pkg,realDurationSec){
+  const vp=pkg.nextwaveV2VisualPlan;
+  if(!vp||!Array.isArray(vp.beats)||!vp.beats.length){
+    pkg.submagicError='missing_visual_plan_at_composite_stage';
+    return{ok:false,reason:'missing_visual_plan'};
+  }
+  pkg.renderStatus='compositing';
+  try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+  try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_canvas',{
+      heygen_video_url:pkg.heygenRawUrl||pkg.videoUrl,
+      visual_plan_package:vp,
+      real_duration_sec:realDurationSec,
+    });
+    const data=await r.json();
+    if(data.ok&&data.composited_video_url){
+      pkg.nextwaveV2CanvasVideoUrl=data.composited_video_url;
+      pkg.nextwaveV2CanvasBeats=data.beats;
+      pkg.nextwaveV2CanvasDurationSec=data.duration_sec;
+      pkg.nextwaveV2CanvasDynamicIllustrations=data.dynamic_illustrations_generated;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Canvas] composite ready:',data.composited_video_url,'· duration:',data.duration_sec+'s');
+      return await nextwaveV2StartCaptionsOnlySubmagic(pkg);
+    }
+    pkg.renderStatus='failed';
+    pkg.renderError='canvas_composite_error: '+(data.error||('HTTP '+data.status));
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'canvas_composite_error',detail:pkg.renderError};
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='canvas_composite_network_error: '+e.message;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// BUILD step 3 — Submagic now only ever sees the ALREADY-composited canvas
+// video. magicBrolls/magicZooms are both OFF and no items are sent — the
+// composition (what's on screen and where) is entirely ours by this point;
+// Submagic's only job is transcription + burned-in captions + emphasis,
+// exactly the parts the CEO confirmed passed review.
+async function nextwaveV2StartCaptionsOnlySubmagic(pkg){
+  const sourceUrl=pkg.nextwaveV2CanvasVideoUrl;
+  if(!sourceUrl){
+    pkg.submagicError='missing_composited_video_at_submagic_stage';
+    return{ok:false,reason:'missing_composited_video'};
+  }
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=submagic_create_project',{
+        title:'NextWave V2 Canvas — '+(pkg.id||''),
+        language:'en',
+        videoUrl:sourceUrl,
+        templateName:'Hormozi 2',
+        magicZooms:false,
+        magicBrolls:false,
+    });
+    const data=await r.json();
+    if(data.ok&&data.projectId){
+      pkg.submagicProjectId=data.projectId;
+      pkg.renderStatus='enhancing';
+      pkg.submagicStartedAt=new Date().toISOString();
+      pkg.submagicError=null;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      console.log('[NextWave V2 Canvas] Submagic (captions-only) project created:',data.projectId);
+      return{ok:true,projectId:data.projectId};
+    }
+    const errMsg=(data.raw&&(data.raw.error||data.raw.message))||data.error||('HTTP '+data.status);
+    pkg.submagicError=String(errMsg).slice(0,300);
+    return{ok:false,reason:'submagic_error',detail:pkg.submagicError};
+  }catch(e){
+    pkg.submagicError=e.message;
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
+// ============================================================================
+// NEXTWAVE V2 PRODUCTION LIFECYCLE RELEASE — integrates the CEO-accepted
+// white-canvas-motion (Short) / long-format (Long) visual system into the
+// REAL production Build button. Until this, every one of those compositor
+// functions was only reachable via direct API calls from a preview-test
+// harness — the real "⚡ Start Build" button a non-test NextWave task hits
+// called the old legacy dark-canvas autoStartHeygenRender path instead
+// (confirmed by reading the actual onclick handler before writing any of
+// this). This does NOT touch autoStartHeygenRender or the old path at all
+// — it's wired in as a parallel path selected by which function the real
+// Build button below now calls, so nothing already-working is removed.
+//
+// Script/content boundary: no new script generation here. `_nwv2AutoMapProductionBeats`
+// only RESHAPES the existing GENERATE-stage script + its existing automatic
+// visual-plan classification (host/exact_evidence/targeted_broll — the same
+// classifier proven across every prior validation phase) into the beat
+// shapes the accepted compositors expect. It invents no copy: headlines/
+// titles are the beat's own first narration sentence, uppercased; evidence
+// values are exactly what the classifier already extracted.
+function _nwv2DeriveCaption(text,maxChars){
+  const clean=String(text||'').replace(/[.!?]+\s*$/,'').trim();
+  const upper=clean.toUpperCase();
+  if(upper.length<=maxChars) return upper;
+  // Truncate at the last whole word within the limit — a live test caught a
+  // plain slice() here mid-word-breaking real narration ("...IS HARML"),
+  // which is exactly the kind of unpolished output the production release
+  // can't ship. Falls back to a hard slice only if there's no space at all
+  // (e.g. one very long token) so this never returns an empty string.
+  const hardCut=upper.slice(0,maxChars);
+  const lastSpace=hardCut.lastIndexOf(' ');
+  return lastSpace>0 ? hardCut.slice(0,lastSpace) : hardCut;
+}
+// Avatar restricted to first+last beat regardless of the classifier's own
+// per-beat treatment — matches the CEO's explicit "avatar only at open/
+// close, brief" policy already validated in the prior two phases; the
+// avatar-duration cap itself lives server-side (NWV2_AVATAR_CAP_SEC_SHORT/
+// LONG in api/ops.js) and applies automatically to every beat this mapper
+// marks 'hook'/'close'/'avatar_panel'.
+function _nwv2AutoMapProductionBeats(vp,isLong){
+  const beats=vp.beats||[];
+  return beats.map(function(b,i){
+    const isFirst=i===0, isLast=i===beats.length-1;
+    const text=(b.unit_texts||[]).join(' ');
+    const treatment=b.visual&&b.visual.visual_treatment;
+    const caption=_nwv2DeriveCaption((b.unit_texts&&b.unit_texts[0])||text,isLong?60:44);
+    if(isLong){
+      if(isFirst||isLast){
+        return{treatment:'avatar_panel',text:text,text2:caption,isCta:isLast};
+      }
+      if(treatment==='exact_evidence'){
+        return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+      }
+      if(treatment==='targeted_broll'&&b.visual.broll_prompt){
+        return{treatment:'illustration',text:text,concept:b.visual.broll_prompt};
+      }
+      return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+    }
+    if(isLast){ return{treatment:'close',text:text}; }
+    if(isFirst){ return{treatment:'hook',text:text,headline:caption}; }
+    if(treatment==='exact_evidence'){
+      return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+    }
+    if(treatment==='targeted_broll'&&b.visual.broll_prompt){
+      return{treatment:'illustration',text:text,concept:b.visual.broll_prompt};
+    }
+    return{treatment:'calc',text:text,title:caption,values:(b.visual.emphasis_values||[])};
+  });
+}
+// Deterministic thumbnail params from the SAME beats already going into the
+// video — the first calc/exact_evidence beat with 2+ real values supplies
+// the from/to contrast; falls back to the overall package title if no
+// calc beat exists. No invented numbers.
+function _nwv2DeriveThumbnailParams(beats,pkgTitle){
+  const calcBeat=beats.find(function(b){return b.treatment==='calc'&&Array.isArray(b.values)&&b.values.length>=2;});
+  const headline=_nwv2DeriveCaption(pkgTitle||(beats[0]&&(beats[0].headline||beats[0].text2||beats[0].text))||'NextWave',60);
+  if(calcBeat){
+    return{
+      headline:headline,
+      fromValue:calcBeat.values[0],
+      fromLabel:_nwv2DeriveCaption(calcBeat.title||'',22),
+      toValue:calcBeat.values[calcBeat.values.length-1],
+      toLabel:_nwv2DeriveCaption(calcBeat.title||'',22),
+    };
+  }
+  return{headline:headline,fromValue:'',fromLabel:'',toValue:'',toLabel:''};
+}
+async function nwv2ProductionGenerateThumbnail(pkg,beats,isLong){
+  const params=_nwv2DeriveThumbnailParams(beats,pkg.title);
+  if(!params.fromValue||!params.toValue) return{ok:false,reason:'no_evidence_values_for_thumbnail'};
+  const action=isLong?'nextwave_v2_generate_long_thumbnail':'nextwave_v2_generate_thumbnail';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action='+action,params);
+    const data=await r.json();
+    // Deliberately NOT pkg.thumbnailUrl — _pollHeygenRenders (the generic,
+    // engine-agnostic HeyGen-completion handler) unconditionally overwrites
+    // pkg.thumbnailUrl with HeyGen's own auto-generated presenter-frame
+    // thumbnail on every completion (see the `pkg.thumbnailUrl = data.thumbnailUrl`
+    // line in that function), which runs AFTER this Build-stage call and would
+    // silently replace the intended deterministic thumbnail with a random
+    // HeyGen video frame. A separate field sidesteps that collision entirely
+    // without touching the generic poller (which other engines also rely on).
+    if(data.ok&&data.thumbnail_url){ pkg.nextwaveV2ThumbnailUrl=data.thumbnail_url; return{ok:true,thumbnailUrl:data.thumbnail_url}; }
+    return{ok:false,reason:'thumbnail_error',detail:data.error};
+  }catch(e){
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+// White-canvas-motion / long-format HeyGen source settings — DIFFERENT from
+// NEXTWAVE_V2_HYBRID_BG_COLOR/_SCALE above, which belong to the superseded,
+// preview-only dark-canvas hybrid path. The white-canvas compositors
+// (nwv2WhiteBuildCloseSegment, nwv2LongAvatarPanelSegment in api/ops.js)
+// overlay the raw HeyGen footage directly with no chroma key, so the
+// source itself must already be rendered on the SAME white canvas color
+// used everywhere else in the system (NWV2_WHITE_BG server-side); scale
+// 2.0 is the value ops.js's own Long-format comment documents as already
+// validated for this avatar family in the white/full-frame composition.
+const NWV2_PRODUCTION_BG_COLOR='#f7f4ee';
+const NWV2_PRODUCTION_HEYGEN_SCALE=2.0;
+// Live Validation Defect #4 — NWV2_AVATAR_CAP_SEC_SHORT/_LONG are defined in
+// api/ops.js (server-side Node scope) only; nwv2ProductionStartBuild below
+// references them as if they were also in scope client-side, which they
+// never were — confirmed by search, this was a genuine missing definition,
+// not a naming/value mismatch. Live-failed on a real Long Retry Build with
+// "NWV2_AVATAR_CAP_SEC_LONG is not defined" — verified from the real
+// package's persisted state that this crashed AFTER a real, successful
+// ElevenLabs master-narration call (a real 6.4MB MP3 exists in storage) and
+// BEFORE ever reaching HeyGen (heygenJobId stayed null) — so the fix below
+// is a pure missing-constant correction, not a change to when/whether
+// either vendor is called. Values must stay identical to the server-side
+// constants (api/ops.js) — the compositor's own avatar-fade timing is
+// computed server-side from the SAME numbers, so a client/server mismatch
+// here would desync the requested clip length from where the visual fade
+// actually happens.
+const NWV2_AVATAR_CAP_SEC_SHORT=3.0;
+const NWV2_AVATAR_CAP_SEC_LONG=4.0;
+
+// Bounded HeyGen implementation (CEO Decision — NextWave V2 authoritative
+// ElevenLabs narration). Polls a single HeyGen job (already started) to
+// completion. Bounded attempts — never re-issues the paid generation call
+// itself on failure/timeout; that stays a one-shot, explicit, CEO-clicked
+// action, exactly like every other paid step in this pipeline.
+async function _nwv2PollHeygenJobToCompletion(videoId,maxAttempts,intervalMs){
+  for(let i=0;i<maxAttempts;i++){
+    await new Promise(function(res){setTimeout(res,intervalMs);});
+    try{
+      const r=await fetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
+      const data=await r.json();
+      if(!data.ok) continue;
+      if(data.status==='completed'&&data.videoUrl) return{ok:true,videoUrl:data.videoUrl,durationSec:data.durationSec};
+      if(data.status==='failed') return{ok:false,reason:'heygen_render_failed',detail:data.raw||data,videoId:videoId};
+    }catch(_){ /* transient — keep polling within the bounded attempt count */ }
+  }
+  return{ok:false,reason:'heygen_poll_timeout',videoId:videoId};
+}
+
+// Real production BUILD entry point — this is what the real "⚡ Start Build"
+// button now calls for NextWave tasks (see renderNextWaveLifecycleCard's
+// build-stage button below), replacing the legacy autoStartHeygenRender
+// call for this engine specifically. Reuses the SAME existing HeyGen
+// avatar identity already validated across every prior phase — per the
+// CEO's explicit "do not redesign the avatar identity" instruction, no
+// rotation/new avatar is introduced here.
+//
+// Bounded HeyGen implementation — CEO-approved locked architecture:
+// reviewed script -> ONE continuous ElevenLabs master narration ->
+// visual-plan/beat timing derived from that master's REAL duration -> for
+// each avatar-visible beat only, slice the exact master-audio interval and
+// send it to HeyGen in audio-driven mode (HeyGen lip-syncs to that audio,
+// never independently narrates) -> existing compositor, now sourcing every
+// beat's audio from the master track and only the avatar-visible beat(s)'
+// video from the resulting short HeyGen clip. HeyGen never receives the
+// full narration — only the exact bounded interval(s) actually shown.
+async function nwv2ProductionStartBuild(pkg){
+  if(!pkg||!pkg.script) return{ok:false,reason:'missing_pkg_or_script'};
+  const cleanScript=(typeof _cleanScriptForRender==='function')?_cleanScriptForRender(pkg.script):pkg.script;
+  if(!cleanScript) return{ok:false,reason:'empty_script'};
+  // Live Validation Defect #3 — pkg.isLong is never actually set anywhere in
+  // this file (confirmed by search); it doesn't exist as a package field —
+  // only task.isLong does. Reuses the same proven 3-level Long detection
+  // autoStartHeygenRender already relies on elsewhere in this file.
+  const isLong=(pkg.contentFormat==='long')
+    || !!(pkg.taskId && Array.isArray(D.tasks) && D.tasks.some(function(t){return String(t.id)===String(pkg.taskId)&&(t.contentFormat==='long'||t.isLong);}))
+    || (typeof pkg.workflowNotes==='string' && pkg.workflowNotes.toLowerCase().includes('landscape'));
+  try{
+    const vpr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_generate_visual_plan',{script:cleanScript});
+    const vpd=await vpr.json();
+    if(!vpd.ok||!vpd.visual_plan_package) return{ok:false,reason:'visual_plan_error',detail:vpd.error};
+    const vp=vpd.visual_plan_package;
+    const beats=_nwv2AutoMapProductionBeats(vp,isLong);
+    pkg.nextwaveV2VisualPlan=vp;
+    pkg.nextwaveV2ProductionBeats=beats;
+    pkg.nextwaveV2Production=true;
+    pkg.nextwaveV2ProductionIsLong=isLong;
+    await nwv2ProductionGenerateThumbnail(pkg,beats,isLong);
+
+    pkg.renderStatus='rendering';
+    pkg.renderStartedAt=new Date().toISOString();
+    pkg.renderError=null;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+
+    // Live Validation Defect #7 — master-narration idempotent reuse. Every
+    // Retry was calling ElevenLabs again even when only an already-slow
+    // HeyGen avatar job needed resuming — confirmed live, the real Long
+    // task accumulated 3 distinct narration files across 3 Retries with an
+    // unchanged script. Identity is the EXACT cleaned script text that
+    // produced the cached asset (byte-for-byte, not a hash — simpler, no
+    // collision surface, human-inspectable) stored alongside the audio URL;
+    // any script change is a guaranteed mismatch. The cached asset is also
+    // verified reachable (HEAD request) before being trusted, never reused
+    // on a URL's mere presence alone.
+    let narrData=null;
+    if(pkg.nextwaveV2MasterNarrationScript===cleanScript && pkg.nextwaveV2MasterAudioUrl && pkg.nextwaveV2MasterDurationSec){
+      let cachedValid=false;
+      try{ const headR=await fetch(pkg.nextwaveV2MasterAudioUrl,{method:'HEAD'}); cachedValid=headR.ok; }catch(_){ cachedValid=false; }
+      if(cachedValid) narrData={ok:true, master_audio_url:pkg.nextwaveV2MasterAudioUrl, duration_sec:pkg.nextwaveV2MasterDurationSec, reused:true};
+    }
+    if(!narrData){
+      // ONE master narration call — never per-beat, per the locked
+      // architecture. script_text is capped at 5000 chars server-side; the
+      // cleaned real Long script that motivated the bounded-HeyGen
+      // correction was 4779.
+      const narr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_prepare_master_narration',{script:cleanScript});
+      narrData=await narr.json();
+      if(!narrData.ok||!narrData.master_audio_url){
+        pkg.renderStatus='failed'; pkg.renderError='master_narration_error: '+(narrData.error||'unknown');
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'master_narration_error',detail:pkg.renderError};
+      }
+      pkg.nextwaveV2MasterNarrationScript=cleanScript;
+    }
+    pkg.nextwaveV2MasterAudioUrl=narrData.master_audio_url;
+    pkg.nextwaveV2MasterDurationSec=narrData.duration_sec;
+
+    // Authoritative timeline — same char-weighted proportional split already
+    // proven for the estimated-duration case, now calibrated against the
+    // REAL measured master-narration duration instead of a wpm guess.
+    const totalChars=beats.reduce(function(s,b){return s+String(b.text||'').length;},0)||1;
+    let cursor=0;
+    const timeline=beats.map(function(b){
+      const chars=String(b.text||'').length;
+      const dur=narrData.duration_sec*(chars/totalChars);
+      const start=cursor; cursor+=dur;
+      return{start:start,dur:dur};
+    });
+    pkg.nextwaveV2BeatTimeline=timeline;
+
+    // Avatar-visible beat(s) only — 'close' for Short (one), 'avatar_panel'
+    // for Long (open + close). Each gets a short master-audio slice, capped
+    // at the approved avatar-duration limit, sent to HeyGen audio-driven —
+    // the only HeyGen spend in this entire Build, bounded to exactly what's
+    // visually shown.
+    const avatarCap=isLong?NWV2_AVATAR_CAP_SEC_LONG:NWV2_AVATAR_CAP_SEC_SHORT;
+    const renderId='b'+Date.now().toString(36);
+    // Live Validation Defect #5 — SUBMIT ONCE idempotency. The prior version
+    // never persisted a submitted HeyGen video_id anywhere until AFTER a
+    // successful poll, so a real poll timeout on a job HeyGen had actually
+    // accepted left no record of it at all — a resume/retry had no way to
+    // avoid paying for a duplicate generation. Job IDs are now persisted the
+    // instant HeyGen accepts them, kept even on timeout (never cleared by a
+    // failure path), and checked FIRST on every beat before ever calling
+    // heygen_start_render — an already-submitted beat resumes polling the
+    // SAME job; only a beat with no recorded job ID yet submits a new one.
+    // Never resets existing progress from a prior attempt.
+    pkg.nextwaveV2AvatarClipUrls=pkg.nextwaveV2AvatarClipUrls||{};
+    pkg.nextwaveV2AvatarJobIds=pkg.nextwaveV2AvatarJobIds||{};
+    for(let i=0;i<beats.length;i++){
+      const isAvatarBeat=isLong?(beats[i].treatment==='avatar_panel'):(beats[i].treatment==='close');
+      if(!isAvatarBeat) continue;
+      if(pkg.nextwaveV2AvatarClipUrls[i]) continue; // already completed in a prior attempt
+      let videoId=pkg.nextwaveV2AvatarJobIds[i]||null;
+      if(!videoId){
+        const t=timeline[i];
+        const clipDur=Math.min(avatarCap,t.dur);
+        const sliceR=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_slice_narration',{
+          master_audio_url:narrData.master_audio_url, start_sec:t.start, dur_sec:clipDur,
+          render_id:renderId, slice_id:'avatar'+i,
+        });
+        const sliceD=await sliceR.json();
+        if(!sliceD.ok||!sliceD.slice_url){
+          pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown');
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'narration_slice_error',detail:pkg.renderError};
+        }
+        const hgR=await _ceoAuthedFetch('/api/ops?action=heygen_start_render',{
+          avatar_id:NEXTWAVE_V2_HYBRID_AVATAR_ID,
+          audio_url:sliceD.slice_url,
+          background:{type:'color',value:NWV2_PRODUCTION_BG_COLOR},
+          dimension:{width:1080,height:1920},
+          scale:NWV2_PRODUCTION_HEYGEN_SCALE,
+          test:false,
+        });
+        const hgData=await hgR.json();
+        if(!hgData.ok||!hgData.videoId){
+          const _apiMsg=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.message;
+          const _apiCode=hgData&&hgData.raw&&hgData.raw.error&&hgData.raw.error.code;
+          pkg.renderStatus='failed';
+          pkg.renderError='heygen_start_error: '+(_apiMsg?(_apiCode?'['+_apiCode+'] '+_apiMsg:_apiMsg):(hgData.error||('HTTP '+hgData.status)));
+          pkg.renderErrorRaw=hgData;
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'heygen_start_error',detail:pkg.renderError};
+        }
+        videoId=hgData.videoId;
+        // Persisted BEFORE polling — the critical fix. Even if the poll
+        // below times out, this job ID survives to the next attempt.
+        pkg.nextwaveV2AvatarJobIds[i]=videoId;
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      }
+      // Live Validation Defect #5 — the real timeout (9:25:53 -> ~9:29, ~3.5
+      // min) landed right at the old 36x5s=180s bound, consistent with
+      // HeyGen's queue/processing overhead sometimes exceeding a few
+      // minutes even for a short clip. Raised to 60x5s=300s (5 min) —
+      // still bounded, never loops indefinitely, never re-submits.
+      const poll=await _nwv2PollHeygenJobToCompletion(videoId,60,5000);
+      if(!poll.ok){
+        pkg.renderStatus='failed';
+        pkg.renderError='heygen_avatar_clip_failed(beat '+i+', job '+videoId+'): '+(poll.reason||'unknown')+' — job ID preserved, a Retry will resume checking this SAME job, not submit a new one';
+        pkg.renderErrorRaw=poll.detail||null;
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'heygen_avatar_clip_failed',detail:pkg.renderError};
+      }
+      pkg.nextwaveV2AvatarClipUrls[i]=poll.videoUrl;
+      try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    }
+
+    return await nwv2ProductionStartComposite(pkg);
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='production_build_network_error: '+e.message;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+// Called directly by nwv2ProductionStartBuild once the master narration and
+// any avatar clip(s) are ready — no separate async poller needed for this
+// phase (matches the pattern the existing Long per-segment loop below
+// already used). Short = one request (proven safe — at most ~7 lightweight
+// segments, well under the function ceiling). Long = per-segment + concat
+// calls (the architecture fix already proven necessary in the Long
+// validation phase, since a single request hung past the Vercel maxDuration
+// timeout there). Every beat now gets its own narration-master slice for
+// audio; only avatar-visible beats also carry a bounded HeyGen clip.
+async function nwv2ProductionStartComposite(pkg){
+  const beats=pkg.nextwaveV2ProductionBeats;
+  const timeline=pkg.nextwaveV2BeatTimeline;
+  if(!beats||!beats.length||!timeline||!timeline.length){ pkg.submagicError='missing_production_beats_or_timeline_at_composite_stage'; return{ok:false,reason:'missing_beats'}; }
+  pkg.renderStatus='compositing';
+  try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+  try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
+  const isLong=pkg.nextwaveV2ProductionIsLong;
+  const avatarClipUrls=pkg.nextwaveV2AvatarClipUrls||{};
+  try{
+    let compositedUrl=null;
+    if(!isLong){
+      const avatarClipUrl=Object.values(avatarClipUrls)[0]||null;
+      const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_white_motion',{
+        master_audio_url:pkg.nextwaveV2MasterAudioUrl, master_duration_sec:pkg.nextwaveV2MasterDurationSec,
+        avatar_clip_url:avatarClipUrl, beats:beats,
+      });
+      const data=await r.json();
+      if(!data.ok||!data.composited_video_url){
+        pkg.renderStatus='failed'; pkg.renderError='composite_error: '+(data.error||('HTTP '+data.status));
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'composite_error',detail:pkg.renderError};
+      }
+      compositedUrl=data.composited_video_url;
+    }else if(pkg.nextwaveV2CanvasVideoUrl){
+      // Live Validation Defect #9 — final concat already succeeded in a
+      // prior attempt (this pkg just never got past persisting it before
+      // the Submagic hand-off, or Resume was clicked again after success).
+      // Never re-run compositing once the final video already exists.
+      compositedUrl=pkg.nextwaveV2CanvasVideoUrl;
+    }else{
+      // Live Validation Defect #9 — SUBMIT ONCE, same principle as the
+      // defect #5 avatar-job fix, now applied to per-beat compositing.
+      // segUrls used to be a local array only, never persisted — a real
+      // Long (27 beats, real ffmpeg work per beat, this browser tab is the
+      // only thing driving it) interrupted partway through lost ALL
+      // progress, and "Resume" restarted every beat from 0 every time,
+      // confirmed live: after one full Resume Compositing click, the real
+      // package had zero record of any completed beat at all. Each
+      // beat's segment_url is now persisted onto pkg the instant it
+      // succeeds; Resume checks for an existing persisted segment first
+      // and skips straight past any beat already done. render_id is also
+      // persisted so segment file naming stays consistent across resumes
+      // rather than restarting under a fresh id each time.
+      pkg.nextwaveV2LongSegmentUrls=pkg.nextwaveV2LongSegmentUrls||{};
+      const renderId=pkg.nextwaveV2LongRenderId||('p'+Date.now().toString(36));
+      pkg.nextwaveV2LongRenderId=renderId;
+      for(let i=0;i<beats.length;i++){
+        if(pkg.nextwaveV2LongSegmentUrls[i]) continue; // already composited in a prior attempt
+        const beat=beats[i];
+        const t=timeline[i];
+        // Every beat needs its own narration slice for audio — matches the
+        // authoritative master timeline, no seeking into a shared file.
+        const sliceR=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_slice_narration',{
+          master_audio_url:pkg.nextwaveV2MasterAudioUrl, start_sec:t.start, dur_sec:t.dur,
+          render_id:renderId, slice_id:'beat'+i,
+        });
+        const sliceD=await sliceR.json();
+        if(!sliceD.ok||!sliceD.slice_url){
+          pkg.renderStatus='failed'; pkg.renderError='narration_slice_error(beat '+i+'): '+(sliceD.error||'unknown')+' — completed beats preserved, a Resume will continue from beat '+i;
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'narration_slice_error',detail:pkg.renderError};
+        }
+        const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_composite_long_segment',{
+          narration_audio_url:sliceD.slice_url, avatar_clip_url:avatarClipUrls[i]||null,
+          beat:beat, dur_sec:t.dur, render_id:renderId, beat_index:i,
+        });
+        const data=await r.json();
+        if(!data.ok||!data.segment_url){
+          pkg.renderStatus='failed'; pkg.renderError='long_segment_error(beat '+i+'): '+(data.error||('HTTP '+data.status))+' — completed beats preserved, a Resume will continue from beat '+i;
+          try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+          return{ok:false,reason:'long_segment_error',detail:pkg.renderError};
+        }
+        pkg.nextwaveV2LongSegmentUrls[i]=data.segment_url;
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+      }
+      const segUrls=beats.map(function(_,i){return pkg.nextwaveV2LongSegmentUrls[i];});
+      const cr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_concat_long',{segment_urls:segUrls,render_id:renderId});
+      const cdata=await cr.json();
+      if(!cdata.ok||!cdata.composited_video_url){
+        pkg.renderStatus='failed'; pkg.renderError='long_concat_error: '+(cdata.error||('HTTP '+cr.status))+' — all 27 beats remain preserved, a Resume will retry only the final concat';
+        try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+        return{ok:false,reason:'long_concat_error',detail:pkg.renderError};
+      }
+      compositedUrl=cdata.composited_video_url;
+    }
+    // Reuses the EXISTING, already-proven canvas-composite field name/
+    // Submagic hand-off unchanged — nextwaveV2StartCaptionsOnlySubmagic only
+    // reads pkg.nextwaveV2CanvasVideoUrl, so populating it here (rather than
+    // forking a parallel captions function) means the real Submagic poller's
+    // existing NextWave auto-advance-to-approve logic keeps working exactly
+    // as already validated, with zero duplicated code.
+    pkg.nextwaveV2CanvasVideoUrl=compositedUrl;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return await nextwaveV2StartCaptionsOnlySubmagic(pkg);
+  }catch(e){
+    pkg.renderStatus='failed';
+    pkg.renderError='production_composite_network_error: '+e.message;
+    try{ if(typeof _persistPkgPipelineState==='function') await _persistPkgPipelineState(pkg); }catch(_){}
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+
 function _srvEnglishCancelTask(taskId){
   if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
   const t=D.tasks.find(function(x){return String(x.id)===String(taskId);});
@@ -17566,17 +18618,34 @@ function _nextWaveGetStage(taskId){
   if(_pkgStage){if(!D.nextWaveLifecycleStages)D.nextWaveLifecycleStages={};D.nextWaveLifecycleStages[String(taskId)]=_pkgStage;}
   return _pkgStage||'generate';
 }
-function _nextWaveSetStage(taskId,stage){
+async function _nextWaveSetStage(taskId,stage){
   if(!D.nextWaveLifecycleStages)D.nextWaveLifecycleStages={};
   D.nextWaveLifecycleStages[String(taskId)]=stage;
   const _pkg=(D.packages||[]).find(function(p){return String(p.taskId||'')===String(taskId);});
-  if(_pkg){_pkg.lifecycleStage=stage;if(typeof savePackageToSupabase==='function')savePackageToSupabase(_pkg).catch(function(){});}
+  if(_pkg){
+    _pkg.lifecycleStage=stage;
+    if(typeof savePackageToSupabase==='function'){
+      // Phase 4.6A — savePackageToSupabase already resolves true/false (never
+      // rejects), but this caller used to fire-and-forget with a no-op
+      // .catch(), so a rejected durable write was indistinguishable from a
+      // successful one: the lifecycle stage still advanced and the UI still
+      // showed it as saved. Awaiting the real result and tagging the package
+      // with it lets the lifecycle card warn instead of silently masquerading
+      // a failed save as durable. Re-rendering after the await (below) is the
+      // only way the UI reflects that outcome, since every caller of this
+      // function already re-renders immediately/optimistically on its own.
+      const _durableOk=await savePackageToSupabase(_pkg).catch(function(){return false;});
+      _pkg._lifecycleStageDurable=!!_durableOk;
+      if(!_durableOk)console.error('[NextWave lifecycle] stage set to',stage,'for task',taskId,'but the durable save FAILED — this state exists only in the current session and will not survive a reload.');
+    }
+  }
   if(stage==='done'){
     // v15.7.0 — search by t.id first (canonical), then t.taskId fallback
     const _t=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId)||String(t.taskId||'')===String(taskId);});
     if(_t&&_t.status!=='done'){_t.status='done';_t.updatedAt=new Date().toISOString();}
   }
   if(typeof saveAppState==='function')saveAppState();
+  if(typeof renderTab==='function' && typeof currentTab!=='undefined')renderTab(currentTab);
 }
 function _nextWavePkgForTask(task){
   if(!task)return null;
@@ -17654,6 +18723,102 @@ function vaStartNextWaveProductionTask(){
   if(typeof renderTab==='function')renderTab('tasks');
   window.scrollTo(0,0);
 }
+// Phase 4.4A — fresh NextWave V2 preview-test lifecycle, independent of the
+// real weekly cap/publish calendar (vaStartNextWaveProductionTask's
+// _nextWaveNextFormat/_nextWaveNextMode/_nextWaveNextPublishDate all advance
+// real shared-DB rotation state — deliberately not called here). isTest=true
+// is the ONLY thing that makes this task/package different from a real one;
+// same shape otherwise, so it flows through the exact same, unmodified
+// _nextWaveHasLifecycle/renderNextWaveLifecycleCard lifecycle — no second
+// lifecycle created.
+// Phase 4.4C — root cause of 4.4B's real-CEO-session failure: D.tasks
+// persists as ONE monolithic blob (see saveAppState — tasks:D.tasks is one
+// field in a single app_settings upsert row), so ANY concurrent save from
+// ANY session (including real, independent production activity sharing
+// this exact row) can silently overwrite a task created moments earlier
+// elsewhere. "Latest task" inference (nwCurrent/nwPending[0]/newest-isTest)
+// is therefore inherently unreliable as the PRIMARY navigation mechanism —
+// it depends on a re-read of shared state that something else may have
+// already clobbered. Fixed by removing that dependency entirely for the
+// critical moment: capture the exact new task id, await the save, verify
+// via a genuine canonical readback (a direct fresh fetch of the same
+// Supabase row loadAppState itself reads — not local D, which could just be
+// echoing back what we ourselves wrote), and navigate straight to that
+// exact id via openExec() — which renders renderNextWaveLifecycleCard(task)
+// for the literal task object passed in, with zero dependency on
+// nwCurrent/"latest" inference. A sessionStorage pointer (preview-only,
+// NextWave-only, per the order's explicitly authorized temporary mitigation)
+// lets a same-tab reload also reopen this exact task by id rather than
+// falling back to inference.
+async function _nextwaveV2CreatePreviewTestTask(){
+  const nextId='nwv2preview_'+Date.now();
+  const task={
+    id:nextId,
+    name:'🧪 NEXTWAVE V2 PREVIEW TEST — Finance',
+    engine:'NextWave',
+    mood:'Finance',
+    mode:'Finance',
+    platform:'YouTube',
+    contentType:'Short',
+    contentFormat:'short',
+    isLong:false,
+    isoDate:new Date().toISOString().slice(0,10),
+    publishAt:null, // never enters the real Fri/Sat/Sun publish calendar
+    status:'assigned',
+    subStage:null,
+    autoCreated:false,
+    reviewStatus:'acknowledged',
+    createdAt:Date.now(),
+    isTest:true, // NEXTWAVE_V2_PREVIEW_TEST — existing convention (see Phase 4.4 checkpoint)
+  };
+  if(!D.nextWaveLifecycleStages)D.nextWaveLifecycleStages={};
+  D.nextWaveLifecycleStages[String(nextId)]='generate';
+  D.tasks.push(task);
+  const _localHasAfterPush=(D.tasks||[]).some(function(t){return String(t.id)===nextId;});
+  console.log('[NextWave V2 Preview Test] step 1/3 — pushed to local D.tasks. id='+nextId+' present locally='+_localHasAfterPush);
+
+  await saveData(); // now explicitly awaited — saveAppState is async and previously wasn't awaited here
+
+  // Canonical readback: fetch the SAME Supabase row loadAppState() reads on
+  // a fresh page load, independent of local D, so this proves the write
+  // actually reached shared state instead of only trusting our own memory.
+  let _canonicalHas=false, _canonicalStage=null;
+  try{
+    const res=await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${SB_FINANCE_KEY}&select=value`,{
+      signal:AbortSignal.timeout(8000),
+      headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}
+    });
+    if(res.ok){
+      const rows=await res.json();
+      if(rows&&rows[0]){
+        const canon=JSON.parse(rows[0].value);
+        const ct=(canon.tasks||[]).find(function(t){return String(t.id)===nextId;});
+        _canonicalHas=!!ct;
+        _canonicalStage=canon.nextWaveLifecycleStages?canon.nextWaveLifecycleStages[nextId]:undefined;
+      }
+    }else{
+      console.error('[NextWave V2 Preview Test] canonical readback HTTP '+res.status);
+    }
+  }catch(e){
+    console.error('[NextWave V2 Preview Test] canonical readback failed:',e.message);
+  }
+  console.log('[NextWave V2 Preview Test] step 2/3 — canonical readback: found='+_canonicalHas+' stage='+_canonicalStage);
+
+  if(!_canonicalHas){
+    alert('⚠ NEXTWAVE V2 PREVIEW TEST did not persist to shared canonical state — likely a concurrent save from another session overwrote it (task id '+nextId+'). This is a real write-overwrite conflict, not a UI bug. Please try again; if it keeps happening, tell Claude the exact task id above so this can be investigated rather than papered over.');
+    console.error('[NextWave V2 Preview Test] STOP — write-overwrite conflict, task id '+nextId+' missing from canonical state after save.');
+    return null;
+  }
+
+  try{ sessionStorage.setItem('nwv2_preview_task_id', nextId); }catch(e){}
+  if(typeof vaFocusTaskId!=='undefined')vaFocusTaskId=nextId;
+  console.log('[NextWave V2 Preview Test] step 3/3 — persistence confirmed, opening exact task id='+nextId+' directly (no latest-task inference)');
+
+  if(typeof openExec==='function') await openExec(nextId);
+  else if(typeof renderTab==='function') renderTab('tasks');
+  window.scrollTo(0,0);
+  return task;
+}
 async function _nextWaveGeneratePackage(taskId){
   const genBtn=document.querySelector('button[onclick="_nextWaveGeneratePackage(\''+taskId+'\')"]');
   if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
@@ -17671,6 +18836,36 @@ async function _nextWaveGeneratePackage(taskId){
       alert('Package generation timed out — try again.');
       return;
     }
+    // Phase 4.4D — REAL root cause of the Build-stage HeyGen dispatch: THIS
+    // is the function the actual NextWave lifecycle UI's "Auto-Generate
+    // Package" button calls (renderNextWaveLifecycleCard, stage='generate')
+    // — _nextwaveGeneratePackageWithV2Plan (Phase 4.4A's isTest-propagation
+    // fix) is only reachable from the OLDER renderExecMode Generate button,
+    // which is skipped entirely for NextWave lifecycle tasks. So every V2
+    // preview-test package generated through the real UI had pkg.isTest
+    // silently stay false and no V2 plan attached — meaning the Build
+    // stage's isNextWaveV2Preview check (pkg.isTest + workflowNotes marker)
+    // was ALWAYS false, and Build silently fell through to the real,
+    // unmodified legacy HeyGen path every time. Confirmed live: a freshly
+    // generated package's pkg.isTest was false and workflowNotes carried
+    // only the generic HeyGen-production template text, with no
+    // NEXTWAVE_V2_PREVIEW_TEST marker anywhere. heygenStartRender is ALSO
+    // requireCeoSession-gated and returns the byte-identical
+    // 'ceo_authorization_required' string, which is why the UI error text
+    // alone couldn't distinguish the two paths — only inspecting pkg.isTest
+    // directly proved which one actually ran. Fixed here, inline, in the
+    // one function the real UI actually calls.
+    const _t=(D.tasks||[]).find(function(x){return String(x.id)===String(taskId);});
+    if(_t&&_t.isTest&&!_pkg.isTest){
+      _pkg.isTest=true;
+      _pkg.workflowNotes=(_pkg.workflowNotes?_pkg.workflowNotes+' | ':'')+'NEXTWAVE_V2_PREVIEW_TEST';
+      try{
+        const _vr=await fetch('/api/ops?action=nextwave_v2_plan_visuals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script:_pkg.script})});
+        const _vd=await _vr.json();
+        if(_vd.ok){_pkg.nextwaveV2Plan=_vd.plan;console.log('[NextWave V2] visual plan attached — units:',_vd.unit_count);}
+        else console.warn('[NextWave V2] plan_visuals failed (package still saved normally):',_vd.error);
+      }catch(e){console.warn('[NextWave V2] plan_visuals error (non-fatal):',e.message);}
+    }
     if(typeof savePackageToSupabase==='function')await savePackageToSupabase(_pkg).catch(function(){});
     _nextWaveSetStage(taskId,'review');
     if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
@@ -17680,10 +18875,61 @@ async function _nextWaveGeneratePackage(taskId){
     alert('Generation failed: '+e.message);
   }
 }
+// Live Validation Defect #1 — Review edit persistence. Reads the three
+// editable Review textareas straight off the DOM (no separate draft/state
+// object to drift out of sync with what's on screen), writes them onto the
+// SAME pkg object every downstream NextWave function (Build, the auto-mapper,
+// thumbnail derivation, Publish) already reads pkg.title/pkg.hook/pkg.script
+// from, and persists via the existing savePackageToSupabase — identical to
+// every other save path in this file, so a reload round-trips the edit
+// correctly (full_package stores the whole object as JSON; there is no
+// second, independently-stale copy anywhere in this chain).
+async function _nextWaveSaveReviewEdits(pkgId,taskId){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(!pkg)return{ok:false,reason:'missing_package'};
+  const titleEl=document.getElementById('nw-rev-title-'+taskId);
+  const hookEl=document.getElementById('nw-rev-hook-'+taskId);
+  const scriptEl=document.getElementById('nw-rev-script-'+taskId);
+  if(titleEl)pkg.title=titleEl.value;
+  if(hookEl)pkg.hook=hookEl.value;
+  if(scriptEl){
+    pkg.script=scriptEl.value;
+    pkg.lyrics=scriptEl.value; // legacy mirror field — savePackageToSupabase's own upload prefers lyrics||script for its indexed column, so both must carry the edit
+  }
+  const statusEl=document.getElementById('nw-rev-savestatus-'+taskId);
+  if(statusEl)statusEl.textContent='Saving…';
+  const ok=await (typeof savePackageToSupabase==='function'?savePackageToSupabase(pkg):Promise.resolve(false)).catch(function(){return false;});
+  if(typeof saveAppState==='function')saveAppState();
+  if(statusEl)statusEl.textContent=ok?('✓ Saved '+new Date().toLocaleTimeString()):'⚠ Save failed — check your connection and try again';
+  return{ok:!!ok};
+}
+// Approve must never advance to Build on an unsaved edit — saves first and
+// refuses to proceed if that save fails, so Build can never silently
+// consume stale pre-edit content.
+async function _nextWaveApproveReview(pkgId,taskId){
+  const r=await _nextWaveSaveReviewEdits(pkgId,taskId);
+  if(!r.ok){alert('Could not save your edits — Build was NOT started. Check your connection and try again.');return;}
+  _nextWaveSetStage(taskId,'build');
+  if(typeof renderTab==='function')renderTab(currentTab);
+}
 async function _nextWaveRunPublish(pkgId,taskId){
   const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
   if(!pkg){alert('Package not found');return;}
   const statusEl=document.getElementById('nw-publish-status-'+taskId);
+  // Phase 4.4A — hard safety guard: a NEXTWAVE V2 PREVIEW TEST package must
+  // never actually reach YouTube, regardless of how the 'publish' stage was
+  // entered. This is the real network-call boundary, not just a UI hint.
+  // Phase 4.5A — also check the TASK's isTest (race-free source of truth —
+  // see the isNextWaveV2Preview comment in renderNextWaveLifecycleCard for
+  // why pkg.isTest alone can be transiently wiped by generatePackage()'s
+  // own detached background refetch) so this guard can't be silently lost
+  // to that same race.
+  const _pubTask=(D.tasks||[]).find(function(x){return String(x.id||'')===String(taskId)||String(x.taskId||'')===String(taskId);});
+  if(pkg.isTest||(_pubTask&&_pubTask.isTest)){
+    if(statusEl){statusEl.style.color='#f59e0b';statusEl.innerHTML='🧪 NEXTWAVE V2 PREVIEW TEST — Publish is disabled for test packages. Review the rendered video in Build/Approve; this will not be uploaded to YouTube.';}
+    _nextWaveSetStage(taskId,'approve');
+    return;
+  }
   const videoUrl=pkg.submagicOutputUrl||pkg.videoUrl||pkg._heygenRawUrl||pkg.heygenVideoUrl;
   if(!videoUrl){if(statusEl)statusEl.textContent='No video URL — go back to Build.';return;}
   const task=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
@@ -17711,6 +18957,23 @@ async function _nextWaveRunPublish(pkgId,taskId){
       pkg.youtubeVideoId=_ytId;
       pkg.youtubeWatchUrl=d.watchUrl||(_ytId?('https://www.youtube.com/watch?v='+_ytId):'');
       pkg.youtubeStudioUrl=d.studioUrl||(_ytId?('https://studio.youtube.com/video/'+_ytId):'');
+      // Production Lifecycle Release — attach the deterministic Build-stage
+      // thumbnail to the actual YouTube video, not just to package storage.
+      // Awaited (not fire-and-forget like SRV Farsi's) so pkg.thumbnailSetOnYoutube
+      // reliably reflects whether it actually reached YouTube before Publish
+      // reports success — the CEO's order is explicit that a thumbnail merely
+      // existing in storage is not sufficient.
+      if(pkg.nextwaveV2ThumbnailUrl&&_ytId){
+        try{
+          const tr=await fetch('/api/ops?action=set_yt_thumbnail',{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({videoId:_ytId,engine:'NextWave',thumbUrl:pkg.nextwaveV2ThumbnailUrl}),
+          });
+          const td=await tr.json().catch(function(){return{};});
+          pkg.thumbnailSetOnYoutube=!!(td&&td.ok);
+          if(!(td&&td.ok)) console.warn('[NextWave V2 Production] YouTube thumbnail set failed:',td&&td.error);
+        }catch(e){ pkg.thumbnailSetOnYoutube=false; console.warn('[NextWave V2 Production] YouTube thumbnail set error:',e.message); }
+      }
       if(typeof savePackageToSupabase==='function')await savePackageToSupabase(pkg).catch(function(){});
       if(typeof saveAppState==='function')saveAppState();
       _nextWaveSetStage(taskId,'done');
@@ -17740,6 +19003,13 @@ function renderNextWaveLifecycleCard(task){
   const btnGreen='width:100%;padding:12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:10px';
   const btnRed='width:100%;padding:9px;background:transparent;border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;cursor:pointer;font-family:\'JetBrains Mono\',monospace;margin-top:8px';
   let body='';
+  // Phase 4.6A — a durable-save failure (e.g. a schema/constraint rejection)
+  // must be visible here, not just in the console, since this lifecycle
+  // stage's own button clicks re-render optimistically before the save's
+  // result is known. pkg._lifecycleStageDurable is set by _nextWaveSetStage.
+  if(pkg && pkg._lifecycleStageDurable===false){
+    body+=`<div style="padding:10px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;margin-bottom:12px">⚠ NOT DURABLY SAVED — this stage change did not persist to the database. It will be lost on reload. See console for the save error.</div>`;
+  }
   // ── GENERATE ──────────────────────────────────────────────────────────────
   if(stage==='generate'){
     const nextMode=_nextWavePeekNextMode();
@@ -17751,23 +19021,51 @@ function renderNextWaveLifecycleCard(task){
     body+=`<button style="${btnBlue}" onclick="_nextWaveGeneratePackage('${taskId}')">⚡ Auto-Generate Package</button>`;
   }
   // ── REVIEW ────────────────────────────────────────────────────────────────
+  // Live Validation Defect #1 — the previous version showed Title/Hook/Script
+  // as small, read-only, copy-on-click boxes (Script capped at a 140px
+  // scrollable window in an 11px font), and offered no way to actually edit
+  // anything — Review was a preview, not the real quality-control gate the
+  // lifecycle requires. Title/Hook/Script are now real, generously-sized
+  // <textarea>s; Save Edits writes them onto the SAME pkg object Build reads
+  // from (pkg.title/pkg.hook/pkg.script — confirmed the exact fields
+  // nwv2ProductionStartBuild and the thumbnail/beat-mapper read) and persists
+  // via the same savePackageToSupabase() every other save in this file uses,
+  // so a reload restores the edited version (full_package round-trips the
+  // whole object as JSON — there is no separate stale copy anywhere in the
+  // chain). Approve now saves first and refuses to advance to Build if that
+  // save fails, so Build can never silently run on an unsaved edit.
   else if(stage==='review'){
     if(pkg){
-      const fields=[
-        {label:'Title',val:pkg.title},
-        {label:'Hook',val:pkg.hook},
-        {label:'Script',val:pkg.script||pkg.lyrics,long:true},
-        {label:'YouTube Caption',val:pkg.captionYT||pkg.captionYouTube},
-        {label:'Hashtags',val:pkg.hashtags},
-      ];
-      fields.forEach(function(f){
-        if(!f.val)return;
-        body+=`<div style="margin-bottom:12px">
-          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">${f.label}</div>
-          <div style="font-size:${f.long?'11px':'13px'};color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 10px;max-height:${f.long?'140px':'60px'};overflow-y:auto;white-space:pre-wrap;cursor:pointer" onclick="navigator.clipboard.writeText(${JSON.stringify(f.val||'')})">${escHTML(f.val||'')}</div>
+      const _rid=taskId;
+      const titleVal=pkg.title||'';
+      const hookVal=pkg.hook||'';
+      const scriptVal=pkg.script||pkg.lyrics||'';
+      const captionVal=pkg.captionYT||pkg.captionYouTube||'';
+      const hashtagsVal=pkg.hashtags||'';
+      const editableField=function(label,id,val,rows){
+        return `<div style="margin-bottom:12px">
+          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">${label}</div>
+          <textarea id="${id}" rows="${rows}" style="width:100%;box-sizing:border-box;font-size:12px;line-height:1.5;color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:8px 10px;white-space:pre-wrap;font-family:inherit;resize:vertical">${escHTML(val)}</textarea>
         </div>`;
-      });
-      body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve Script → Build</button>`;
+      };
+      body+=editableField('Title (editable)','nw-rev-title-'+_rid,titleVal,2);
+      body+=editableField('Hook (editable)','nw-rev-hook-'+_rid,hookVal,2);
+      body+=editableField('Full Script (editable — do not truncate before reading)','nw-rev-script-'+_rid,scriptVal,16);
+      if(captionVal){
+        body+=`<div style="margin-bottom:12px">
+          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">YouTube Caption</div>
+          <div style="font-size:12px;color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 10px;max-height:120px;overflow-y:auto;white-space:pre-wrap;cursor:pointer" onclick="navigator.clipboard.writeText(${JSON.stringify(captionVal)})" title="Click to copy">${escHTML(captionVal)}</div>
+        </div>`;
+      }
+      if(hashtagsVal){
+        body+=`<div style="margin-bottom:12px">
+          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">Hashtags</div>
+          <div style="font-size:12px;color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 10px;white-space:pre-wrap;cursor:pointer" onclick="navigator.clipboard.writeText(${JSON.stringify(hashtagsVal)})" title="Click to copy">${escHTML(hashtagsVal)}</div>
+        </div>`;
+      }
+      body+=`<div id="nw-rev-savestatus-${_rid}" style="font-size:10px;color:var(--dim);margin-bottom:8px;min-height:14px"></div>`;
+      body+=`<button style="${btnBlue}" onclick="_nextWaveSaveReviewEdits('${pkgId}','${_rid}')">💾 Save Edits</button>`;
+      body+=`<button style="${btnGreen}" onclick="_nextWaveApproveReview('${pkgId}','${taskId}')">✅ Approve Script → Build</button>`;
       body+=`<button style="${btnRed}" onclick="if(confirm('Discard package and regenerate?')){_nextWaveSetStage('${taskId}','generate');if(typeof renderTab==='function')renderTab(currentTab)}">↺ Discard & Regenerate</button>`;
     }else{
       body+=`<div style="color:var(--dim);font-size:12px;margin-bottom:12px">Package not found — try generating again.</div>`;
@@ -17777,9 +19075,179 @@ function renderNextWaveLifecycleCard(task){
   // ── BUILD — pkg.renderStatus state machine ────────────────────────────────
   else if(stage==='build'){
     const renderStatus=pkg?pkg.renderStatus:'';
+    // Phase 4.4D — root cause of the CEO's "HeyGen render failed /
+    // ceo_authorization_required" report: nextwaveV2StartBuild already
+    // correctly used _ceoAuthedFetch and got a real (correctly-enforced)
+    // 401 from the server — HeyGen was never invoked. But the FAILURE
+    // display below was the same shared, HeyGen-labeled 'failed' branch
+    // every engine's Build stage uses, whose Retry button was hardcoded to
+    // autoStartHeygenRender — meaning a retry click would have genuinely
+    // fired the legacy HeyGen path. The CEO was right not to retry. Fixed
+    // by giving a NextWave V2 preview package (isTest + the
+    // NEXTWAVE_V2_PREVIEW_TEST marker — the exact criteria this order
+    // specifies) its own fully self-contained state branch below, which
+    // never touches renderStatus values the legacy HeyGen/Submagic branches
+    // interpret, never shows HeyGen/Submagic language, and always retries
+    // via nextwaveV2StartBuild. Real (non-preview) NextWave packages fall
+    // through to the original HeyGen+Submagic state machine, byte-for-byte
+    // unchanged, further below.
+    // Phase 4.5A — real root cause of a FRESH V2 preview task still falling
+    // through to this legacy branch: generatePackage() (the shared, legacy
+    // function every engine's Generate button calls, including
+    // _nextWaveGeneratePackage) does its own save, then fires a DETACHED,
+    // un-awaited setTimeout(...,800) that refetches D.packages from
+    // Supabase and replaces the whole array — independent of when
+    // generatePackage() itself returns. _nextWaveGeneratePackage stamps
+    // pkg.isTest + the marker AFTER generatePackage() resolves, then
+    // re-saves — if that stamp+resave takes longer than the detached 800ms
+    // timer, the refetch can win the race and silently overwrite D.packages
+    // with the PRE-stamp version, wiping isTest/marker back out from under
+    // the just-rendered UI. This is exactly why it was intermittent rather
+    // than always broken. task.isTest is set once at task creation and is
+    // never touched by that refetch (which only ever replaces D.packages),
+    // so it's the race-free source of truth — checked first, with the
+    // pkg-level check kept as a fallback for defense in depth.
+    const isNextWaveV2Preview=!!(task&&task.isTest) || !!(pkg&&pkg.isTest&&typeof pkg.workflowNotes==='string'&&pkg.workflowNotes.indexOf('NEXTWAVE_V2_PREVIEW_TEST')!==-1);
+    if(isNextWaveV2Preview){
+      // Phase 4.4E — traced end-to-end: _ceoAuthedFetch/requireCeoSession/
+      // _ceoVerifySession have no domain/origin binding (pure HMAC, verified
+      // against the shared Supabase ceo_auth_config row) and the 12h-TTL
+      // token is issued and attached correctly — there is no code defect in
+      // the auth mechanism itself. Generate/Review/Approve are NOT
+      // CEO-gated, so this entire lifecycle UI (including this Build panel)
+      // renders identically regardless of which profile is active -- only
+      // the actual Build/voice actions are gated server-side. That means a
+      // non-CEO-authenticated session (VA/Family, or Admin without a
+      // completed PIN login) can navigate all the way to this exact screen
+      // and only discover the gate on the final click, with no prior
+      // indication anything was missing. This status line makes that
+      // visible up front instead, without touching requireCeoSession or any
+      // auth code at all -- it just surfaces the EXISTING, already-safe
+      // ceo_check_session read.
+      const _ceoStatusPanel=`<div style="border:1px solid rgba(201,158,76,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">CEO SESSION</div>
+        <div id="nwv2-ceo-status-${taskId}" style="font-size:12px;color:#fff">checking…</div>
+      </div>`;
+      const _voicePanel=`<div style="border:1px solid rgba(59,130,246,0.25);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">ELEVENLABS VOICE</div>
+        <div id="nwv2-voice-status-${taskId}" style="font-size:12px;color:#fff;margin-bottom:8px">checking…</div>
+        <button style="width:100%;padding:9px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.3);border-radius:8px;color:#3b82f6;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="_nextwaveV2ListVoices('${taskId}')">🎙 List ElevenLabs Voices</button>
+        <div id="nwv2-voice-list-${taskId}" style="margin-top:8px"></div>
+      </div>`;
+      const _ideogramPanel=`<div style="border:1px solid rgba(201,158,76,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">IDEOGRAM HOST POSES (Phase 4.7)</div>
+        <div id="nwv2-ideogram-status-${taskId}" style="font-size:12px;color:#fff;margin-bottom:8px">checking…</div>
+        <div id="nwv2-ideogram-keyrow-${taskId}" style="display:none;margin-bottom:10px">
+          <input type="password" id="nwv2-ideogram-keyinput-${taskId}" placeholder="Ideogram API key" style="width:100%;padding:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;font-size:12px;margin-bottom:6px;box-sizing:border-box">
+          <button style="width:100%;padding:8px;background:rgba(201,158,76,0.12);border:1px solid rgba(201,158,76,0.4);border-radius:6px;color:#c99e4c;font-weight:700;font-size:11px;cursor:pointer" onclick="_nextwaveV2SetIdeogramKey('${taskId}')">Save Ideogram Key (CEO only)</button>
+        </div>
+        ${NEXTWAVE_V2_IDEOGRAM_POSES.map(function(p){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">'
+            +'<div><div style="font-size:12px;color:#fff">'+p.label+'</div><div id="nwv2-pose-status-'+p.role+'-'+taskId+'" style="font-size:11px;color:var(--dim);margin-top:4px"></div></div>'
+            +'<button style="padding:6px 10px;background:rgba(201,158,76,0.1);border:1px solid rgba(201,158,76,0.35);border-radius:6px;color:#c99e4c;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="_nextwaveV2GeneratePose(\''+taskId+'\',\''+p.role+'\')">Generate</button>'
+            +'</div>';
+        }).join('')}
+      </div>`;
+      const _buildBtn=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Rendering (ElevenLabs + ffmpeg, ~1-2 min)…';const r=await nextwaveV2StartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{btn.textContent=(p.renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)');if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}})()">${renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)'}</button>`;
+      if(renderStatus==='enhanced'&&pkg&&pkg.videoUrl){
+        const _isHybrid=!!(pkg&&pkg.nextwaveV2Hybrid);
+        body+=`<div style="padding:20px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.50);border-radius:12px;text-align:center;margin-bottom:12px">
+          <div style="font-size:32px;margin-bottom:12px">🎬</div>
+          <div style="font-size:16px;font-weight:800;color:#22c55e;margin-bottom:8px">NextWave V2 video ready</div>
+          <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">${_isHybrid?'HeyGen native avatar+voice · persistent-canvas composite (presenter window + evidence zone) · Submagic captions-only':'ElevenLabs narration · original environment/icons — Phase 5.3 legacy renderer'} · duration: ${escHTML(String(pkg.renderDurationSec||pkg.submagicDurationSec||'—'))}s</div>
+          <video src="${escHTML(pkg.videoUrl)}" controls style="width:100%;border-radius:10px;max-height:280px;background:#000;margin-top:8px"></video>
+        </div>`;
+        body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>`;
+      }else{
+        if(renderStatus==='failed'||renderStatus==='enhance_failed'){
+          const _errRaw=pkg&&(pkg.renderError||pkg.submagicError)||'unknown';
+          const _errFailed=escHTML((typeof _errRaw==='object'?(_errRaw.message||_errRaw.code||JSON.stringify(_errRaw)):String(_errRaw)).slice(0,250));
+          const _isAuthErr=/ceo_authorization_required/i.test(String(_errRaw));
+          body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">🔴</span><span style="font-size:14px;font-weight:800;color:#ef4444">NextWave V2 build failed</span></div>
+            <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
+            ${_isAuthErr?`<div style="margin-top:10px;font-size:11px;color:#f59e0b">Check the CEO SESSION status below. This usually means the active browser profile is not a completed CEO/Admin PIN login (e.g. it's on VA or Family, or Admin was never fully logged in this tab) — log out, select the Admin/CEO profile, and enter your PIN. This does not touch HeyGen and will not consume any HeyGen/Submagic quota.</div>`:''}
+          </div>`;
+        }else if(renderStatus==='rendering'||renderStatus==='compositing'||renderStatus==='enhancing'){
+          const _statusLabel=renderStatus==='rendering'?'HeyGen rendering presenter…':(renderStatus==='compositing'?'Compositing persistent-canvas video (presenter window + evidence zone)…':'Submagic applying captions (composition-only, no B-roll)…');
+          body+=`<div style="padding:16px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.35);border-radius:12px;text-align:center;margin-bottom:12px">
+            <div style="font-size:12px;color:#fbbf24;font-weight:700">⏳ ${_statusLabel}</div>
+            <div style="font-size:10px;color:var(--dim);margin-top:4px;font-family:'JetBrains Mono',monospace">${renderStatus==='compositing'?'Real ffmpeg work — can take longer than the other steps. ':''}Polls automatically every ${renderStatus==='rendering'?'45':'30'}s — no action needed.</div>
+          </div>`;
+        }else{
+          body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">Frozen architecture: HeyGen native avatar + native voice for the base video, composited into a persistent NextWave canvas (presenter window + evidence zone), then Submagic for captions only. No ElevenLabs, no full-screen auto-B-roll, no custom renderer.</div>`;
+        }
+        body+=_ceoStatusPanel;
+        body+=_voicePanel;
+        // NextWave V2 Production Architecture Freeze — GENERATE-stage hybrid
+        // visual plan (visual_treatment/broll_prompt/emphasis_values per beat,
+        // including any unsupported-precise-evidence flags) is now the primary
+        // reviewable artifact before Build spends anything on this frozen path.
+        if(pkg&&pkg.nextwaveV2VisualPlan){
+          const vp=pkg.nextwaveV2VisualPlan;
+          const treatColor={host:'#3b82f6',auto_broll:'#8b8b8b',targeted_broll:'#c99e4c',exact_evidence:'#22c55e'};
+          const beatRows=(vp.beats||[]).map(function(b){
+            const v=b.visual||{};
+            const tc=treatColor[v.visual_treatment]||'#8b8b8b';
+            return '<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">'
+              +'<div style="font-size:11px;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:'+tc+'">BEAT '+(b.beatIndex+1)+' · '+escHTML((v.visual_treatment||'—').toUpperCase())+(v.unsupported_precise?' · ⚠ UNSUPPORTED PRECISE VISUAL':'')+'</div>'
+              +'<div style="font-size:11px;color:#fff;margin-top:3px">'+escHTML((b.unit_texts||[]).join(' ').slice(0,140))+'</div>'
+              +(v.broll_prompt?'<div style="font-size:11px;color:#c99e4c;margin-top:3px">broll prompt: '+escHTML(v.broll_prompt)+'</div>':'')
+              +((v.emphasis_values||[]).length?'<div style="font-size:11px;color:#9fb3d8;margin-top:3px">exact evidence: '+escHTML(v.emphasis_values.join(' · '))+'</div>':'')
+              +(v.unsupported_reason?'<div style="font-size:10px;color:#f59e0b;margin-top:3px">'+escHTML(v.unsupported_reason)+'</div>':'')
+              +'</div>';
+          }).join('');
+          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">VISUAL PLAN — ${vp.beat_count} beat(s), ${vp.unit_count} unit(s)</div>
+            ${beatRows}
+            <button style="width:100%;padding:8px;margin-top:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:11px;cursor:pointer" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;event.target.textContent='Regenerating…';const r=await nextwaveV2GenerateHybridVisualPlan(p);if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Regenerate visual plan</button>
+          </div>`;
+          body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Starting HeyGen render…';const r=await nextwaveV2StartHybridBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('Build failed to start: '+(r&&(r.detail||r.reason)||'unknown'));btn.textContent='⚡ Start Build (HeyGen + Submagic)';if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}})()">⚡ Start Build (HeyGen + Submagic)</button>`;
+        }else{
+          body+=`<div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">GENERATE VISUAL PLAN</div>
+            <div id="nwv2-visualplan-status-${taskId}" style="font-size:12px;color:var(--dim);margin-bottom:8px">Analyzes the script into meaning units and decides, per beat: stay on the HeyGen presenter, let Submagic auto-match B-roll, request a targeted concept B-roll at a specific moment, or preserve exact evidence through captions. Required before Build.</div>
+            <button style="width:100%;padding:9px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-weight:700;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;const st=document.getElementById('nwv2-visualplan-status-${taskId}');if(st)st.innerHTML='<span style=\\'color:var(--dim)\\'>Generating visual plan (~5-15s)…</span>';const r=await nextwaveV2GenerateHybridVisualPlan(p);if(r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else if(st){st.innerHTML='<span style=\\'color:#ef4444\\'>'+escHTML(r.detail||r.reason||'failed')+'</span>';}})()">🧩 Generate Visual Plan</button>
+          </div>`;
+        }
+        // Phase 5.3 legacy custom renderer — kept for reference/comparison only,
+        // not the frozen default. Collapsed below the hybrid path so it's never
+        // the first/easiest button to click.
+        body+=`<details style="margin-top:14px;margin-bottom:8px">
+          <summary style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;cursor:pointer">LEGACY — Phase 5.3 custom illustrated renderer (rejected, not the frozen architecture)</summary>
+          <div style="margin-top:10px">${_ideogramPanel}</div>`;
+        if(pkg&&pkg.nextwaveV2ScenePackage){
+          const sp=pkg.nextwaveV2ScenePackage;
+          const sceneRows=(sp.scenes||[]).map(function(s){
+            const sb=s.storyboard||{};
+            return '<div style="padding:6px 0;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:var(--dim)">SCENE '+(s.sceneIndex+1)+' · '+escHTML(sb.screen_type||'—')+' · '+escHTML(sb.heading||'')+'</div>';
+          }).join('');
+          body+=`<div style="border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px;margin-top:8px">${sceneRows}
+            <button style="width:100%;padding:6px;margin-top:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">↻ Regenerate legacy storyboard</button>
+          </div>`;
+        }else{
+          body+=`<button style="width:100%;padding:8px;margin-top:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:11px;cursor:pointer" onclick="_nextwaveV2GenerateStoryboardUI('${taskId}','${pkgId}')">Generate legacy storyboard</button>`;
+        }
+        body+=`<div style="margin-top:8px">${_buildBtn}</div></details>`;
+      }
+      setTimeout(function(){
+        if(typeof _nextwaveV2LoadVoiceStatus==='function')_nextwaveV2LoadVoiceStatus(taskId);
+        if(typeof _nextwaveV2LoadIdeogramStatus==='function')_nextwaveV2LoadIdeogramStatus(taskId);
+        if(typeof _nextwaveV2CheckCeoStatus==='function')_nextwaveV2CheckCeoStatus(taskId);
+      },50);
+      body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
+      return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="card-title" style="margin-bottom:0;color:var(--text)">⚡ NextWave Systems</div>
+          <span style="font-size:10px;font-weight:800;color:${stageCol};background:${stageCol}15;padding:3px 8px;border-radius:5px;letter-spacing:1px;font-family:'JetBrains Mono',monospace">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
+        </div>
+        ${_srvLifecycleProgressBar(stage)}
+        ${body}
+      </div>`;
+    }
     if(!renderStatus||!pkg){
-      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">HeyGen renders the video automatically. MMM polls every 45 sec.<br>Submagic captions apply after render.</div>`;
-      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const r=await autoStartHeygenRender(p);if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('HeyGen submit failed: '+(r&&(r.detail||r.reason)||'unknown'));}})()">⚡ Start Build (HeyGen → Submagic)</button>`;
+      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">Generates the CEO-accepted white-canvas visual plan from this package's own reviewed script, starts the HeyGen presenter render, composites the accepted visual system, and applies Submagic captions automatically. MMM polls every 45 sec.</div>`;
+      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Starting…';const r=await nwv2ProductionStartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('Build failed to start: '+(r&&(r.detail||r.reason)||'unknown'));btn.textContent='⚡ Start Build (HeyGen → Submagic)';}})()">⚡ Start Build (HeyGen → Submagic)</button>`;
     }else if(renderStatus==='rendering'){
       const _jobShort=escHTML(String(pkg.heygenJobId||'').slice(0,16));
       const _started=pkg.renderStartedAt?new Date(pkg.renderStartedAt).toLocaleTimeString():'—';
@@ -17790,6 +19258,31 @@ function renderNextWaveLifecycleCard(task){
         <div style="font-size:11px;color:var(--text);margin-top:12px;line-height:1.5">MMM polls every 45 sec — auto-advances when ready.</div>
       </div>`;
       body+=`<button style="${btnBlue}" onclick="_pollHeygenRenders().then(function(){if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks')})">↻ Check render status now</button>`;
+    }else if(renderStatus==='compositing'){
+      // Live Validation Defect #8 — this real (non-preview) Build branch had
+      // no case for 'compositing' at all, a status nwv2ProductionStartComposite
+      // sets and persists immediately on entry. With no matching branch, the
+      // whole if/else chain fell through silently — no status, no error, no
+      // button, just the trailing "Back to Review" — indistinguishable from
+      // a defect even though nothing had actually failed. Confirmed live:
+      // narration and both avatar clips were correctly reused (zero new
+      // vendor calls), the compositor was genuinely invoked and persisted
+      // this exact status; the blank screen was purely a missing UI branch,
+      // not a backend/compositor failure. The Long per-beat compositing
+      // loop runs entirely client-side with no server-side job to poll, so
+      // if the tab was closed/refreshed mid-loop there is nothing to
+      // "check" — Resume below simply calls nwv2ProductionStartBuild again,
+      // which (per the defect #5/#7 fixes) safely skips narration and both
+      // already-completed avatar clips and goes straight back into
+      // compositing, at zero additional vendor cost.
+      const _startedComp=pkg.renderStartedAt?new Date(pkg.renderStartedAt).toLocaleTimeString():'—';
+      body+=`<div style="padding:20px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.40);border-radius:12px;text-align:center;margin-bottom:12px">
+        <div style="font-size:32px;margin-bottom:12px">🎬</div>
+        <div style="font-size:16px;font-weight:800;color:#a855f7;margin-bottom:8px">Compositing final video…</div>
+        <div style="font-size:11px;color:var(--dim);line-height:1.6;font-family:'JetBrains Mono',monospace">narration + avatar already reused, no new vendor cost so far<br>started: ${escHTML(_startedComp)}<br>real ffmpeg work per beat — a Long can take a few minutes</div>
+        <div style="font-size:11px;color:var(--text);margin-top:12px;line-height:1.5">This runs in your browser tab, not on a server — if it looks stuck (tab was closed/refreshed), click Resume below. It will NOT re-charge narration or either avatar clip.</div>
+      </div>`;
+      body+=`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Resuming…';const r=await nwv2ProductionStartBuild(p);btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Resume Compositing</button>`;
     }else if(renderStatus==='post_processing'){
       body+=`<div style="padding:20px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.40);border-radius:12px;text-align:center;margin-bottom:12px">
         <div style="font-size:32px;margin-bottom:12px">✨</div>
@@ -17836,12 +19329,62 @@ function renderNextWaveLifecycleCard(task){
       body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">→ Continue with Raw MP4 — Advance to Approve</button>`;
     }else if(renderStatus==='failed'){
       const _errRaw=pkg&&pkg.renderError||'unknown';
-      const _errFailed=escHTML((typeof _errRaw==='object'?(_errRaw.message||_errRaw.code||JSON.stringify(_errRaw)):String(_errRaw)).slice(0,250));
+      const _errStr=(typeof _errRaw==='object'?(_errRaw.message||_errRaw.code||JSON.stringify(_errRaw)):String(_errRaw));
+      const _errFailed=escHTML(_errStr.slice(0,250));
+      // Live Validation Defect #2 — two real, separate bugs traced from a
+      // live failure on a real Finance/Long task:
+      // (1) This generic failed-state block is reached by every real
+      //     NextWave Build regardless of which path started the render, and
+      //     its Retry button was hardcoded to the LEGACY autoStartHeygenRender
+      //     — which uses a plain fetch() with no CEO token at all, so it
+      //     ALWAYS fails ceo_authorization_required regardless of session
+      //     validity (confirmed by reading its source). This whole block only
+      //     renders for real, non-preview NextWave tasks (the preview/test
+      //     branch is fully separate, earlier in this function), so Retry now
+      //     unconditionally calls nwv2ProductionStartBuild — the same, only,
+      //     correct path the initial Build button already uses — instead of
+      //     branching on pkg.nextwaveV2Production, which is unreliable here:
+      //     it's only set partway through that function, so a task that
+      //     failed before reaching that point (exactly what happened below)
+      //     would incorrectly still route to the broken legacy path.
+      // (2) The actual original failure on the real task traced to
+      //     nextwave_v2_generate_visual_plan's script-length cap (3000 chars
+      //     — sized for early Short-only candidate testing, never revisited
+      //     for Long) rejecting the script before ever reaching HeyGen; fixed
+      //     server-side (api/ops.js, raised to 8000 chars). That early-return
+      //     path never touched pkg.renderStatus, so this stale
+      //     ceo_authorization_required is very likely left over from an even
+      //     earlier attempt under the pre-rewire legacy button, not a defect
+      //     in the current session/auth plumbing itself.
+      const _isAuthError=_errStr.indexOf('ceo_authorization_required')!==-1;
+      const _isTooLong=/too long/i.test(_errStr);
+      // Live Validation Defect #10 — a failure can now occur AFTER the
+      // bounded pipeline is already mid-flight (visual plan classified,
+      // master narration synthesized, avatar clips generated, some/all
+      // per-beat composites already persisted — e.g. a CEO session expiring
+      // partway through the Defect #9 per-beat compositor loop). Routing
+      // that case through the unconditional nwv2ProductionStartBuild above
+      // would re-call nextwave_v2_generate_visual_plan — a non-deterministic
+      // LLM classification — and overwrite pkg.nextwaveV2ProductionBeats,
+      // risking a mismatch against beats already composited under the OLD
+      // beat definitions. When this mid-flight evidence is present, resume
+      // must go straight to nwv2ProductionStartComposite instead, skipping
+      // visual-plan regeneration and narration re-synthesis entirely — the
+      // exact same completed-beat/asset state confirmed untouched via a
+      // live read-only Supabase check is what this condition detects.
+      const _canResumeComposite=!!(pkg&&pkg.nextwaveV2ProductionBeats&&pkg.nextwaveV2ProductionBeats.length&&pkg.nextwaveV2BeatTimeline&&pkg.nextwaveV2BeatTimeline.length&&pkg.nextwaveV2MasterAudioUrl);
+      const _title=_isTooLong?'Script exceeded the build size limit (fixed)':(_isAuthError?'CEO session expired':'Build failed');
+      const _icon=_isTooLong?'✂️':(_isAuthError?'🔒':'🔴');
       body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">🔴</span><span style="font-size:14px;font-weight:800;color:#ef4444">HeyGen render failed</span></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">${_icon}</span><span style="font-size:14px;font-weight:800;color:#ef4444">${_title}</span></div>
+        ${_isTooLong?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">This error is from an earlier attempt — the script-length limit that caused it has been raised to fit real Long scripts. <strong>Click Retry Build below to try again.</strong></div>`:''}
+        ${_isAuthError&&!_isTooLong&&!_canResumeComposite?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">This stopped before HeyGen was ever contacted, so nothing was rendered and no spend occurred. If this happens again on a fresh click: log out, log back in as Admin, then click Retry Build below.</div>`:''}
+        ${_isAuthError&&_canResumeComposite?`<div style="font-size:12px;color:var(--text);margin-bottom:8px;line-height:1.5">The build already reached compositing before this stopped — the visual plan, master narration, and any completed beat segments are preserved. Log out, log back in as Admin, then click Resume Compositing below to continue from the first unfinished beat with no re-generation.</div>`:''}
         <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_errFailed}</div>
       </div>`;
-      body+=`<button style="${btnBlue}" onclick="(function(){var p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(p){p.renderStatus=null;p.renderError=null;p.heygenJobId=null;window._vaPkg=p;autoStartHeygenRender(p).then(function(){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');});}})()">↻ Retry Build</button>`;
+      body+=_canResumeComposite
+        ?`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;p.renderStatus=null;p.renderError=null;window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Resuming…';const r=await nwv2ProductionStartComposite(p);btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Resume Compositing</button>`
+        :`<button style="${btnBlue}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p)return;p.renderStatus=null;p.renderError=null;p.heygenJobId=null;window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Retrying…';const r=await nwv2ProductionStartBuild(p);btn.disabled=false;if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()">↻ Retry Build</button>`;
     }
     body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
   }
@@ -17852,7 +19395,11 @@ function renderNextWaveLifecycleCard(task){
       body+=`<div style="margin-bottom:14px">
         <video src="${escHTML(videoUrl)}" controls style="width:100%;border-radius:10px;max-height:300px;background:#000"></video>
       </div>`;
-      body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
+      if((task&&task.isTest)||(pkg&&pkg.isTest)){
+        body+=`<div style="padding:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#f59e0b;font-size:12px;margin-bottom:10px">🧪 NEXTWAVE V2 PREVIEW TEST — Publish to YouTube is disabled for this task. This is a preview candidate for CEO visual/audio review only.</div>`;
+      }else{
+        body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
+      }
       body+=`<button style="${btnRed}" onclick="_nextWaveSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Build</button>`;
     }else{
       body+=`<div style="color:#ef4444;font-size:12px;margin-bottom:14px;padding:10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:8px">⚠ No video URL — go back to Build to complete rendering first.</div>`;
@@ -17888,6 +19435,22 @@ function _renderNextWaveOperatorPanel(nwCurrent){
   var h='';
   h+='<div class="card" style="margin-bottom:12px;padding:20px;border-color:rgba(59,130,246,0.2)">';
   h+='<div style="font-size:11px;font-weight:800;color:#3b82f6;letter-spacing:1.5px;font-family:\'JetBrains Mono\',monospace;margin-bottom:14px">⚡ NEXTWAVE</div>';
+  // Phase 4.4A — always available regardless of the real weekly cap/current
+  // task, since a preview-test task must never depend on or consume real
+  // production scheduling state. isTest=true keeps it out of that state
+  // entirely (see _engineWeeklyTasksThisWeek, _nextWaveRunPublish guards).
+  h+='<button onclick="_nextwaveV2CreatePreviewTestTask()" style="width:100%;padding:9px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#f59e0b;font-weight:700;font-size:11px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;margin-bottom:12px">🧪 Start V2 PREVIEW TEST Task (fresh lifecycle, does not touch real weekly calendar)</button>';
+  // Phase 4.4C — surface a real write-overwrite conflict explicitly instead
+  // of silently falling back to whatever task inference happens to resolve
+  // to (which is exactly how a stale Done task could reopen with no visible
+  // explanation). This checks the same sessionStorage pointer nwCurrent's
+  // computation already reads.
+  (function(){
+    var _ptrId=null; try{_ptrId=sessionStorage.getItem('nwv2_preview_task_id');}catch(e){}
+    if(_ptrId&&!(D.tasks||[]).some(function(t){return String(t.id)===String(_ptrId);})){
+      h+='<div style="padding:10px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.35);border-radius:8px;color:#ef4444;font-size:11px;margin-bottom:12px">⚠ The preview-test task you created (id '+escHTML(_ptrId)+') is no longer in the shared task state — a concurrent save from another session likely overwrote it. This is a real conflict, not resolved automatically. Click "Start V2 PREVIEW TEST Task" again.</div>';
+    }
+  })();
   if(!nwCurrent){
     // v15.7.0 — weekly cap check
     const _nwWeekCount=_engineWeeklyTasksThisWeek('NextWave');
@@ -25692,6 +27255,10 @@ function renderEngineeringBrain(){
               ${state.note?`<div style="font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.5">${state.note}</div>`:''}
               ${retryNote}
               ${showButton?`<button onclick="_engReviewAuthorizeProductionRelease('${t.id}','${sha}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(168,85,247,0.5);background:rgba(168,85,247,0.15);color:#a855f7;font-size:11px;font-weight:700;cursor:pointer">🚀 Authorize Production Release</button>`:''}
+              ${showButton?`<div style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(168,85,247,0.25)">
+                <div style="font-size:9px;color:var(--dim);line-height:1.5;margin-bottom:6px">Direct path — restores the pre-existing single-step CEO authorization (unchanged productionDeploymentAuthorize: same CEO-session gate, same server-side commit-integrity check, same audit record) for use only while the Engineering Worker execution path above is unavailable. Deploys immediately on confirmation — no separate worker step.</div>
+                <button onclick="_engReviewAuthorizeRelease('${t.id}','${sha}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(139,92,246,0.5);background:rgba(139,92,246,0.1);color:#8b5cf6;font-size:11px;font-weight:700;cursor:pointer">🔓 Authorize Production Release (Direct)</button>
+              </div>`:''}
             </div>`;
           }).join('')}
         </div>`;
