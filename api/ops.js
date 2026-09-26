@@ -16833,7 +16833,16 @@ const nwv2rPublic = (path) => `${SUPABASE_URL}/storage/v1/object/public/srv-asse
 async function nwv2rGetState(id) {
   try { const r = await fetch(`${nwv2rPublic(nwv2rBase(id) + '/state.json')}?t=${Date.now()}`); if (!r.ok) return null; return await r.json(); } catch { return null; }
 }
-async function nwv2rPutState(id, state) { await sbStorageUpload(`${nwv2rBase(id)}/state.json`, Buffer.from(JSON.stringify(state)), 'application/json'); }
+// The srv-assets bucket restricts MIME types (found in the real preview: application/json is rejected with 415), so the state file is
+// stored under the first type the bucket accepts. Reads never depend on the stored content-type.
+async function nwv2rPutState(id, state) {
+  const buf = Buffer.from(JSON.stringify(state)); let last;
+  for (const ct of ['application/octet-stream', 'text/plain', 'application/json']) {
+    try { await sbStorageUpload(`${nwv2rBase(id)}/state.json`, buf, ct); return; }
+    catch (e) { last = e; if (!/415|invalid_mime/i.test(String(e.message))) throw e; }
+  }
+  throw last;
+}
 const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${format}|${script}`).digest('hex').slice(0, 16);
 const nwv2rSummary = (st, extra = {}) => ({
   ok: true, build_id: st.build_id, status: st.status, format: st.format, gate: st.gate, exception: st.exception || null, stages: st.stages,
@@ -16884,6 +16893,7 @@ async function nextwaveV2RouteStart(req, res) {
   const buildId = nwv2rBuildId(format, script);
   try {
     if (!force) { /* never re-spend on a build that already passed the gate */ const prior = await nwv2rGetState(buildId); if (prior && (prior.status === 'planned' || prior.status === 'ready_for_review')) return res.status(200).json(nwv2rSummary(prior, { reused: true })); }
+    await nwv2rPutState(buildId, { build_id: buildId, status: 'starting', at: new Date().toISOString() }); // storage preflight: fail BEFORE any vendor spend
     const key = process.env.ANTHROPIC_API_KEY; if (!key) return res.status(500).json({ ok: false, error: 'anthropic_not_configured' });
     const L = await nwv2rLib(); const tallied = L.route.makeTalliedCaller(L.prop.makeLiveCaller(key), L.prop.costOf);
     const voiceId = (await nextwaveV2GetVoiceConfig()).voice_id || null;
