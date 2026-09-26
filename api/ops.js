@@ -16842,7 +16842,7 @@ async function nwv2rPutState(id, state) {
   const existing = await sbGetSafe(`app_settings?key=eq.${key}&select=key&limit=1`);
   if (existing.length) await sbPatch('app_settings', `key=eq.${key}`, body); else await sbInsert('app_settings', body);
 }
-const NWV2R_REV = '1.4'; // must equal ROUTE_VERSION in lib/nextwaveV2Renderer/production/route.mjs (checked by test)
+const NWV2R_REV = '1.5'; // must equal ROUTE_VERSION in lib/nextwaveV2Renderer/production/route.mjs (checked by test)
 const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${NWV2R_REV}|${format}|${script}`).digest('hex').slice(0, 16);
 const nwv2rSummary = (st, extra = {}) => ({
   ok: true, build_id: st.build_id, status: st.status, format: st.format, gate: st.gate, exception: st.exception || null, stages: st.stages,
@@ -16901,7 +16901,13 @@ async function nextwaveV2RouteStart(req, res) {
       script, formatName: format, title, deps: {
         buildStoryboard: (s) => L.sem.nextwaveV2BuildStoryboardSemantic(s, { segmentMeaningUnits: nextwaveSegmentMeaningUnits, wordsToNumber: _nextwaveWordsToNumber, numberRegexSource: NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, classifyLongTreatment: nwv2ClassifyLongTreatment, callModel: tallied.callModel }),
         loadPoses: L.route.loadHostPoses, loadBench: L.route.loadBench,
-        narrate: async (text) => { const r = await nextwaveSynthesizeNarrationElevenLabsWithTimestamps(text, voiceId); if (!r.ok) return r; const url = await sbStorageUpload(`${nwv2rBase(buildId)}/narration.mp3`, r.buffer, 'audio/mpeg'); return { ok: true, alignment: r.alignment, audio_url: url }; },
+        // narration is paid: persist it the moment it exists so a later failure in the same start (e.g. a serverless OOM in compile/QC) never re-buys it
+        narrate: async (text) => {
+          const nk = `nwv2r_narr_${buildId}`; try { const rows = await sbGet(`app_settings?key=eq.${nk}&select=value&limit=1`); if (rows && rows[0]) { const c = JSON.parse(rows[0].value); if (c && c.alignment && c.audio_url) return { ok: true, alignment: c.alignment, audio_url: c.audio_url, reused: true }; } } catch {}
+          const r = await nextwaveSynthesizeNarrationElevenLabsWithTimestamps(text, voiceId); if (!r.ok) return r; const url = await sbStorageUpload(`${nwv2rBase(buildId)}/narration.mp3`, r.buffer, 'audio/mpeg');
+          try { const body = { key: nk, value: JSON.stringify({ alignment: r.alignment, audio_url: url }), updated_at: new Date().toISOString() }; const ex = await sbGetSafe(`app_settings?key=eq.${nk}&select=key&limit=1`); if (ex.length) await sbPatch('app_settings', `key=eq.${nk}`, body); else await sbInsert('app_settings', body); } catch {}
+          return { ok: true, alignment: r.alignment, audio_url: url };
+        },
       },
     });
     const state = L.route.buildStateFrom(route, { title, buildId, model: tallied.tally });
