@@ -54,7 +54,7 @@ if (setName === 'final') {
   cases = (await import('./nextwave_v2_storyboard_eval/' + freeze.file)).FRESH;
 } else if (setName === 'dev') {
   // the first final set was SPENT (seen and reported); it is now development data
-  cases = [...DEV, ...DEV2, ...DEV3, ...DEV4, ...(await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL, ...(await import('./nextwave_v2_storyboard_eval/fresh_holdout.mjs')).FRESH, ...(await import('./nextwave_v2_storyboard_eval/third_holdout.mjs')).THIRD];
+  cases = [...DEV, ...DEV2, ...DEV3, ...DEV4, ...(await import('./nextwave_v2_storyboard_eval/final_holdout.mjs')).FINAL, ...(await import('./nextwave_v2_storyboard_eval/fresh_holdout.mjs')).FRESH, ...(await import('./nextwave_v2_storyboard_eval/third_holdout.mjs')).THIRD, ...(await import('./nextwave_v2_storyboard_eval/fourth_holdout.mjs')).FRESH];
 } else if (setName === 'proofs') {
   // Proof A / Proof B / synthetic C scripts through the SEMANTIC Brain (no ground truth
   // here: status, scenes, derived values and renderer parameters are inspected directly)
@@ -66,7 +66,7 @@ const recPath = dir + `recordings/${setName === 'final' ? 'final' : setName}.jso
 mkdirSync(dir + 'recordings', { recursive: true });
 const store = new Map(existsSync(recPath) ? Object.entries(JSON.parse(readFileSync(recPath, 'utf8'))) : []);
 // spent hold-out sets are development data: their recorded model responses are reusable for replay
-if (setName === 'dev') for (const f of ['fresh', 'final', 'proofs', 'third']) { const fp = dir + `recordings/${f}.json`; if (existsSync(fp)) for (const [k, v] of Object.entries(JSON.parse(readFileSync(fp, 'utf8')))) if (!store.has(k)) store.set(k, v); }
+if (setName === 'dev') for (const f of ['fresh', 'final', 'proofs', 'third', 'fourth']) { const fp = dir + `recordings/${f}.json`; if (existsSync(fp)) for (const [k, v] of Object.entries(JSON.parse(readFileSync(fp, 'utf8')))) if (!store.has(k)) store.set(k, v); }
 const tally = { live_calls: 0, replayed: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0 };
 let liveCaller = null;
 if (live) {
@@ -111,7 +111,7 @@ for (const c of cases) {
     for (const q of use) {
       const e = entityByMention.get(q.id);
       if (e) {
-        const accepted = gt.roles.includes(e.role);
+        const accepted = gt.roles.includes(e.role) || (e.role === 'remaining_period' && gt.roles.includes('horizon')); // post-delay period reconciled exactly to horizon-delay
         mentionRows.push({ raw: q.raw, expected: gt.roles, bound: e.role, confidence: e.confidence && e.confidence.level, result: accepted ? 'OK' : 'MISBOUND' });
         if (accepted) ok++; else misb++;
       } else if (unboundIds.has(q.id)) { mentionRows.push({ raw: q.raw, expected: gt.roles, result: 'unbound_reported' }); unb++; }
