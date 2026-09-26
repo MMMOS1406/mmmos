@@ -16814,6 +16814,9 @@ async function nextwaveV2StoryboardBrainAction(req, res) {
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 const NWV2R_FLAG_KEY = 'nextwave_v2_route_enabled';
 async function nwv2rIsEnabled() {
+  // The flag row lives in the Supabase project that preview AND production share, so the row alone must never enable the route in
+  // production: production additionally requires NEXTWAVE_V2_ROUTE_PRODUCTION=1 (set only by a future release authorization).
+  if (process.env.VERCEL_ENV === 'production' && process.env.NEXTWAVE_V2_ROUTE_PRODUCTION !== '1') return false;
   try { const rows = await sbGet(`app_settings?key=eq.${NWV2R_FLAG_KEY}&select=value&limit=1`); if (rows && rows[0]) { const v = JSON.parse(rows[0].value || '{}'); return v.enabled === true; } } catch {}
   return false;
 }
@@ -16844,6 +16847,13 @@ const nwv2rSummary = (st, extra = {}) => ({
 async function nextwaveV2RouteConfig(req, res) {
   const enabled = await nwv2rIsEnabled();
   return res.status(200).json({ ok: true, enabled, route_version: '1.0' });
+}
+// Read-only runtime probe (canvas / fonts / banked assets / ffmpeg). No auth needed because it reads nothing private and spends nothing;
+// it does not exist in production (404) — it is a preview-validation aid.
+async function nextwaveV2RouteRuntimeProbe(req, res) {
+  if (process.env.VERCEL_ENV === 'production') return res.status(404).json({ ok: false, error: 'not_found' });
+  try { const { runtimeProbe } = await import('../lib/nextwaveV2Renderer/production/probe.mjs'); const r = await runtimeProbe({ ffmpegPath: ffmpegInstaller.path }); return res.status(200).json({ ok: true, ...r }); }
+  catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
 }
 // CEO-gated: the only way the flag changes. NOT called by anything in this release.
 async function nextwaveV2RouteSetEnabled(req, res) {
@@ -18908,6 +18918,7 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_classify_long_beats')  return await nextwaveV2ClassifyLongBeats(req, res);
     if (action === 'nextwave_v2_storyboard_brain')     return await nextwaveV2StoryboardBrainAction(req, res);
     if (action === 'nextwave_v2_route_config')       return await nextwaveV2RouteConfig(req, res);      // V2 production route (feature-flagged, default OFF)
+    if (action === 'nextwave_v2_route_runtime_probe') return await nextwaveV2RouteRuntimeProbe(req, res);
     if (action === 'nextwave_v2_route_set_enabled')  return await nextwaveV2RouteSetEnabled(req, res);
     if (action === 'nextwave_v2_route_status')       return await nextwaveV2RouteStatus(req, res);
     if (action === 'nextwave_v2_route_start')        return await nextwaveV2RouteStart(req, res);
