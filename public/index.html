@@ -15899,6 +15899,108 @@ async function _nextwaveGeneratePackageWithV2Plan(taskId){
     console.warn('[NextWave V2] plan_visuals error (non-fatal, package still saved normally):',e.message);
   }
 }
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// NextWave V2 PRODUCTION ROUTE (client) — the accepted V2 Creative Production Standard, wired into the EXISTING Build stage.
+// Feature-flagged: the server flag (app_settings.nextwave_v2_route_enabled) defaults OFF and, while OFF, _nextwaveV2RouteOn()
+// is false, so the Build stage renders exactly what it renders today. When ON, the Build stage for NextWave shows this route:
+// guarded Storyboard Brain -> PASS / NEEDS_REVIEW / BLOCK -> narration -> V2 renderer (chunked) -> thumbnail -> automated QC ->
+// the SAME terminal state the existing path produces (renderStatus 'enhanced' + videoUrl), so Approve/Publish/Done are unchanged.
+// It never calls HeyGen or Submagic, never falls back to them, and never publishes. NEEDS_REVIEW / BLOCK stop before any spend.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+const _nwv2Route={cfg:null,loading:false};
+function _nextwaveV2RouteLoadConfig(force){
+  if(_nwv2Route.loading||(_nwv2Route.cfg&&!force))return;
+  _nwv2Route.loading=true;
+  fetch('/api/ops?action=nextwave_v2_route_config').then(function(r){return r.json();}).then(function(d){
+    const was=!!(_nwv2Route.cfg&&_nwv2Route.cfg.enabled);
+    _nwv2Route.cfg={enabled:!!(d&&d.ok&&d.enabled)};_nwv2Route.loading=false;
+    if(_nwv2Route.cfg.enabled&&!was&&typeof renderTab==='function'&&typeof currentTab!=='undefined'){try{renderTab(currentTab);}catch(_){}}
+  }).catch(function(){_nwv2Route.cfg={enabled:false};_nwv2Route.loading=false;});
+}
+function _nextwaveV2RouteOn(task,pkg){
+  if(!_nwv2Route.cfg){_nextwaveV2RouteLoadConfig();return false;}
+  return !!_nwv2Route.cfg.enabled;
+}
+function _nextwaveV2RouteFormat(pkg){
+  const isLong=(pkg&&pkg.contentFormat==='long')
+    ||(pkg&&pkg.taskId&&Array.isArray(D.tasks)&&D.tasks.some(function(t){return String(t.id)===String(pkg.taskId)&&t.contentFormat==='long';}))
+    ||(pkg&&typeof pkg.workflowNotes==='string'&&pkg.workflowNotes.toLowerCase().includes('landscape'));
+  return isLong?'long':'short';
+}
+async function _nextwaveV2RoutePersist(pkg){try{if(typeof _persistPkgPipelineState==='function')await _persistPkgPipelineState(pkg);}catch(_){}}
+async function nextwaveV2RouteBuild(pkg){
+  if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
+  const format=_nextwaveV2RouteFormat(pkg);
+  pkg.renderStatus='v2_building';pkg.renderError=null;pkg.renderStartedAt=new Date().toISOString();
+  pkg.nextwaveV2Route={status:'starting',format:format,startedAt:pkg.renderStartedAt};
+  await _nextwaveV2RoutePersist(pkg);
+  try{
+    const sr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_start',{script:pkg.script,format:format,title:pkg.title||''});
+    const s=await sr.json();
+    if(!s.ok){pkg.renderStatus='failed';pkg.renderError=s.error||('HTTP '+sr.status);pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);return{ok:false,reason:'start_failed',detail:pkg.renderError};}
+    pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{buildId:s.build_id,status:s.status,gate:s.gate,exception:s.exception||null,vendor:s.vendor||null,durationSec:s.duration_sec||null,chunkCount:s.chunk_count||0,qcPre:s.qc_pre_render||null});
+    if(s.status==='needs_review'||s.status==='blocked'){
+      // STOP. No narration/asset/render spend has happened. Routed to VA Production / Product QC (needs_review) or Engineering triage (blocked).
+      pkg.renderStatus=s.status==='blocked'?'v2_blocked':'v2_needs_review';
+      await _nextwaveV2RoutePersist(pkg);
+      try{fetch('/api/ops?action=create_notification',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'nextwave_v2_exception',title:'NextWave V2 '+(s.status==='blocked'?'BLOCK':'NEEDS REVIEW'),message:'pkg '+String(pkg.id||'').slice(0,8)+' · '+((s.exception&&s.exception.reasons)||[]).map(function(x){return x.kind;}).slice(0,4).join(', ')+' · owner: '+((s.exception&&s.exception.owner)||'va_production_product_qc'),task_id:String(pkg.taskId||''),created_by:'system',department:'operations',requires_ceo_approval:false})}).catch(function(){});}catch(_){}
+      return{ok:false,reason:s.status,detail:s.exception};
+    }
+    pkg.renderStatus='v2_building';
+    for(let i=0;i<(s.chunks||[]).length;i++){
+      pkg.nextwaveV2Route.progress={done:i,total:s.chunks.length};await _nextwaveV2RoutePersist(pkg);
+      try{if(typeof renderTab==='function'&&typeof currentTab!=='undefined')renderTab(currentTab);}catch(_){}
+      const cr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_chunk',{build_id:s.build_id,index:i});
+      const c=await cr.json();
+      if(!c.ok){pkg.renderStatus='failed';pkg.renderError='chunk '+(i+1)+'/'+s.chunks.length+': '+(c.error||('HTTP '+cr.status));pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);return{ok:false,reason:'chunk_failed',detail:pkg.renderError};}
+    }
+    const fr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_finish',{build_id:s.build_id});
+    const f=await fr.json();
+    if(!f.ok){pkg.renderStatus='failed';pkg.renderError=f.error||('HTTP '+fr.status);pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);return{ok:false,reason:'finish_failed',detail:pkg.renderError};}
+    pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{status:f.status,final:f.final,exception:f.exception||null,progress:{done:s.chunks.length,total:s.chunks.length}});
+    if(f.status==='ready_for_review'&&f.final&&f.final.video_url){
+      pkg.videoUrl=f.final.video_url;pkg.thumbnailUrl=f.final.thumbnail_url||null;
+      pkg.renderDurationSec=(f.final.encode&&f.final.encode.duration)||f.duration_sec||null;pkg.renderCompletedAt=new Date().toISOString();
+      pkg.renderStatus='enhanced'; // the existing "publishable MP4 ready" terminal state: Approve/Publish/Done consume it unchanged
+      await _nextwaveV2RoutePersist(pkg);
+      return{ok:true,video_url:pkg.videoUrl};
+    }
+    pkg.renderStatus='v2_needs_review';await _nextwaveV2RoutePersist(pkg);
+    return{ok:false,reason:'needs_review',detail:f.exception};
+  }catch(e){
+    pkg.renderStatus='failed';pkg.renderError=e.message;if(pkg.nextwaveV2Route)pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
+function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
+  const rs=pkg?pkg.renderStatus:'';const r=(pkg&&pkg.nextwaveV2Route)||{};
+  const box=function(color,inner){return '<div style="padding:16px;background:rgba('+color+',0.08);border:1px solid rgba('+color+',0.4);border-radius:12px;margin-bottom:12px">'+inner+'</div>';};
+  const build='(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||\'\')===String(\''+pkgId+'\');});if(!p){alert(\'Package not found\');return;}window._vaPkg=p;const b=event.target;b.disabled=true;b.textContent=\'⏳ Building (V2 route)…\';const x=await nextwaveV2RouteBuild(p);if(typeof renderTab===\'function\')renderTab(currentTab);})()';
+  let h='<div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.6">NextWave V2 production route: guarded Storyboard Brain → verified evidence → ElevenLabs narration → V2 renderer → automated QC. No HeyGen. Nothing is published from here.</div>';
+  if(rs==='enhanced'&&pkg.videoUrl){
+    const q=(r.qcPre&&r.qcPre.numbers)||{};
+    h+=box('34,197,94','<div style="font-size:15px;font-weight:800;color:#22c55e;margin-bottom:6px">🎬 NextWave V2 video ready</div><div style="font-size:10px;color:var(--dim);font-family:\'JetBrains Mono\',monospace;margin-bottom:8px">Brain: '+escHTML(String((r.gate&&r.gate.route)||'PASS'))+' · on-screen numbers checked: '+escHTML(String(q.drawn_tokens||'—'))+' · unprovenanced: '+escHTML(String(q.unprovenanced==null?'—':q.unprovenanced))+' · '+escHTML(String(pkg.renderDurationSec||'—'))+'s</div><video src="'+escHTML(pkg.videoUrl)+'" controls style="width:100%;border-radius:10px;max-height:280px;background:#000"></video>'+(pkg.thumbnailUrl?'<img src="'+escHTML(pkg.thumbnailUrl)+'" style="width:100%;border-radius:10px;margin-top:8px" alt="thumbnail">':''));
+    h+='<button style="'+st.btnGreen+'" onclick="_nextWaveSetStage(\''+taskId+'\',\'approve\');if(typeof renderTab===\'function\')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>';
+  }else if(rs==='v2_needs_review'||rs==='v2_blocked'){
+    const blocked=rs==='v2_blocked';const ex=r.exception||{};
+    h+=box(blocked?'239,68,68':'245,158,11','<div style="font-size:14px;font-weight:800;color:'+(blocked?'#ef4444':'#f59e0b')+';margin-bottom:8px">'+(blocked?'🛑 BLOCKED — factual/safety failure':'⚠️ NEEDS REVIEW — stopped before any render')+'</div><div style="font-size:11px;color:var(--text);line-height:1.6;font-family:\'JetBrains Mono\',monospace">'+((ex.reasons||[]).map(function(x){return escHTML(String(x.kind||'')+(x.scene?(' · '+x.scene):''));}).join('<br>')||'see build state')+'</div><div style="font-size:11px;color:var(--dim);margin-top:8px">Routed to '+escHTML(String(ex.owner||'VA Production / Product QC').replace(/_/g,' '))+'. No narration, asset or render spend occurred'+(r.vendor&&r.vendor.elevenlabs_chars?' (narration had already run)':'')+'. The system never guesses: edit the script (Review stage) or resolve with Product QC, then rebuild.</div>');
+    h+='<button style="'+st.btnBlue+'" onclick="_nextWaveSetStage(\''+taskId+'\',\'review\');if(typeof renderTab===\'function\')renderTab(currentTab)">← Back to Review (edit script)</button>';
+    h+='<button style="'+st.btnGreen+'" onclick="'+build.replace(/"/g,'&quot;')+'">↻ Re-run V2 route</button>';
+  }else if(rs==='v2_building'){
+    const pr=r.progress||{done:0,total:r.chunkCount||0};
+    h+=box('251,191,36','<div style="font-size:13px;font-weight:700;color:#fbbf24">⏳ Building — '+escHTML(String(r.status==='starting'?'Storyboard Brain + narration':('rendering chunk '+Math.min(pr.done+1,pr.total||1)+' of '+(pr.total||'?'))))+'</div><div style="font-size:10px;color:var(--dim);margin-top:4px;font-family:\'JetBrains Mono\',monospace">Runs from this tab; safe to resume — finished chunks are reused at no extra cost.</div>');
+    h+='<button style="'+st.btnBlue+'" onclick="'+build.replace(/"/g,'&quot;')+'">↻ Resume build</button>';
+  }else if(rs==='failed'){
+    h+=box('239,68,68','<div style="font-size:14px;font-weight:800;color:#ef4444;margin-bottom:8px">🔴 NextWave V2 build failed</div><div style="font-size:11px;color:var(--text);font-family:\'JetBrains Mono\',monospace;white-space:pre-wrap;word-break:break-word">'+escHTML(String(pkg.renderError||'unknown').slice(0,250))+'</div>');
+    h+='<button style="'+st.btnBlue+'" onclick="'+build.replace(/"/g,'&quot;')+'">↻ Retry V2 build</button>';
+  }else{
+    h+='<div id="nwv2-ceo-status-'+taskId+'" style="font-size:12px;color:#fff;margin-bottom:10px">checking…</div>';
+    h+='<button style="'+st.btnGreen+'" onclick="'+build.replace(/"/g,'&quot;')+'">▶ Build with NextWave V2 route</button>';
+    setTimeout(function(){if(typeof _nextwaveV2CheckCeoStatus==='function')_nextwaveV2CheckCeoStatus(taskId);},0);
+  }
+  return h;
+}
+
 // ── NextWave V2 Build renderer (Phase 4.4) — voice picker + Build trigger ──
 // Replaces autoStartHeygenRender for NextWave only. Every other engine's
 // Build trigger (autoStartHeygenRender itself, _srvEnglishBuildTrigger,
@@ -19108,7 +19210,10 @@ function renderNextWaveLifecycleCard(task){
     // so it's the race-free source of truth — checked first, with the
     // pkg-level check kept as a fallback for defense in depth.
     const isNextWaveV2Preview=!!(task&&task.isTest) || !!(pkg&&pkg.isTest&&typeof pkg.workflowNotes==='string'&&pkg.workflowNotes.indexOf('NEXTWAVE_V2_PREVIEW_TEST')!==-1);
-    if(isNextWaveV2Preview){
+    if(_nextwaveV2RouteOn(task,pkg)){
+      // NextWave V2 production route (feature-flagged; false while the server flag is OFF, so nothing below changes today)
+      body+=_nextwaveV2RoutePanel(task,pkg,taskId,pkgId,{btnGreen:btnGreen,btnBlue:btnBlue,btnRed:btnRed});
+    }else if(isNextWaveV2Preview){
       // Phase 4.4E — traced end-to-end: _ceoAuthedFetch/requireCeoSession/
       // _ceoVerifySession have no domain/origin binding (pure HMAC, verified
       // against the shared Supabase ceo_auth_config row) and the 12h-TTL

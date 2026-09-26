@@ -16804,6 +16804,140 @@ async function nextwaveV2StoryboardBrainAction(req, res) {
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// NextWave V2 PRODUCTION ROUTE — the accepted V2 Creative Production Standard (benchmark commit fa34eb0), integrated as ADDITIVE,
+// FEATURE-FLAGGED actions. Approved script -> guarded semantic Storyboard Brain -> PASS / NEEDS_REVIEW / BLOCK -> assets ->
+// ElevenLabs narration + character alignment -> V2 renderer (chunked across invocations) -> thumbnail -> automated factual/visual
+// QC -> hand-off to the EXISTING Review/Approve lifecycle. Nothing here publishes. NEEDS_REVIEW / BLOCK stop BEFORE any narration,
+// asset or render spend. Flag `app_settings.nextwave_v2_route_enabled` defaults OFF: with it off, no existing path changes.
+// The renderer library is loaded lazily (dynamic import) so no other action's cold start or behaviour depends on it.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+const NWV2R_FLAG_KEY = 'nextwave_v2_route_enabled';
+async function nwv2rIsEnabled() {
+  try { const rows = await sbGet(`app_settings?key=eq.${NWV2R_FLAG_KEY}&select=value&limit=1`); if (rows && rows[0]) { const v = JSON.parse(rows[0].value || '{}'); return v.enabled === true; } } catch {}
+  return false;
+}
+async function nwv2rLib() {
+  const [route, sem, prop] = await Promise.all([
+    import('../lib/nextwaveV2Renderer/production/route.mjs'),
+    import('../lib/nextwaveV2SemanticStoryboard.mjs'),
+    import('../lib/nextwaveV2SemanticProposer.mjs'),
+  ]);
+  return { route, sem, prop };
+}
+const nwv2rBase = (id) => `nextwave-v2-route/${id}`;
+const nwv2rPublic = (path) => `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${path}`;
+async function nwv2rGetState(id) {
+  try { const r = await fetch(`${nwv2rPublic(nwv2rBase(id) + '/state.json')}?t=${Date.now()}`); if (!r.ok) return null; return await r.json(); } catch { return null; }
+}
+async function nwv2rPutState(id, state) { await sbStorageUpload(`${nwv2rBase(id)}/state.json`, Buffer.from(JSON.stringify(state)), 'application/json'); }
+const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${format}|${script}`).digest('hex').slice(0, 16);
+const nwv2rSummary = (st, extra = {}) => ({
+  ok: true, build_id: st.build_id, status: st.status, format: st.format, gate: st.gate, exception: st.exception || null, stages: st.stages,
+  duration_sec: st.duration_sec || null, chunk_count: (st.chunks || []).length, chunks: st.chunks || [], timeline: st.timeline || null,
+  qc_pre_render: st.qc_pre_render ? { ok: st.qc_pre_render.ok, numbers: st.qc_pre_render.numbers, idle_windows: st.qc_pre_render.idle_windows, captions: st.qc_pre_render.captions } : null,
+  asset_plan: st.asset_plan ? { bank_reused: st.asset_plan.bank_reused, generated: (st.asset_plan.generate || []).length, est_ideogram_usd: st.asset_plan.est_ideogram_usd } : null,
+  vendor: st.vendor || null, final: st.final || null, ...extra,
+});
+
+// Read-only, not CEO-gated (no secrets, no spend): tells the client whether to show the V2 Build route. Default OFF.
+async function nextwaveV2RouteConfig(req, res) {
+  const enabled = await nwv2rIsEnabled();
+  return res.status(200).json({ ok: true, enabled, route_version: '1.0' });
+}
+// CEO-gated: the only way the flag changes. NOT called by anything in this release.
+async function nextwaveV2RouteSetEnabled(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const enabled = !!(req.body && req.body.enabled === true);
+  const existing = await sbGetSafe(`app_settings?key=eq.${NWV2R_FLAG_KEY}&select=key&limit=1`);
+  const body = { key: NWV2R_FLAG_KEY, value: JSON.stringify({ enabled, changed_at: new Date().toISOString() }), updated_at: new Date().toISOString() };
+  if (existing.length) await sbPatch('app_settings', `key=eq.${NWV2R_FLAG_KEY}`, body); else await sbInsert('app_settings', body);
+  return res.status(200).json({ ok: true, enabled });
+}
+// CEO-gated read of a build's persisted state (exception details for VA Production / Product QC; QC results).
+async function nextwaveV2RouteStatus(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const id = String((req.method === 'POST' ? (req.body || {}).build_id : req.query.build_id) || '');
+  if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id_invalid' });
+  const st = await nwv2rGetState(id); if (!st) return res.status(404).json({ ok: false, error: 'build_not_found' });
+  return res.status(200).json(nwv2rSummary(st));
+}
+// START — Brain gate first. Vendor spend (narration) happens only after PASS. Idempotent: an existing planned build is returned as-is.
+async function nextwaveV2RouteStart(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  if (!(await nwv2rIsEnabled())) return res.status(409).json({ ok: false, error: 'v2_route_disabled' });
+  const { script, format, title, force } = req.body || {};
+  if (format !== 'short' && format !== 'long') return res.status(400).json({ ok: false, error: 'format must be short or long' });
+  if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script (string) required' });
+  const buildId = nwv2rBuildId(format, script);
+  try {
+    if (!force) { /* never re-spend on a build that already passed the gate */ const prior = await nwv2rGetState(buildId); if (prior && (prior.status === 'planned' || prior.status === 'ready_for_review')) return res.status(200).json(nwv2rSummary(prior, { reused: true })); }
+    const key = process.env.ANTHROPIC_API_KEY; if (!key) return res.status(500).json({ ok: false, error: 'anthropic_not_configured' });
+    const L = await nwv2rLib(); const tallied = L.route.makeTalliedCaller(L.prop.makeLiveCaller(key), L.prop.costOf);
+    const voiceId = (await nextwaveV2GetVoiceConfig()).voice_id || null;
+    const route = await L.route.startRoute({
+      script, formatName: format, title, deps: {
+        buildStoryboard: (s) => L.sem.nextwaveV2BuildStoryboardSemantic(s, { segmentMeaningUnits: nextwaveSegmentMeaningUnits, wordsToNumber: _nextwaveWordsToNumber, numberRegexSource: NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, classifyLongTreatment: nwv2ClassifyLongTreatment, callModel: tallied.callModel }),
+        loadPoses: L.route.loadHostPoses, loadBench: L.route.loadBench,
+        narrate: async (text) => { const r = await nextwaveSynthesizeNarrationElevenLabsWithTimestamps(text, voiceId); if (!r.ok) return r; const url = await sbStorageUpload(`${nwv2rBase(buildId)}/narration.mp3`, r.buffer, 'audio/mpeg'); return { ok: true, alignment: r.alignment, audio_url: url }; },
+      },
+    });
+    const state = L.route.buildStateFrom(route, { title, buildId, model: tallied.tally });
+    await nwv2rPutState(buildId, state);
+    return res.status(200).json(nwv2rSummary(state));
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+}
+// CHUNK — renders one ~8 s slice of the video (deterministic recompile from the persisted storyboard + alignment). Idempotent.
+async function nextwaveV2RouteChunk(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  if (!(await nwv2rIsEnabled())) return res.status(409).json({ ok: false, error: 'v2_route_disabled' });
+  const { build_id: id, index } = req.body || {}; const i = Number(index);
+  if (!/^nwv2r-[0-9a-f]{16}$/.test(String(id || '')) || !Number.isInteger(i) || i < 0) return res.status(400).json({ ok: false, error: 'build_id/index invalid' });
+  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-c${i}`);
+  try {
+    const state = await nwv2rGetState(id); if (!state) return res.status(404).json({ ok: false, error: 'build_not_found' });
+    if (state.status !== 'planned' && state.status !== 'rendered') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });
+    const ch = (state.chunks || [])[i]; if (!ch) return res.status(400).json({ ok: false, error: 'chunk_out_of_range' });
+    const rel = `${nwv2rBase(id)}/chunk_${String(i).padStart(3, '0')}.mp4`; const head = await fetch(nwv2rPublic(rel), { method: 'HEAD' }).catch(() => null);
+    if (head && head.ok && Number(head.headers.get('content-length') || 0) > 2048) return res.status(200).json({ ok: true, index: i, url: nwv2rPublic(rel), reused: true });
+    const L = await nwv2rLib(); await mkdir(dir, { recursive: true }); const out = join(dir, 'chunk.mp4');
+    const { C, format } = await L.route.compileFromState(state, { loadPoses: L.route.loadHostPoses, loadBench: L.route.loadBench });
+    await L.route.renderChunk({ C, format, chunk: ch, outPath: out, ffmpegPath: ffmpegInstaller.path });
+    const buf = await readFile(out); const url = await sbStorageUpload(rel, buf, 'video/mp4');
+    return res.status(200).json({ ok: true, index: i, url, bytes: buf.length });
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+  finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+// FINISH — concat chunks + mux the ElevenLabs narration, thumbnail, post-encode checks. Terminal state is ready_for_review (or needs_review).
+async function nextwaveV2RouteFinish(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  if (!(await nwv2rIsEnabled())) return res.status(409).json({ ok: false, error: 'v2_route_disabled' });
+  const id = String((req.body || {}).build_id || ''); if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id invalid' });
+  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-final`);
+  try {
+    const state = await nwv2rGetState(id); if (!state) return res.status(404).json({ ok: false, error: 'build_not_found' });
+    if (state.status !== 'planned' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_finishable: ${state.status}` });
+    const L = await nwv2rLib(); await mkdir(dir, { recursive: true });
+    const chunkPaths = []; for (const ch of state.chunks) { const p = join(dir, `c${String(ch.index).padStart(3, '0')}.mp4`); await smDownloadToFile(nwv2rPublic(`${nwv2rBase(id)}/chunk_${String(ch.index).padStart(3, '0')}.mp4`), p); chunkPaths.push(p); }
+    const audio = join(dir, 'narration.mp3'); await smDownloadToFile(state.audio_url, audio); const out = join(dir, 'final.mp4');
+    await L.route.finalizeVideo({ chunkPaths, audioPath: audio, outPath: out, ffmpegPath: ffmpegInstaller.path, workDir: dir, duration: state.duration_sec });
+    const pr = await L.route.probe(ffmpegInstaller.path, out); const wantW = state.format === 'short' ? 1080 : 1920, wantH = state.format === 'short' ? 1920 : 1080;
+    const issues = []; if (!pr.has_audio || !pr.has_video) issues.push('missing_stream'); if (pr.width !== wantW || pr.height !== wantH) issues.push('wrong_resolution'); if (!pr.duration || Math.abs(pr.duration - state.duration_sec) > 0.8) issues.push('duration_mismatch');
+    const bench = await L.route.loadBench(); const thumb = L.route.makeThumbnail({ storyboard: state.storyboard, formatName: state.format, title: state.title || '', bench });
+    const videoUrl = await sbStorageUpload(`${nwv2rBase(id)}/final.mp4`, await readFile(out), 'video/mp4'); const thumbUrl = await sbStorageUpload(`${nwv2rBase(id)}/thumbnail.png`, thumb, 'image/png');
+    state.final = { video_url: videoUrl, thumbnail_url: thumbUrl, encode: pr, post_encode_issues: issues, finished_at: new Date().toISOString() };
+    state.status = issues.length ? 'needs_review' : 'ready_for_review';
+    if (issues.length) state.exception = { route: 'NEEDS_REVIEW', reasons: issues.map((k) => ({ kind: k })), owner: 'engineering_triage' };
+    await nwv2rPutState(id, state);
+    return res.status(200).json(nwv2rSummary(state));
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+  finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+
 async function nextwaveV2CompositeLongSegmentRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
@@ -18773,6 +18907,12 @@ export default async function handler(req, res) {
     // panels only), comparison/timeline treatments for real visual variety.
     if (action === 'nextwave_v2_classify_long_beats')  return await nextwaveV2ClassifyLongBeats(req, res);
     if (action === 'nextwave_v2_storyboard_brain')     return await nextwaveV2StoryboardBrainAction(req, res);
+    if (action === 'nextwave_v2_route_config')       return await nextwaveV2RouteConfig(req, res);      // V2 production route (feature-flagged, default OFF)
+    if (action === 'nextwave_v2_route_set_enabled')  return await nextwaveV2RouteSetEnabled(req, res);
+    if (action === 'nextwave_v2_route_status')       return await nextwaveV2RouteStatus(req, res);
+    if (action === 'nextwave_v2_route_start')        return await nextwaveV2RouteStart(req, res);
+    if (action === 'nextwave_v2_route_chunk')        return await nextwaveV2RouteChunk(req, res);
+    if (action === 'nextwave_v2_route_finish')       return await nextwaveV2RouteFinish(req, res);
     if (action === 'nextwave_v2_composite_long_segment') return await nextwaveV2CompositeLongSegmentRender(req, res);
     if (action === 'nextwave_v2_concat_long')         return await nextwaveV2ConcatLongRender(req, res);
     if (action === 'nextwave_v2_generate_long_thumbnail') return await nextwaveV2GenerateLongThumbnail(req, res);
