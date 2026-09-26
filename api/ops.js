@@ -16842,7 +16842,8 @@ async function nwv2rPutState(id, state) {
   const existing = await sbGetSafe(`app_settings?key=eq.${key}&select=key&limit=1`);
   if (existing.length) await sbPatch('app_settings', `key=eq.${key}`, body); else await sbInsert('app_settings', body);
 }
-const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${format}|${script}`).digest('hex').slice(0, 16);
+const NWV2R_REV = '1.1'; // must equal ROUTE_VERSION in lib/nextwaveV2Renderer/production/route.mjs (checked by test)
+const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${NWV2R_REV}|${format}|${script}`).digest('hex').slice(0, 16);
 const nwv2rSummary = (st, extra = {}) => ({
   ok: true, build_id: st.build_id, status: st.status, format: st.format, gate: st.gate, exception: st.exception || null, stages: st.stages,
   duration_sec: st.duration_sec || null, chunk_count: (st.chunks || []).length, chunks: st.chunks || [], timeline: st.timeline || null,
@@ -16854,7 +16855,7 @@ const nwv2rSummary = (st, extra = {}) => ({
 // Read-only, not CEO-gated (no secrets, no spend): tells the client whether to show the V2 Build route. Default OFF.
 async function nextwaveV2RouteConfig(req, res) {
   const enabled = await nwv2rIsEnabled();
-  return res.status(200).json({ ok: true, enabled, route_version: '1.0' });
+  return res.status(200).json({ ok: true, enabled, route_version: NWV2R_REV });
 }
 // Read-only runtime probe (canvas / fonts / banked assets / ffmpeg). No auth needed because it reads nothing private and spends nothing;
 // it does not exist in production (404) — it is a preview-validation aid.
