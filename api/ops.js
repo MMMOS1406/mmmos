@@ -16830,18 +16830,17 @@ async function nwv2rLib() {
 }
 const nwv2rBase = (id) => `nextwave-v2-route/${id}`;
 const nwv2rPublic = (path) => `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${path}`;
+// Build state (storyboard + alignment + plan, ~50-250 KB of JSON) is kept in app_settings under a namespaced key. The srv-assets bucket only
+// accepts media MIME types (real preview: json/octet-stream/text-plain all rejected with 415), so JSON cannot live there.
+const nwv2rStateKey = (id) => `nwv2r_state_${id}`;
 async function nwv2rGetState(id) {
-  try { const r = await fetch(`${nwv2rPublic(nwv2rBase(id) + '/state.json')}?t=${Date.now()}`); if (!r.ok) return null; return await r.json(); } catch { return null; }
+  try { const rows = await sbGet(`app_settings?key=eq.${nwv2rStateKey(id)}&select=value&limit=1`); if (rows && rows[0]) return JSON.parse(rows[0].value || 'null'); } catch {}
+  return null;
 }
-// The srv-assets bucket restricts MIME types (found in the real preview: application/json is rejected with 415), so the state file is
-// stored under the first type the bucket accepts. Reads never depend on the stored content-type.
 async function nwv2rPutState(id, state) {
-  const buf = Buffer.from(JSON.stringify(state)); let last;
-  for (const ct of ['application/octet-stream', 'text/plain', 'application/json']) {
-    try { await sbStorageUpload(`${nwv2rBase(id)}/state.json`, buf, ct); return; }
-    catch (e) { last = e; if (!/415|invalid_mime/i.test(String(e.message))) throw e; }
-  }
-  throw last;
+  const key = nwv2rStateKey(id); const body = { key, value: JSON.stringify(state), updated_at: new Date().toISOString() };
+  const existing = await sbGetSafe(`app_settings?key=eq.${key}&select=key&limit=1`);
+  if (existing.length) await sbPatch('app_settings', `key=eq.${key}`, body); else await sbInsert('app_settings', body);
 }
 const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${format}|${script}`).digest('hex').slice(0, 16);
 const nwv2rSummary = (st, extra = {}) => ({
