@@ -62,6 +62,18 @@ await t('numeric provenance accepts spoken/verified numbers and rejects others',
 
 console.log('\n[3b] narrative treatment — arbitrary Brain-PASS scripts render richly and without unprovenanced numbers');
 const { topicOf, comparisons } = await import('./lib/nextwaveV2Renderer/production/narrative.mjs');
+await t('topic precedence: savings/deposit evidence never becomes loan just because of the word "rate"; loan evidence still wins for debt', () => {
+  const cases = [
+    ['Imagine you put $20,000 in a savings account for 15 years. At a 5 percent rate you would end up with more.', 'savings'],
+    ['A high-yield deposit paying a 4.5% APY grows your balance.', 'savings'],
+    ['Say you borrow $350,000 for 30 years. At a 6% rate you pay back about that much.', 'loan'],
+    ['The APR on your loan decides what the debt really costs.', 'loan'],
+    ['Refinance your mortgage when the rate drops.', 'loan'],
+    ['Your index fund earns a 7 percent rate of return each year.', 'invest'],
+    ['With a fund charging 1 percent a year, fees eat into your return.', 'invest'],
+    ['At a 5% rate,', null],
+    ['Your savings account earns interest, but your mortgage charges more.', 'loan'],
+  ]; cases.forEach(([txt, want]) => assert.equal(topicOf(txt), want, txt)); });
 await t('environment follows the topic of the argument (delay->road, loan->city, invest->office, prices->kitchen)', () => { assert.equal(topicOf('The first is when you start.'), 'time'); assert.equal(topicOf('Say you borrow $250,000 for 30 years.'), 'loan'); assert.equal(topicOf('Invest $400 every month.'), 'invest'); assert.equal(topicOf('Prices rise 3% a year.'), 'price'); assert.equal(topicOf('Nothing topical here.'), null); });
 await t('composed Long: avatar scenes carry a focal object (no host-only scenes); environments change with the argument; closing is a recap of every comparison', async () => { const C2 = composeStoryboard({ storyboard: await brain(scriptOf('B')), words: wordsFromAlignment(scriptOf('B'), synthAlign(scriptOf('B'))), assets: { poses: await loadHostPoses(), bench: await loadBench() }, format: fmtLong }); const av = C2.scenes.filter((x) => x.treatment === 'avatar_panel'); assert.ok(av.length >= 2); assert.ok(av.every((x) => ['metaphor', 'value_stack', 'timeline', 'recap'].includes(x.kit)), JSON.stringify(av)); assert.equal(av[av.length - 1].kit, 'recap'); });
 await t('chart scenes open with the subject (verified recurring amount / principal) on screen before the first line; short bridges are merged into the next evidence scene', async () => { const sbB = await brain(scriptOf('B')); const wB = wordsFromAlignment(scriptOf('B'), synthAlign(scriptOf('B'))); const C4 = composeStoryboard({ storyboard: sbB, words: wB, assets: { poses: await loadHostPoses(), bench: await loadBench() }, format: fmtLong }); const ch = C4.scenes.find((x) => x.treatment === 'stock_chart'); assert.ok(ch); assert.ok(['physical_race', 'physical_orchard', 'chart_story'].includes(ch.kit), ch.kit); const drawn = collectDrawnText({ format: fmtLong, drawFrame: C4.draw, times: [ch.start + 1.8] })[0].strings.join(' '); assert.ok(/\$500/.test(drawn), 'subject value not on screen before the chart: ' + drawn.slice(0, 200)); const shortBridge = sbB.scenes.filter((x, i) => i > 0 && i < sbB.scenes.length - 1 && x.renderer_params.treatment === 'avatar_panel'); assert.ok(C4.scenes.every((x) => x.treatment !== 'avatar_panel' || x.end - x.start >= 3.6 || x.id === sbB.scenes[0].scene_id || x.id === sbB.scenes[sbB.scenes.length - 1].scene_id), 'a sub-3.6 s bridge survived as its own scene'); });
