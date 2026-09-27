@@ -15938,7 +15938,7 @@ async function nextwaveV2RouteBuild(pkg){
     const sr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_start',{script:pkg.script,format:format,title:pkg.title||''});
     const s=await sr.json();
     if(!s.ok){pkg.renderStatus='failed';pkg.renderError=s.error||('HTTP '+sr.status);pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);return{ok:false,reason:'start_failed',detail:pkg.renderError};}
-    pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{buildId:s.build_id,status:s.status,gate:s.gate,exception:s.exception||null,vendor:s.vendor||null,durationSec:s.duration_sec||null,chunkCount:s.chunk_count||0,qcPre:s.qc_pre_render||null});
+    pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{buildId:s.build_id,status:s.status,gate:s.gate,exception:s.exception||null,vendor:s.vendor||null,durationSec:s.duration_sec||null,chunkCount:s.chunk_count||0,qcPre:s.qc_pre_render||null,illustration:s.illustration||null});
     if(s.status==='needs_review'||s.status==='blocked'){
       // STOP. No narration/asset/render spend has happened. Routed to VA Production / Product QC (needs_review) or Engineering triage (blocked).
       pkg.renderStatus=s.status==='blocked'?'v2_blocked':'v2_needs_review';
@@ -15957,7 +15957,7 @@ async function nextwaveV2RouteBuild(pkg){
     const fr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_finish',{build_id:s.build_id});
     const f=await fr.json();
     if(!f.ok){pkg.renderStatus='failed';pkg.renderError=f.error||('HTTP '+fr.status);pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);return{ok:false,reason:'finish_failed',detail:pkg.renderError};}
-    pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{status:f.status,final:f.final,exception:f.exception||null,progress:{done:s.chunks.length,total:s.chunks.length}});
+    pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{status:f.status,final:f.final,exception:f.exception||null,illustration:f.illustration||pkg.nextwaveV2Route.illustration||null,progress:{done:s.chunks.length,total:s.chunks.length}});
     if(f.status==='ready_for_review'&&f.final&&f.final.video_url){
       pkg.videoUrl=f.final.video_url;pkg.thumbnailUrl=f.final.thumbnail_url||null;
       pkg.renderDurationSec=(f.final.encode&&f.final.encode.duration)||f.duration_sec||null;pkg.renderCompletedAt=new Date().toISOString();
@@ -15979,7 +15979,13 @@ function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
   let h='<div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.6">NextWave V2 production route: guarded Storyboard Brain → verified evidence → ElevenLabs narration → V2 renderer → automated QC. No HeyGen. Nothing is published from here.</div>';
   if(rs==='enhanced'&&pkg.videoUrl){
     const q=(r.qcPre&&r.qcPre.numbers)||{};
-    h+=box('34,197,94','<div style="font-size:15px;font-weight:800;color:#22c55e;margin-bottom:6px">🎬 NextWave V2 video ready</div><div style="font-size:10px;color:var(--dim);font-family:\'JetBrains Mono\',monospace;margin-bottom:8px">Brain: '+escHTML(String((r.gate&&r.gate.route)||'PASS'))+' · on-screen numbers checked: '+escHTML(String(q.drawn_tokens||'—'))+' · unprovenanced: '+escHTML(String(q.unprovenanced==null?'—':q.unprovenanced))+' · '+escHTML(String(pkg.renderDurationSec||'—'))+'s</div><video src="'+escHTML(pkg.videoUrl)+'" controls style="width:100%;border-radius:10px;max-height:280px;background:#000"></video>'+(pkg.thumbnailUrl?'<img src="'+escHTML(pkg.thumbnailUrl)+'" style="width:100%;border-radius:10px;margin-top:8px" alt="thumbnail">':''));
+    const illu=r.illustration||null; const illuNeedsReview=!!(illu&&illu.creative_qc&&illu.creative_qc.status==='needs_review');
+    h+=box('34,197,94','<div style="font-size:15px;font-weight:800;color:#22c55e;margin-bottom:6px">🎬 NextWave V2 video ready</div><div style="font-size:10px;color:var(--dim);font-family:\'JetBrains Mono\',monospace;margin-bottom:8px">Brain: '+escHTML(String((r.gate&&r.gate.route)||'PASS'))+' · on-screen numbers checked: '+escHTML(String(q.drawn_tokens||'—'))+' · unprovenanced: '+escHTML(String(q.unprovenanced==null?'—':q.unprovenanced))+' · '+escHTML(String(pkg.renderDurationSec||'—'))+'s'+(illu?' · illustration: '+escHTML(String(illu.counts.reused))+' reused, '+escHTML(String(illu.counts.generated))+' generated, '+escHTML(String(illu.counts.fallback))+' fallback':'')+'</div><video src="'+escHTML(pkg.videoUrl)+'" controls style="width:100%;border-radius:10px;max-height:280px;background:#000"></video>'+(pkg.thumbnailUrl?'<img src="'+escHTML(pkg.thumbnailUrl)+'" style="width:100%;border-radius:10px;margin-top:8px" alt="thumbnail">':''));
+    // CRITICAL RULE (topic-specific illustration layer, bounded preview integration): a renderer-2.1 fallback caused
+    // by illustration generation/QC failure must NOT silently read as a Creative PASS just because the technical
+    // build completed. This banner is additive only — it does not block the Approve button below (that would be a
+    // lifecycle change, out of scope for this order) — a human must see it and clear it before publishing.
+    if(illuNeedsReview) h+=box('245,158,11','<div style="font-size:13px;font-weight:800;color:#f59e0b;margin-bottom:6px">⚠️ CREATIVE NEEDS REVIEW — illustration fell back to the standard template</div><div style="font-size:11px;color:var(--text);line-height:1.6;font-family:\'JetBrains Mono\',monospace">'+((illu.creative_qc.reasons||[]).map(function(x){return escHTML((x.scene||'')+' ('+(x.mode||'')+'): '+((x.reasons||[]).join(', ')));}).join('<br>')||'see build state')+'</div><div style="font-size:11px;color:var(--dim);margin-top:8px">Owner: '+escHTML(String(illu.creative_qc.owner||'va_production_product_qc').replace(/_/g,' '))+'. The technical build is complete and factually correct, but this is NOT a Creative PASS — review before publishing.</div>');
     h+='<button style="'+st.btnGreen+'" onclick="_nextWaveSetStage(\''+taskId+'\',\'approve\');if(typeof renderTab===\'function\')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>';
   }else if(rs==='v2_needs_review'||rs==='v2_blocked'){
     const blocked=rs==='v2_blocked';const ex=r.exception||{};

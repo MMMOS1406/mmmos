@@ -13850,6 +13850,22 @@ async function nextwaveV2IdeogramCall({ prompt, characterReferencePath, aspectRa
   const cost = characterReferencePath ? IDEOGRAM_COST_PER_IMAGE_USD : 0.03;
   return { ok: true, url: img.url, seed: img.seed, resolution: img.resolution, cost_usd: cost };
 }
+// Additive sibling of nextwaveV2IdeogramCall (that function is left byte-for-byte untouched) for the topic-specific
+// illustration layer: adds negative_prompt (keeps generated art free of any authoritative-looking text/numbers/UI —
+// those are always drawn programmatically on top, never trusted from the image) and style_reference_images (keeps a
+// Short's independently-composed illustration in the same NextWave visual family as its Long counterpart without
+// ever cropping one into the other). Same endpoint, same key, same TURBO speed, same $0.03/image (no character
+// reference is ever used here, per the order's host rule — the host stays a separate reusable overlay).
+async function nwv2rIdeogramGenerate({ prompt, aspectRatio, negativePrompt, styleReferenceBuffer }) {
+  const key = await _ideogramLoadKey(); if (!key) return { ok: false, error: 'ideogram_not_configured' };
+  const form = new FormData(); form.append('prompt', prompt); form.append('rendering_speed', 'TURBO'); form.append('aspect_ratio', aspectRatio || '16x9');
+  if (negativePrompt) form.append('negative_prompt', negativePrompt);
+  if (styleReferenceBuffer) form.append('style_reference_images', new Blob([styleReferenceBuffer], { type: 'image/png' }), 'style_ref.png');
+  const res = await fetch(IDEOGRAM_GENERATE_URL, { method: 'POST', headers: { 'Api-Key': key }, body: form });
+  if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, error: `ideogram_http_${res.status}: ${t.slice(0, 300)}` }; }
+  const data = await res.json(); const img = data && data.data && data.data[0]; if (!img || !img.url) return { ok: false, error: 'ideogram_no_image_returned' };
+  return { ok: true, url: img.url, seed: img.seed, resolution: img.resolution, cost_usd: 0.03 };
+}
 
 // Orchestrator: reuse if an approved pose with this role already exists,
 // otherwise generate via Ideogram (character-referenced against the
@@ -13936,6 +13952,68 @@ async function nextwaveV2IdeogramResolveObject(objectRole, promptText, aspectRat
     tags: [`role:${objectRole}`, 'model:ideogram-v3-turbo', `cost_usd:${gen.cost_usd}`],
   });
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// NextWave V2 — TOPIC-SPECIFIC ILLUSTRATION LAYER (bounded preview integration, PMO order 2026-09-27).
+// Additive to the accepted V2 route: for the ONE hook beat of a Long and the ONE dominant comparison beat of a
+// Short (production/illustration.mjs `chooseIllustratedBeats` — bounded, not every beat), decide reuse vs generate
+// vs programmatic-only, generate via the existing Ideogram integration above when needed, QC the result with a
+// Claude vision call (Anthropic — already-approved vendor, no new integration), and record it in the SAME
+// `production_assets_library` table every other NextWave asset already uses. A newly generated asset is inserted
+// with status:'draft' — it does NOT enter silent reuse until a human flips it to 'approved' via the existing generic
+// `update_asset` action (same mechanism every other engine's assets already use for review). Nothing here touches
+// the Brain, narration, chunking, auth, or the existing lifecycle.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+async function _nextwaveV2FindApprovedTopicScene(topic, relationship, formatName) {
+  const rows = await sbGetSafe(`production_assets_library?engine=eq.NextWave&asset_type=eq.topic_scene&status=eq.approved&tags=cs.{format:${formatName},relationship:${relationship || 'none'}}&select=id,asset_name,asset_url,tags&order=created_at.desc&limit=1`);
+  return rows && rows[0] ? rows[0] : null;
+}
+// Claude vision QC (Anthropic Messages API, image content block) — already-approved vendor, same account as the
+// Brain's semantic proposer. Rejects politely (regenerate/fallback), never silently ships a mismatched scene.
+async function nwv2rClaudeVisionQc({ imageBuf, qcPromptText }) {
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return { ok: false, pass: false, reasons: ['anthropic_not_configured'], cost_usd: 0 };
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300, temperature: 0, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBuf.toString('base64') } }, { type: 'text', text: qcPromptText }] }] }),
+    });
+    if (!res.ok) { const t = await res.text().catch(() => ''); return { ok: false, pass: false, reasons: [`qc_http_${res.status}`], cost_usd: 0, detail: t.slice(0, 200) }; }
+    const j = await res.json(); const usage = j.usage || {}; const cost_usd = ((usage.input_tokens || 0) * 1 + (usage.output_tokens || 0) * 5) / 1e6; // claude-haiku-4-5 list price, USD/token
+    const text = (j.content || []).map((b) => b.text || '').join('');
+    const { parseQcResponse } = await import('../lib/nextwaveV2Renderer/production/illustration.mjs');
+    const parsed = parseQcResponse(text); return { ok: true, ...parsed, cost_usd };
+  } catch (e) { return { ok: false, pass: false, reasons: [`qc_exception: ${e.message}`], cost_usd: 0 }; }
+}
+// Orchestrates ONE illustrated beat: reuse (free) -> generate -> QC -> accept (draft, not silently reusable) or
+// reject -> bounded retry -> fall back (caller marks NEEDS_REVIEW, never a silent Creative PASS).
+async function nwv2rResolveIllustratedBeat(spec, mode /* 'hook'|'comparison' */) {
+  const { assetKey, buildPrompt, qcPrompt } = await import('../lib/nextwaveV2Renderer/production/illustration.mjs');
+  const out = { key: assetKey(spec), vendor: { ideogram_images: 0, ideogram_usd: 0, qc_calls: 0, qc_usd: 0 }, regenerations: 0 };
+  const existing = await _nextwaveV2FindApprovedTopicScene(spec.topic, spec.relationship, spec.format).catch(() => null);
+  if (existing) return { ...out, ok: true, mode: 'reuse', asset_url: existing.asset_url, asset_id: existing.id };
+  const { prompt, negative, aspect } = buildPrompt(spec);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const gen = await nwv2rIdeogramGenerate({ prompt, aspectRatio: aspect, negativePrompt: negative });
+    if (!gen.ok) { out.regenerations++; continue; }
+    out.vendor.ideogram_images++; out.vendor.ideogram_usd += gen.cost_usd;
+    const imgRes = await fetch(gen.url); if (!imgRes.ok) { out.regenerations++; continue; }
+    const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+    const qc = await nwv2rClaudeVisionQc({ imageBuf: imgBuf, qcPromptText: qcPrompt(spec) });
+    out.vendor.qc_calls++; out.vendor.qc_usd += qc.cost_usd || 0;
+    if (!qc.pass) { out.regenerations++; out.last_qc_reasons = qc.reasons; continue; }
+    const assetName = `nextwave_topic_scene_${spec.relationship || 'na'}_${spec.format}_${Date.now()}`;
+    const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+    const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, { method: 'POST', headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' }, body: imgBuf });
+    if (!upRes.ok) { out.regenerations++; continue; }
+    const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+    // status:'draft', NOT 'approved' — one initial human acceptance (existing generic update_asset action) is
+    // required before this asset can be matched by _nextwaveV2FindApprovedTopicScene on a future video.
+    const row = await sbInsert('production_assets_library', { asset_type: 'topic_scene', asset_name: assetName, asset_url: permanentUrl, engine: 'NextWave', source: 'ideogram', status: 'draft', tags: [`format:${spec.format}`, `relationship:${spec.relationship || 'none'}`, `topic:${spec.topic || 'none'}`, 'model:ideogram-v3-turbo', `cost_usd:${gen.cost_usd}`, `qc:pass`] });
+    return { ...out, ok: true, mode: 'generate', asset_url: permanentUrl, asset_id: row && row.id, seed: gen.seed };
+  }
+  return { ...out, ok: false, mode: 'fallback', reasons: out.last_qc_reasons || ['generation_failed'] };
 }
 async function nextwaveV2ResolveObjectLocalPath(objectRole, renderId) {
   try {
@@ -16842,13 +16920,17 @@ async function nwv2rPutState(id, state) {
   const existing = await sbGetSafe(`app_settings?key=eq.${key}&select=key&limit=1`);
   if (existing.length) await sbPatch('app_settings', `key=eq.${key}`, body); else await sbInsert('app_settings', body);
 }
-const NWV2R_REV = '2.1'; // must equal ROUTE_VERSION in lib/nextwaveV2Renderer/production/route.mjs (checked by test)
+const NWV2R_REV = '2.2'; // must equal ROUTE_VERSION in lib/nextwaveV2Renderer/production/route.mjs (checked by test)
 const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${NWV2R_REV}|${format}|${script}`).digest('hex').slice(0, 16);
 const nwv2rSummary = (st, extra = {}) => ({
   ok: true, build_id: st.build_id, status: st.status, format: st.format, gate: st.gate, exception: st.exception || null, stages: st.stages,
   duration_sec: st.duration_sec || null, chunk_count: (st.chunks || []).length, chunks: st.chunks || [], timeline: st.timeline || null,
   qc_pre_render: st.qc_pre_render ? { ok: st.qc_pre_render.ok, numbers: st.qc_pre_render.numbers, idle_windows: st.qc_pre_render.idle_windows, captions: st.qc_pre_render.captions } : null,
   asset_plan: st.asset_plan ? { bank_reused: st.asset_plan.bank_reused, generated: (st.asset_plan.generate || []).length, est_ideogram_usd: st.asset_plan.est_ideogram_usd } : null,
+  // topic-specific illustration layer (bounded preview integration): a generation/QC fallback is surfaced here as
+  // creative_qc.status='needs_review' — the CRITICAL RULE from the order is that this must never be silently a
+  // Creative PASS just because the technical build completed via the safe renderer-2.1 fallback.
+  illustration: st.illustration ? { counts: st.illustration.counts, creative_qc: st.illustration.creative_qc, perScene: st.illustration.perScene } : null,
   vendor: st.vendor || null, final: st.final || null, ...extra,
 });
 
@@ -16908,6 +16990,10 @@ async function nextwaveV2RouteStart(req, res) {
           try { const body = { key: nk, value: JSON.stringify({ alignment: r.alignment, audio_url: url }), updated_at: new Date().toISOString() }; const ex = await sbGetSafe(`app_settings?key=eq.${nk}&select=key&limit=1`); if (ex.length) await sbPatch('app_settings', `key=eq.${nk}`, body); else await sbInsert('app_settings', body); } catch {}
           return { ok: true, alignment: r.alignment, audio_url: url };
         },
+        // topic-specific illustration layer (bounded preview integration) — reuse/generate/QC one hook (Long) or
+        // dominant comparison (Short) beat; omitting this dep entirely (as every OTHER route caller still does)
+        // leaves the route byte-for-byte the renderer-2.1 behavior.
+        illustrateBeat: (spec, mode) => nwv2rResolveIllustratedBeat(spec, mode),
       },
     });
     const state = L.route.buildStateFrom(route, { title, buildId, model: tallied.tally });
