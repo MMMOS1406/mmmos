@@ -16920,7 +16920,7 @@ async function nwv2rPutState(id, state) {
   const existing = await sbGetSafe(`app_settings?key=eq.${key}&select=key&limit=1`);
   if (existing.length) await sbPatch('app_settings', `key=eq.${key}`, body); else await sbInsert('app_settings', body);
 }
-const NWV2R_REV = '2.2'; // must equal ROUTE_VERSION in lib/nextwaveV2Renderer/production/route.mjs (checked by test)
+const NWV2R_REV = '2.3'; // must equal ROUTE_VERSION in lib/nextwaveV2Renderer/production/route.mjs (checked by test)
 const nwv2rBuildId = (format, script) => 'nwv2r-' + createHash('sha256').update(`${NWV2R_REV}|${format}|${script}`).digest('hex').slice(0, 16);
 const nwv2rSummary = (st, extra = {}) => ({
   ok: true, build_id: st.build_id, status: st.status, format: st.format, gate: st.gate, exception: st.exception || null, stages: st.stages,
