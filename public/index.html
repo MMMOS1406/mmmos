@@ -15939,6 +15939,23 @@ async function nextwaveV2RouteBuild(pkg){
     const s=await sr.json();
     if(!s.ok){pkg.renderStatus='failed';pkg.renderError=s.error||('HTTP '+sr.status);pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);return{ok:false,reason:'start_failed',detail:pkg.renderError};}
     pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{buildId:s.build_id,status:s.status,gate:s.gate,exception:s.exception||null,vendor:s.vendor||null,durationSec:s.duration_sec||null,chunkCount:s.chunk_count||0,qcPre:s.qc_pre_render||null,illustration:s.illustration||null});
+    // v16.66.1 — idempotent re-entry fix: `start` returns the PRIOR persisted state (reused:true, zero vendor
+    // spend) whenever this exact build_id (a pure hash of route revision + format + script) already reached a
+    // terminal status. A build already at 'ready_for_review' already carries its finished `final` (video_url/
+    // thumbnail_url/encode) right here in `s` — chunking or finishing it again is not just wasted work, it is
+    // actively wrong: nextwave_v2_route_chunk refuses any state that isn't 'planned'/'rendered' (by design, so a
+    // finished video can never be silently re-rendered/overwritten), so calling it here always 409s with
+    // "build_not_renderable: ready_for_review" and the loop below used to read that as a real failure — marking a
+    // perfectly good, already-complete video as renderStatus='failed'. Recognize the already-done case and skip
+    // straight to the same terminal branch the finish path uses, unchanged.
+    if(s.status==='ready_for_review'&&s.final&&s.final.video_url){
+      pkg.videoUrl=s.final.video_url;pkg.thumbnailUrl=s.final.thumbnail_url||null;
+      pkg.renderDurationSec=(s.final.encode&&s.final.encode.duration)||s.duration_sec||null;pkg.renderCompletedAt=new Date().toISOString();
+      pkg.renderStatus='enhanced'; // the existing "publishable MP4 ready" terminal state: Approve/Publish/Done consume it unchanged
+      pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{final:s.final,progress:{done:s.chunk_count||0,total:s.chunk_count||0}});
+      await _nextwaveV2RoutePersist(pkg);
+      return{ok:true,video_url:pkg.videoUrl,reused:true};
+    }
     if(s.status==='needs_review'||s.status==='blocked'){
       // STOP. No narration/asset/render spend has happened. Routed to VA Production / Product QC (needs_review) or Engineering triage (blocked).
       pkg.renderStatus=s.status==='blocked'?'v2_blocked':'v2_needs_review';
