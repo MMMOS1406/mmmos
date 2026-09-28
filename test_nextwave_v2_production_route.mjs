@@ -103,7 +103,7 @@ await t('ops.js diff vs pre-integration baseline (fa34eb0) is purely additive ex
 
 await t('build id includes the renderer revision (stale chunks can never be reused) and ops rev == route lib version', async () => { const { ROUTE_VERSION } = await import('./lib/nextwaveV2Renderer/production/route.mjs'); assert.ok(ops.includes(`const NWV2R_REV = '${ROUTE_VERSION}'`)); assert.ok(/update\(`\$\{NWV2R_REV\}\|\$\{format\}\|\$\{script\}`\)/.test(ops)); });
 console.log('\n[3c] topic-specific illustration layer (bounded preview integration)');
-const { chooseIllustratedBeats, assetKey, buildPrompt, qcPrompt, parseQcResponse } = await import('./lib/nextwaveV2Renderer/production/illustration.mjs');
+const { chooseIllustratedBeats, assetKey, buildPrompt, qcPrompt, parseQcResponse, routingModeFor } = await import('./lib/nextwaveV2Renderer/production/illustration.mjs');
 const { deriveSceneSpec } = await import('./lib/nextwaveV2Renderer/production/scenespec.mjs');
 const { resolveIllustration } = await import('./lib/nextwaveV2Renderer/production/route.mjs');
 await t('beat selection: Long -> its own hook plus its richest substantive comparison beat (Illustration Generation Quality Gate order §4); Short -> the richest comparison beat only, never the hook/close, never more than one', async () => { const sbB = await brain(scriptOf('B')); const cL = chooseIllustratedBeats(sbB.scenes, 'long'); assert.equal(cL.hookIdx, 0); assert.ok(cL.dominantIdx > 0 && cL.dominantIdx < sbB.scenes.length - 1, 'Long must independently qualify a substantive evidence/comparison beat, not just the hook'); assert.notEqual(cL.dominantIdx, cL.hookIdx); const sbA = await brain(scriptOf('A')); const cS = chooseIllustratedBeats(sbA.scenes, 'short'); assert.ok(cS.dominantIdx > 0 && cS.dominantIdx < sbA.scenes.length - 1); assert.equal(cS.hookIdx, -1); });
@@ -130,6 +130,55 @@ await t('resolveIllustration: reuse costs nothing; generate+QC-pass registers a 
   const throwDeps = { illustrateBeat: async () => { throw new Error('network down'); } }; const r4 = await resolveIllustration(sbB, 'long', throwDeps); assert.equal(r4.creative_qc.status, 'needs_review'); assert.ok(r4.creative_qc.reasons[0].reasons[0].includes('illustrate_exception'));
   const skipped = await resolveIllustration(sbB, 'long', {}); assert.equal(skipped, null); // no deps.illustrateBeat -> byte-for-byte renderer-2.1 behavior
 });
+console.log('\n[3d] semantic routing finalization (erosion/fee-drag -> deterministic; delayed_start/rate_outcome -> generate, unchanged)');
+await t('routing table: erosion -> deterministic; delayed_start and rate_outcome -> generate, unchanged; unknown relationship -> generate (default, byte-for-byte prior behavior)', () => {
+  assert.equal(routingModeFor('fee_drag'), 'deterministic');
+  assert.equal(routingModeFor('delay'), 'generate');
+  ['accumulation', 'purchasing_power', 'loan_cost', 'savings_split', 'outcome_gap'].forEach((rel) => assert.equal(routingModeFor(rel), 'generate', rel));
+  assert.equal(routingModeFor('hook'), 'generate'); assert.equal(routingModeFor('close'), 'generate'); assert.equal(routingModeFor(null), 'generate');
+});
+// Local, fully deterministic fixtures (no Brain/vendor call) — per the order: "a local deterministic render is
+// sufficient for the erosion-routing proof; do NOT spend another real narration/Ideogram preview cycle."
+const fakeBrain = (relationship, rendererParams) => ({
+  ok: true, integrity: { status: 'clean' },
+  values: [], scenes: [
+    { scene_id: 'S0', intent: 'introduction', narration: { text: 'An unrelated introduction beat, never a hook or a comparison.' }, renderer_params: { treatment: 'avatar_panel' }, reveal_steps: [] },
+    { scene_id: 'S1', intent: 'outcome_comparison', narration: { text: relationship === 'fee_drag' ? 'That fee difference costs you real money over time.' : 'A verified comparison beat for this fixture.' }, renderer_params: rendererParams, reveal_steps: [] },
+    { scene_id: 'S2', intent: 'presenter_conclusion', narration: { text: 'A closing beat.' }, renderer_params: { treatment: 'avatar_panel' }, reveal_steps: [] },
+  ],
+});
+await t('(A) erosion/fee_drag routes DIRECTLY to the deterministic physical-evidence template: deps.illustrateBeat is NEVER called, zero Ideogram/QC vendor calls, and a correctly-routed deterministic beat does not flip creative_qc to needs_review', async () => {
+  const b = fakeBrain('fee_drag', { treatment: 'share_compare', beforeValue: '$105,204', afterValue: '$85,528', beforeLabel: 'Low fee', afterLabel: 'High fee' });
+  let calls = 0; const spyDeps = { illustrateBeat: async () => { calls++; throw new Error('deps.illustrateBeat must never be called for an erosion/fee_drag-routed beat'); } };
+  const r = await resolveIllustration(b, 'long', spyDeps);
+  assert.equal(calls, 0, 'Ideogram/QC path was invoked for an erosion beat');
+  assert.equal(r.counts.deterministic, 1); assert.equal(r.counts.generated, 0); assert.equal(r.counts.fallback, 0);
+  assert.equal(r.vendor.ideogram_images, 0); assert.equal(r.vendor.ideogram_usd, 0); assert.equal(r.vendor.qc_calls, 0); assert.equal(r.vendor.qc_usd, 0);
+  assert.equal(r.creative_qc.status, 'pass', 'a deterministic (approved) treatment must never be flagged needs_review merely for not using Ideogram');
+  assert.deepEqual(r.perScene, {}, 'no illustration asset for a deterministic beat -> compose.mjs falls through to its existing renderer-2.1/2.3 template unchanged');
+});
+await t('(B) delayed_start remains eligible for generated illustration, unchanged', async () => {
+  const b = fakeBrain('delay', { treatment: 'stock_chart', markerIndex: 3, series: [{ label: 'Start today', finalValueText: '$155,924' }, { label: 'Delayed start', finalValueText: '$79,477' }] });
+  let calls = 0; const genDeps = { illustrateBeat: async () => { calls++; return { ok: true, mode: 'generate', asset_url: 'https://x/delay.png', asset_id: 'a1', vendor: { ideogram_images: 1, ideogram_usd: 0.03, qc_calls: 1, qc_usd: 0.01 } }; } };
+  const r = await resolveIllustration(b, 'long', genDeps);
+  assert.equal(calls, 1); assert.equal(r.counts.generated, 1); assert.equal(r.counts.deterministic, 0); assert.equal(r.creative_qc.status, 'pass');
+});
+await t('(C) rate_outcome (e.g. loan_cost) remains governed by the existing semantic route + QC, unchanged', async () => {
+  const b = fakeBrain('loan_cost', { treatment: 'share_compare', beforeValue: '$395,503', afterValue: '$435,382', beforeLabel: '5.25% rate', afterLabel: '6.25% rate' });
+  b.scenes[1].narration.text = 'Say you borrow $220,000 for a mortgage.'; // loan topic, not fee -> relationship loan_cost
+  let calls = 0; const genDeps = { illustrateBeat: async () => { calls++; return { ok: true, mode: 'generate', asset_url: 'https://x/loan.png', asset_id: 'a2', vendor: { ideogram_images: 1, ideogram_usd: 0.03, qc_calls: 1, qc_usd: 0.01 } }; } };
+  const r = await resolveIllustration(b, 'long', genDeps);
+  assert.equal(calls, 1); assert.equal(r.counts.generated, 1); assert.equal(r.counts.deterministic, 0); assert.equal(r.creative_qc.status, 'pass');
+});
+await t('(D) an unknown/genuine generation failure on a generate-routed beat still produces the existing safe fallback + needs_review (unchanged by the routing finalization)', async () => {
+  const b = fakeBrain('delay', { treatment: 'stock_chart', markerIndex: 3, series: [{ label: 'A', finalValueText: '$1' }, { label: 'B', finalValueText: '$2' }] });
+  const failDeps = { illustrateBeat: async () => ({ ok: false, mode: 'fallback', reasons: ['qc_rejected: ambiguous'], vendor: { ideogram_images: 1, ideogram_usd: 0.03, qc_calls: 2, qc_usd: 0.02 } }) };
+  const r = await resolveIllustration(b, 'long', failDeps);
+  assert.equal(r.counts.fallback, 1); assert.equal(r.creative_qc.status, 'needs_review'); assert.equal(r.creative_qc.owner, 'va_production_product_qc');
+});
+// (E) zero unprovenanced authoritative numbers, and (F) existing lifecycle/production guard remain intact: both are
+// already proven by the unchanged suites below ([3b]'s 114-script robustness sweep and section [6]'s byte-identical
+// lifecycle/auth/production-guard tests) — this routing finalization touches neither number provenance nor lifecycle.
 await t('illustrated beats render with word-anchored evidence tags and pass number provenance (hook + comparison, both formats)', async () => { const { loadSprite } = await import('./lib/nextwaveV2Renderer/core.mjs'); const stub = await loadSprite('./api/assets/nextwave-v2/bench/bg_road_wide.png'); const sbB = await brain(scriptOf('B'));
   for (const fname of ['long', 'short']) { const fm = STYLE.formats[fname]; const words = wordsFromAlignment(scriptOf('B'), synthAlign(scriptOf('B'))); const choice = chooseIllustratedBeats(sbB.scenes, fname); const illustration = {}; if (choice.hookIdx >= 0) illustration[choice.hookIdx] = { mode: 'hook', image: stub }; if (choice.dominantIdx >= 0) illustration[choice.dominantIdx] = { mode: 'comparison', image: stub };
     const C = composeStoryboard({ storyboard: sbB, words, assets: { poses: await loadHostPoses(), bench: await loadBench() }, format: fm, illustration }); const illustrated = C.scenes.filter((s) => s.illustrated); assert.ok(illustrated.length >= 1, fname);
