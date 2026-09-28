@@ -2195,7 +2195,17 @@ async function saveAppState(){
 }
 // v15.21.1 — isolated so saveAppState can gate showSaved()/showSaveFailed() on the real result
 // instead of calling showSaved() unconditionally. Returns true only on a confirmed HTTP-OK write.
+// P0 2026-09-28 shared-state data-loss guard: this tab may only write the shared company state
+// after it has successfully read it from Supabase in loadAppState. A tab whose load failed/timed
+// out is running on defaults or a stale localStorage copy — saving it would overwrite everyone's
+// real state (the 2026-09-28 incident). The server-side mmm_state_write_guard trigger is the
+// second line of defense for catastrophic shrinks; this stops the bad write at the source.
+let _sbFinanceVerified=false;
 async function _persistFinancePayloadToSupabase(financePayload){
+  if(!_sbFinanceVerified){
+    console.error('[P0 state-guard] BLOCKED shared-state save: this tab never loaded the shared state from Supabase. Reload the page before making changes.');
+    return false;
+  }
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
       method:'POST',
@@ -2204,7 +2214,9 @@ async function _persistFinancePayloadToSupabase(financePayload){
       body: JSON.stringify({key:SB_FINANCE_KEY, value:JSON.stringify(financePayload)})
     });
     if(res.ok){console.log('[v12.5] Finance synced to Supabase ✓ | availableCash:',D.availableCash);return true;}
-    const t=await res.text();console.error('[v12.5] Finance sync failed:',res.status,t.slice(0,150));
+    const t=await res.text();
+    if(t.indexOf('MMM_STATE_GUARD')!==-1){console.error('[P0 state-guard] Server BLOCKED this save as a catastrophic shrink of shared state — nothing was overwritten. Reload the page.',t.slice(0,300));return false;}
+    console.error('[v12.5] Finance sync failed:',res.status,t.slice(0,150));
     return false;
   } catch(e){console.error('[v12.5] Finance Supabase error:',e.message);return false;}
 }
@@ -2314,6 +2326,7 @@ async function loadAppState(){
         financeLoaded=true;
         console.log('[v12.5] Finance loaded from Supabase ✓ | availableCash:',D.availableCash);
       }
+      _sbFinanceVerified=true; // P0 state-guard: server state read successfully (row applied, or genuinely absent)
     }else{console.error('[v12.5] Finance fetch failed:',res.status);}
   }catch(e){console.error('[v12.5] Finance Supabase error:',e.message);}
 
