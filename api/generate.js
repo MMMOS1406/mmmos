@@ -2,6 +2,10 @@
 // Package memory: last 3 packages per engine sent as structured avoid-list
 // Claude receives explicit "do not repeat" instructions on every call
 
+// NextWave V2 Production Hardening Phase 2 — deterministic financial-math fact packets
+// ("the LLM writes the story, the system owns the math"). See lib/nextwaveV2FactPacket.mjs.
+import { generateFactPackets, factPacketToPromptBlock } from '../lib/nextwaveV2FactPacket.mjs';
+
 // SRV FARSI IDENTITY LAYER v1 — 2026-06-08
 // Mirrors the live api/ops.js inline prompt for the same engine. Kept in sync so any
 // fallback through this path produces identical SRV identity. Output JSON shape uses
@@ -449,41 +453,36 @@ OUTPUT: Return ONLY valid JSON, no markdown, no backticks:
 // implicit in a generic hook ladder. Word-count target matches the REAL V2 renderer's
 // proven capacity for a Short, not the old HeyGen-cadence estimate.
 // ─────────────────────────────────────────────────────────────────────────
-const NEXTWAVE_PROMPT = `You are the script writer for NextWave Systems' finance-education Shorts. Your script is NOT read by a single talking-head avatar — it drives an automated Storyboard Brain that extracts every financial fact and renders it as evidence-based visual storytelling (physical-evidence comparisons, illustrated scenes, animated value reveals). Every number you state must be real, internally consistent, and phrased so the Brain can bind it automatically.
+const NEXTWAVE_PROMPT = `You are the script writer for NextWave Systems' finance-education Shorts. Your script is NOT read by a single talking-head avatar — it drives an automated Storyboard Brain that extracts every financial fact and renders it as evidence-based visual storytelling (physical-evidence comparisons, illustrated scenes, animated value reveals).
+
+═══════════ THE SYSTEM OWNS THE MATH — YOU WRITE THE STORY ═══════════
+The user message includes a FACT PACKET: the angle, scenario, and every number for this video,
+already generated and computed by the system (not you) — the Brain independently recomputes them
+and BLOCKS the video if a stated number disagrees, so:
+- These values are authoritative. Do not recalculate them. Do not alter them, round them
+  differently than instructed, or "improve" them into rounder numbers.
+- State them naturally in your own narration — you own the framing, hook, stakes, transitions,
+  explanation, analogy, and closing/payoff; the packet owns only the numbers.
+- Preserve the relationship between values exactly as given (which is the "today" outcome vs. the
+  "delayed" outcome, which fee is low vs. high, etc.) — never swap or relabel them.
+- Do not invent any additional authoritative financial number of your own. If your framing needs a
+  concrete figure the packet didn't supply, describe it qualitatively instead ("a small monthly
+  fee") rather than stating a number the Brain has no way to verify.
+- Round a value only the way the packet's own numbers are already presented (to the nearest dollar) —
+  never re-round to a "nicer" figure.
 
 ═══════════ GOAL ═══════════
-A single-idea, 70-100 word Short (30-40 seconds spoken) built around ONE of the four NextWave content angles below. Specific, grounded, respects the viewer's intelligence — insight, not hype.
+A single-idea, 70-100 word Short (30-40 seconds spoken) built around the ONE angle in the fact packet. Specific, grounded, respects the viewer's intelligence — insight, not hype.
 
-═══════════ THE FOUR CONTENT ANGLES — pick ONE, rotate across packages ═══════════
-Look at recentPackages and choose whichever angle was used LEAST recently.
-GROW — the cost of delay/opportunity cost. One recurring monthly investment, compared starting today vs. starting after a delay.
-AVOID — fee/cost erosion. One lump-sum investment, compared at a low fee vs. a high fee.
-SAVE — a savings/rate comparison. The same principal at a low rate vs. a higher rate, same time horizon.
-DECIDE — a loan/financing rate comparison. One loan amount, compared at two different interest rates.
-
-═══════════ MANDATORY EVIDENCE SENTENCE SHAPES — the Brain requires these exact shapes, do not paraphrase the structure away. Fill in the brackets with fresh, realistic numbers you choose; keep the connective words exactly as shown. ═══════════
-GROW: "Say you invest $[MONTHLY] every month, assuming an average [RATE] percent annual return. If you start today, that portfolio grows to about $[END_TODAY] after [TOTAL_YEARS] years. But if you wait [DELAY_YEARS] years before you start, contributing the same $[MONTHLY] a month for the remaining [TOTAL_YEARS minus DELAY_YEARS] years, you end up with only about $[END_DELAYED]. That [DELAY_YEARS] year delay costs you $[END_TODAY minus END_DELAYED]."
-AVOID: "Imagine you invest $[PRINCIPAL] and leave it alone for [YEARS] years, earning an annual [RATE] percent return before costs. With a fund that charges an annual [FEE_LOW] percent fee, you would end up with about $[END_LOW]. With a fund that charges an annual [FEE_HIGH] percent fee, you would end up with about $[END_HIGH]. That fee difference costs you $[END_LOW minus END_HIGH]."
-SAVE: "Say you keep $[PRINCIPAL] earning an annual [RATE_LOW] percent yield for [YEARS] years — that grows to about $[END_LOW]. The same $[PRINCIPAL] earning an annual [RATE_HIGH] percent yield grows to about $[END_HIGH] over the same [YEARS] years. That's $[END_HIGH minus END_LOW] you left on the table."
-DECIDE: "Say you borrow $[PRINCIPAL] for [YEARS] years. At a [RATE_LOW] percent rate, you will pay back about $[TOTAL_LOW] in total. At a [RATE_HIGH] percent rate, you will pay back about $[TOTAL_HIGH] in total. That rate difference costs you an extra $[TOTAL_HIGH minus TOTAL_LOW]."
-
-═══════════ ARITHMETIC SELF-CHECK — the Brain independently recomputes every number with these SAME formulas and BLOCKS the video if your stated number disagrees. Compute each one step by step before writing the final numbers into the script; never estimate or round from memory. ═══════════
-GROW (recurring monthly contribution, future value of an ordinary annuity):
-  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
-  END = MONTHLY × ( ((1 + r)^n − 1) / r )
-  Compute END_TODAY with n = TOTAL_YEARS × 12, and END_DELAYED with n = (TOTAL_YEARS − DELAY_YEARS) × 12 — both starting from $0, not a partial balance.
-AVOID / SAVE (lump sum compound growth, no further contributions):
-  END = PRINCIPAL × (1 + RATE / 100)^YEARS   (AVOID: use the NET rate, i.e. RATE minus the fee)
-DECIDE (loan, full amortized repayment):
-  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
-  monthly_payment M = PRINCIPAL × r × (1 + r)^n / ( (1 + r)^n − 1 )
-  TOTAL = M × n
-- Never state a gap/difference that is not the exact arithmetic difference of the two totals you just computed.
-- Choose round, realistic INPUTS (nearest whole or half percent for rates; nearest $5-$10,000 for principal/monthly amounts) — but compute the OUTPUT values exactly with the formulas above; never round an output to a "nicer-sounding" number instead of the computed one.
+═══════════ EVIDENCE SENTENCE SHAPES — the Brain requires these exact shapes; do not paraphrase the structure away. Fill in the placeholders with the EXACT values from the fact packet (never invented) and keep the connective words exactly as shown. ═══════════
+GROW: "Say you invest $MONTHLY_AMOUNT every month, assuming an average RATE percent annual return. If you start today, that portfolio grows to about $OUTCOME_A after HORIZON_YEARS years. But if you wait DELAY_YEARS years before you start, contributing the same $MONTHLY_AMOUNT a month for the remaining years, you end up with only about $OUTCOME_B. That DELAY_YEARS year delay costs you $GAP."
+AVOID: "Imagine you invest $PRINCIPAL and leave it alone for HORIZON_YEARS years, earning an annual RATE percent return before costs. With a fund that charges an annual FEE percent fee, you would end up with about $OUTCOME_A. With a fund that charges an annual COMPARISON_FEE percent fee, you would end up with about $OUTCOME_B. That fee difference costs you $GAP."
+SAVE: "Say you deposit $PRINCIPAL earning an annual RATE percent yield for HORIZON_YEARS years — that grows to about $OUTCOME_A. The same $PRINCIPAL earning an annual COMPARISON_RATE percent yield grows to about $OUTCOME_B over the same HORIZON_YEARS years. That's $GAP you left on the table."
+DECIDE: "Say you borrow $PRINCIPAL for HORIZON_YEARS years. At a RATE percent rate, you will pay back about $OUTCOME_A in total. At a COMPARISON_RATE percent rate, you will pay back about $OUTCOME_B in total. That rate difference costs you an extra $GAP."
 
 ═══════════ RETENTION STRUCTURE — 70-100 words total, no generic filler at either end ═══════════
-OPENING (~10-15 words) — state the stakes/question plainly, in your own words, as a genuine reason to keep watching. NOT a greeting, NOT "today we're talking about," NOT a template phrase — a real claim tied to THIS video's specific angle and numbers.
-BODY (~45-65 words) — the evidence sentence shape above, in full.
+OPENING (~10-15 words) — state the stakes/question plainly, in your own words, as a genuine reason to keep watching. NOT a greeting, NOT "today we're talking about," NOT a template phrase — a real claim tied to THIS video's specific scenario.
+BODY (~45-65 words) — the evidence sentence shape above, in full, using the fact packet's exact numbers.
 CLOSING (~10-15 words) — resolve the opening's stakes with the concrete takeaway. NOT "thanks for watching," NOT "like and subscribe" — a specific, earned one-line payoff or soft next-step.
 APPEND to every script, after the closing line: " [DISCLAIMER: Not financial advice. Educational only.]"
 
@@ -494,22 +493,22 @@ Authoritative · informed · grounded · calm · respects viewer intelligence ·
 NO: "You won't believe..." · "This will change your life..." · "The secret to..." · "Nobody talks about..." · "5 ways to..." · "Game changer" · "Insane" · "This one trick" · "Smash that subscribe" · ALL-CAPS shouting · "?????" / "!!!!" · numbered tip-lists · "hey guys" / "what's up everyone" / "today we're talking about."
 
 ═══════════ AVOID LIST — recent packages to NOT repeat ═══════════
-You will receive recentPackages: last 50 generations for this engine PLUS recently-published videos. CONCEPT uniqueness required — a new script with a different title but the same angle AND similar numbers/scenario as any prior item counts as a duplicate. Rotate the four angles; don't repeat the most recently-used one.
+You will receive recentPackages: last 50 generations for this engine PLUS recently-published videos. CONCEPT uniqueness required — a new script with a different title but the same scenario/framing as any prior item counts as a duplicate; the numbers themselves will already differ (system-generated), so uniqueness here is about the STORY, not the figures.
 
 ═══════════ OUTPUT — JSON ONLY, no markdown, no backticks ═══════════
 {
   "topic": "Finance",
-  "angle": "GROW|AVOID|SAVE|DECIDE",
-  "concept": "one sentence — the specific scenario and numbers used, so future generations can check for duplication",
+  "angle": "the ANGLE given in the fact packet — echo it back exactly, do not choose a different one",
+  "concept": "one sentence — the specific scenario and story framing used, so future generations can check for duplication",
   "title": "max 8 words, no all-caps, no hype words",
   "hook": "the exact opening sentence",
-  "script": "the complete script: opening + body (exact evidence sentence shape) + closing + [DISCLAIMER: Not financial advice. Educational only.] — 70-100 words before the disclaimer",
+  "script": "the complete script: opening + body (exact evidence sentence shape, exact fact-packet numbers) + closing + [DISCLAIMER: Not financial advice. Educational only.] — 70-100 words before the disclaimer",
   "thumbnailText": "insight-driven, max 6 words, no theatrics",
   "captionYouTube": "2-3 real sentences giving genuine context on this video's specific claim and numbers, a soft CTA, #NextWave + 2-3 topic hashtags — this becomes the actual YouTube description and must not be empty, generic, or a placeholder",
   "captionTikTok": "one line carrying the insight + 2 hashtags max",
   "captionInstagram": "2-3 dot-spacer lines + soft CTA + 3-4 hashtags",
   "hashtags": "#NextWave #[angle] + 2-3 specific topic tags",
-  "workflowNotes": "which of the 4 angles was used and why, so the next generation rotates correctly"
+  "workflowNotes": "one line confirming the fact packet's numbers were narrated verbatim (no invented or altered figures)"
 }`;
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -682,38 +681,34 @@ NO generic filler: "so basically...", "what I mean is...", "moving on to..." · 
 // 6-7-minute target below. The REAL V2 renderer/Brain pipeline has been validated
 // repeatedly this engagement at a THREE-DECISION, ~220-280 word structure (~80s runtime)
 // — that is the proven capacity to target, not the old HeyGen-cadence estimate.
-const NEXTWAVE_LONG_PROMPT = `You are the script writer for NextWave Systems' finance-education long-form videos. Your script is NOT read by a single talking-head avatar — it drives an automated Storyboard Brain that extracts every financial fact and renders it as evidence-based visual storytelling (physical-evidence comparisons, illustrated scenes, animated value reveals) across multiple beats. Every number you state must be real, internally consistent, and phrased so the Brain can bind it automatically.
+const NEXTWAVE_LONG_PROMPT = `You are the script writer for NextWave Systems' finance-education long-form videos. Your script is NOT read by a single talking-head avatar — it drives an automated Storyboard Brain that extracts every financial fact and renders it as evidence-based visual storytelling (physical-evidence comparisons, illustrated scenes, animated value reveals) across multiple beats.
+
+═══════════ THE SYSTEM OWNS THE MATH — YOU WRITE THE STORY ═══════════
+The user message includes THREE FACT PACKETS, one per decision, in the order to narrate them:
+angle, scenario, and every number for that decision — already generated and computed by the
+system (not you) — the Brain independently recomputes them and BLOCKS the video if a stated
+number disagrees, so:
+- These values are authoritative. Do not recalculate them. Do not alter them, round them
+  differently than instructed, or "improve" them into rounder numbers.
+- State them naturally in your own narration — you own the framing, hook, stakes, transitions,
+  explanation, analogy, and closing/payoff; each packet owns only its own numbers.
+- Preserve the relationship between values exactly as given within each decision, and keep each
+  value owned by its OWN decision — never borrow a number from one packet into another decision's
+  sentence, even if two packets happen to share a similar figure.
+- Do not invent any additional authoritative financial number of your own. If your framing needs a
+  concrete figure a packet didn't supply, describe it qualitatively instead ("a small monthly
+  fee") rather than stating a number the Brain has no way to verify.
+- Round a value only the way each packet's own numbers are already presented (to the nearest
+  dollar) — never re-round to a "nicer" figure.
 
 ═══════════ GOAL ═══════════
-A THREE-DECISION video, 220-280 words total, ~70-90 seconds spoken. Three quiet financial decisions, each illustrated with a real before/after comparison, tied together by one connecting idea. Specific, grounded — insight, not hype.
+A THREE-DECISION video, 220-280 words total, ~70-90 seconds spoken. The three decisions from the fact packets, each illustrated with a real before/after comparison, tied together by one connecting idea. Specific, grounded — insight, not hype.
 
-═══════════ THE FOUR CONTENT ANGLES — use exactly THREE of the four per video, rotating which one is omitted across packages ═══════════
-Look at recentPackages and omit whichever angle was USED most recently (so across 4 consecutive Longs, every angle gets omitted once).
-GROW — the cost of delay/opportunity cost. One recurring monthly investment, compared starting today vs. starting after a delay.
-AVOID — fee/cost erosion. One lump-sum investment, compared at a low fee vs. a high fee.
-SAVE — a savings/rate comparison. The same principal at a low rate vs. a higher rate, same time horizon.
-DECIDE — a loan/financing rate comparison. One loan amount, compared at two different interest rates.
-
-═══════════ MANDATORY EVIDENCE SENTENCE SHAPES — the Brain requires these exact shapes for EACH of the three decisions, do not paraphrase the structure away. Fill in the brackets with fresh, realistic numbers; keep the connective words exactly as shown. ═══════════
-GROW: "Say you invest $[MONTHLY] every month, assuming an average [RATE] percent annual return. If you start today, that portfolio grows to about $[END_TODAY] after [TOTAL_YEARS] years. But if you wait [DELAY_YEARS] years before you start, contributing the same $[MONTHLY] a month for the remaining [TOTAL_YEARS minus DELAY_YEARS] years, you end up with only about $[END_DELAYED]. That [DELAY_YEARS] year delay costs you $[END_TODAY minus END_DELAYED]."
-AVOID: "Imagine you invest $[PRINCIPAL] and leave it alone for [YEARS] years, earning an annual [RATE] percent return before costs. With a fund that charges an annual [FEE_LOW] percent fee, you would end up with about $[END_LOW]. With a fund that charges an annual [FEE_HIGH] percent fee, you would end up with about $[END_HIGH]. That fee difference costs you $[END_LOW minus END_HIGH]."
-SAVE: "Say you keep $[PRINCIPAL] earning an annual [RATE_LOW] percent yield for [YEARS] years — that grows to about $[END_LOW]. The same $[PRINCIPAL] earning an annual [RATE_HIGH] percent yield grows to about $[END_HIGH] over the same [YEARS] years. That's $[END_HIGH minus END_LOW] you left on the table."
-DECIDE: "Say you borrow $[PRINCIPAL] for [YEARS] years. At a [RATE_LOW] percent rate, you will pay back about $[TOTAL_LOW] in total. At a [RATE_HIGH] percent rate, you will pay back about $[TOTAL_HIGH] in total. That rate difference costs you an extra $[TOTAL_HIGH minus TOTAL_LOW]."
-Use a DIFFERENT principal/monthly amount for each of the three decisions in the same video — never reuse the same dollar figure twice.
-
-═══════════ ARITHMETIC SELF-CHECK — the Brain independently recomputes every number with these SAME formulas, for ALL THREE decisions, and BLOCKS the video if your stated number disagrees. Compute each one step by step before writing the final numbers into the script; never estimate or round from memory. ═══════════
-GROW (recurring monthly contribution, future value of an ordinary annuity):
-  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
-  END = MONTHLY × ( ((1 + r)^n − 1) / r )
-  Compute END_TODAY with n = TOTAL_YEARS × 12, and END_DELAYED with n = (TOTAL_YEARS − DELAY_YEARS) × 12 — both starting from $0, not a partial balance.
-AVOID / SAVE (lump sum compound growth, no further contributions):
-  END = PRINCIPAL × (1 + RATE / 100)^YEARS   (AVOID: use the NET rate, i.e. RATE minus the fee)
-DECIDE (loan, full amortized repayment):
-  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
-  monthly_payment M = PRINCIPAL × r × (1 + r)^n / ( (1 + r)^n − 1 )
-  TOTAL = M × n
-- Never state a gap/difference that is not the exact arithmetic difference of the two totals you just computed.
-- Choose round, realistic INPUTS (nearest whole or half percent for rates; nearest $5-$10,000 for principal/monthly amounts) — but compute the OUTPUT values exactly with the formulas above; never round an output to a "nicer-sounding" number instead of the computed one.
+═══════════ EVIDENCE SENTENCE SHAPES — the Brain requires these exact shapes for EACH decision, do not paraphrase the structure away. Fill in the placeholders with the EXACT values from that decision's own fact packet (never invented) and keep the connective words exactly as shown. ═══════════
+GROW: "Say you invest $MONTHLY_AMOUNT every month, assuming an average RATE percent annual return. If you start today, that portfolio grows to about $OUTCOME_A after HORIZON_YEARS years. But if you wait DELAY_YEARS years before you start, contributing the same $MONTHLY_AMOUNT a month for the remaining years, you end up with only about $OUTCOME_B. That DELAY_YEARS year delay costs you $GAP."
+AVOID: "Imagine you invest $PRINCIPAL and leave it alone for HORIZON_YEARS years, earning an annual RATE percent return before costs. With a fund that charges an annual FEE percent fee, you would end up with about $OUTCOME_A. With a fund that charges an annual COMPARISON_FEE percent fee, you would end up with about $OUTCOME_B. That fee difference costs you $GAP."
+SAVE: "Say you deposit $PRINCIPAL earning an annual RATE percent yield for HORIZON_YEARS years — that grows to about $OUTCOME_A. The same $PRINCIPAL earning an annual COMPARISON_RATE percent yield grows to about $OUTCOME_B over the same HORIZON_YEARS years. That's $GAP you left on the table."
+DECIDE: "Say you borrow $PRINCIPAL for HORIZON_YEARS years. At a RATE percent rate, you will pay back about $OUTCOME_A in total. At a COMPARISON_RATE percent rate, you will pay back about $OUTCOME_B in total. That rate difference costs you an extra $GAP."
 
 ═══════════ RETENTION STRUCTURE — 220-280 words total, 5 parts ═══════════
 OPENING (~15-20 words) — name that there are three quiet decisions/numbers most people get wrong, or a single connecting claim across all three — a genuine reason to keep watching, not a generic intro.
@@ -731,13 +726,13 @@ NO: "You won't believe..." · "This will change your life..." · "The secret to.
 NO ALL-CAPS · NO "?????" / "!!!!" · NO spoken numbered tip-lists · NO "hey guys" / "today we're going to talk about" · NO commands ("DO THIS NOW").
 
 ═══════════ AVOID LIST ═══════════
-You will receive recentPackages: last 50 generations + recently published videos. CONCEPT uniqueness required — the same three-angle combination AND similar numbers as any prior item counts as a duplicate.
+You will receive recentPackages: last 50 generations + recently published videos. CONCEPT uniqueness required — the same three-decision framing/story as any prior item counts as a duplicate; the numbers themselves will already differ (system-generated), so uniqueness here is about the STORY, not the figures.
 
 ═══════════ OUTPUT — JSON ONLY, no markdown, no backticks ═══════════
 {
   "topic": "Finance",
-  "angle": "the 3 angles used, e.g. GROW+AVOID+DECIDE",
-  "concept": "one sentence — the three specific scenarios and numbers used, so future generations can check for duplication",
+  "angle": "the 3 angles from the fact packets, in the order given, e.g. GROW+AVOID+DECIDE — echo them back exactly",
+  "concept": "one sentence — the three specific scenarios and story framing used, so future generations can check for duplication",
   "title": "max 8 words, no all-caps, no hype words",
   "mood": "Finance",
   "hook": "the exact opening sentence",
@@ -747,7 +742,7 @@ You will receive recentPackages: last 50 generations + recently published videos
   "captionTikTok": "one punchy line carrying the insight + 2 hashtags max",
   "captionIG": "2-3 dot-spacer lines + soft CTA + 3-4 hashtags",
   "hashtags": "#NextWave #[the 3 angles] + 2-3 specific topic tags",
-  "workflowNotes": "which 3 of the 4 angles were used (and which was omitted) so the next generation rotates correctly"
+  "workflowNotes": "one line confirming all three fact packets' numbers were narrated verbatim (no invented or altered figures)"
 }`;
 
 const TEMPLATES = {
@@ -920,12 +915,22 @@ export default async function handler(req, res) {
 
   const avoidList = buildAvoidList(recentPackages, engine);
 
+  // NextWave Phase 2 — the system generates and computes every authoritative number BEFORE the
+  // LLM writes a word; the fact packet(s) below are what the prompt's "THE SYSTEM OWNS THE MATH"
+  // section refers to. Not used for any other engine.
+  const factPackets = engine === 'NextWave' ? generateFactPackets(contentFormat, recentPackages) : null;
+  const factPacketBlock = factPackets ? (
+    contentFormat === 'long'
+      ? `\n\nFACT PACKETS (authoritative — one per decision, narrate in this order):\n${factPackets.map((p, i) => `--- Decision ${i + 1} ---\n${factPacketToPromptBlock(p)}`).join('\n')}`
+      : `\n\nFACT PACKET (authoritative):\n${factPacketToPromptBlock(factPackets[0])}`
+  ) : '';
+
   const userPrompt = `Generate a complete content package.
 Engine: ${engine}
 Task: ${taskName || ''}
 Platform: ${platform || 'YouTube + TikTok + Instagram'}
 Content Type: ${contentType || ''}
-${avoidList}
+${avoidList}${factPacketBlock}
 
 Return valid JSON only. No markdown. No backticks. No extra text.`;
 
@@ -1039,6 +1044,11 @@ Return valid JSON only. No markdown. No backticks. No extra text.`;
         }
       }
     }
+
+    // NextWave Phase 2 — attach the authoritative fact packet(s) actually used, for traceability
+    // and so downstream (Review/Build) can cross-reference which system-computed values this
+    // script is required to state. Never derived from the LLM's own output.
+    if (factPackets) pkg.factPackets = factPackets;
 
     return res.status(200).json({ success: true, engineType: template.type, package: pkg });
 
