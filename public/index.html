@@ -14508,7 +14508,7 @@ function autoCreateCadenceTasksForCurrentWeek(){
       if(D.cadenceAutoCreatedSlots[key]){
         // v13.69.30 — same recreation guard as long-form: slot claimed but task may have been discarded
         const shortStillExists=D.tasks.some(function(t){
-          if(!t||t.contentFormat==='long')return false;
+          if(!t||(t.cadenceSlotFormat||t.contentFormat)==='long')return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
           if(!_engineNameMatches(t.engine,cfg.name))return false;
           if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
           return String(t.isoDate||'')===iso;
@@ -14586,7 +14586,7 @@ function autoCreateCadenceTasksForCurrentWeek(){
     if(D.cadenceAutoCreatedSlots[lfKey]){
       // v13.69.465 — slot claimed, but verify the task actually exists (may have been discarded/deleted)
       const lfStillExists=D.tasks.some(function(t){
-        if(!t||t.contentFormat!=='long')return false;
+        if(!t||(t.cadenceSlotFormat||t.contentFormat)!=='long')return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
         if(!_engineNameMatches(t.engine,cfg.name))return false;
         if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
         return String(t.isoDate||'')===iso;
@@ -14597,7 +14597,7 @@ function autoCreateCadenceTasksForCurrentWeek(){
     }
     // skip if a non-terminal long-form task already exists this week for this engine
     const lfCollides=D.tasks.some(t=>{
-      if(!t||!t.contentFormat||t.contentFormat!=='long')return false;
+      if(!t||(t.cadenceSlotFormat||t.contentFormat)!=='long')return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
       if(!_engineNameMatches(t.engine,cfg.name))return false;
       if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
       return String(t.isoDate||'')===iso;
@@ -17438,11 +17438,13 @@ function renderSRVFarsiLifecycleCard(task){
 
   // ── GENERATE ────────────────────────────────────────────────────────────────
   if(stage==='generate'){
+    // VA may change Artist and Long/Short for this task before generating (see _srvFarsiVaSetArtistFormat).
+    const _fSel=(field,cur,opts)=>`<select onchange="_srvFarsiVaSetArtistFormat('${taskId}','${field}',this.value)" style="margin-left:6px;padding:4px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.35);border-radius:6px;color:var(--text);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">${opts.map(o=>`<option value="${o}"${o===cur?' selected':''}>${o}</option>`).join('')}</select>`;
     stageContent=`
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        ${_fArtist?`<div style="font-size:12px;color:var(--dim);margin-bottom:4px">Artist: <strong style="color:var(--text)">${escHTML(_fArtist)}</strong></div>`:''}
-        <div style="font-size:12px;color:var(--dim);margin-bottom:4px">Mood: <strong style="color:var(--text)">${escHTML(_fMoodLabel)}</strong></div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format: <strong style="color:var(--text)">${escHTML(_fFormat)}</strong></div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Artist:${_fSel('artist',_fArtist,['Male','Female','Duet'])}</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mood: <strong style="color:var(--text)">${escHTML(_fMoodLabel)}</strong></div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format:${_fSel('format',_fFormat,['Long','Short'])}</div>
         <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the Persian song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
         <button onclick="vaFarsiGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
           🌹 Generate Package
@@ -18236,6 +18238,43 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
     // rotates across the full 20-slot cycle, each new task draws from a different 2-photo bucket.
   }
   return _pkg;
+}
+
+// ── SRV Farsi — VA Artist / Format selection (Generate stage only) ────────────
+// Lets the VA pick Male/Female/Duet and Long/Short for THIS task before its package is generated.
+// Changes only this task's artist (the part of task.mood before " — ") and the format fields that
+// generation/build/publish already read (contentFormat / contentType / isLong). Mood, day, isoDate,
+// publish scheduling and the rotation/cadence pointers are never touched. cadenceSlotFormat keeps
+// the slot's ORIGINAL format so the weekly cadence still sees this task as filling its original
+// Short/Long slot and never re-creates a replacement task for that day.
+function _srvFarsiVaSetArtistFormat(taskId,field,value){
+  const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
+  if(!task||task.engine!=='SRV Farsi')return;
+  if(_srvFarsiGetStage(taskId)!=='generate')return; // locked once the package has been generated
+  const curMood=task.mode||task.mood||'';
+  const {artist:oldArtist}=_srvFarsiSplitMood(curMood);
+  const moodPart=curMood.includes(' — ')?curMood.split(' — ').slice(1).join(' — ').trim():curMood;
+  const oldFormat=(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short';
+  let artist=oldArtist,format=oldFormat;
+  if(field==='artist'&&['Male','Female','Duet'].includes(value))artist=value;
+  else if(field==='format'&&['Long','Short'].includes(value))format=value;
+  else return;
+  if(artist===oldArtist&&format===oldFormat)return;
+  if(!task.cadenceSlotFormat)task.cadenceSlotFormat=(task.contentFormat==='long')?'long':'short';
+  const newMood=(artist?artist+' — ':'')+moodPart;
+  task.mood=newMood;
+  if(task.mode)task.mode=newMood;
+  const isLong=(format==='Long');
+  task.contentFormat=isLong?'long':'short';
+  task.contentType=isLong?'Long Script':'Short Video';
+  task.isLong=isLong;
+  const suffix=(String(task.name||'').match(/\s\([^)]*\)\s*$/)||[''])[0];
+  task.name='SRV Farsi — '+(isLong?'Long · '+newMood:newMood+' · Short')+suffix;
+  if(!Array.isArray(task.vaOverrides))task.vaOverrides=[];
+  task.vaOverrides.push({field,from:field==='artist'?oldArtist:oldFormat,to:value,
+    by:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||'unknown',at:new Date().toISOString()});
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
 
 // ── vaFarsiGeneratePackage — Generate button for SRV Farsi lifecycle ──────────
