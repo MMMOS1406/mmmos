@@ -464,14 +464,22 @@ DECIDE — a loan/financing rate comparison. One loan amount, compared at two di
 ═══════════ MANDATORY EVIDENCE SENTENCE SHAPES — the Brain requires these exact shapes, do not paraphrase the structure away. Fill in the brackets with fresh, realistic numbers you choose; keep the connective words exactly as shown. ═══════════
 GROW: "Say you invest $[MONTHLY] every month, assuming an average [RATE] percent annual return. If you start today, that portfolio grows to about $[END_TODAY] after [TOTAL_YEARS] years. But if you wait [DELAY_YEARS] years before you start, contributing the same $[MONTHLY] a month for the remaining [TOTAL_YEARS minus DELAY_YEARS] years, you end up with only about $[END_DELAYED]. That [DELAY_YEARS] year delay costs you $[END_TODAY minus END_DELAYED]."
 AVOID: "Imagine you invest $[PRINCIPAL] and leave it alone for [YEARS] years, earning about [RATE] percent a year before costs. With a fund charging [FEE_LOW] percent a year, you would end up with about $[END_LOW]. With a fund charging [FEE_HIGH] percent a year, you would end up with about $[END_HIGH]. That fee difference costs you $[END_LOW minus END_HIGH]."
-SAVE: "Say you keep $[PRINCIPAL] earning [RATE_LOW] percent a year for [YEARS] years — that grows to about $[END_LOW]. The same $[PRINCIPAL] earning [RATE_HIGH] percent a year grows to about $[END_HIGH] over the same [YEARS] years. That's $[END_HIGH minus END_LOW] you left on the table."
+SAVE: "Say you keep $[PRINCIPAL] earning an annual [RATE_LOW] percent yield for [YEARS] years — that grows to about $[END_LOW]. The same $[PRINCIPAL] earning an annual [RATE_HIGH] percent yield grows to about $[END_HIGH] over the same [YEARS] years. That's $[END_HIGH minus END_LOW] you left on the table."
 DECIDE: "Say you borrow $[PRINCIPAL] for [YEARS] years. At a [RATE_LOW] percent rate, you will pay back about $[TOTAL_LOW] in total. At a [RATE_HIGH] percent rate, you will pay back about $[TOTAL_HIGH] in total. That rate difference costs you an extra $[TOTAL_HIGH minus TOTAL_LOW]."
 
-═══════════ ARITHMETIC SELF-CHECK — do this before finalizing; the Brain independently recomputes every number and BLOCKS the video if it disagrees ═══════════
-- GROW/AVOID/SAVE: the end value is the compound growth of the stated principal/monthly amount at the stated rate (minus fee, for AVOID) over the stated years. A delayed start (GROW) compounds only over the REMAINING years after the delay, starting from $0 — not from a partial balance.
-- DECIDE: the total paid is the stated loan's full amortized repayment (principal + all interest) over the stated term at the stated rate.
-- Never state a gap/difference that is not the exact arithmetic difference of the two totals you just stated.
-- Choose round, realistic numbers (nearest whole or half percent for rates; nearest $5-$10,000 for principal/monthly amounts) — precision you can't verify by hand is a liability, not a feature.
+═══════════ ARITHMETIC SELF-CHECK — the Brain independently recomputes every number with these SAME formulas and BLOCKS the video if your stated number disagrees. Compute each one step by step before writing the final numbers into the script; never estimate or round from memory. ═══════════
+GROW (recurring monthly contribution, future value of an ordinary annuity):
+  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
+  END = MONTHLY × ( ((1 + r)^n − 1) / r )
+  Compute END_TODAY with n = TOTAL_YEARS × 12, and END_DELAYED with n = (TOTAL_YEARS − DELAY_YEARS) × 12 — both starting from $0, not a partial balance.
+AVOID / SAVE (lump sum compound growth, no further contributions):
+  END = PRINCIPAL × (1 + RATE / 100)^YEARS   (AVOID: use the NET rate, i.e. RATE minus the fee)
+DECIDE (loan, full amortized repayment):
+  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
+  monthly_payment M = PRINCIPAL × r × (1 + r)^n / ( (1 + r)^n − 1 )
+  TOTAL = M × n
+- Never state a gap/difference that is not the exact arithmetic difference of the two totals you just computed.
+- Choose round, realistic INPUTS (nearest whole or half percent for rates; nearest $5-$10,000 for principal/monthly amounts) — but compute the OUTPUT values exactly with the formulas above; never round an output to a "nicer-sounding" number instead of the computed one.
 
 ═══════════ RETENTION STRUCTURE — 70-100 words total, no generic filler at either end ═══════════
 OPENING (~10-15 words) — state the stakes/question plainly, in your own words, as a genuine reason to keep watching. NOT a greeting, NOT "today we're talking about," NOT a template phrase — a real claim tied to THIS video's specific angle and numbers.
@@ -689,15 +697,23 @@ DECIDE — a loan/financing rate comparison. One loan amount, compared at two di
 ═══════════ MANDATORY EVIDENCE SENTENCE SHAPES — the Brain requires these exact shapes for EACH of the three decisions, do not paraphrase the structure away. Fill in the brackets with fresh, realistic numbers; keep the connective words exactly as shown. ═══════════
 GROW: "Say you invest $[MONTHLY] every month, assuming an average [RATE] percent annual return. If you start today, that portfolio grows to about $[END_TODAY] after [TOTAL_YEARS] years. But if you wait [DELAY_YEARS] years before you start, contributing the same $[MONTHLY] a month for the remaining [TOTAL_YEARS minus DELAY_YEARS] years, you end up with only about $[END_DELAYED]. That [DELAY_YEARS] year delay costs you $[END_TODAY minus END_DELAYED]."
 AVOID: "Imagine you invest $[PRINCIPAL] and leave it alone for [YEARS] years, earning about [RATE] percent a year before costs. With a fund charging [FEE_LOW] percent a year, you would end up with about $[END_LOW]. With a fund charging [FEE_HIGH] percent a year, you would end up with about $[END_HIGH]. That fee difference costs you $[END_LOW minus END_HIGH]."
-SAVE: "Say you keep $[PRINCIPAL] earning [RATE_LOW] percent a year for [YEARS] years — that grows to about $[END_LOW]. The same $[PRINCIPAL] earning [RATE_HIGH] percent a year grows to about $[END_HIGH] over the same [YEARS] years. That's $[END_HIGH minus END_LOW] you left on the table."
+SAVE: "Say you keep $[PRINCIPAL] earning an annual [RATE_LOW] percent yield for [YEARS] years — that grows to about $[END_LOW]. The same $[PRINCIPAL] earning an annual [RATE_HIGH] percent yield grows to about $[END_HIGH] over the same [YEARS] years. That's $[END_HIGH minus END_LOW] you left on the table."
 DECIDE: "Say you borrow $[PRINCIPAL] for [YEARS] years. At a [RATE_LOW] percent rate, you will pay back about $[TOTAL_LOW] in total. At a [RATE_HIGH] percent rate, you will pay back about $[TOTAL_HIGH] in total. That rate difference costs you an extra $[TOTAL_HIGH minus TOTAL_LOW]."
 Use a DIFFERENT principal/monthly amount for each of the three decisions in the same video — never reuse the same dollar figure twice.
 
-═══════════ ARITHMETIC SELF-CHECK — do this before finalizing, for ALL THREE decisions; the Brain independently recomputes every number and BLOCKS the video if it disagrees ═══════════
-- GROW/AVOID/SAVE: end value is compound growth of the stated principal/monthly amount at the stated rate (minus fee, for AVOID) over the stated years. A delayed start (GROW) compounds only over the REMAINING years after the delay, starting from $0 — not from a partial balance.
-- DECIDE: total paid is the stated loan's full amortized repayment (principal + all interest) over the stated term at the stated rate.
-- Never state a gap/difference that is not the exact arithmetic difference of the two totals you just stated.
-- Choose round, realistic numbers (nearest whole or half percent for rates; nearest $5-$10,000 for principal/monthly amounts).
+═══════════ ARITHMETIC SELF-CHECK — the Brain independently recomputes every number with these SAME formulas, for ALL THREE decisions, and BLOCKS the video if your stated number disagrees. Compute each one step by step before writing the final numbers into the script; never estimate or round from memory. ═══════════
+GROW (recurring monthly contribution, future value of an ordinary annuity):
+  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
+  END = MONTHLY × ( ((1 + r)^n − 1) / r )
+  Compute END_TODAY with n = TOTAL_YEARS × 12, and END_DELAYED with n = (TOTAL_YEARS − DELAY_YEARS) × 12 — both starting from $0, not a partial balance.
+AVOID / SAVE (lump sum compound growth, no further contributions):
+  END = PRINCIPAL × (1 + RATE / 100)^YEARS   (AVOID: use the NET rate, i.e. RATE minus the fee)
+DECIDE (loan, full amortized repayment):
+  monthly_rate r = RATE / 100 / 12 ; months n = YEARS × 12
+  monthly_payment M = PRINCIPAL × r × (1 + r)^n / ( (1 + r)^n − 1 )
+  TOTAL = M × n
+- Never state a gap/difference that is not the exact arithmetic difference of the two totals you just computed.
+- Choose round, realistic INPUTS (nearest whole or half percent for rates; nearest $5-$10,000 for principal/monthly amounts) — but compute the OUTPUT values exactly with the formulas above; never round an output to a "nicer-sounding" number instead of the computed one.
 
 ═══════════ RETENTION STRUCTURE — 220-280 words total, 5 parts ═══════════
 OPENING (~15-20 words) — name that there are three quiet decisions/numbers most people get wrong, or a single connecting claim across all three — a genuine reason to keep watching, not a generic intro.
