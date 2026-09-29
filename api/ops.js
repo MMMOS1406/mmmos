@@ -7219,6 +7219,11 @@ async function youtubeUploadVideo(req, res) {
     publishAt,         // ISO timestamp for scheduled publish (requires privacy=private)
     madeForKids,       // boolean, defaults false (we're general audience)
     playlistCategory,  // v13.72.0 — 'romantic'|'emotional'|'happy' → auto-add to named playlist
+    containsSyntheticMedia, // Release A3 (2026-09-28) — optional, additive; official YouTube Data API
+                             // field (status.containsSyntheticMedia, live since 2024-10-30, confirmed
+                             // via developers.google.com/youtube/v3/docs/videos) for the structured
+                             // altered/synthetic-content disclosure. Omitted by every existing caller
+                             // today, so this changes nothing unless a caller explicitly opts in.
   } = body;
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'missing_video_url' });
 
@@ -7291,6 +7296,10 @@ async function youtubeUploadVideo(req, res) {
     metadata.status.publishAt = publishAt;
     metadata.status.privacyStatus = 'private'; // required for scheduled publish
   }
+  // Release A3 — additive, opt-in only (see containsSyntheticMedia destructure above).
+  if (containsSyntheticMedia === true) {
+    metadata.status.containsSyntheticMedia = true;
+  }
 
   try {
     const result = await _youtubeResumableUpload(accessToken, videoUrl, metadata);
@@ -7299,7 +7308,12 @@ async function youtubeUploadVideo(req, res) {
     let playlistResult = null;
     if (playlistCategory && youtubeVideoId) {
       try {
-        const plTitle = _FARSI_PLAYLIST_MAP[playlistCategory] || ('SRV Farsi - ' + playlistCategory);
+        // Production Hardening Release A2 (2026-09-28) — the fallback naming below was hardcoded
+        // to "SRV Farsi - <category>" regardless of engine, which would have mis-named NextWave's
+        // playlists. SRV Farsi's own resulting value (map lookup, then its fallback) is unchanged;
+        // only a NextWave-specific fallback branch was added, reusing the exact same existing
+        // mechanism (_ytGetOrCreatePlaylist / _ytAddVideoToPlaylist) per the order's "no new logic".
+        const plTitle = _FARSI_PLAYLIST_MAP[playlistCategory] || (engine === 'NextWave' ? ('NextWave - ' + playlistCategory) : ('SRV Farsi - ' + playlistCategory));
         const pl = await _ytGetOrCreatePlaylist(plTitle, accessToken);
         await _ytAddVideoToPlaylist(youtubeVideoId, pl.id, accessToken);
         playlistResult = { id: pl.id, title: pl.title };
