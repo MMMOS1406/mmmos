@@ -89,3 +89,13 @@ business branch → preview (automatic on push) → validation → PR merged int
 5. Business branches (for example `srv-farsi/va-artist-format-select`) follow the normal flow: preview → PR → main.
 
 Separately tracked (security, not part of this change): `app_settings` grants anonymous full write; 33 tables have RLS off.
+
+## 7. Cutover log
+
+| Step | Result |
+|---|---|
+| 1. PR #19 (main := production) | Merged 2026-09-30 02:50 UTC as merge commit `259d1e1`. main contains `d286100`, and its tree is identical to production. No deploy, because Git deploys were off on that commit. |
+| 2. Migration `platform_business_state_isolation` | Applied. Pre-apply fix: the guard reads the flag through `mmm_platform_flag_enabled()` (SECURITY DEFINER), because an anon-fired trigger can't see the RLS-locked flag table. Validated in production as `anon` in rolled-back transactions with synthetic `mmm_isolation_test_*` keys: A, B, C, D, H pass; CEO keys refused; anon can't read or flip flags; legacy writes still accepted while the flag is off. Real state row unchanged (md5 `a60b4921…`, 64 tasks). `state_merge_only` = false. |
+| 3a. Guard on a real Vercel preview | Passed. Git preview `dpl_A32k5SrgKyZ1q92SphZFoCtPhVbh` (c964145) logged `MMMOS RELEASE GUARD: env=preview ref=platform/business-isolation`, so the guard runs, Git metadata is present and previews aren't blocked. The served page equals `public/index.html` byte-for-byte, plus Vercel's preview-toolbar tag, so the output directory is unchanged. The project is linked to GitHub, and Git production deploys come from main (last one: `5bca0df` on main, 09-13). |
+| 3b. Vercel project Build Command | **BLOCKED.** The Vercel API returned 403 "You don't have permission to update the project". Without it, branches whose `vercel.json` lacks the guard (e.g. `nextwave-v2-live-integration`) can still replace production directly, including rolling back this change. |
+| 4–5. PR #20 merge, flag on | Not started. Waiting on 3b. |
