@@ -19,9 +19,9 @@ ok('guard fits Vercel project Build Command setting (<=256 chars)', guard.length
 ok('git deployments enabled (main -> production, branches -> preview)', vercel.git && vercel.git.deploymentEnabled === true);
 
 const A = build({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'srv-farsi/va-artist-format-select' });
-ok('A: SRV feature branch production build blocked', A.status === 1 && /RELEASE GUARD/.test(A.stdout), A.stdout.trim());
+ok('A: SRV feature branch production build blocked', A.status === 1 && /BLOCKED/.test(A.stdout), A.stdout.trim());
 const B = build({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'nextwave-v2-live-integration' });
-ok('B: NextWave feature branch production build blocked', B.status === 1 && /RELEASE GUARD/.test(B.stdout), B.stdout.trim());
+ok('B: NextWave feature branch production build blocked', B.status === 1 && /BLOCKED/.test(B.stdout), B.stdout.trim());
 const U = build({ VERCEL_ENV: 'production' });
 ok('fail-closed: production build with unknown branch (e.g. CLI upload) blocked', U.status === 1, U.stdout.trim());
 ok('main production build allowed', build({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main' }).status === 0);
