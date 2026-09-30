@@ -18,6 +18,16 @@ insert into public.mmm_platform_flags(flag, enabled, note) values
   ('state_merge_only', false, 'When true, direct whole-row writes to mmm_finance_v118 are rejected; only mmm_state_save (3-way merge) may write it. Switch on only after the merge-aware client is in production.')
 on conflict (flag) do nothing;
 
+-- Read-only flag lookup usable from triggers fired by anon/authenticated writes. The flags table has RLS
+-- with no client policies, so a plain SELECT from a client-role trigger would see no rows (flag always
+-- "off"). SECURITY DEFINER returns just the boolean; clients still cannot read or change the table.
+create or replace function public.mmm_platform_flag_enabled(p_flag text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select enabled from public.mmm_platform_flags where flag = p_flag), false)
+$$;
+revoke all on function public.mmm_platform_flag_enabled(text) from public;
+grant execute on function public.mmm_platform_flag_enabled(text) to anon, authenticated;
+
 -- 3-way merge: c = current server value, b = base the client loaded, n = what the client wants to save.
 -- SQL NULL means "absent".
 create or replace function public.mmm_json_merge3(c jsonb, b jsonb, n jsonb)
@@ -119,7 +129,7 @@ begin
   end if;
   if NEW.key <> 'mmm_finance_v118' then return NEW; end if;
   if coalesce(current_setting('mmm.via_merge', true),'') <> 'on'
-     and exists (select 1 from public.mmm_platform_flags where flag = 'state_merge_only' and enabled) then
+     and public.mmm_platform_flag_enabled('state_merge_only') then
     raise exception 'MMM_STATE_ISOLATION: direct whole-state write to % rejected; use rpc mmm_state_save', NEW.key using errcode = 'P0001';
   end if;
   begin o := OLD.value::jsonb; exception when others then return NEW; end;

@@ -152,4 +152,32 @@ async function rejects(p, re) { try { await p; return false; } catch (e) { retur
   ok('SAME-BUSINESS conflict: field-level last-writer-wins, other fields kept', s3.status === 'B' && s3.note === 'from A');
 }
 
+// ROLE-REALISTIC: production's app_settings RLS policies, all writes performed AS the browser's anon role
+{
+  const db = await fresh(); const s0 = seed(); await put(db, s0);
+  await db.exec(`
+    alter table app_settings enable row level security;
+    create policy anon_full_access_app_settings on app_settings as permissive for all to anon using (true) with check (true);
+    create policy block_anon_ceo_lockout on app_settings as restrictive for all to anon
+      using (key <> 'ceo_login_security_preview') with check (key <> 'ceo_login_security_preview');
+    grant usage on schema public to anon; grant select, insert, update, delete on app_settings to anon;
+    grant select, insert, update, delete on mmm_platform_flags to anon;`); // even with table grants, RLS must keep anon out
+  const asAnon = async (sql, params) => { await db.exec('set role anon'); try { return await db.query(sql, params); } finally { await db.exec('reset role'); } };
+  const anonLegacy = v => asAnon(`insert into app_settings(key,value) values ($1,$2) on conflict (key) do update set value=excluded.value`, [KEY, JSON.stringify(v)]);
+  const anonSave = (b, n) => asAnon(`select mmm_state_save($1,$2::jsonb,$3::jsonb)`, [KEY, JSON.stringify(b), JSON.stringify(n)]);
+  const t1 = clone(s0); find(t1, 'SRV Farsi', 1).status = 'anon-legacy';
+  await anonLegacy(t1);
+  ok('ROLE anon: flag off -> legacy write allowed (compat)', find(await get(db), 'SRV Farsi', 1).status === 'anon-legacy');
+  const flagsSeen = (await asAnon(`select count(*)::int n from mmm_platform_flags`)).rows[0].n;
+  await asAnon(`update mmm_platform_flags set enabled = true`);
+  ok('ROLE anon: cannot read or flip platform flags (RLS)', flagsSeen === 0 &&
+    (await db.query(`select enabled from mmm_platform_flags where flag='state_merge_only'`)).rows[0].enabled === false);
+  await db.exec(`update mmm_platform_flags set enabled = true where flag = 'state_merge_only'`);
+  ok('ROLE anon: flag on -> anon legacy whole-row write REJECTED', await rejects(anonLegacy(s0), /MMM_STATE_ISOLATION/));
+  const cur = await get(db); const t2 = clone(cur); find(t2, 'NextWave', 2).status = 'anon-merge'; await anonSave(cur, t2);
+  ok('ROLE anon: flag on -> anon merge save works', find(await get(db), 'NextWave', 2).status === 'anon-merge');
+  ok('ROLE anon: shrink guard still blocks anon wipe via merge', await rejects(anonSave(await get(db), { tasks: [] }), /MMM_STATE_GUARD/));
+  ok('ROLE anon: anon delete of state row blocked', await rejects(asAnon(`delete from app_settings where key=$1`, [KEY]), /MMM_STATE_GUARD/));
+}
+
 console.log(out.join('\n')); console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
