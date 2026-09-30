@@ -19,3 +19,4 @@ supabase/.temp
 node_modules
 *.bak
 *.tmp
+.env.bench.local

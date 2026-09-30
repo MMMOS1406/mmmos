@@ -1,0 +1,335 @@
+{
+ "setName": "third",
+ "sums": {
+  "cases": 23,
+  "full": 21,
+  "needs_review": 5,
+  "misbindings": 0,
+  "silent_drops": 0,
+  "gt_mentions": 99,
+  "bound_ok": 94,
+  "unbound_reported": 5,
+  "calcs_gt": 30,
+  "calcs_verified": 28,
+  "calcs_agree": 28,
+  "provenance_bad": 0,
+  "blocked": 1,
+  "visual_mismatch": 0,
+  "normal": 19,
+  "normal_full": 17,
+  "normal_review": 2,
+  "normal_blocked": 0,
+  "safety": 4,
+  "safety_safe": 4
+ },
+ "tally": {
+  "live_calls": 46,
+  "replayed": 0,
+  "input_tokens": 122541,
+  "output_tokens": 30816,
+  "cost_usd": 0.829863
+ },
+ "model": "claude-sonnet-4-5",
+ "rows": [
+  {
+   "id": "T01_flow_single_amount",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:money_flow(flow)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T02_flow_roth_growth",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T03_milestones_recurring",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T04_nominal_vs_real_nest_egg",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T05_gross_vs_net_gain",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:money_flow(flow)",
+    "u01:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T06_insurance_pct_and_dollars",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T07_refinance_pct_decrease",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": [
+    "review:stated_value_not_reproduced"
+   ]
+  },
+  {
+   "id": "T08_refi_rate_a_vs_b",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T09_fee_vs_no_fee",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T10_interest_income_tax",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T11_weekly_savings",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T12_start_now_vs_later",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T13_coffee_inflation",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(start_to_result)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T14_runway_months",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T15_card_payoff_time",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T16_milestones_lump_sum",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T17_periodic_vs_lifetime",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T18_return_scenarios_contributions",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "T19_flow_parts_and_total",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [
+    [
+     "$250",
+     "$500"
+    ]
+   ],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "review:unbound_value $250 (only one valid pass labelled this quantity)"
+   ]
+  },
+  {
+   "id": "U1_direction_unknown",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(explanation)"
+   ],
+   "reasons": [
+    "review:direction_ambiguous 5 percent (the script does not say whether the change is up or down)"
+   ]
+  },
+  {
+   "id": "U2_contradicted_result",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "review:stated_value_not_reproduced"
+   ]
+  },
+  {
+   "id": "U3_unclear_options",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(explanation)"
+   ],
+   "reasons": [
+    "review:unbound_value $50 (passes disagree: upfront_cost vs none)",
+    "review:unbound_value $500 (passes disagree: upfront_cost vs none)",
+    "review:unbound_value 3 percent (passes disagree: fee_rate vs none)",
+    "review:unbound_value 12 percent (passes disagree: fee_rate vs none)"
+   ]
+  },
+  {
+   "id": "U4_ages_unsupported",
+   "status": "blocked",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "blocking:visual_semantic_mismatch",
+    "review:uncovered_numeric_token 30",
+    "review:uncovered_numeric_token 40",
+    "review:uncovered_numeric_token 67"
+   ]
+  }
+ ]
+}

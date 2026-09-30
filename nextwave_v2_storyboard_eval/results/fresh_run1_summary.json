@@ -1,0 +1,280 @@
+{
+ "setName": "fresh",
+ "sums": {
+  "cases": 18,
+  "full": 17,
+  "needs_review": 5,
+  "misbindings": 0,
+  "silent_drops": 0,
+  "gt_mentions": 86,
+  "bound_ok": 77,
+  "unbound_reported": 9,
+  "calcs_gt": 26,
+  "calcs_verified": 25,
+  "calcs_agree": 25,
+  "provenance_bad": 0,
+  "blocked": 0,
+  "visual_mismatch": 0,
+  "normal": 14,
+  "normal_full": 13,
+  "normal_review": 1,
+  "normal_blocked": 0,
+  "safety": 4,
+  "safety_safe": 4
+ },
+ "tally": {
+  "live_calls": 36,
+  "replayed": 0,
+  "input_tokens": 96576,
+  "output_tokens": 27509,
+  "cost_usd": 0.702363
+ },
+ "model": "claude-sonnet-4-5",
+ "rows": [
+  {
+   "id": "N01_fees_retirement_plan",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(presenter_hook)",
+    "u01+u02+u03:stock_chart(trajectory_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N02_mortgage_payment_interest",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N03_card_payoff_two_payments",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(presenter_hook)",
+    "u01+u02:share_compare(outcome_comparison)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N04_salary_inflation",
+   "status": "needs_review",
+   "full": false,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [
+    [
+     "$90,000",
+     "$179,081"
+    ]
+   ],
+   "scenes": [
+    "u00+u01:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "review:unbound_value $90,000 (passes disagree: income_amount vs baseline_amount)"
+   ]
+  },
+  {
+   "id": "N05_withdrawal_tax_roth",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N06_match_multistep",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:money_flow(flow)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N07_solar_breakeven_years",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:stock_chart(breakeven)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N08_multi_horizon_growth",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(presenter_hook)",
+    "u01:stock_chart(trajectory_comparison)",
+    "u02:avatar_panel(presenter_conclusion)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N09_rent_increase_annualized",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:stock_chart(change_over_window)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N10_nominal_vs_real",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:share_compare(start_to_result)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N11_gym_totals",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N12_combined_401k_contribution",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00+u01:calc_card(single_figure)",
+    "u02:avatar_panel(presenter_conclusion)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N13_gas_price_drop",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:stock_chart(change_over_window)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "N14_car_loan_question_form",
+   "status": "clean",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(presenter_hook)",
+    "u01:calc_card(single_figure)"
+   ],
+   "reasons": []
+  },
+  {
+   "id": "S1_direction_unknown",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:calc_card(change_over_window)",
+    "u01:avatar_panel(explanation)"
+   ],
+   "reasons": [
+    "review:direction_ambiguous 15 percent (the script does not say whether the change is up or down)"
+   ]
+  },
+  {
+   "id": "S2_contradicted_result",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:share_compare(start_to_result)"
+   ],
+   "reasons": [
+    "review:stated_value_not_reproduced"
+   ]
+  },
+  {
+   "id": "S3_unclear_quantities",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(explanation)"
+   ],
+   "reasons": [
+    "review:unassigned_quantity $500 (both passes judged this money/percent quantity to play no financial role)",
+    "review:unassigned_quantity $1,200 (both passes judged this money/percent quantity to play no financial role)",
+    "review:unassigned_quantity 12 percent (both passes judged this money/percent quantity to play no financial role)",
+    "review:uncovered_numeric_token 8",
+    "review:uncovered_numeric_token 5"
+   ]
+  },
+  {
+   "id": "S4_allocation_weights_unsupported",
+   "status": "needs_review",
+   "full": true,
+   "misbound": 0,
+   "silent_drops": 0,
+   "together_fail": [],
+   "scenes": [
+    "u00:avatar_panel(explanation)",
+    "u01:calc_card(single_figure)"
+   ],
+   "reasons": [
+    "review:unbound_value 6.6 percent (only one valid pass labelled this quantity)",
+    "review:unassigned_quantity 60 percent (both passes judged this money/percent quantity to play no financial role)",
+    "review:unassigned_quantity 40 percent (both passes judged this money/percent quantity to play no financial role)"
+   ]
+  }
+ ]
+}

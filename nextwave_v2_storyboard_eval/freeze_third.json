@@ -1,0 +1,6 @@
+{
+  "file": "third_holdout.mjs",
+  "sha256": "111c9942a5667d4fad6151f66e9985547a8e38db4b366e1457c848a9ced0e1a4",
+  "frozen_at": "2026-09-25T19:58:52Z",
+  "note": "Written after the final semantic corrections and frozen BEFORE its first run. The Brain, prompts and renderer must not change in response to this set's results."
+}
