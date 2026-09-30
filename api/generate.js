@@ -711,11 +711,12 @@ SAVE: "Say you deposit $PRINCIPAL earning an annual RATE percent yield for HORIZ
 DECIDE: "Say you borrow $PRINCIPAL for HORIZON_YEARS years. At a RATE percent rate, you will pay back about $OUTCOME_A in total. At a COMPARISON_RATE percent rate, you will pay back about $OUTCOME_B in total. That rate difference costs you an extra $GAP."
 
 ═══════════ RETENTION STRUCTURE — 220-280 words total, 5 parts. Hit this range through genuine retention content below, never through filler, throat-clearing, or repeating a number you already stated. ═══════════
-OPENING (~25-30 words) — a stronger viewer promise than a bare topic name: state the stakes AND why these three specific decisions are worth the next 80 seconds (e.g. what it costs to get them wrong, who this actually affects) — a genuine reason to keep watching, not a generic intro.
-DECISION 1 (~70-85 words) — a short set-up sentence giving context on WHY this decision matters/who faces it, then the evidence sentence shape in full, then one closing sentence explaining the real-world consequence of the gap in plain terms (not just restating the dollar figure).
-DECISION 2 (~70-85 words) — an 8-12 word transition that also serves as a pattern-interruption/retention bridge (e.g. contrasting this decision's stakes with Decision 1's, or naming why people underestimate this one specifically), then the evidence sentence shape in full, then one sentence on its real-world consequence.
-DECISION 3 (~70-85 words) — an 8-12 word transition in the same style, then the evidence sentence shape in full, then one sentence on its real-world consequence.
-CLOSING (~25-35 words) — a genuine synthesis (not a mechanical recap) tying the three decisions into one takeaway, plus a concrete next step or soft CTA where it fits naturally. NOT "thanks for watching."
+Stay close to the LOW-to-MIDDLE of each range below — overshooting every range at once is what pushed prior drafts past 300 words. Word counts are strict; count before finalizing.
+OPENING (~18-24 words) — a stronger viewer promise than a bare topic name: state the stakes AND why these three specific decisions are worth the next 80 seconds (e.g. what it costs to get them wrong, who this actually affects) — a genuine reason to keep watching, not a generic intro.
+DECISION 1 (~60-70 words) — a short set-up clause (not a full extra sentence) giving context on WHY this decision matters, then the evidence sentence shape in full, then ONE brief closing clause on its real-world consequence (not a full extra sentence restating the dollar figure).
+DECISION 2 (~60-70 words) — a single 6-9 word transition that doubles as a retention bridge (e.g. contrasting this decision's stakes with Decision 1's), then the evidence sentence shape in full, then one brief consequence clause.
+DECISION 3 (~60-70 words) — a single 6-9 word transition in the same style, then the evidence sentence shape in full, then one brief consequence clause.
+CLOSING (~18-24 words) — one genuine synthesis sentence tying the three decisions together, plus a short next step/CTA only if it fits in the remaining words. NOT "thanks for watching."
 Add explanatory/consequence sentences ONLY around the fact packets' own numbers — never invent a new authoritative figure to fill length; the extra words come from context, stakes, and consequence, not more numbers.
 APPEND, after the closing line: " [DISCLAIMER: Not financial advice. Educational only.]"
 
