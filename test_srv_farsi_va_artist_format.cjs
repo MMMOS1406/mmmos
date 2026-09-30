@@ -5,7 +5,7 @@ const fs=require('fs');
 const h=fs.readFileSync(process.argv[2]||'public/index.html','utf8');
 function fn(name){const s=h.indexOf('function '+name+'(');if(s<0)throw new Error('missing '+name);const e=h.indexOf('\n}\n',s);return h.slice(s,e+2);}
 function cst(name){const s=h.indexOf('const '+name+'=');const e=h.indexOf(';\n',s);return h.slice(s,e+2);}
-const src=[fn('_srvFarsiSplitMood'),fn('_srvFarsiGetStage'),fn('_srvFarsiVaSetArtistFormat'),fn('_getEngineState'),fn('_isEnginePaused'),
+const src=[fn('_srvFarsiSplitMood'),fn('_srvFarsiGetStage'),fn('_srvFarsiVaCurrentArtistFormat'),fn('_srvFarsiVaAutoArtistFormat'),fn('_srvFarsiVaSetArtistFormat'),fn('_getEngineState'),fn('_isEnginePaused'),
   fn('_isoOfDay'),fn('_isoDateForDayName'),fn('_currentWeekIsoForDayName'),fn('_slotKey'),fn('_engineNameMatches'),cst('_AUTO_ASSIGN_TERMINAL'),
   fn('_autoAssignChannelFor'),fn('_autoAssignPlatformFor'),fn('_autoAssignContentTypeFor'),fn('autoCreateCadenceTasksForCurrentWeek')].join('\n');
 let pass=0,fail=0;const out=[];const ok=(n,c,extra)=>{c?pass++:fail++;out.push((c?'PASS ':'FAIL ')+n+(extra?'  '+extra:''));};
@@ -72,6 +72,43 @@ ok('invalid values / fields ignored',JSON.stringify(s4)===snap);
 const saves=W.saves;W.set(String(s4.id),'artist',W.split(s4.mood).artist);
 ok('re-selecting current value is a no-op',W.saves===saves&&JSON.stringify(s4)===snap);
 
+// 9. AUTO: restores the rotation-assigned value, per field, without touching rotation
+{
+  const Y=world();Y.cadence();const ys=farsi(Y).filter(t=>t.contentFormat!=='long');const yl=farsi(Y).find(t=>t.contentFormat==='long');
+  const rot=Y.rotationCalls,n=Y.D.tasks.length;
+  const a=ys[0];const origMood=a.mood,origName=a.name,origArtist=origMood.split(' — ')[0];
+  Y.set(String(a.id),'artist','Auto');
+  ok('AUTO on a never-overridden task is a no-op',a.mood===origMood&&!a.vaOriginal&&!a.vaOverrides);
+  const other=['Male','Female','Duet'].find(x=>x!==origArtist);
+  Y.set(String(a.id),'artist',other);Y.set(String(a.id),'format','Long');
+  ok('override recorded original rotation values',a.vaOriginal&&a.vaOriginal.artist===origArtist&&a.vaOriginal.format==='Short');
+  Y.set(String(a.id),'artist','Auto');
+  ok('AUTO artist restores rotation artist, keeps manual format',a.mood===origMood&&a.isLong===true&&a.contentType==='Long Script');
+  Y.set(String(a.id),'format','Auto');
+  ok('AUTO format restores rotation format',a.isLong===false&&a.contentType==='Short Video'&&a.contentFormat==='short');
+  ok('fully back on Auto: name/mood match rotation',a.mood===origMood&&a.name.replace(' · Short','')===origName.replace(' · Short',''),a.name);
+  Y.set(String(yl.id),'format','Short');Y.set(String(yl.id),'format','Auto');
+  ok('AUTO on Friday Long restores Long',yl.isLong===true&&yl.contentFormat==='long'&&yl.contentType==='Long Script');
+  Y.cadence();Y.cadence();
+  ok('Auto round-trips: cadence creates nothing',Y.D.tasks.length===n);
+  ok('Auto round-trips: rotation pointer never advanced',Y.rotationCalls===rot,`calls ${rot}->${Y.rotationCalls}`);
+  ok('audit trail keeps every change incl. Auto',a.vaOverrides.length===4&&a.vaOverrides[2].to==='Auto');
+}
+// 10. Render: the real Generate card shows Auto (rotation value) selected, explicit value when overridden
+{
+  const R=world();R.cadence();const t=farsi(R).find(x=>x.contentFormat!=='long');const rotArtist=t.mood.split(' — ')[0];
+  const src2=[fn('_srvFarsiSplitMood'),fn('_srvFarsiGetStage'),fn('_srvFarsiVaCurrentArtistFormat'),fn('_srvFarsiVaAutoArtistFormat'),fn('renderSRVFarsiLifecycleCard')].join('\n');
+  const known={D:R.D,SRV_STAGE_COLORS:{},escHTML:x=>String(x),_srvFarsiPkgForTask:()=>null};
+  const scope=new Proxy(known,{has:(o,k)=>k in o||!(k in globalThis),get:(o,k)=>k in o?o[k]:(k===Symbol.unscopables?undefined:(()=>''))});
+  const render=new Function('scope','with(scope){'+src2+';return renderSRVFarsiLifecycleCard;}')(scope);
+  const sel=(h,f)=>{const m=h.match(new RegExp(`'${f}',this.value\\)[^>]*>([\\s\\S]*?)</select>`));return m?m[1]:'';};
+  let h=render(t);
+  ok('render: Artist options Auto/Male/Female/Duet',/>Auto \(/.test(sel(h,'artist'))&&['Male','Female','Duet'].every(x=>sel(h,'artist').includes(`>${x}<`)));
+  ok('render: Format options Auto/Short/Long',/>Auto \(Short\)</.test(sel(h,'format'))&&['Short','Long'].every(x=>sel(h,'format').includes(`>${x}<`)));
+  ok('render: Auto selected when on rotation',/value="Auto" selected>Auto \(/.test(sel(h,'artist'))&&/value="Auto" selected>Auto \(Short\)/.test(sel(h,'format')));
+  const other=['Male','Female','Duet'].find(x=>x!==rotArtist);R.set(String(t.id),'artist',other);h=render(t);
+  ok('render: explicit override selected, Auto still shows rotation value',new RegExp(`value="${other}" selected`).test(sel(h,'artist'))&&sel(h,'artist').includes(`Auto (${rotArtist})`));
+}
 // 8. Untouched tasks keep baseline cadence semantics (no cadenceSlotFormat stamped)
 ok('non-overridden tasks not stamped',!s4.cadenceSlotFormat&&!shorts[2].cadenceSlotFormat);
 

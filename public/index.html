@@ -17439,12 +17439,15 @@ function renderSRVFarsiLifecycleCard(task){
   // ── GENERATE ────────────────────────────────────────────────────────────────
   if(stage==='generate'){
     // VA may change Artist and Long/Short for this task before generating (see _srvFarsiVaSetArtistFormat).
-    const _fSel=(field,cur,opts)=>`<select onchange="_srvFarsiVaSetArtistFormat('${taskId}','${field}',this.value)" style="margin-left:6px;padding:4px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.35);border-radius:6px;color:var(--text);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">${opts.map(o=>`<option value="${o}"${o===cur?' selected':''}>${o}</option>`).join('')}</select>`;
+    // "Auto" = the rotation-assigned value for this task (selected whenever the task is on it).
+    const _fAuto=_srvFarsiVaAutoArtistFormat(task);
+    const _fSel=(field,cur,opts)=>{const auto=_fAuto[field];const sel=(cur===auto)?'Auto':cur;
+      return `<select onchange="_srvFarsiVaSetArtistFormat('${taskId}','${field}',this.value)" style="margin-left:6px;padding:4px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.35);border-radius:6px;color:var(--text);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">${['Auto'].concat(opts).map(o=>`<option value="${o}"${o===sel?' selected':''}>${o==='Auto'?'Auto'+(auto?' ('+escHTML(auto)+')':''):o}</option>`).join('')}</select>`;};
     stageContent=`
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
         <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Artist:${_fSel('artist',_fArtist,['Male','Female','Duet'])}</div>
         <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mood: <strong style="color:var(--text)">${escHTML(_fMoodLabel)}</strong></div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format:${_fSel('format',_fFormat,['Long','Short'])}</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format:${_fSel('format',_fFormat,['Short','Long'])}</div>
         <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the Persian song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
         <button onclick="vaFarsiGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
           🌹 Generate Package
@@ -18247,19 +18250,31 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
 // publish scheduling and the rotation/cadence pointers are never touched. cadenceSlotFormat keeps
 // the slot's ORIGINAL format so the weekly cadence still sees this task as filling its original
 // Short/Long slot and never re-creates a replacement task for that day.
+// "Auto" = the value the rotation assigned to this task, kept in task.vaOriginal on first override.
+function _srvFarsiVaCurrentArtistFormat(task){
+  const {artist}=_srvFarsiSplitMood(task.mode||task.mood||'');
+  return {artist,format:(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short'};
+}
+function _srvFarsiVaAutoArtistFormat(task){
+  return task.vaOriginal||_srvFarsiVaCurrentArtistFormat(task);
+}
 function _srvFarsiVaSetArtistFormat(taskId,field,value){
   const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
   if(!task||task.engine!=='SRV Farsi')return;
   if(_srvFarsiGetStage(taskId)!=='generate')return; // locked once the package has been generated
   const curMood=task.mode||task.mood||'';
-  const {artist:oldArtist}=_srvFarsiSplitMood(curMood);
   const moodPart=curMood.includes(' — ')?curMood.split(' — ').slice(1).join(' — ').trim():curMood;
-  const oldFormat=(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short';
+  const {artist:oldArtist,format:oldFormat}=_srvFarsiVaCurrentArtistFormat(task);
   let artist=oldArtist,format=oldFormat;
-  if(field==='artist'&&['Male','Female','Duet'].includes(value))artist=value;
+  if(value==='Auto'&&(field==='artist'||field==='format')){
+    if(!task.vaOriginal)return; // never overridden: already on the rotation value
+    if(field==='artist')artist=task.vaOriginal.artist;else format=task.vaOriginal.format;
+  }
+  else if(field==='artist'&&['Male','Female','Duet'].includes(value))artist=value;
   else if(field==='format'&&['Long','Short'].includes(value))format=value;
   else return;
   if(artist===oldArtist&&format===oldFormat)return;
+  if(!task.vaOriginal)task.vaOriginal={artist:oldArtist,format:oldFormat};
   if(!task.cadenceSlotFormat)task.cadenceSlotFormat=(task.contentFormat==='long')?'long':'short';
   const newMood=(artist?artist+' — ':'')+moodPart;
   task.mood=newMood;
