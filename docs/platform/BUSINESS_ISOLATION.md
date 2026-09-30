@@ -1,7 +1,7 @@
 # MMMOS Platform Architecture: Business Isolation
 
-**Status:** designed, implemented on branch `platform/business-isolation` and validated locally.
-Not yet in production. Adopted 2026-09-29 after the 2026-09-28 shared-state data-loss incident.
+**Status:** COMPLETE and live in production since 2026-09-30 (main `2eddfd3`, deployment `dpl_5b9gZ4vySAyKvmGmqayw9ktBEUTw`,
+`state_merge_only` on at 03:27:17 UTC). Adopted 2026-09-29 after the 2026-09-28 shared-state data-loss incident.
 
 ## 1. The rule
 
@@ -97,5 +97,12 @@ Separately tracked (security, not part of this change): `app_settings` grants an
 | 1. PR #19 (main := production) | Merged 2026-09-30 02:50 UTC as merge commit `259d1e1`. main contains `d286100`, and its tree is identical to production. No deploy, because Git deploys were off on that commit. |
 | 2. Migration `platform_business_state_isolation` | Applied. Pre-apply fix: the guard reads the flag through `mmm_platform_flag_enabled()` (SECURITY DEFINER), because an anon-fired trigger can't see the RLS-locked flag table. Validated in production as `anon` in rolled-back transactions with synthetic `mmm_isolation_test_*` keys: A, B, C, D, H pass; CEO keys refused; anon can't read or flip flags; legacy writes still accepted while the flag is off. Real state row unchanged (md5 `a60b4921…`, 64 tasks). `state_merge_only` = false. |
 | 3a. Guard on a real Vercel preview | Passed. Git preview `dpl_A32k5SrgKyZ1q92SphZFoCtPhVbh` (c964145) logged `MMMOS RELEASE GUARD: env=preview ref=platform/business-isolation`, so the guard runs, Git metadata is present and previews aren't blocked. The served page equals `public/index.html` byte-for-byte, plus Vercel's preview-toolbar tag, so the output directory is unchanged. The project is linked to GitHub, and Git production deploys come from main (last one: `5bca0df` on main, 09-13). |
-| 3b. Vercel project Build Command | **BLOCKED.** The Vercel API returned 403 "You don't have permission to update the project". Without it, branches whose `vercel.json` lacks the guard (e.g. `nextwave-v2-live-integration`) can still replace production directly, including rolling back this change. |
-| 4–5. PR #20 merge, flag on | Not started. Waiting on 3b. |
+| 3b. Vercel project Build Command | Done 2026-09-30 through the Vercel dashboard (owner session, CEO-authorized). The API token gets 403 on project update. Verified: a preview of `srv-farsi/va-artist-format-select`, whose `vercel.json` has no guard, logged `MMMOS RELEASE GUARD: env=preview ref=srv-farsi/va-artist-format-select`, so the project-level guard covers every branch. Production branch confirmed as `main`. The Hobby plan has no deployment-source policy; branch=main plus the fail-closed guard enforce main-only production. |
+| 4. PR #20 | Merged as `2eddfd3`. Production `dpl_5b9gZ4vySAyKvmGmqayw9ktBEUTw` came from Git `main`, and its build logged `MMMOS RELEASE GUARD: env=production ref=main`. The served page is byte-identical to `public/index.html` and contains the merge client. |
+| 5. Session transition | The CEO reloaded all MMMOS tabs. The first real live merge-save was `POST /rpc/mmm_state_save` 200 at 03:25:39 UTC. The old Chrome/143 tab had tried two 64→0 wipes on 09-29 19:16 UTC; the P0 guard blocked both. |
+| 6. `state_merge_only` | ON at 03:27:17 UTC. |
+| 7. Final production enforcement (anon role, rolled back) | Old-style update and upsert rejected (`MMM_STATE_ISOLATION`); the merge-aware save is accepted. Empty/default state is rejected on the old path; on the merge path a fresh tab loses nothing, and a tab wiping what it loaded is blocked by the shrink guard. Delete blocked. Anon can't switch enforcement off. Isolation A, B, C, D, H pass. The real row is byte-identical after the tests (md5 `4f5e765e…`, 64 tasks). |
+
+**Follow-ups (non-blocking):** `mmm_state_save` sets `mmm.via_merge` for the whole transaction. Each REST request is its own transaction, so there's no exposure, but resetting it at the end of the function would be cleaner. Security (separate track): `app_settings` grants anonymous full write; 33 tables have RLS off.
+
+**Rollback:** set `state_merge_only=false` (one statement) · promote a previous production deployment · clear the project Build Command.
