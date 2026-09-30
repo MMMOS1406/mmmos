@@ -3397,7 +3397,7 @@ async function ytShowTopPerformers(){
   if(!el) return;
   el.innerHTML = '<div style="color:var(--dim);font-size:11px;padding:6px 0">⏳ loading…</div>';
   try{
-    const r = await fetch(SUPABASE_URL + '/rest/v1/youtube_videos?select=title,channel_id,retention_pct,avg_view_duration_sec,watch_time_min,views,subs_gained,analytics_synced_at&analytics_synced_at=not.is.null&order=retention_pct.desc&limit=20', {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/youtube_videos_analytics?select=title,channel_id,retention_pct,avg_view_duration_sec,watch_time_min,views,subs_gained,analytics_synced_at&analytics_synced_at=not.is.null&order=retention_pct.desc&limit=20', {
       headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY }
     });
     if(!r.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">Supabase fetch failed (HTTP '+r.status+')</div>'; return; }
@@ -10296,7 +10296,7 @@ async function loadYouTubeAnalytics(){
       fetch(SUPABASE_URL+'/rest/v1/youtube_channels?select=channel_id,title,mmm_engine&mmm_engine=not.is.null',{
         headers:{apikey:SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}
       }),
-      fetch(SUPABASE_URL+'/rest/v1/youtube_videos?select=channel_id,title,views,watch_time_min,retention_pct,subs_gained,analytics_synced_at&analytics_synced_at=not.is.null&order=views.desc&limit=200',{
+      fetch(SUPABASE_URL+'/rest/v1/youtube_videos_analytics?select=channel_id,title,views,watch_time_min,retention_pct,subs_gained,analytics_synced_at&analytics_synced_at=not.is.null&order=views.desc&limit=200',{
         headers:{apikey:SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}
       })
     ]);
@@ -14250,6 +14250,7 @@ function engineWeeklyLoad(configName){
   return D.tasks.filter(t=>{
     if(!t)return false;
     if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
+    if(_srvFarsiIsTestTask(t))return false; // SRV Farsi P1-B: test tasks never consume production cadence capacity
     return _engineNameMatches(t.engine,configName);
   }).length;
 }
@@ -14547,7 +14548,7 @@ function autoCreateCadenceTasksForCurrentWeek(){
       if(D.cadenceAutoCreatedSlots[key]){
         // v13.69.30 — same recreation guard as long-form: slot claimed but task may have been discarded
         const shortStillExists=D.tasks.some(function(t){
-          if(!t||(t.cadenceSlotFormat||t.contentFormat)==='long')return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
+          if(!t||(t.cadenceSlotFormat||t.contentFormat)==='long'||_srvFarsiIsTestTask(t))return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
           if(!_engineNameMatches(t.engine,cfg.name))return false;
           if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
           return String(t.isoDate||'')===iso;
@@ -14559,6 +14560,7 @@ function autoCreateCadenceTasksForCurrentWeek(){
       // existing non-terminal task at this (engine, iso)?
       const collides=D.tasks.some(t=>{
         if(!t)return false;
+        if(_srvFarsiIsTestTask(t))return false; // SRV Farsi P1-B: a test task never occupies a production day
         if(!_engineNameMatches(t.engine,cfg.name))return false;
         if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
         return String(t.isoDate||'')===iso;
@@ -14625,7 +14627,7 @@ function autoCreateCadenceTasksForCurrentWeek(){
     if(D.cadenceAutoCreatedSlots[lfKey]){
       // v13.69.465 — slot claimed, but verify the task actually exists (may have been discarded/deleted)
       const lfStillExists=D.tasks.some(function(t){
-        if(!t||(t.cadenceSlotFormat||t.contentFormat)!=='long')return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
+        if(!t||(t.cadenceSlotFormat||t.contentFormat)!=='long'||_srvFarsiIsTestTask(t))return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
         if(!_engineNameMatches(t.engine,cfg.name))return false;
         if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
         return String(t.isoDate||'')===iso;
@@ -14636,7 +14638,7 @@ function autoCreateCadenceTasksForCurrentWeek(){
     }
     // skip if a non-terminal long-form task already exists this week for this engine
     const lfCollides=D.tasks.some(t=>{
-      if(!t||(t.cadenceSlotFormat||t.contentFormat)!=='long')return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
+      if(!t||(t.cadenceSlotFormat||t.contentFormat)!=='long'||_srvFarsiIsTestTask(t))return false; // cadenceSlotFormat: original slot format if a VA changed Long/Short (SRV Farsi)
       if(!_engineNameMatches(t.engine,cfg.name))return false;
       if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
       return String(t.isoDate||'')===iso;
@@ -15026,14 +15028,21 @@ function renderOperatorProgressCard(){
 // bugs are fixed by routing through the one already-correct path instead of a second, divergent
 // one. No lifecycle redesign — this only changes which existing function Quick Generate calls.
 function _quickGenerateTest(engineId,engineName,contentFormat){
-  _setEngineState(engineName,'test');
-  saveAppState();
+  // SRV Farsi P1-B: test identity belongs to the task, never the whole engine — production cadence and
+  // publishing keep running. Other engines keep their existing engine-wide test behaviour unchanged.
+  if(engineId!=='srv_farsi'){
+    _setEngineState(engineName,'test');
+    saveAppState();
+  }
   if(engineId==='srv_farsi'){
     // v16.67.1 — peek (not advance): this is only choosing a mood label for a TEST task, and must
     // not consume a real rotation slot — same isolation as the post-generation guard below.
     const mode=(typeof _srvFarsiPeekNextMode==='function')?_srvFarsiPeekNextMode():'Female — Emotional';
     const newTaskId=vaAddTestTask(engineName,mode,contentFormat);
     if(!newTaskId){alert('Quick Generate failed: could not create persistent test task. Check console.');return;}
+    // P1-A/P1-B: the task carries its own test identity and immutable srvUid.
+    const _qt=_srvFarsiTaskById(newTaskId);
+    if(_qt){_qt.isTest=true;const _u=_srvFarsiTaskUid(_qt);if(_u)_qt.srvUid=_u;if(typeof saveAppState==='function')saveAppState();}
     if(typeof vaFarsiGeneratePackage==='function'){
       vaFarsiGeneratePackage(String(newTaskId));
     }else{
@@ -17383,23 +17392,95 @@ function _srvFarsiHasLifecycle(task){
   const cfg=_srvFarsiEngineConfig();
   return !!(cfg&&cfg.lifecycle);
 }
+// ── SRV Farsi immutable task identity (P1-A) ─────────────────────────────────
+// Numeric task ids are display/back-compat only: they are shared across engines and reused after
+// deletions. SRV Farsi identity = srvUid = 'srvf_<createdAt ms>_<id>'. It is deterministic (every tab
+// derives the same value), immutable for the task's life, and unique across id reuse (a reused id has a
+// different createdAt). A task without createdAt has no identity: it is "unresolved" and never binds
+// to a package by guesswork. Packages link by srvTaskUid (stamped at generate) + engine 'SRV Farsi'.
+function _srvFarsiIsTask(t){return !!t&&t.engine==='SRV Farsi';}
+function _srvFarsiTaskUid(task){
+  if(!_srvFarsiIsTask(task))return null;
+  if(task.srvUid)return task.srvUid;
+  const c=Number(task.createdAt);
+  if(!c||!isFinite(c)||task.id==null)return null;
+  return 'srvf_'+c+'_'+task.id;
+}
+// Exactly one SRV Farsi task with this numeric id, or null. Never resolves another engine's task, and
+// refuses (null) instead of picking the first match if SRV ids are ever duplicated.
+function _srvFarsiTaskById(taskId){
+  const m=(D.tasks||[]).filter(t=>_srvFarsiIsTask(t)&&String(t.taskId||t.id||'')===String(taskId));
+  if(m.length===1)return m[0];
+  if(m.length>1)console.error('[SRV Farsi identity] numeric task id '+taskId+' matches '+m.length+' SRV tasks — refusing to guess');
+  return null;
+}
+function _srvFarsiTaskByUid(uid){
+  if(!uid)return null;
+  return (D.tasks||[]).find(t=>_srvFarsiTaskUid(t)===uid)||null;
+}
+// Task for a package: by srvTaskUid when stamped, else the unique SRV task with the package's numeric id.
+function _srvFarsiTaskForPkg(pkg){
+  if(!pkg)return null;
+  if(pkg.srvTaskUid)return _srvFarsiTaskByUid(pkg.srvTaskUid);
+  return _srvFarsiTaskById(pkg.taskId);
+}
+// Stamp srvUid on SRV tasks that don't carry it yet (deterministic, so tabs can never disagree).
+function _srvFarsiEnsureIdentity(){
+  (D.tasks||[]).forEach(t=>{if(_srvFarsiIsTask(t)&&!t.srvUid){const u=_srvFarsiTaskUid(t);if(u)t.srvUid=u;}});
+}
+// SRV Farsi test identity (P1-B) belongs to the task, not the engine. Legacy test tasks (created before
+// isTest existed) are recognised by their creator stamp / [TEST] name.
+function _srvFarsiIsTestTask(t){
+  if(!_srvFarsiIsTask(t))return false;
+  return t.isTest===true||/\[manual-test\]/.test(String(t.assignmentReason||''))||/\[TEST\]\s*$/.test(String(t.name||''));
+}
+// Lifecycle stages are keyed by srvUid. Numeric keys are still written for back-compat but only read for
+// tasks created before the identity epoch (the first moment this code ran), so a task that reuses a
+// numeric id can never inherit a previous task's stage. The epoch lives inside the (persisted) stage map.
+function _srvFarsiStageMap(){
+  if(!D.srvFarsiLifecycleStages||typeof D.srvFarsiLifecycleStages!=='object')D.srvFarsiLifecycleStages={};
+  if(!D.srvFarsiLifecycleStages.__identityEpoch)D.srvFarsiLifecycleStages.__identityEpoch=Date.now();
+  return D.srvFarsiLifecycleStages;
+}
 function _srvFarsiGetStage(taskId){
-  if(!D.srvFarsiLifecycleStages||typeof D.srvFarsiLifecycleStages!=='object')return 'generate';
-  return D.srvFarsiLifecycleStages[String(taskId)]||'generate';
+  const m=_srvFarsiStageMap();
+  const task=_srvFarsiTaskById(taskId);
+  const uid=_srvFarsiTaskUid(task);
+  if(uid&&m[uid])return m[uid];
+  if(task&&uid&&Number(task.createdAt)>=Number(m.__identityEpoch))return 'generate'; // new-era task: numeric key is not its own
+  return m[String(taskId)]||'generate';
 }
 function _srvFarsiSetStage(taskId,stage){
-  if(!D.srvFarsiLifecycleStages||typeof D.srvFarsiLifecycleStages!=='object')D.srvFarsiLifecycleStages={};
-  D.srvFarsiLifecycleStages[String(taskId)]=stage;
+  const m=_srvFarsiStageMap();
+  const task=_srvFarsiTaskById(taskId);
+  const uid=_srvFarsiTaskUid(task);
+  if(uid){m[uid]=stage;if(!task.srvUid)task.srvUid=uid;}
+  m[String(taskId)]=stage;
   // v13.73.1 — auto-complete task when lifecycle reaches 'done'
   if(stage==='done'){
-    const _t=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
-    if(_t&&_t.status!=='done'){_t.status='done';_t.updatedAt=new Date().toISOString();}
+    if(task&&task.status!=='done'){task.status='done';task.updatedAt=new Date().toISOString();}
   }
   if(typeof saveAppState==='function')saveAppState();
 }
+// Package for a task: srvTaskUid match first. Legacy packages (no srvTaskUid) bind only when unambiguous:
+// SRV Farsi engine, same numeric id, exactly one SRV task holds that id, and generated no earlier than the
+// task was created (a package cannot predate its task — this is what stops August packages attaching to
+// a September task that reused the id). Anything else stays unresolved (null) — never guessed.
 function _srvFarsiPkgForTask(task){
-  if(!task)return null;
-  return (D.packages||[]).find(p=>String(p.taskId||'')===String(task.taskId||task.id||''))||null;
+  if(!_srvFarsiIsTask(task))return null;
+  const uid=_srvFarsiTaskUid(task);
+  const srvPkgs=(D.packages||[]).filter(p=>p&&p.engine==='SRV Farsi');
+  const latest=arr=>arr.slice().sort((a,b)=>String(b.generatedAt||'').localeCompare(String(a.generatedAt||'')))[0]||null;
+  if(uid){
+    const byUid=srvPkgs.filter(p=>p.srvTaskUid===uid);
+    if(byUid.length)return latest(byUid);
+  }
+  const created=Number(task.createdAt);
+  if(!uid||!created)return null;
+  if(_srvFarsiTaskById(task.taskId||task.id)!==task)return null;
+  const legacy=srvPkgs.filter(p=>!p.srvTaskUid&&String(p.taskId||'')===String(task.taskId||task.id||'')
+    &&Date.parse(p.generatedAt||'')>=created);
+  return latest(legacy);
 }
 /// v15.7.0 — Farsi Review inline edit: patches D.packages + auto-regenerates captionYT on title/lyrics save
 function _farsisaveEdit(pkgId,field,inputId,btnId){
@@ -17424,7 +17505,7 @@ function _farsisaveEdit(pkgId,field,inputId,btnId){
   if(btn){var _orig=btn.textContent;btn.textContent='✓ Saved';btn.style.color='#22c55e';setTimeout(function(){btn.textContent=_orig;btn.style.color='';},2000);}
   // v15.7.0 — auto-regen caption when title or lyrics changes
   if(field==='title'||field==='lyrics'||field==='shortLyrics'){
-    var _task=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(pkg.taskId||'');});
+    var _task=_srvFarsiTaskForPkg(pkg);
     var _isLong=!!(_task&&(_task.contentType==='Long'||_task.contentFormat==='long'));
     var _lyrics=_isLong?(pkg.lyrics||''):(pkg.shortLyrics||pkg.short_lyrics||pkg.lyrics||'');
     // show subtle "Updating caption…" indicator on captionYT field if visible
@@ -17458,8 +17539,28 @@ function _farsisaveEdit(pkgId,field,inputId,btnId){
   }
 }
 
+// SRV Farsi P1-D — stuck-engine warning (display only; changes no state, reads only SRV Farsi).
+// Shown when the SRV Farsi engine is not 'running' while real (non-test) production tasks are open.
+function _srvFarsiStuckEngineStatus(){
+  const state=(typeof _getEngineState==='function')?_getEngineState('SRV Farsi'):'running';
+  if(state==='running')return null;
+  const today=new Date().toISOString().slice(0,10);
+  const open=(D.tasks||[]).filter(t=>_srvFarsiIsTask(t)&&!_srvFarsiIsTestTask(t)
+    &&!_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()));
+  if(!open.length)return null;
+  return {state,pending:open.length,due:open.filter(t=>t.isoDate&&String(t.isoDate)<=today).length};
+}
+function _srvFarsiStuckEngineWarningHtml(){
+  const st=_srvFarsiStuckEngineStatus();
+  if(!st)return '';
+  return `<div role="alert" style="margin:4px 0 10px;padding:12px 14px;border-radius:10px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.45);color:#fca5a5;font-size:12px;line-height:1.5">
+    <strong style="color:#ef4444">⚠ SRV Farsi engine is ${escHTML(String(st.state).toUpperCase())}</strong> — ${st.pending} production task${st.pending===1?'':'s'} pending${st.due?` (${st.due} due now)`:''}.
+    While the engine isn't running, published videos get no schedule slot and the cadence creates no new tasks. Ask the CEO to resume SRV Farsi (Developer Options → ▶ Resume).
+  </div>`;
+}
 // ── Farsi lifecycle card renderer ─────────────────────────────────────────────
 function renderSRVFarsiLifecycleCard(task){
+  _srvFarsiEnsureIdentity(); // P1-A
   const pkg=_srvFarsiPkgForTask(task);
   const stage=_srvFarsiGetStage(task.taskId||task.id);
   const taskId=String(task.taskId||task.id||'');
@@ -17719,11 +17820,11 @@ function renderSRVFarsiLifecycleCard(task){
           </div>
           <div style="font-size:10px;color:var(--dim);margin-top:6px">Connection reserved for future work.</div>
         </div>`:''}
-        <button onclick="(function(){var _t=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String('${taskId}');});if(_t){_t.status='done';_t.updatedAt=new Date().toISOString();}if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()" style="width:100%;margin-top:12px;padding:11px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.40);border-radius:8px;color:#22c55e;font-size:12px;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif">✓ Close Task — Return to Queue</button>
+        <button onclick="(function(){var _t=_srvFarsiTaskById('${taskId}');if(_t){_t.status='done';_t.updatedAt=new Date().toISOString();}if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})()" style="width:100%;margin-top:12px;padding:11px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.40);border-radius:8px;color:#22c55e;font-size:12px;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif">✓ Close Task — Return to Queue</button>
       </div>`;
   }
 
-  return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
+  return _srvFarsiStuckEngineWarningHtml()+`<div class="card" style="margin-top:4px;border-color:${stageCol}30">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="card-title" style="margin-bottom:0;color:var(--text)">🌹 SRV Farsi · Lifecycle</div>
       <span style="font-size:10px;font-weight:800;color:${stageCol};font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;padding:3px 8px;background:${stageCol}18;border-radius:5px">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
@@ -17744,9 +17845,9 @@ function _srvFarsiApproveVideo(pkgId,taskId){
 }
 function _srvFarsiCancelTask(taskId){
   if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
-  const t=D.tasks.find(function(x){return String(x.id)===String(taskId);});
+  const t=_srvFarsiTaskById(taskId);
   if(t){t.status='done';t.cancelledAt=Date.now();}
-  if(D.srvFarsiLifecycleStages)delete D.srvFarsiLifecycleStages[String(taskId)];
+  if(D.srvFarsiLifecycleStages){delete D.srvFarsiLifecycleStages[String(taskId)];const _u=_srvFarsiTaskUid(t);if(_u)delete D.srvFarsiLifecycleStages[_u];}
   if(typeof saveAppState==='function')saveAppState();
   if(typeof closeExec==='function')closeExec();
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
@@ -17806,7 +17907,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent='🌹 Build Package — Fetch Background + Render Video';}
       return;
     }
-    const task=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);});
+    const task=_srvFarsiTaskById(taskId);
     const isLongTask=!!(task&&task.isLong);
 
     pkg._srvShortVideoUrl=null; pkg._srvLongVideoUrl=null;
@@ -17990,10 +18091,10 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
     const pkgChannel='SRV Farsi';
     const _buildEngineState=_getEngineState(pkgChannel);
-    const _inTestMode=_buildEngineState==='test';
+    const _inTestMode=_buildEngineState==='test'||!!(pkg&&pkg.isTest)||_srvFarsiIsTestTask(_srvFarsiTaskById(taskId)); // P1-B: per-task/package test identity
     const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
     // v13.72.0 — look up playlist category from the task for this package
-    const _farsiPubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
+    const _farsiPubTask=_srvFarsiTaskById(taskId);
     const _farsiPlaylistCat=(_farsiPubTask&&_farsiPubTask.playlistCategory)||_srvFarsiPlaylistCategory(_farsiPubTask&&_farsiPubTask.mood);
     // v16.68.0 — metadata clarity: title now differs Long vs Short (deterministic template from
     // the FINAL saved title/titleFinglish); description/hashtags built the same way for both.
@@ -18019,7 +18120,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
       return r.json().catch(()=>({}));
     }
 
-    const _pubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
+    const _pubTask=_srvFarsiTaskById(taskId);
     const _isLongPub=!!(_pubTask&&_pubTask.isLong);
     const [longUp,shortUp]=await Promise.all([
       _isLongPub?doUpload(longUrl,'LONG',true):Promise.resolve(null),
@@ -18051,7 +18152,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     const allOk=(_isLongPub?(longUp?.ok!==false):true)&&(shortUp?.ok!==false);
     if(allOk){
       _srvFarsiSetStage(taskId,'done');
-      const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
+      const task=_srvFarsiTaskById(taskId);
       if(task)task.status='done';
       if(typeof saveAppState==='function')saveAppState();
       if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
@@ -18082,9 +18183,9 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
   if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
   const pkgChannel='SRV Farsi';
   const _buildEngineState=_getEngineState(pkgChannel);
-  const _inTestMode=_buildEngineState==='test';
+  const _inTestMode=_buildEngineState==='test'||!!(pkg&&pkg.isTest)||_srvFarsiIsTestTask(_srvFarsiTaskById(taskId)); // P1-B: per-task/package test identity
   const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
-  const _farsiPubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
+  const _farsiPubTask=_srvFarsiTaskById(taskId);
   const _farsiPlaylistCat=(_farsiPubTask&&_farsiPubTask.playlistCategory)||_srvFarsiPlaylistCategory(_farsiPubTask&&_farsiPubTask.mood);
   // v16.68.0 — metadata clarity: deterministic Short title/description/hashtags from the FINAL
   // saved package (never model-generated at this step, so they can't drift from what was saved).
@@ -18117,9 +18218,9 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
       pkg.youtubePublishState='published';
       pkg.youtubeWatchUrl=d.watchUrl||(_ytId?('https://www.youtube.com/watch?v='+_ytId):pkg.youtubeWatchUrl);
       pkg.youtubePublishError=null;
-      if(!pkg.taskId) pkg.taskId=taskId;
+      if(!pkg.taskId) pkg.taskId=taskId; if(!pkg.srvTaskUid){const _u=_srvFarsiTaskUid(_srvFarsiTaskById(taskId));if(_u)pkg.srvTaskUid=_u;} // P1-A
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
-      const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
+      const task=_srvFarsiTaskById(taskId);
       if(task&&task.status!=='done'){ task.status='done'; task.updatedAt=new Date().toISOString(); }
       if(typeof saveAppState==='function') await saveAppState().catch(()=>{});
       _srvFarsiSetStage(taskId,'done');
@@ -18216,7 +18317,8 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
     const _callTime=Date.now();
     await generatePackage(_tid);
     _pkg=(D.packages||[]).find(function(p){
-      return (String(p.taskId)===String(_tid)||String(p.taskId)===String(taskId))
+      return p&&p.engine==='SRV Farsi' // P1-A: only SRV Farsi packages
+        && (String(p.taskId)===String(_tid)||String(p.taskId)===String(taskId))
         && new Date(p.generatedAt||0).getTime()>=_callTime-15000;
     });
     if(!_pkg){
@@ -18236,6 +18338,15 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
     if(_att>=2){throw new Error('Language guard failed after 3 attempts — output not in Persian/Dari. Please retry.');}
   }
   }finally{_srvFarsiGuardActive=false;}
+  // P1-A/P1-B: link the package to the task's immutable identity and carry the TASK's test identity
+  // (generatePackage only knows engine-wide test state). Re-save so the stamp reaches the packages table.
+  if(_pkg){
+    const _gTask=_srvFarsiTaskById(taskId);
+    const _gUid=_srvFarsiTaskUid(_gTask);
+    if(_gUid){_pkg.srvTaskUid=_gUid;if(!_gTask.srvUid)_gTask.srvUid=_gUid;}
+    if(_srvFarsiIsTestTask(_gTask)){_pkg.isTest=true;_pkg._inTestMode=true;}
+    if(typeof savePackageToSupabase==='function'){try{await savePackageToSupabase(_pkg);}catch(_){}}
+  }
   // FIX 1: save to generation_memory table (persists across sessions for anti-repetition)
   // Mirrors what Factory runGeneration() does — lifecycle path previously skipped this
   if(_pkg){
@@ -18298,7 +18409,7 @@ function _srvFarsiVaAutoArtistFormat(task){
   return task.vaOriginal||_srvFarsiVaCurrentArtistFormat(task);
 }
 function _srvFarsiVaSetArtistFormat(taskId,field,value){
-  const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
+  const task=_srvFarsiTaskById(taskId);
   if(!task||task.engine!=='SRV Farsi')return;
   if(_srvFarsiGetStage(taskId)!=='generate')return; // locked once the package has been generated
   const curMood=task.mode||task.mood||'';
@@ -18333,7 +18444,7 @@ function _srvFarsiVaSetArtistFormat(taskId,field,value){
 
 // ── vaFarsiGeneratePackage — Generate button for SRV Farsi lifecycle ──────────
 async function vaFarsiGeneratePackage(taskId){
-  const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
+  const task=_srvFarsiTaskById(taskId);
   if(!task){console.warn('[vaFarsiGeneratePackage] task not found:',taskId);return;}
   const genBtn=document.querySelector(`button[onclick="vaFarsiGeneratePackage('${taskId}')"]`);
   if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
@@ -21551,7 +21662,7 @@ async function _pcFetchTopPerformersForEngine(engine){
     const channels=await ch.json();
     if(!channels.length) return [];
     const inClause=channels.map(c=>'"'+c.channel_id+'"').join(',');
-    const url=SUPABASE_URL+'/rest/v1/youtube_videos'
+    const url=SUPABASE_URL+'/rest/v1/youtube_videos_analytics'
       +'?channel_id=in.('+inClause+')'
       +'&analytics_synced_at=not.is.null'
       +'&retention_pct=not.is.null'
