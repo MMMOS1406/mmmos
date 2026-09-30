@@ -11690,9 +11690,14 @@ function nextwaveSegmentMeaningUnits(script, minWords = 4) {
   return units;
 }
 
-const NEXTWAVE_V2_NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +
+// Phase 2 decimal-integrity repair (2026-09-30) — "zero" and "point" added so spelled-out
+// decimals ("seven point five percent", "zero point zero six percent") match as ONE run instead
+// of fracturing at the unrecognized "point" and silently losing everything before it. See
+// _nextwaveWordsToNumber for the actual decimal composition (this only widens what the regex
+// captures as a candidate span — composition happens after, with an explicit safe-failure path).
+const NEXTWAVE_V2_NUMBER_WORDS = 'zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +
   'fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|' +
-  'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion';
+  'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|point';
 // Phase 4.5C — generalized to cover every form the real bond-duration
 // candidate exposed as missing: percent SIGNS (7%, 0.5%, 4.5%) had no
 // branch at all (only the spelled word "percent" was recognized); the
@@ -11784,10 +11789,12 @@ function nextwaveRankNumberPhrase(text) {
 // display card. Generic English-number-words parser -- not a lookup
 // table -- so it works for any future Finance/Growth/Wealth amount.
 const NEXTWAVE_V2_ONES = {
-  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
   nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
   fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
 };
+// digit-words valid on the decimal side of "point" — 0-9 only, never a teen/ten/place-value word.
+const NEXTWAVE_V2_DIGIT_WORDS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
 const NEXTWAVE_V2_TENS = {
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
   eighty: 80, ninety: 90,
@@ -11814,10 +11821,36 @@ function _nextwaveWordsToNumber(phrase) {
   if (digitMatch) return { value: parseFloat(digitMatch[1].replace(/,/g, '')), suffix };
 
   let tokens = text.split(/[\s,-]+/).filter((t) => t && t !== 'and');
+
+  // Phase 2 decimal-integrity repair (2026-09-30) — "seven point five", "zero point zero six".
+  // The decimal side of "point" is a sequence of SINGLE DIGITS spoken one at a time (never a
+  // place-value word like "hundred"/"twenty"), concatenated as literal decimal digits: "point
+  // zero six" is 0.06 (six hundredths), not 0.6 or 6 — composed explicitly below, never inferred.
+  // More than one "point", an empty decimal side, or any non-digit word on the decimal side is an
+  // ambiguous/unsupported phrase: returns NaN rather than guessing, so parseNumeric()'s existing
+  // `!(value > 0)` check safely drops the mention (uncovered_numeric_token) instead of silently
+  // binding a wrong number.
+  const pointCount = tokens.filter((t) => t === 'point').length;
+  if (pointCount > 0) {
+    if (pointCount > 1) return { value: NaN, suffix };
+    const pi = tokens.indexOf('point');
+    const intWords = tokens.slice(0, pi);
+    const decWords = tokens.slice(pi + 1);
+    if (!decWords.length || decWords.some((w) => !(w in NEXTWAVE_V2_DIGIT_WORDS))) return { value: NaN, suffix };
+    const intValue = intWords.length ? _nextwaveWholeWordsToNumber(intWords) : 0;
+    if (!Number.isFinite(intValue)) return { value: NaN, suffix };
+    const decDigits = decWords.map((w) => String(NEXTWAVE_V2_DIGIT_WORDS[w])).join('');
+    return { value: intValue + parseFloat('0.' + decDigits), suffix };
+  }
+
   let halfBonus = 0;
   if (tokens.slice(-2).join(' ') === 'a half') { halfBonus = 0.5; tokens = tokens.slice(0, -2); }
   else if (tokens.slice(-2).join(' ') === 'a quarter') { halfBonus = 0.25; tokens = tokens.slice(0, -2); }
-
+  return { value: _nextwaveWholeWordsToNumber(tokens) + halfBonus, suffix };
+}
+// the pre-existing whole-number-only accumulation (ones/tens/hundred/scale), factored out so the
+// decimal path above can reuse it for the integer side of "point" instead of duplicating it.
+function _nextwaveWholeWordsToNumber(tokens) {
   let result = 0, current = 0;
   for (const tok of tokens) {
     if (tok in NEXTWAVE_V2_ONES) current += NEXTWAVE_V2_ONES[tok];
@@ -11826,8 +11859,7 @@ function _nextwaveWordsToNumber(phrase) {
     else if (tok in NEXTWAVE_V2_SCALES) { result += (current || 1) * NEXTWAVE_V2_SCALES[tok]; current = 0; }
     else if (tok === 'a') current += 1;
   }
-  result += current + halfBonus;
-  return { value: result, suffix };
+  return result + current;
 }
 
 function nextwaveFormatFinancialNumber(phrase) {

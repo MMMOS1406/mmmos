@@ -106,6 +106,11 @@ await t('every pre-existing NextWave V2 action is still dispatched (nothing remo
 // a NextWave-only fallback branch — reviewed and authorized, not a silent/unbounded change.
 const OPS_A2_ALLOWED_REMOVED_LINES = new Set([
   "        const plTitle = _FARSI_PLAYLIST_MAP[playlistCategory] || ('SRV Farsi - ' + playlistCategory);",
+  "const NEXTWAVE_V2_NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +",
+  "  'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion';",
+  "  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,",
+  "  result += current + halfBonus;",
+  "  return { value: result, suffix };",
 ]);
 await t('ops.js diff vs pre-integration baseline (fa34eb0) is purely additive except the dispatcher lines and the Release A2 playlist-naming allow-list', () => { const base = execFileSync('git', ['show', BASELINE + ':api/ops.js'], { maxBuffer: 1 << 28 }).toString().split('\n'); const cur = ops.split('\n'); const baseSet = new Map(); base.forEach((l) => baseSet.set(l, (baseSet.get(l) || 0) + 1)); let removed = 0; const unexpected = []; const curSet = new Map(); cur.forEach((l) => curSet.set(l, (curSet.get(l) || 0) + 1)); baseSet.forEach((n, l) => { const m = curSet.get(l) || 0; if (m < n) { const delta = n - m; removed += delta; if (!OPS_A2_ALLOWED_REMOVED_LINES.has(l)) unexpected.push(l); } }); assert.equal(unexpected.length, 0, `unexpected pre-existing lines removed/changed in ops.js: ${JSON.stringify(unexpected)}`); assert.ok(removed <= OPS_A2_ALLOWED_REMOVED_LINES.size, `${removed} pre-existing lines removed/changed in ops.js (expected at most ${OPS_A2_ALLOWED_REMOVED_LINES.size})`); });
 
@@ -287,5 +292,66 @@ const scriptFor = (p) => {
 await t('fact-packet-generated numbers pass Brain arithmetic verification with zero blocking issues, for all 4 angles (20 random draws each)', () => { for (const angle of ['GROW', 'AVOID', 'SAVE', 'DECIDE']) { for (let i = 0; i < 20; i++) { const p = generateFactPacket(angle, []); const sb = nextwaveV2BuildStoryboard(scriptFor(p), baseDeps); const blocking = sb.integrity.issues.filter((x) => x.severity === 'blocking'); assert.equal(blocking.length, 0, `${angle} draw ${i} (${p.scenario_type}) blocked: ${JSON.stringify(blocking)}`); } } });
 await t('AVOID/SAVE lump-sum outcomes are now independently verified (not merely unblocked by absence of a check) — corrupting a stated AVOID outcome is caught', () => { const p = generateFactPacket('AVOID', []); const good = scriptFor(p); const sbGood = nextwaveV2BuildStoryboard(good, baseDeps); const outVerifs = sbGood.integrity.verifications.filter((v) => v.check === 'outcome'); assert.ok(outVerifs.length >= 2, 'AVOID must produce real outcome verifications, not zero (the previously-unverified gap)'); assert.ok(outVerifs.every((v) => v.ok)); const corrupted = good.replace(fmt$(p.outcome_a), fmt$(p.outcome_a * 1.5)); const sbBad = nextwaveV2BuildStoryboard(corrupted, baseDeps); assert.ok(sbBad.integrity.issues.some((i) => i.severity === 'blocking' && i.kind === 'stated_value_inconsistent'), 'a corrupted AVOID outcome must now be caught, not silently pass'); });
 await t('rate/fee cue tie fixed: AVOID\'s fee percentages bind to fee_rate (not left ambiguous against rate) now that the redundant "annual" double-count is removed', () => { const p = generateFactPacket('AVOID', []); const sb = nextwaveV2BuildStoryboard(scriptFor(p), baseDeps); const feeVals = sb.values.filter((v) => v.role === 'fee_rate'); assert.equal(feeVals.length, 2, 'both AVOID fee percentages should bind cleanly to fee_rate'); assert.ok(!sb.integrity.issues.some((i) => i.kind === 'unbound_value' && /percent/.test(i.raw || '') && /ambiguous.*fee_rate/.test(i.reason || ''))); });
+
+console.log('\n[9] Decimal-integrity repair — spelled-out decimals (2026-09-30)');
+// Real-route validation surfaced this: a fresh Long spelled numbers out in words, and "seven point
+// five percent" / "zero point zero six percent" / "zero point six percent" all silently lost their
+// leading digits (parsed as bare "five percent" / "six percent" / "six percent"), collapsing two
+// distinct AVOID fees to the identical wrong value. Fixed in _nextwaveWordsToNumber (api/ops.js).
+const wtn = (s) => baseDeps.wordsToNumber(s).value;
+await t('spelled-out decimal composition: exact required examples', () => {
+  assert.equal(wtn('seven point five percent'), 7.5);
+  assert.equal(wtn('zero point six percent'), 0.6);
+  assert.equal(wtn('zero point zero six percent'), 0.06);
+  assert.equal(wtn('one point two five percent'), 1.25);
+});
+await t('digit form and word form resolve to the identical value', () => {
+  assert.equal(wtn('7.5 percent'), wtn('seven point five percent'));
+  assert.equal(wtn('0.6 percent'), wtn('zero point six percent'));
+  assert.equal(wtn('0.06 percent'), wtn('zero point zero six percent'));
+  assert.equal(wtn('75000 dollars'), wtn('seventy-five thousand dollars'));
+  assert.equal(wtn('$75,000'), 75000);
+});
+await t('malformed/unsupported decimal phrases fail safely (NaN, never a guessed number) — the exact safety rule the order required', () => {
+  assert.ok(Number.isNaN(wtn('two point twenty percent')), 'a non-digit word after "point" must not silently resolve');
+  assert.ok(Number.isNaN(wtn('zero point point six percent')), 'more than one "point" must not silently resolve');
+  assert.ok(Number.isNaN(wtn('seven point percent')), 'an empty decimal side must not silently resolve');
+  assert.notEqual(wtn('zero point zero six percent'), 6, '0.06 must never collapse to 6 — the exact failure this repair targets');
+});
+await t('a malformed decimal phrase in a real script drops the mention (uncovered_numeric_token) rather than binding a wrong value', () => {
+  const script = 'Say you borrow $50,000 for 10 years. At a two point twenty percent rate, you will pay back about $55,000 in total. At a five percent rate, you will pay back about $61,000 in total. That rate difference costs you an extra $6,000.';
+  const sb = nextwaveV2BuildStoryboard(script, baseDeps);
+  assert.ok(sb.uncovered_numeric_tokens.some((u) => /point/.test(u.token)), 'the malformed rate phrase must surface as uncovered, not silently bind a wrong value');
+});
+await t('AVOID fee comparison 0.06% vs 0.6% — the exact real-world case that surfaced this defect: two distinct entities, two distinct correct outcomes, zero blocking issues', () => {
+  const principal = 75000, rate = 7.5, years = 20, feeLow = 0.06, feeHigh = 0.6;
+  const endLow = principal * Math.pow(1 + (rate - feeLow) / 100, years);
+  const endHigh = principal * Math.pow(1 + (rate - feeHigh) / 100, years);
+  const script = `Imagine you invest $${principal.toLocaleString('en-US')} and leave it alone for ${years} years, earning an annual seven point five percent return before costs. With a fund that charges an annual zero point zero six percent fee, you would end up with about $${Math.round(endLow).toLocaleString('en-US')}. With a fund that charges an annual zero point six percent fee, you would end up with about $${Math.round(endHigh).toLocaleString('en-US')}. That fee difference costs you $${Math.round(endLow - endHigh).toLocaleString('en-US')}.`;
+  const sb = nextwaveV2BuildStoryboard(script, baseDeps);
+  const fees = sb.values.filter((v) => v.role === 'fee_rate');
+  assert.equal(fees.length, 2, 'both fees must bind as two distinct entities');
+  const feeVals = fees.map((f) => f.value).sort((a, b) => a - b);
+  assert.deepEqual(feeVals, [0.06, 0.6], '0.06% and 0.6% must remain two distinct values, never collapse to the same one');
+  const blocking = sb.integrity.issues.filter((i) => i.severity === 'blocking');
+  assert.equal(blocking.length, 0, `expected clean arithmetic, got: ${JSON.stringify(blocking)}`);
+});
+await t('SAVE rate comparison with spelled-out decimals verifies correctly', () => {
+  const principal = 22000, rateLow = 0.9, rateHigh = 4.2, years = 4;
+  const endLow = principal * Math.pow(1 + rateLow / 100, years);
+  const endHigh = principal * Math.pow(1 + rateHigh / 100, years);
+  const script = `Say you deposit $${principal.toLocaleString('en-US')} earning an annual zero point nine percent yield for ${years} years — that grows to about $${Math.round(endLow).toLocaleString('en-US')}. The same $${principal.toLocaleString('en-US')} earning an annual four point two percent yield grows to about $${Math.round(endHigh).toLocaleString('en-US')} over the same ${years} years. That's $${Math.round(endHigh - endLow).toLocaleString('en-US')} you left on the table.`;
+  const sb = nextwaveV2BuildStoryboard(script, baseDeps);
+  const blocking = sb.integrity.issues.filter((i) => i.severity === 'blocking');
+  assert.equal(blocking.length, 0, `expected clean arithmetic, got: ${JSON.stringify(blocking)}`);
+});
+await t('multi-decision Long containing several spelled-out decimal values: zero blocking issues, zero cross-decision contamination (the actual real script that originally surfaced this defect, verbatim)', () => {
+  const script = "Three everyday decisions where a fraction of a percent quietly costs you thousands — or saves you thousands. Start with the slow burn. Imagine you invest seventy-five thousand dollars and leave it alone for twenty years, earning an annual seven point five percent return before costs. With a fund that charges an annual zero point zero six percent fee, you would end up with about three hundred fifteen thousand fifty-one dollars. With a fund that charges an annual zero point six percent fee, you would end up with about two hundred eighty-four thousand eight hundred forty-nine dollars. That fee difference costs you thirty thousand two hundred two dollars. Most investors never even check the expense ratio. Now flip to saving. Say you deposit twenty-two thousand dollars earning an annual zero point nine percent yield for four years — that grows to about twenty-two thousand eight hundred three dollars. The same twenty-two thousand dollars earning an annual four point two percent yield grows to about twenty-five thousand nine hundred thirty-five dollars over the same four years. That's three thousand one hundred thirty-three dollars you left on the table. Finally, the borrowing side. Say you borrow twenty-two thousand dollars for four years. At a seven percent rate, you will pay back about twenty-five thousand two hundred eighty-seven dollars in total. At a sixteen percent rate, you will pay back about twenty-nine thousand nine hundred twenty-seven dollars in total. That rate difference costs you an extra four thousand six hundred forty dollars. Your credit score directly controls which rate you qualify for. The pattern holds: percentages look abstract until you run the actual math. [DISCLAIMER: Not financial advice. Educational only.]";
+  const sb = nextwaveV2BuildStoryboard(script, baseDeps);
+  const blocking = sb.integrity.issues.filter((i) => i.severity === 'blocking');
+  assert.equal(blocking.length, 0, `expected clean arithmetic on the real defect-surfacing script, got: ${JSON.stringify(blocking)}`);
+  const avoidFees = sb.values.filter((v) => v.role === 'fee_rate').map((v) => v.value).sort((a, b) => a - b);
+  assert.deepEqual(avoidFees, [0.06, 0.6], 'the two AVOID fees must remain distinct in the real multi-decision script');
+});
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

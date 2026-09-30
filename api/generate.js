@@ -480,6 +480,11 @@ AVOID: "Imagine you invest $PRINCIPAL and leave it alone for HORIZON_YEARS years
 SAVE: "Say you deposit $PRINCIPAL earning an annual RATE percent yield for HORIZON_YEARS years — that grows to about $OUTCOME_A. The same $PRINCIPAL earning an annual COMPARISON_RATE percent yield grows to about $OUTCOME_B over the same HORIZON_YEARS years. That's $GAP you left on the table."
 DECIDE: "Say you borrow $PRINCIPAL for HORIZON_YEARS years. At a RATE percent rate, you will pay back about $OUTCOME_A in total. At a COMPARISON_RATE percent rate, you will pay back about $OUTCOME_B in total. That rate difference costs you an extra $GAP."
 
+═══════════ NUMERIC FORMAT — every authoritative financial number MUST be written in digit/numeric notation, never spelled out in words. This applies to principal, recurring amount, rate, fee, comparison rate/fee, horizon, delay, outcome, and gap — every value that came from the fact packet. ═══════════
+Correct: $75,000 · 7.5 percent · 0.06 percent · 25 years · $350 per month
+Wrong (never do this): seventy-five thousand dollars · seven point five percent · zero point zero six percent · twenty-five years
+The words AROUND the numbers stay natural, spoken prose — only the numbers themselves must be digits. This is a hard requirement, not a style preference: the Brain's number extraction does not reliably parse spelled-out decimals, so a spelled-out number can silently misread as a different, wrong figure.
+
 ═══════════ RETENTION STRUCTURE — 70-100 words total, no generic filler at either end ═══════════
 OPENING (~10-15 words) — state the stakes/question plainly, in your own words, as a genuine reason to keep watching. NOT a greeting, NOT "today we're talking about," NOT a template phrase — a real claim tied to THIS video's specific scenario.
 BODY (~45-65 words) — the evidence sentence shape above, in full, using the fact packet's exact numbers.
@@ -709,6 +714,11 @@ GROW: "Say you invest $MONTHLY_AMOUNT every month, assuming an average RATE perc
 AVOID: "Imagine you invest $PRINCIPAL and leave it alone for HORIZON_YEARS years, earning an annual RATE percent return before costs. With a fund that charges an annual FEE percent fee, you would end up with about $OUTCOME_A. With a fund that charges an annual COMPARISON_FEE percent fee, you would end up with about $OUTCOME_B. That fee difference costs you $GAP."
 SAVE: "Say you deposit $PRINCIPAL earning an annual RATE percent yield for HORIZON_YEARS years — that grows to about $OUTCOME_A. The same $PRINCIPAL earning an annual COMPARISON_RATE percent yield grows to about $OUTCOME_B over the same HORIZON_YEARS years. That's $GAP you left on the table."
 DECIDE: "Say you borrow $PRINCIPAL for HORIZON_YEARS years. At a RATE percent rate, you will pay back about $OUTCOME_A in total. At a COMPARISON_RATE percent rate, you will pay back about $OUTCOME_B in total. That rate difference costs you an extra $GAP."
+
+═══════════ NUMERIC FORMAT — every authoritative financial number, in ALL THREE decisions, MUST be written in digit/numeric notation, never spelled out in words. This applies to principal, recurring amount, rate, fee, comparison rate/fee, horizon, delay, outcome, and gap — every value that came from a fact packet. ═══════════
+Correct: $75,000 · 7.5 percent · 0.06 percent · 25 years · $350 per month
+Wrong (never do this): seventy-five thousand dollars · seven point five percent · zero point zero six percent · twenty-five years
+The words AROUND the numbers stay natural, spoken prose — only the numbers themselves must be digits. This is a hard requirement, not a style preference: the Brain's number extraction does not reliably parse spelled-out decimals, so a spelled-out number can silently misread as a different, wrong figure.
 
 ═══════════ RETENTION STRUCTURE — 220-280 words total, 5 parts. Hit this range through genuine retention content below, never through filler, throat-clearing, or repeating a number you already stated. ═══════════
 Stay close to the LOW-to-MIDDLE of each range below — overshooting every range at once is what pushed prior drafts past 300 words. Word counts are strict; count before finalizing.
