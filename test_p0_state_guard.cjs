@@ -1,6 +1,6 @@
 // Extracts the real guard + persist functions from public/index.html and exercises them with mocked fetch.
 const fs=require('fs');const h=fs.readFileSync(process.argv[2],'utf8');
-const s=h.indexOf('let _sbFinanceVerified=false;');const e=h.indexOf('\n}\n',h.indexOf('async function _persistFinancePayloadToSupabase'))+3;
+const s=h.indexOf('let _sbFinanceVerified=false;');const e=h.indexOf('\n}\n',h.indexOf('function _reportFinanceSaveFailure'))+3; // through the save helpers
 const persistSrc=h.slice(s,e);
 const ls=h.indexOf('async function loadAppState(){');const le=h.indexOf('// 2. Load packages from Supabase',ls);
 const loadHeadSrc=h.slice(ls,le)+'\n return financeLoaded; }';

@@ -2201,11 +2201,33 @@ async function saveAppState(){
 // real state (the 2026-09-28 incident). The server-side mmm_state_write_guard trigger is the
 // second line of defense for catastrophic shrinks; this stops the bad write at the source.
 let _sbFinanceVerified=false;
+// Platform business-state isolation: the shared state as this tab last loaded/saved it. Sent with every
+// save so the server (rpc mmm_state_save, a 3-way merge) applies only what THIS tab changed — a tab
+// working on one business can no longer overwrite another business's newer state with its stale copy.
+let _sbFinanceBase=null;
 async function _persistFinancePayloadToSupabase(financePayload){
   if(!_sbFinanceVerified){
     console.error('[P0 state-guard] BLOCKED shared-state save: this tab never loaded the shared state from Supabase. Reload the page before making changes.');
     return false;
   }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/mmm_state_save`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
+      body: JSON.stringify({p_key:SB_FINANCE_KEY, p_base:_sbFinanceBase, p_new:financePayload})
+    });
+    if(res.ok){
+      _sbFinanceBase=JSON.parse(JSON.stringify(financePayload));
+      console.log('[v12.5] Finance synced to Supabase ✓ (merge) | availableCash:',D.availableCash);
+      return true;
+    }
+    const t=await res.text();
+    // Compatibility during rollout: merge function not in this database yet → previous whole-row write.
+    if(res.status===404&&/mmm_state_save|PGRST202/.test(t))return await _persistFinancePayloadLegacy(financePayload);
+    return _reportFinanceSaveFailure(res.status,t);
+  } catch(e){console.error('[v12.5] Finance Supabase error:',e.message);return false;}
+}
+async function _persistFinancePayloadLegacy(financePayload){
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
       method:'POST',
@@ -2213,12 +2235,15 @@ async function _persistFinancePayloadToSupabase(financePayload){
         'Authorization':'Bearer '+SUPABASE_KEY,'Prefer':'resolution=merge-duplicates,return=minimal'},
       body: JSON.stringify({key:SB_FINANCE_KEY, value:JSON.stringify(financePayload)})
     });
-    if(res.ok){console.log('[v12.5] Finance synced to Supabase ✓ | availableCash:',D.availableCash);return true;}
-    const t=await res.text();
-    if(t.indexOf('MMM_STATE_GUARD')!==-1){console.error('[P0 state-guard] Server BLOCKED this save as a catastrophic shrink of shared state — nothing was overwritten. Reload the page.',t.slice(0,300));return false;}
-    console.error('[v12.5] Finance sync failed:',res.status,t.slice(0,150));
-    return false;
+    if(res.ok){_sbFinanceBase=JSON.parse(JSON.stringify(financePayload));console.log('[v12.5] Finance synced to Supabase ✓ | availableCash:',D.availableCash);return true;}
+    return _reportFinanceSaveFailure(res.status,await res.text());
   } catch(e){console.error('[v12.5] Finance Supabase error:',e.message);return false;}
+}
+function _reportFinanceSaveFailure(status,t){
+  if(t.indexOf('MMM_STATE_GUARD')!==-1){console.error('[P0 state-guard] Server BLOCKED this save as a catastrophic shrink of shared state — nothing was overwritten. Reload the page.',t.slice(0,300));return false;}
+  if(t.indexOf('MMM_STATE_ISOLATION')!==-1){console.error('[state-isolation] Server rejected this save — reload the page.',t.slice(0,300));return false;}
+  console.error('[v12.5] Finance sync failed:',status,t.slice(0,150));
+  return false;
 }
 // v15.21.1 — persistent (non-auto-hiding) failure badge: the operator's edit is still safe in
 // memory (and in localStorage from step 1 above), but it has NOT reached Supabase yet — the
@@ -2323,6 +2348,7 @@ async function loadAppState(){
       const rows=await res.json();
       if(rows&&rows.length>0){
         applyFinanceState(JSON.parse(rows[0].value));
+        _sbFinanceBase=JSON.parse(rows[0].value); // separate parse: applyFinanceState mutates what it is given
         financeLoaded=true;
         console.log('[v12.5] Finance loaded from Supabase ✓ | availableCash:',D.availableCash);
       }

@@ -1,8 +1,9 @@
 {
   "version": 2,
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   },
+  "buildCommand": "if [ \"$VERCEL_ENV\" = \"production\" ] && [ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]; then echo \"MMMOS RELEASE GUARD: production deploys only from main (got '${VERCEL_GIT_COMMIT_REF:-unknown}')\"; exit 1; fi",
   "fluid": true,
   "functions": {
     "api/ops.js": { "maxDuration": 180 }
