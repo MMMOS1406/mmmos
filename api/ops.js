@@ -16896,6 +16896,36 @@ async function nextwaveV2StoryboardBrainAction(req, res) {
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
+// Creative B4 diagnostic (2026-09-30) — the CEO-gated production route's own status/summary
+// (nwv2rSummary) intentionally strips the semantic layer's result down to gate/exception for VA
+// display. This returns the FULL raw nextwaveV2BuildStoryboardSemantic() result (every proposal's
+// role/scenario decisions, every calculation attempt with stated-vs-computed detail, rejected
+// proposals) so a NEEDS_REVIEW/BLOCK from the real route can actually be diagnosed instead of just
+// observed. Same CEO gate as the real route: this makes the same two real (cheap) proposer calls
+// nextwaveV2RouteStart itself makes, no narration/render/storage spend beyond that.
+async function nextwaveV2StoryboardBrainSemanticAction(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script (string) required' });
+  if (script.length > 6000) return res.status(400).json({ ok: false, error: 'script too long (max 6000 characters)' });
+  const key = process.env.ANTHROPIC_API_KEY; if (!key) return res.status(500).json({ ok: false, error: 'anthropic_not_configured' });
+  try {
+    const L = await nwv2rLib();
+    const tallied = L.route.makeTalliedCaller(L.prop.makeLiveCaller(key), L.prop.costOf);
+    const out = await L.sem.nextwaveV2BuildStoryboardSemantic(script, {
+      segmentMeaningUnits: nextwaveSegmentMeaningUnits,
+      wordsToNumber: _nextwaveWordsToNumber,
+      numberRegexSource: NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source,
+      classifyLongTreatment: nwv2ClassifyLongTreatment,
+      callModel: tallied.callModel,
+    });
+    out.vendor_tally = tallied.tally;
+    return res.status(out.ok ? 200 : 422).json(out);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // NextWave V2 PRODUCTION ROUTE — the accepted V2 Creative Production Standard (benchmark commit fa34eb0), integrated as ADDITIVE,
 // FEATURE-FLAGGED actions. Approved script -> guarded semantic Storyboard Brain -> PASS / NEEDS_REVIEW / BLOCK -> assets ->
@@ -19033,6 +19063,7 @@ export default async function handler(req, res) {
     // panels only), comparison/timeline treatments for real visual variety.
     if (action === 'nextwave_v2_classify_long_beats')  return await nextwaveV2ClassifyLongBeats(req, res);
     if (action === 'nextwave_v2_storyboard_brain')     return await nextwaveV2StoryboardBrainAction(req, res);
+    if (action === 'nextwave_v2_storyboard_brain_semantic') return await nextwaveV2StoryboardBrainSemanticAction(req, res);
     if (action === 'nextwave_v2_route_config')       return await nextwaveV2RouteConfig(req, res);      // V2 production route (feature-flagged, default OFF)
     if (action === 'nextwave_v2_route_runtime_probe') return await nextwaveV2RouteRuntimeProbe(req, res);
     if (action === 'nextwave_v2_route_set_enabled')  return await nextwaveV2RouteSetEnabled(req, res);
