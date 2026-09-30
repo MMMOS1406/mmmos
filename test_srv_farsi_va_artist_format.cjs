@@ -61,7 +61,7 @@ delete xs.cadenceSlotFormat;delete xl.cadenceSlotFormat;const xn=X.D.tasks.lengt
 ok('negative control: guard is what prevents re-creation',X.D.tasks.length>xn,`without guard ${xn}->${X.D.tasks.length}`);
 
 // 7. Locks and scope
-const s3=shorts[2];W.D.srvFarsiLifecycleStages[String(s3.id)]='review';const m3=s3.mood;
+const s3=shorts[2];W.D.srvFarsiLifecycleStages[String(s3.id)]='review';W.D.srvFarsiLifecycleStages['srvf_'+s3.createdAt+'_'+s3.id]='review'; /* written the way _srvFarsiSetStage writes it (identity + numeric), so the lock test doesn't depend on the identity-epoch millisecond */const m3=s3.mood;
 W.set(String(s3.id),'artist','Female');W.set(String(s3.id),'format','Long');
 ok('locked after generate (review stage): no change',s3.mood===m3&&s3.contentFormat!=='long');
 W.D.tasks.push({id:900,engine:'AI Studio',mood:'x',contentType:'Short Video',name:'AI'});
