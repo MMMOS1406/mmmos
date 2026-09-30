@@ -5,7 +5,7 @@ const fs=require('fs');
 const h=fs.readFileSync(process.argv[2]||'public/index.html','utf8');
 function fn(name){const s=h.indexOf('function '+name+'(');if(s<0)throw new Error('missing '+name);const e=h.indexOf('\n}\n',s);return h.slice(s,e+2);}
 function cst(name){const s=h.indexOf('const '+name+'=');const e=h.indexOf(';\n',s);return h.slice(s,e+2);}
-const src=[fn('_srvFarsiSplitMood'),fn('_srvFarsiGetStage'),fn('_srvFarsiVaCurrentArtistFormat'),fn('_srvFarsiVaAutoArtistFormat'),fn('_srvFarsiVaSetArtistFormat'),fn('_getEngineState'),fn('_isEnginePaused'),
+const src=[fn('_srvFarsiIsTask'),fn('_srvFarsiTaskUid'),fn('_srvFarsiTaskById'),fn('_srvFarsiIsTestTask'),fn('_srvFarsiStageMap'),fn('_srvFarsiSplitMood'),fn('_srvFarsiGetStage'),fn('_srvFarsiVaCurrentArtistFormat'),fn('_srvFarsiVaAutoArtistFormat'),fn('_srvFarsiVaSetArtistFormat'),fn('_getEngineState'),fn('_isEnginePaused'),
   fn('_isoOfDay'),fn('_isoDateForDayName'),fn('_currentWeekIsoForDayName'),fn('_slotKey'),fn('_engineNameMatches'),cst('_AUTO_ASSIGN_TERMINAL'),
   fn('_autoAssignChannelFor'),fn('_autoAssignPlatformFor'),fn('_autoAssignContentTypeFor'),fn('autoCreateCadenceTasksForCurrentWeek')].join('\n');
 let pass=0,fail=0;const out=[];const ok=(n,c,extra)=>{c?pass++:fail++;out.push((c?'PASS ':'FAIL ')+n+(extra?'  '+extra:''));};
@@ -97,8 +97,8 @@ ok('re-selecting current value is a no-op',W.saves===saves&&JSON.stringify(s4)==
 // 10. Render: the real Generate card shows Auto (rotation value) selected, explicit value when overridden
 {
   const R=world();R.cadence();const t=farsi(R).find(x=>x.contentFormat!=='long');const rotArtist=t.mood.split(' — ')[0];
-  const src2=[fn('_srvFarsiSplitMood'),fn('_srvFarsiGetStage'),fn('_srvFarsiVaCurrentArtistFormat'),fn('_srvFarsiVaAutoArtistFormat'),fn('renderSRVFarsiLifecycleCard')].join('\n');
-  const known={D:R.D,SRV_STAGE_COLORS:{},escHTML:x=>String(x),_srvFarsiPkgForTask:()=>null};
+  const src2=[fn('_srvFarsiIsTask'),fn('_srvFarsiTaskUid'),fn('_srvFarsiTaskById'),fn('_srvFarsiIsTestTask'),fn('_srvFarsiStageMap'),fn('_srvFarsiEnsureIdentity'),fn('_srvFarsiStuckEngineStatus'),fn('_srvFarsiStuckEngineWarningHtml'),fn('_srvFarsiSplitMood'),fn('_srvFarsiGetStage'),fn('_srvFarsiVaCurrentArtistFormat'),fn('_srvFarsiVaAutoArtistFormat'),fn('renderSRVFarsiLifecycleCard')].join('\n');
+  const known={D:R.D,SRV_STAGE_COLORS:{},escHTML:x=>String(x),_srvFarsiPkgForTask:()=>null,_AUTO_ASSIGN_TERMINAL:new Set(['uploaded','verified','done']),_getEngineState:()=>'running'};
   const scope=new Proxy(known,{has:(o,k)=>k in o||!(k in globalThis),get:(o,k)=>k in o?o[k]:(k===Symbol.unscopables?undefined:(()=>''))});
   const render=new Function('scope','with(scope){'+src2+';return renderSRVFarsiLifecycleCard;}')(scope);
   const sel=(h,f)=>{const m=h.match(new RegExp(`'${f}',this.value\\)[^>]*>([\\s\\S]*?)</select>`));return m?m[1]:'';};

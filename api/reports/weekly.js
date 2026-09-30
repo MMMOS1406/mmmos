@@ -75,12 +75,12 @@ async function generateReport() {
 
   // ── 2. This week's videos ──
   const weeklyVideos = await sbGet(
-    `youtube_videos?published_at=gte.${weekAgoISO}&select=channel_id,video_id,published_at,view_count&order=published_at.desc&limit=200`
+    `youtube_videos_analytics?published_at=gte.${weekAgoISO}&select=channel_id,video_id,published_at,view_count&order=published_at.desc&limit=200`
   ) || [];
 
   // ── 3. Last known upload per channel (for stalled detection) ──
   const recentVideos = await sbGet(
-    `youtube_videos?select=channel_id,published_at&order=published_at.desc&limit=100`
+    `youtube_videos_analytics?select=channel_id,published_at&order=published_at.desc&limit=100`
   ) || [];
   const lastUploadPerChannel = {};
   for (const v of recentVideos) {
@@ -246,7 +246,7 @@ async function generateShortFormIntelligence() {
   const twelveWeeksAgo = new Date(now - 84 * 86400000).toISOString();
 
   const [ytRaw, ttRaw] = await Promise.all([
-    sbGet(`youtube_videos?published_at=gte.${ninetyDaysAgo}&select=video_id,channel_id,title,published_at,view_count,like_count,comment_count&order=published_at.desc&limit=500`),
+    sbGet(`youtube_videos_analytics?published_at=gte.${ninetyDaysAgo}&select=video_id,channel_id,title,published_at,view_count,like_count,comment_count&order=published_at.desc&limit=500`),
     sbGet(`tiktok_videos?published_at=gte.${ninetyDaysAgo}&select=video_id,open_id,title,published_at,view_count,like_count,comment_count,share_count&order=published_at.desc&limit=500`),
   ]);
   const ytVideos = ytRaw || [];

@@ -1695,8 +1695,8 @@ async function operatorRecommendations(req, res) {
     sbGetSafe('production_pipeline?select=id,title,engine,missing_assets,stage,stalled,updated_at&limit=100'),
     sbGetSafe(`approvals?status=eq.pending&created_at=lt.${new Date(now - 86400000).toISOString()}&select=id,item_title,approval_type,created_at&limit=20`),
     sbGetSafe('youtube_channels?select=channel_id,title&limit=20'),
-    sbGetSafe(`youtube_videos?published_at=gte.${new Date(now - 30 * 86400000).toISOString()}&select=channel_id,published_at&order=published_at.desc&limit=200`),
-    sbGetSafe('youtube_videos?select=channel_id,view_count,published_at&order=published_at.desc&limit=200'),
+    sbGetSafe(`youtube_videos_analytics?published_at=gte.${new Date(now - 30 * 86400000).toISOString()}&select=channel_id,published_at&order=published_at.desc&limit=200`),
+    sbGetSafe('youtube_videos_analytics?select=channel_id,view_count,published_at&order=published_at.desc&limit=200'),
     sbGetSafe('api_queue?status=eq.failed&select=id,provider,job_type,updated_at&order=updated_at.desc&limit=20'),
   ]);
 
@@ -7866,13 +7866,13 @@ async function revenueDashboard(req, res) {
     const lookback7 = new Date(Date.now() - 7 * 86400 * 1000).toISOString();
     const out = { ok: true, perChannel: [] };
     for (const ch of channels) {
-      const vids12m = await sbGet('youtube_videos?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback365) + '&select=watch_time_min,views,published_at');
+      const vids12m = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback365) + '&select=watch_time_min,views,published_at');
       const w12m = (Array.isArray(vids12m) ? vids12m : []).reduce((a,v)=>a+(Number(v.watch_time_min)||0), 0);
       const watchHours12m = w12m / 60;
-      const vids90d = await sbGet('youtube_videos?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback90) + '&select=views,published_at');
+      const vids90d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback90) + '&select=views,published_at');
       const shortsViews90d = (Array.isArray(vids90d) ? vids90d : []).reduce((a,v)=>a+(Number(v.views)||0), 0);
-      const vids30d = await sbGet('youtube_videos?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback30) + '&select=video_id');
-      const vids7d = await sbGet('youtube_videos?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback7) + '&select=video_id');
+      const vids30d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback30) + '&select=video_id');
+      const vids7d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback7) + '&select=video_id');
       const uploads30d = Array.isArray(vids30d) ? vids30d.length : 0;
       const uploads7d = Array.isArray(vids7d) ? vids7d.length : 0;
       const chSnaps = await sbGet('youtube_channel_snapshots?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&order=snapshot_date.desc&limit=60');
@@ -7933,7 +7933,7 @@ async function decisionEngine(req, res) {
     if (!Array.isArray(channels)) return res.status(500).json({ ok:false, error:'channels_load_failed' });
     const out = { ok: true, lookbackDays, perChannel: [] };
     for (const ch of channels) {
-      const videos = await sbGet('youtube_videos?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(recentCutoff) + '&select=video_id,title,published_at,views,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,linked_package_id&order=published_at.desc');
+      const videos = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(recentCutoff) + '&select=video_id,title,published_at,views,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,linked_package_id&order=published_at.desc');
       const v = Array.isArray(videos) ? videos : [];
       const recs = [];
       // Empty channel
@@ -8061,7 +8061,7 @@ async function analyticsFoundationReport(req, res) {
     const result = { ok: true, lookbackDays, perChannel: [] };
     for (const ch of channels) {
       // Videos for this channel in lookback window
-      const videos = await sbGet('youtube_videos?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(recentCutoff) + '&select=video_id,title,published_at,views,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,likes,comments,linked_package_id&order=published_at.desc');
+      const videos = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(recentCutoff) + '&select=video_id,title,published_at,views,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,likes,comments,linked_package_id&order=published_at.desc');
       const videosArr = Array.isArray(videos) ? videos : [];
       // Channel snapshot history (last 60d) for growth rate
       const chSnaps = await sbGet('youtube_channel_snapshots?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&order=snapshot_date.desc&limit=60');
