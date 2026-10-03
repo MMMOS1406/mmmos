@@ -6,9 +6,9 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
 import { deps as baseDeps, SCRIPTS } from './test_nextwave_v2_storyboard_brain.mjs';
-import { nextwaveV2BuildStoryboardSemantic } from './lib/nextwaveV2SemanticStoryboard.mjs';
+import { nextwaveV2BuildStoryboardSemantic, runCalculations } from './lib/nextwaveV2SemanticStoryboard.mjs';
 import { nextwaveV2BuildStoryboard } from './lib/nextwaveV2StoryboardBrain.mjs';
-import { makeRecordingCaller } from './lib/nextwaveV2SemanticProposer.mjs';
+import { makeRecordingCaller, validateProposal } from './lib/nextwaveV2SemanticProposer.mjs';
 import { DEV, DEV2, DEV3, DEV4 } from './nextwave_v2_storyboard_eval/dev_set.mjs';
 import { STYLE } from './lib/nextwaveV2Renderer/core.mjs';
 import { wordsFromAlignment } from './lib/nextwaveV2Renderer/captions.mjs';
@@ -18,6 +18,8 @@ import { startRoute, classifyGate, planAssets, chunkPlan, compileFromState, buil
 import { composeStoryboard } from './lib/nextwaveV2Renderer/production/compose.mjs';
 import { runQc, collectDrawnText, numberProvenance, allowedNumbers, occupancy, idleWindows } from './lib/nextwaveV2Renderer/production/qc.mjs';
 import { placeScenes, eventTime } from './lib/nextwaveV2Renderer/production/timing.mjs';
+import { barEnv } from './lib/nextwaveV2Renderer/production/vocab.mjs';
+import { integerToWords, numberToSpokenWords, spanTextToSpoken, expandNumbersForSpeech, wordsFromAlignmentWithSpeechSpans } from './lib/nextwaveV2Renderer/production/speech.mjs';
 
 const BASELINE = 'fa34eb0'; // pre-integration commit: the accepted benchmark standard, before the route was wired into ops.js / index.html
 let pass = 0, fail = 0; const failures = [];
@@ -352,6 +354,313 @@ await t('multi-decision Long containing several spelled-out decimal values: zero
   assert.equal(blocking.length, 0, `expected clean arithmetic on the real defect-surfacing script, got: ${JSON.stringify(blocking)}`);
   const avoidFees = sb.values.filter((v) => v.role === 'fee_rate').map((v) => v.value).sort((a, b) => a - b);
   assert.deepEqual(avoidFees, [0.06, 0.6], 'the two AVOID fees must remain distinct in the real multi-decision script');
+});
+
+console.log('\n[10] Closing-recap $1 rounding repair (2026-09-30) — the Short #3 / Long #3 real B4 unprovenanced_number_on_screen root cause');
+await t('reproduced case: Short #3 AVOID fee comparison — recap now uses the verified gap ($74,144), not the unregistered a-b recomputation ($74,143)', () => {
+  const scenes = [{ narration: { text: 'fee comparison' }, renderer_params: { displayMode: 'bar', beforeValue: '$345,613', afterValue: '$271,470', deltaTextOverride: '-$74,144', anchorText: '$60,000 AT 7% OVER 27 YEARS', beforeLabel: 'LOW FEE FUND 0.3%', afterLabel: 'HIGH FEE FUND 1.25%' } }];
+  const [cmp] = comparisons(scenes);
+  assert.equal(cmp.gap, 74144, `recap gap must equal the verified/stated $74,144, not the raw before-after subtraction (${345613 - 271470})`);
+});
+await t('reproduced case: Long #3 AVOID fee comparison — recap now uses the verified gap ($52,330), not the unregistered a-b recomputation ($52,329)', () => {
+  const scenes = [{ narration: { text: 'fee comparison' }, renderer_params: { displayMode: 'bar', beforeValue: '$369,734', afterValue: '$317,405', deltaTextOverride: '-$52,330', anchorText: '$100,000 AT 6% OVER 23 YEARS', beforeLabel: 'LOW FEE', afterLabel: 'HIGH FEE' } }];
+  const [cmp] = comparisons(scenes);
+  assert.equal(cmp.gap, 52330, `recap gap must equal the verified/stated $52,330, not the raw before-after subtraction (${369734 - 317405})`);
+});
+await t('no registered gap: recap falls back to the a-b recomputation exactly as before (no behavior change for scenes that never had an override)', () => {
+  const scenes = [{ narration: { text: 'plain comparison' }, renderer_params: { displayMode: 'bar', beforeValue: '$500', afterValue: '$300', anchorText: 'x', beforeLabel: 'a', afterLabel: 'b' } }];
+  const [cmp] = comparisons(scenes);
+  assert.equal(cmp.gap, 200, 'with no deltaTextOverride, the old a-b behavior must be preserved unchanged');
+});
+await t('negative proof: a genuinely invented on-screen number with no verified lineage still triggers unprovenanced_number_on_screen (the gate is not weakened by this repair)', () => {
+  const storyboard = { values: [{ display: '$74,144', value: 74144 }], scenes: [{ renderer_params: { deltaTextOverride: '-$74,144' } }] };
+  const script = 'That fee difference costs you $74144.';
+  const allowed = allowedNumbers({ storyboard, script });
+  const drawn = [{ t: 33, strings: ['$99,999 FABRICATED'] }]; // a number injected by a hypothetical renderer bug/attack, never registered anywhere
+  const result = numberProvenance({ drawn, allowed });
+  assert.equal(result.ok, false, 'an invented number with no verified lineage must still fail provenance');
+  assert.ok(result.unprovenanced.some((u) => u.token.includes('99,999')), 'the specific invented token must be named as unprovenanced');
+});
+
+console.log('\n[11] Semantic partition hardening Phase 1 (2026-09-30) — opening/closing invented-aggregate prompt contract, deterministic backstop');
+const AGG_BASE = "Three everyday decisions where a fraction of a percent quietly costs you thousands — or saves you thousands. Start with the slow burn. Imagine you invest seventy-five thousand dollars and leave it alone for twenty years, earning an annual seven point five percent return before costs. With a fund that charges an annual zero point zero six percent fee, you would end up with about three hundred fifteen thousand fifty-one dollars. With a fund that charges an annual zero point six percent fee, you would end up with about two hundred eighty-four thousand eight hundred forty-nine dollars. That fee difference costs you thirty thousand two hundred two dollars. Most investors never even check the expense ratio. Now flip to saving. Say you deposit twenty-two thousand dollars earning an annual zero point nine percent yield for four years — that grows to about twenty-two thousand eight hundred three dollars. The same twenty-two thousand dollars earning an annual four point two percent yield grows to about twenty-five thousand nine hundred thirty-five dollars over the same four years. That is three thousand one hundred thirty-three dollars you left on the table. Finally, the borrowing side. Say you borrow twenty-two thousand dollars for four years. At a seven percent rate, you will pay back about twenty-five thousand two hundred eighty-seven dollars in total. At a sixteen percent rate, you will pay back about twenty-nine thousand nine hundred twenty-seven dollars in total. That rate difference costs you an extra four thousand six hundred forty dollars. Your credit score directly controls which rate you qualify for. The pattern holds: percentages look abstract until you run the actual math.";
+await t('closing invented aggregate (does not match any real gap or their sum) IS caught: blocking gap_inconsistent, derived against the nearest real decision', () => {
+  const script = `${AGG_BASE} Combined, these three choices cost you nearly $50,000 in real money.`;
+  const sb = nextwaveV2BuildStoryboard(script, baseDeps);
+  const blocking = sb.integrity.issues.filter((i) => i.severity === 'blocking');
+  assert.ok(blocking.some((i) => i.kind === 'gap_inconsistent' && i.stated === 50000), `expected the invented closing aggregate to be caught as gap_inconsistent, got: ${JSON.stringify(blocking)}`);
+});
+await t('supplied decision-level numbers remain allowed and correctly verified alongside an invented closing aggregate (the real gaps are not collateral damage)', () => {
+  const script = `${AGG_BASE} Combined, these three choices cost you nearly $50,000 in real money.`;
+  const sb = nextwaveV2BuildStoryboard(script, baseDeps);
+  const realGaps = sb.values.filter((v) => v.role === 'gap' && v.value !== 50000).map((v) => v.value).sort((a, b) => a - b);
+  assert.deepEqual(realGaps, [3132, 4640, 30202], 'the three real decision gaps must remain correctly bound and unaffected by the invented aggregate');
+});
+await t('KNOWN GAP (flagged for PM review, not fixed in this pass — Phase 1 order scope is prompt-only): an opening invented aggregate is NOT currently caught by the plain Brain — no preceding comparison scene exists to verify it against, so it silently binds as an unverified 4th "gap" entity with zero issues. The prompt-layer prohibition (api/generate.js) is the only current defense for this position; do not rely on this deterministic backstop for opening-position aggregates until it is explicitly authorized and fixed.', () => {
+  const script = `These three decisions alone could cost you over $50,000 if you get them wrong. ${AGG_BASE}`;
+  const sb = nextwaveV2BuildStoryboard(script, baseDeps);
+  const fake = sb.values.find((v) => v.value === 50000);
+  const issuesOnFake = sb.integrity.issues.filter((i) => i.entity === (fake && fake.id));
+  assert.ok(fake && fake.role === 'gap', 'documents current behavior: the invented opening aggregate binds as role=gap');
+  assert.equal(issuesOnFake.length, 0, 'documents current behavior: zero verification issues are raised for it — this is the gap this test exists to make visible, not to endorse');
+});
+
+console.log('\n[12] scanFree partition repair (2026-10-01) — paraphrase fields verified by numeric VALUE, never substring; evidence stays verbatim');
+const PP_UNITS = [
+  { unit: 'u00', text: 'Say you invest $150 every month, assuming an average 6.5 percent annual return.', mentions: [{ id: 'u00.m0', unit_id: 'u00', kind: 'money' }] },
+  { unit: 'u01', text: 'But if you wait 8 years before you start, you end up with much less.', mentions: [{ id: 'u01.m0', unit_id: 'u01', kind: 'duration' }] },
+];
+const PP_MENTIONS = PP_UNITS.flatMap((u) => u.mentions);
+const scenesFor = (purpose) => validateProposal({ mentions: [], scenarios: [], calculations: [], scenes: [
+  { unit_ids: ['u00'], intent: 'flow', purpose: 'introduce the monthly amount', from_label: null, to_label: null },
+  { unit_ids: ['u01'], intent: 'outcome_comparison', purpose, from_label: null, to_label: null },
+] }, { units: PP_UNITS, mentions: PP_MENTIONS });
+await t('A. real supported paraphrase passes: fresh Long #2\'s exact real rejected purpose string ("compare starting today versus delaying 8 years") now survives — the script genuinely has "wait 8 years"', () => {
+  const { proposal, rejections } = scenesFor('comparing start today vs wait 8 years with gap');
+  assert.equal(proposal.scenes.length, 2, `expected both scenes to survive, got: ${JSON.stringify(rejections)}`);
+  assert.equal(rejections.length, 0, `expected zero rejections, got: ${JSON.stringify(rejections)}`);
+});
+await t('B. equivalent Long #2b case passes: the actual real rejected purpose string ("compare starting today versus waiting 6 years") now survives against a script with a genuine 6-year delay', () => {
+  const units = [
+    { unit: 'u00', text: 'Say you invest $200 every month, assuming an average 9 percent annual return.', mentions: [{ id: 'u00.m0', unit_id: 'u00', kind: 'money' }] },
+    { unit: 'u01', text: 'But if you wait 6 years before you start, contributing the same $200 a month, you end up with only about $95784.', mentions: [{ id: 'u01.m0', unit_id: 'u01', kind: 'duration' }] },
+  ];
+  const mentions = units.flatMap((u) => u.mentions);
+  const { proposal, rejections } = validateProposal({ mentions: [], scenarios: [], calculations: [], scenes: [
+    { unit_ids: ['u00'], intent: 'flow', purpose: 'introduce the monthly amount', from_label: null, to_label: null },
+    { unit_ids: ['u01'], intent: 'outcome_comparison', purpose: 'compare starting today versus waiting 6 years', from_label: null, to_label: null },
+  ] }, { units, mentions });
+  assert.equal(proposal.scenes.length, 2, `expected both scenes to survive, got: ${JSON.stringify(rejections)}`);
+});
+await t('C/F. fabricated numeric value fails and still invalidates the whole partition (the existing all-or-nothing safety behavior is unchanged)', () => {
+  const { proposal, rejections } = scenesFor('comparing start today vs wait 95 years with gap');
+  assert.equal(proposal.scenes.length, 0, 'a fabricated number must still wholesale-invalidate the partition, exactly as before this repair');
+  assert.ok(rejections.some((r) => r.where === 'scenes[1].purpose' && /not present in the script/.test(r.why)), `expected the fabricated "95" to be rejected, got: ${JSON.stringify(rejections)}`);
+});
+await t('D. numeric substring collision fails: a purpose referencing "8" must NOT be validated merely because the script contains "80,000" — value equality, never substring containment', () => {
+  const units = [{ unit: 'u00', text: 'Say you invest $80,000 in a fund.', mentions: [{ id: 'u00.m0', unit_id: 'u00', kind: 'money' }] }];
+  const mentions = units.flatMap((u) => u.mentions);
+  const { proposal, rejections } = validateProposal({ mentions: [], scenarios: [], calculations: [], scenes: [
+    { unit_ids: ['u00'], intent: 'flow', purpose: 'the 8 dollar investment', from_label: null, to_label: null },
+  ] }, { units, mentions });
+  assert.equal(proposal.scenes.length, 0, '"8" must not pass merely because the script contains "80,000" — this is the exact collision the fix must prevent');
+  assert.ok(rejections.some((r) => r.where === 'scenes[0].purpose'), `expected the unsupported "8" to be rejected, got: ${JSON.stringify(rejections)}`);
+});
+await t('E. evidence remains verbatim-gated exactly as before — a paraphrased (non-quote) evidence string still fails even though its number is real', () => {
+  const units = [{ unit: 'u00', text: 'Say you invest $150 every month for 8 years.', mentions: [{ id: 'u00.m0', unit_id: 'u00', kind: 'money' }] }];
+  const mentions = units.flatMap((u) => u.mentions);
+  const { proposal, rejections } = validateProposal({ mentions: [
+    { id: 'u00.m0', role: 'recurring_amount', confidence: 1, evidence: 'you put in 150 dollars monthly', label: null },
+  ], scenarios: [], calculations: [], scenes: [] }, { units, mentions });
+  assert.equal(Object.keys(proposal.mentions).length, 0, 'a paraphrased (non-verbatim) evidence quote must still be rejected — this repair touches ONLY purpose/from_label/to_label');
+  assert.ok(rejections.some((r) => /evidence is not verbatim/.test(r.why)), `expected the verbatim-evidence rejection to be unchanged, got: ${JSON.stringify(rejections)}`);
+});
+
+console.log('\n[13] Disclaimer structural-markup repair (2026-10-02) — the "[DISCLAIMER:" bracket found baked into every B4 piece\'s closing captions');
+const DISCLAIMED_SCRIPT = `${PASS_SCRIPT} [DISCLAIMER: Not financial advice. Educational only.]`;
+const plainBrainDeps = { buildStoryboard: async (s) => nextwaveV2BuildStoryboard(s, baseDeps) };
+await t('no "[DISCLAIMER:" markup reaches narration (TTS) — the stub narrate() receives the unwrapped disclosure sentence, never the tag', async () => {
+  let capturedText = null;
+  const { deps } = mkDeps({ ...plainBrainDeps, narrate: async (text) => { capturedText = text; return { ok: true, alignment: synthAlign(text), audio_url: 'stub://narration.mp3' }; } });
+  const r = await startRoute({ script: DISCLAIMED_SCRIPT, formatName: 'long', title: 't', deps });
+  assert.equal(r.status, 'planned', `expected a clean PASS, got: ${JSON.stringify(r.exception)}`);
+  assert.ok(capturedText, 'narrate must have been called');
+  assert.ok(!/\[DISCLAIMER/i.test(capturedText), `narration text must never contain the structural tag, got tail: ${capturedText.slice(-80)}`);
+  assert.ok(!/\]/.test(capturedText), `narration text must never contain a stray closing bracket, got tail: ${capturedText.slice(-80)}`);
+  assert.ok(/Not financial advice\. Educational only\./.test(capturedText), 'the actual disclosure SENTENCE must still be present — this is an unwrap, not a deletion');
+});
+await t('no "[DISCLAIMER:" markup reaches captions — the persisted/returned route script (what alignment and captions are built from) is equally clean', async () => {
+  const { deps } = mkDeps(plainBrainDeps);
+  const r = await startRoute({ script: DISCLAIMED_SCRIPT, formatName: 'long', title: 't', deps });
+  assert.equal(r.status, 'planned');
+  assert.ok(!/\[DISCLAIMER/i.test(r.script), `the route's own persisted script (source for wordsFromAlignment -> captions) must be clean, got tail: ${r.script.slice(-80)}`);
+  assert.ok(/Not financial advice\. Educational only\./.test(r.script), 'the disclosure sentence must survive into the persisted/captioned script');
+  assert.equal(r.qc_pre_render.ok, true, `QC must stay clean on the unwrapped script, got: ${JSON.stringify(r.qc_pre_render)}`);
+});
+await t('the Brain analyzes the ORIGINAL script unchanged — this repair touches only narration/caption text, never storyboard verification input', async () => {
+  let brainSawText = null;
+  const { deps } = mkDeps({ buildStoryboard: async (s) => { brainSawText = s; return brain(s); } });
+  await startRoute({ script: DISCLAIMED_SCRIPT, formatName: 'long', title: 't', deps });
+  assert.equal(brainSawText, DISCLAIMED_SCRIPT, 'the Brain must still receive the exact original script, bracket included — frozen Brain input is untouched');
+});
+await t('a script with no disclaimer suffix is unaffected (no-op for scripts that never had the tag)', async () => {
+  let capturedText = null;
+  const { deps } = mkDeps({ narrate: async (text) => { capturedText = text; return { ok: true, alignment: synthAlign(text), audio_url: 'stub://narration.mp3' }; } });
+  const r = await startRoute({ script: PASS_SCRIPT, formatName: 'long', title: 't', deps });
+  assert.equal(r.status, 'planned');
+  assert.equal(capturedText, PASS_SCRIPT, 'a script with no bracket must pass through byte-for-byte unchanged');
+});
+await t('YouTube description AI/synthetic-media disclosure safety net is untouched by this repair (separate mechanism, api/ops.js _youtubeResumableUpload)', () => {
+  const src = fs.readFileSync('./api/ops.js', 'utf8');
+  assert.ok(/AI-generated avatar narration/.test(src), 'the existing YouTube-description AI-disclosure safety net must remain intact');
+});
+
+console.log('\n[14] Long visual-treatment variety (2026-10-02) — AVOID and SAVE no longer collapse onto the identical share_compare backdrop');
+await t('AVOID (fee/fund) and SAVE (savings/CD) get distinct bar-scene environments — the real repetition found across both AVOID+SAVE+DECIDE B4 Longs', () => {
+  const avoidEnv = barEnv('invest', 'annual fee');
+  const saveEnv = barEnv('savings', 'annual yield');
+  const loanEnv = barEnv('loan', 'annual rate');
+  assert.notEqual(avoidEnv, saveEnv, `AVOID and SAVE must no longer share a backdrop, got both: ${avoidEnv}`);
+  assert.notEqual(saveEnv, loanEnv, 'SAVE and DECIDE must remain distinct as before');
+  assert.notEqual(avoidEnv, loanEnv, 'AVOID and DECIDE must remain distinct as before');
+});
+await t('SAVE\'s new environment (office) is fully programmatic — no new banked/generated asset, no new vendor cost', () => {
+  assert.equal(barEnv('savings', 'annual yield'), 'office');
+  const src = fs.readFileSync('./lib/nextwaveV2Renderer/sets.mjs', 'utf8');
+  assert.ok(/export function officeSet/.test(src), 'officeSet must already exist as a programmatic renderer (no banked image dependency)');
+});
+await t('loan and kitchen/price environments are unchanged by this repair (bounded to the AVOID/SAVE collision only)', () => {
+  assert.equal(barEnv('loan', ''), 'neighbourhood');
+  assert.equal(barEnv('price', ''), 'kitchen');
+  assert.equal(barEnv('invest', 'annual fee'), 'finance');
+});
+
+console.log('\n[15] P0 deterministic numeric-input verification (2026-10-03) — a calculation that cannot even evaluate with its mapped inputs is no longer a silent blind spot');
+const mk = (value, kind = 'money') => ({ value, kind });
+await t('6.5% -> "5%" must fail: real case — principal/years absent from the mapped inputs (the generator dropped that clause), rate+fee corrupted; compute() cannot evaluate at all, and this is now caught (not silently excluded)', () => {
+  const mentionsById = new Map([['rate_m', mk(5)], ['fee_m', mk(1)], ['outcome_m', mk(113605)]]);
+  const { details } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { rate: { mention: 'rate_m' }, fee: { mention: 'fee_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.equal(details[0].ok, false);
+  assert.equal(details[0].reason, 'model could not be evaluated with the mapped inputs');
+  assert.equal(details[0].target, 'outcome_m', 'the target this unevaluable calc was supposed to verify must now be recorded, not dropped');
+  assert.equal(details[0].stated, 113605, 'the stated figure it failed to verify must be recorded for the review issue');
+});
+await t('0.09% -> "09%"/9% must fail: wrong fee input, but principal/years ARE present so compute() evaluates to a real (wrong) number — this was already correctly caught before this repair and remains caught', () => {
+  const mentionsById = new Map([['p_m', mk(15000)], ['y_m', mk(22)], ['rate_m', mk(6)], ['fee_m', mk(9)], ['outcome_m', mk(53052)]]);
+  const { details } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { principal: { mention: 'p_m' }, years: { mention: 'y_m' }, rate: { mention: 'rate_m' }, fee: { mention: 'fee_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.notEqual(details[0].ok, false, 'compute() must still evaluate (a real, if wrong, candidate exists)');
+  assert.equal(details[0].verified, false, 'the wrong fee (9% instead of 0.09%) must not reproduce the true stated outcome');
+});
+await t('0.1% -> "1%" must fail: same missing-clause pattern as the 6.5->5 case, isolated to fee alone', () => {
+  const mentionsById = new Map([['rate_m', mk(6.5)], ['fee_m', mk(1)], ['outcome_m', mk(113605)]]);
+  const { details } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { rate: { mention: 'rate_m' }, fee: { mention: 'fee_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.equal(details[0].ok, false); assert.equal(details[0].target, 'outcome_m'); assert.equal(details[0].stated, 113605);
+});
+await t('0.9% -> "9%" must fail (comparison_fee side of the same real case)', () => {
+  const mentionsById = new Map([['rate_m', mk(6.5)], ['fee_m', mk(9)], ['outcome_m', mk(91964)]]);
+  const { details } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { rate: { mention: 'rate_m' }, fee: { mention: 'fee_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.equal(details[0].ok, false); assert.equal(details[0].target, 'outcome_m'); assert.equal(details[0].stated, 91964);
+});
+await t('1.15% -> "15%" must fail (the third real sample\'s exact comparison_fee corruption)', () => {
+  const mentionsById = new Map([['rate_m', mk(6.5)], ['fee_m', mk(15)], ['outcome_m', mk(232109)]]);
+  const { details } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { rate: { mention: 'rate_m' }, fee: { mention: 'fee_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.equal(details[0].ok, false); assert.equal(details[0].target, 'outcome_m'); assert.equal(details[0].stated, 232109);
+});
+await t('correct fact-packet input + correct derived outcome -> PASS: the true 6.5%/0.1% over 28 years on $20,000 genuinely verifies', () => {
+  const mentionsById = new Map([['p_m', mk(20000)], ['y_m', mk(28)], ['rate_m', mk(6.5)], ['fee_m', mk(0.1)], ['outcome_m', mk(113605)]]);
+  const { results } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { principal: { mention: 'p_m' }, years: { mention: 'y_m' }, rate: { mention: 'rate_m' }, fee: { mention: 'fee_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.equal(results.get('c1').verified, true, 'the real, correct inputs must still verify cleanly — this repair must not create false positives');
+});
+await t('wrong input that genuinely evaluates to a different number than stated (not an eval failure) remains correctly caught exactly as before — unaffected by this repair', () => {
+  const mentionsById = new Map([['p_m', mk(20000)], ['y_m', mk(28)], ['rate_m', mk(5)], ['fee_m', mk(1)], ['outcome_m', mk(113605)]]);
+  const { details } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { principal: { mention: 'p_m' }, years: { mention: 'y_m' }, rate: { mention: 'rate_m' }, fee: { mention: 'fee_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.notEqual(details[0].ok, false, 'compute() evaluates fine with valid-shaped (if wrong) numeric inputs — this is the pre-existing, already-working catch path');
+  assert.equal(details[0].verified, false);
+  assert.ok(Math.abs(details[0].computed - 59974) < 1, `expected the wrong-input computation (~$59,974), got ${details[0].computed}`);
+});
+await t('integer-valued rates/fees remain valid: a plain 6% rate with no decimal still verifies normally (this repair only affects calculations that cannot evaluate at all)', () => {
+  const mentionsById = new Map([['p_m', mk(10000)], ['y_m', mk(10)], ['rate_m', mk(6)], ['outcome_m', mk(17908)]]);
+  const { results } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: { principal: { mention: 'p_m' }, years: { mention: 'y_m' }, rate: { mention: 'rate_m' } }, output: 'end_value', target: 'outcome_m' }] }, mentionsById);
+  assert.equal(results.get('c1').verified, true);
+});
+await t('a cascading "depends on a calculation that did not resolve" failure (never has a target) remains unaffected — this repair is scoped only to the unevaluable-with-mapped-inputs case', () => {
+  const { details } = runCalculations({ calculations: [{ id: 'c1', model: 'compound_growth', inputs: {}, output: 'end_value', target: 'outcome_m' }, { id: 'c2', model: 'arithmetic', inputs: { a: { calc: 'c1' } }, output: 'value', target: 'gap_m' }] }, new Map([['outcome_m', mk(113605)], ['gap_m', mk(5000)]]));
+  const c2detail = details.find((d) => d.calc === 'c2');
+  assert.equal(c2detail.reason, 'depends on a calculation that did not resolve');
+  assert.equal(c2detail.target, undefined, 'a dependency-chain cascade failure still carries no target — unchanged from before this repair');
+});
+
+console.log('\n[16] Number Narration Clarity Gate (2026-10-03) — deterministic spoken-number expansion/collapse (lib/nextwaveV2Renderer/production/speech.mjs)');
+const REGRESSION_MATRIX = [
+  { span: '$2,346', kind: 'money', value: 2346 }, { span: '$25,500', kind: 'money', value: 25500 },
+  { span: '$303,597', kind: 'money', value: 303597 }, { span: '$1,000,000', kind: 'money', value: 1000000 },
+  { span: '0.06%', kind: 'percent', value: 0.06 }, { span: '0.09%', kind: 'percent', value: 0.09 },
+  { span: '0.1%', kind: 'percent', value: 0.1 }, { span: '0.9%', kind: 'percent', value: 0.9 },
+  { span: '1.15%', kind: 'percent', value: 1.15 }, { span: '6.5%', kind: 'percent', value: 6.5 },
+  { span: '7.5%', kind: 'percent', value: 7.5 }, { span: '8%', kind: 'percent', value: 8 },
+  { span: '8 years', kind: 'duration', value: 8 }, { span: '24 years', kind: 'duration', value: 24 },
+];
+await t('spoken-form round-trip: every required regression value speaks a phrase that the EXISTING production words-to-number parser (api/ops.js _nextwaveWordsToNumber, lifted verbatim into baseDeps) reads back to the identical numeric value — canonical meaning preserved end-to-end, text differs, value never does', () => {
+  for (const { span, kind, value } of REGRESSION_MATRIX) {
+    const r = spanTextToSpoken(span, kind);
+    assert.ok(r, `spanTextToSpoken returned null for ${span}`);
+    const { value: roundTripped } = baseDeps.wordsToNumber(r.text);
+    assert.ok(Math.abs(roundTripped - value) < 1e-9, `${span} -> "${r.text}" -> ${roundTripped}, expected ${value}`);
+  }
+});
+await t('percent SYMBOL-form spans ("0.06%") never pass a literal "%" character to TTS — the entity\'s kind drives the spoken unit word, never the source punctuation (ElevenLabs\' handling of raw symbols/tags was already shown unreliable by the earlier <break> tag probe)', () => {
+  assert.equal(spanTextToSpoken('0.06%', 'percent').text, 'zero point zero six percent');
+  assert.equal(spanTextToSpoken('6.5%', 'percent').text, 'six point five percent');
+  for (const { span } of REGRESSION_MATRIX.filter((m) => m.kind === 'percent')) assert.ok(!spanTextToSpoken(span, 'percent').text.includes('%'), `no literal % may reach the spoken string for ${span}`);
+});
+await t('decimal precision is never lost or coarsened: 0.06 / 0.09 / 0.1 / 0.9 / 1.15 remain distinct from each other and from any whole-number reading', () => {
+  const spoken = ['0.06%', '0.09%', '0.1%', '0.9%', '1.15%'].map((s) => spanTextToSpoken(s, 'percent').text);
+  assert.deepEqual(spoken, ['zero point zero six percent', 'zero point zero nine percent', 'zero point one percent', 'zero point nine percent', 'one point one five percent']);
+  assert.equal(new Set(spoken).size, spoken.length, 'every distinct input decimal must produce a distinct spoken phrase (the exact "0.06% must never become six percent" invariant the PM order requires)');
+});
+await t('large integers expand correctly through the thousand/million scale: $303,597 and $1,000,000', () => {
+  assert.equal(spanTextToSpoken('$303,597', 'money').text, 'three hundred three thousand five hundred ninety-seven dollars');
+  assert.equal(spanTextToSpoken('$1,000,000', 'money').text, 'one million dollars');
+});
+await t('durations speak the number but reuse the actual written unit word verbatim (never re-derived or re-pluralized): 8 years vs 24 years, never confused with a same-numeral percent (8 years vs 8%)', () => {
+  assert.equal(spanTextToSpoken('8 years', 'duration').text, 'eight years');
+  assert.equal(spanTextToSpoken('24 years', 'duration').text, 'twenty-four years');
+  assert.notEqual(spanTextToSpoken('8 years', 'duration').text, spanTextToSpoken('8%', 'percent').text);
+});
+await t('the collapsed caption token is the ORIGINAL numeral exactly as written, never the Brain\'s reformatted display field, and never bundled with a trailing unit word as a second token — this is what keeps the real caption renderer\'s one-token-per-word.w invariant intact for a multi-token span like "8 years" (a bug caught and fixed this pass: collapsing the whole phrase to a two-word display crashed drawCaptions)', () => {
+  assert.equal(spanTextToSpoken('8 years', 'duration').numericDisplay, '8');
+  assert.equal(spanTextToSpoken('7 percent', 'percent').numericDisplay, '7');
+  assert.equal(spanTextToSpoken('$2,346', 'money').numericDisplay, '$2,346');
+  assert.equal(spanTextToSpoken('6.5%', 'percent').numericDisplay, '6.5%');
+});
+await t('a range or compact-scale shorthand this gate does not cover safely fails closed (returns null) rather than silently dropping part of the meaning — the exact real defect found in script A, where "2 to 3 days" first expanded to just "two days", losing the upper bound entirely', () => {
+  assert.equal(spanTextToSpoken('2 to 3 days', 'duration'), null);
+  assert.equal(spanTextToSpoken('$2.3 million', 'money'), null);
+});
+
+console.log('\n[16b] Number Narration — full expand/collapse pipeline against a synthetic multi-value script (canonical/display/alignment mapping + neighbor safety)');
+const NN_SCRIPT = 'The starting amount is $2,346 today. The rate is 6.5% with a 0.1% fee, but a corrupted comparison once used 1.15% instead. Over 8 years the outcome reaches $25,500, and over 24 years it reaches $303,597, a gap worth $1,000,000 if ignored. Smaller fee variants of 0.06%, 0.09%, 0.9%, 7.5%, and 8% were also tested.';
+const NN_SPECS = [
+  { span: '$2,346', kind: 'money', display: '$2,346' }, { span: '6.5%', kind: 'percent', display: '6.5%' },
+  { span: '0.1%', kind: 'percent', display: '0.1%' }, { span: '1.15%', kind: 'percent', display: '1.15%' },
+  { span: '8 years', kind: 'duration', display: '8' }, { span: '$25,500', kind: 'money', display: '$25,500' },
+  { span: '24 years', kind: 'duration', display: '24' }, { span: '$303,597', kind: 'money', display: '$303,597' },
+  { span: '$1,000,000', kind: 'money', display: '$1,000,000' }, { span: '0.06%', kind: 'percent', display: '0.06%' },
+  { span: '0.09%', kind: 'percent', display: '0.09%' }, { span: '0.9%', kind: 'percent', display: '0.9%' },
+  { span: '7.5%', kind: 'percent', display: '7.5%' }, { span: '8%', kind: 'percent', display: '8%' },
+];
+const buildValues = (script, specs) => { let cursor = 0; return specs.map((s, i) => { const start = script.indexOf(s.span, cursor); assert.ok(start >= 0, `fixture error: "${s.span}" not found in NN_SCRIPT after offset ${cursor}`); const end = start + s.span.length; cursor = end; return { id: `v${i}`, kind: s.kind, display: s.display, provenance: { kind: 'script', unit_id: `u${String(i).padStart(2, '0')}`, span_text: s.span, start: 0, end: s.span.length } }; }); };
+const NN_VALUES = buildValues(NN_SCRIPT, NN_SPECS);
+await t('every one of the 14 regression-matrix values survives expand -> synthetic ElevenLabs-shaped alignment -> collapse, landing on its OWN numeral, in script order, with none skipped and none merged into a neighbor, and every caption word stays a single space-free token (the exact invariant the real captions.mjs renderer requires)', () => {
+  const { ttsText, spans } = expandNumbersForSpeech(NN_SCRIPT, NN_VALUES);
+  assert.equal(spans.length, NN_VALUES.length, 'every regression-matrix value must produce exactly one TTS span — none silently skipped');
+  const alignment = synthAlign(ttsText);
+  const words = wordsFromAlignmentWithSpeechSpans(ttsText, alignment, spans);
+  words.forEach((w) => assert.ok(!/\s/.test(w.w), `caption word "${w.w}" contains whitespace — would desync the real caption renderer's per-token index`));
+  const collapsed = words.filter((w) => NN_VALUES.some((v) => v.display === w.w));
+  assert.equal(collapsed.length, NN_VALUES.length, `expected exactly ${NN_VALUES.length} collapsed numeral caption words, got ${collapsed.length}`);
+  NN_VALUES.forEach((v, i) => assert.equal(collapsed[i].w, v.display, `value #${i} ("${v.provenance.span_text}") collapsed to the wrong entity — possible cross-mapping to a neighbor`));
+  for (let i = 1; i < collapsed.length; i++) assert.ok(collapsed[i].start >= collapsed[i - 1].end, `collapsed caption entries must never overlap in time (index ${i}: "${collapsed[i - 1].w}" vs "${collapsed[i].w}")`);
+  assert.equal(words.length, NN_SCRIPT.split(/\s+/).filter(Boolean).length, 'collapsing a multi-word spoken numeral back to one caption word must never change the overall caption word count the renderer/alignment sanity check expects');
+});
+await t('expandNumbersForSpeech never mutates its inputs — the canonical script string and every value\'s display/provenance fields are byte-identical before and after (representation C is derived FROM A/B, it never writes back into them)', () => {
+  const before = JSON.stringify(NN_VALUES);
+  expandNumbersForSpeech(NN_SCRIPT, NN_VALUES);
+  assert.equal(JSON.stringify(NN_VALUES), before);
+});
+await t('a script with zero script-sourced financial values is a true no-op — already-spelled-out scripts (e.g. the accepted PASS_SCRIPT fixture, which already reads "five hundred dollars" etc.) are left byte-for-byte unchanged, exactly as before this gate existed', () => {
+  const { ttsText, spans } = expandNumbersForSpeech(PASS_SCRIPT, []);
+  assert.equal(ttsText, PASS_SCRIPT);
+  assert.equal(spans.length, 0);
+});
+await t('REGRESSION (2026-10-03 real defect, script A): a duplicate span_text ("$3,000" appearing twice) resolves each occurrence to its OWN position via document order rather than scrambling the text, and the unsupported range form ("2 to 3 days") safely falls back to fully unexpanded rather than silently losing its upper bound', async () => {
+  const scriptA = scriptOf('A');
+  const b = await brain(scriptA);
+  const { ttsText, spans } = expandNumbersForSpeech(scriptA, b.values);
+  assert.ok(ttsText.includes('paid you three thousand dollars in dividends'), 'first $3,000 occurrence must expand in place, not scramble the preceding prose');
+  assert.ok(ttsText.includes('same three thousand dollars buys fewer shares'), 'second $3,000 occurrence must resolve to ITS OWN position, not collide with the first one\'s');
+  assert.ok(ttsText.includes('take 2 to 3 days to process'), '"2 to 3 days" is a range this gate does not cover — it must be left exactly as written, never truncated to "two days"');
+  assert.equal(spans.length, 3, 'exactly 3 of the 4 script-sourced mentions expand ($3,000 x2, 2% — the range is correctly skipped)');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

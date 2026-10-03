@@ -17040,6 +17040,82 @@ async function nextwaveV2RouteStatus(req, res) {
   const st = await nwv2rGetState(id); if (!st) return res.status(404).json({ ok: false, error: 'build_not_found' });
   return res.status(200).json(nwv2rSummary(st));
 }
+// CEO-gated diagnostic (2026-10-02, B4 consolidated review): lists every persisted NextWave V2 route
+// build (by scanning app_settings for the nwv2r_state_ key prefix) with just enough summary per build
+// to identify which pieces exist and reached ready_for_review, without needing to already know their
+// build_ids. Pure read, no vendor spend.
+async function nextwaveV2RouteListBuilds(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const rows = await sbGet(`app_settings?key=like.nwv2r_state_%25&select=key,value,updated_at&order=updated_at.asc`);
+    const builds = (rows || []).map((r) => {
+      let st = null; try { st = JSON.parse(r.value || 'null'); } catch {}
+      if (!st) return { key: r.key, parse_error: true };
+      return { build_id: st.build_id, format: st.format, status: st.status, title: st.title || null, video_url: (st.final && st.final.video_url) || null, updated_at: r.updated_at };
+    });
+    return res.status(200).json({ ok: true, count: builds.length, builds });
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+}
+// CEO-gated diagnostic (2026-09-30, Bounded Render-QC order Part 1): nwv2rSummary() strips
+// qc_pre_render down to {ok, numbers, idle_windows, captions} for client display, discarding
+// qc_pre_render.issues[].detail (the exact {t, token, in} entries numberProvenance() records per
+// unprovenanced number) and the full storyboard/scenes/renderer_params needed to trace a flagged
+// number back through the Brain/Scene-Spec/renderer chain. Returns the RAW persisted build state
+// exactly as stored — no summarization. Pure read of already-persisted state: no vendor call, no
+// spend, no write.
+async function nextwaveV2RouteDebugState(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const id = String((req.method === 'POST' ? (req.body || {}).build_id : req.query.build_id) || '');
+  if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id_invalid' });
+  const st = await nwv2rGetState(id); if (!st) return res.status(404).json({ ok: false, error: 'build_not_found' });
+  return res.status(200).json({ ok: true, raw: st });
+}
+// CEO-gated diagnostic (2026-10-03, Number Narration Clarity Gate order Part 1-2): synthesizes a
+// short, ARBITRARY text directly through the existing ElevenLabs integration (nextwaveSynthesizeNarrationElevenLabsWithTimestamps,
+// eleven_turbo_v2_5, the exact function the real route uses) — completely bypassing the Brain/
+// storyboard pipeline, for isolated narration-mechanism testing (does a <break> tag get spoken
+// literally or honored as audio timing? does a punctuation pause measurably widen the alignment
+// gap?) without spending on a full route_start. No new vendor; reuses the existing credentials/
+// function only. Uploads the resulting audio for real listening (by a human) and returns the full
+// alignment so the mechanism's effect can be verified structurally (literal-tag leakage would show
+// up as those characters in alignment.characters, exactly like the disclaimer-bracket defect did).
+async function nextwaveV2NarrationProbe(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const text = String((req.body || {}).text || '');
+  const label = String((req.body || {}).label || 'probe').replace(/[^a-z0-9_-]/gi, '_').slice(0, 60);
+  if (!text.trim() || text.length > 2000) return res.status(400).json({ ok: false, error: 'text (1..2000 chars) required' });
+  try {
+    const voiceId = (await nextwaveV2GetVoiceConfig()).voice_id || null;
+    const r = await nextwaveSynthesizeNarrationElevenLabsWithTimestamps(text, voiceId);
+    if (!r.ok) return res.status(502).json(r);
+    const id = `probe_${label}_${Date.now()}`;
+    const audio_url = await sbStorageUpload(`nextwave-v2-route/narration-probes/${id}.mp3`, r.buffer, 'audio/mpeg');
+    return res.status(200).json({ ok: true, text, audio_url, alignment: r.alignment, chars: text.length });
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+}
+// CEO-gated containment (2026-10-03, P0 Numeric Input Integrity order Part 1): marks a build
+// terminally invalid using the EXISTING 'blocked' status value — chunk/finish already refuse any
+// build whose status isn't 'planned'/'rendered'/'ready_for_review' (confirmed by existing e2e tests),
+// so 'blocked' is sufficient to make this build permanently unbuildable/unfinishable with no new
+// status value introduced. Archives the pre-containment state under a separate key FIRST (full byte-
+// for-byte copy — storyboard, qc_pre_render, narration/audio_url, script, vendor all preserved) so no
+// forensic evidence is lost, then patches only `status` and `exception` on the live key.
+async function nextwaveV2RouteContain(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const id = String((req.body || {}).build_id || ''); const reason = String((req.body || {}).reason || 'factual_integrity_contamination');
+  if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id_invalid' });
+  const st = await nwv2rGetState(id); if (!st) return res.status(404).json({ ok: false, error: 'build_not_found' });
+  if (st.status === 'blocked' && st.exception && st.exception.reasons && st.exception.reasons.some((r) => r.kind === 'contained_factual_integrity')) {
+    return res.status(200).json({ ok: true, already_contained: true, build_id: id, status: st.status });
+  }
+  const archiveKey = `nwv2r_state_${id}_precontainment_${Date.now()}`;
+  await nwv2rPutState(archiveKey, st); // full untouched snapshot, forensic record
+  const contained = { ...st, status: 'blocked', exception: { route: 'BLOCK', reasons: [{ kind: 'contained_factual_integrity', detail: reason }], owner: 'engineering_triage' }, prior_status: st.status, contained_at: new Date().toISOString() };
+  await nwv2rPutState(id, contained);
+  return res.status(200).json({ ok: true, build_id: id, prior_status: st.status, status: 'blocked', archive_key: archiveKey });
+}
 // START — Brain gate first. Vendor spend (narration) happens only after PASS. Idempotent: an existing planned build is returned as-is.
 async function nextwaveV2RouteStart(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
@@ -19100,6 +19176,10 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_route_runtime_probe') return await nextwaveV2RouteRuntimeProbe(req, res);
     if (action === 'nextwave_v2_route_set_enabled')  return await nextwaveV2RouteSetEnabled(req, res);
     if (action === 'nextwave_v2_route_status')       return await nextwaveV2RouteStatus(req, res);
+    if (action === 'nextwave_v2_route_debug_state')  return await nextwaveV2RouteDebugState(req, res);
+    if (action === 'nextwave_v2_route_contain')      return await nextwaveV2RouteContain(req, res);
+    if (action === 'nextwave_v2_narration_probe')    return await nextwaveV2NarrationProbe(req, res);
+    if (action === 'nextwave_v2_route_list_builds')  return await nextwaveV2RouteListBuilds(req, res);
     if (action === 'nextwave_v2_route_start')        return await nextwaveV2RouteStart(req, res);
     if (action === 'nextwave_v2_route_chunk')        return await nextwaveV2RouteChunk(req, res);
     if (action === 'nextwave_v2_route_finish')       return await nextwaveV2RouteFinish(req, res);
