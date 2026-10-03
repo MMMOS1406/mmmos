@@ -35,10 +35,10 @@ function extractConst(name) {
 }
 const liftSrc = [
   'NEXTWAVE_V2_META_MARKER_RE', 'NEXTWAVE_V2_NUMBER_WORDS', 'NEXTWAVE_V2_DYNAMIC_NUMBER_RE',
-  'NEXTWAVE_V2_ONES', 'NEXTWAVE_V2_TENS', 'NEXTWAVE_V2_SCALES',
+  'NEXTWAVE_V2_ONES', 'NEXTWAVE_V2_DIGIT_WORDS', 'NEXTWAVE_V2_TENS', 'NEXTWAVE_V2_SCALES',
   'NWV2_LONG_RECURRING_CUES', 'NWV2_LONG_GROWTH_CUES', 'NWV2_LONG_COMPARE_CUES',
 ].map(extractConst).join('\n') + '\n' + [
-  'nextwaveSegmentMeaningUnits', '_nextwaveWordsToNumber', 'nextwaveHasDynamicNumbers', 'nwv2ClassifyLongTreatment',
+  'nextwaveSegmentMeaningUnits', '_nextwaveWordsToNumber', '_nextwaveWholeWordsToNumber', 'nextwaveHasDynamicNumbers', 'nwv2ClassifyLongTreatment',
 ].map(extractFn).join('\n') +
   '\nreturn { segmentMeaningUnits: nextwaveSegmentMeaningUnits, wordsToNumber: _nextwaveWordsToNumber, numberRegexSource: NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source, classifyLongTreatment: nwv2ClassifyLongTreatment };';
 export const deps = new Function(liftSrc)();
