@@ -7219,6 +7219,11 @@ async function youtubeUploadVideo(req, res) {
     publishAt,         // ISO timestamp for scheduled publish (requires privacy=private)
     madeForKids,       // boolean, defaults false (we're general audience)
     playlistCategory,  // v13.72.0 — 'romantic'|'emotional'|'happy' → auto-add to named playlist
+    containsSyntheticMedia, // Release A3 (2026-09-28) — optional, additive; official YouTube Data API
+                             // field (status.containsSyntheticMedia, live since 2024-10-30, confirmed
+                             // via developers.google.com/youtube/v3/docs/videos) for the structured
+                             // altered/synthetic-content disclosure. Omitted by every existing caller
+                             // today, so this changes nothing unless a caller explicitly opts in.
   } = body;
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'missing_video_url' });
 
@@ -7291,6 +7296,10 @@ async function youtubeUploadVideo(req, res) {
     metadata.status.publishAt = publishAt;
     metadata.status.privacyStatus = 'private'; // required for scheduled publish
   }
+  // Release A3 — additive, opt-in only (see containsSyntheticMedia destructure above).
+  if (containsSyntheticMedia === true) {
+    metadata.status.containsSyntheticMedia = true;
+  }
 
   try {
     const result = await _youtubeResumableUpload(accessToken, videoUrl, metadata);
@@ -7299,7 +7308,12 @@ async function youtubeUploadVideo(req, res) {
     let playlistResult = null;
     if (playlistCategory && youtubeVideoId) {
       try {
-        const plTitle = _FARSI_PLAYLIST_MAP[playlistCategory] || ('SRV Farsi - ' + playlistCategory);
+        // Production Hardening Release A2 (2026-09-28) — the fallback naming below was hardcoded
+        // to "SRV Farsi - <category>" regardless of engine, which would have mis-named NextWave's
+        // playlists. SRV Farsi's own resulting value (map lookup, then its fallback) is unchanged;
+        // only a NextWave-specific fallback branch was added, reusing the exact same existing
+        // mechanism (_ytGetOrCreatePlaylist / _ytAddVideoToPlaylist) per the order's "no new logic".
+        const plTitle = _FARSI_PLAYLIST_MAP[playlistCategory] || (engine === 'NextWave' ? ('NextWave - ' + playlistCategory) : ('SRV Farsi - ' + playlistCategory));
         const pl = await _ytGetOrCreatePlaylist(plTitle, accessToken);
         await _ytAddVideoToPlaylist(youtubeVideoId, pl.id, accessToken);
         playlistResult = { id: pl.id, title: pl.title };
@@ -11676,9 +11690,14 @@ function nextwaveSegmentMeaningUnits(script, minWords = 4) {
   return units;
 }
 
-const NEXTWAVE_V2_NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +
+// Phase 2 decimal-integrity repair (2026-09-30) — "zero" and "point" added so spelled-out
+// decimals ("seven point five percent", "zero point zero six percent") match as ONE run instead
+// of fracturing at the unrecognized "point" and silently losing everything before it. See
+// _nextwaveWordsToNumber for the actual decimal composition (this only widens what the regex
+// captures as a candidate span — composition happens after, with an explicit safe-failure path).
+const NEXTWAVE_V2_NUMBER_WORDS = 'zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|' +
   'fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|' +
-  'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion';
+  'fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|point';
 // Phase 4.5C — generalized to cover every form the real bond-duration
 // candidate exposed as missing: percent SIGNS (7%, 0.5%, 4.5%) had no
 // branch at all (only the spelled word "percent" was recognized); the
@@ -11770,10 +11789,12 @@ function nextwaveRankNumberPhrase(text) {
 // display card. Generic English-number-words parser -- not a lookup
 // table -- so it works for any future Finance/Growth/Wealth amount.
 const NEXTWAVE_V2_ONES = {
-  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
   nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
   fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
 };
+// digit-words valid on the decimal side of "point" — 0-9 only, never a teen/ten/place-value word.
+const NEXTWAVE_V2_DIGIT_WORDS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
 const NEXTWAVE_V2_TENS = {
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
   eighty: 80, ninety: 90,
@@ -11800,10 +11821,36 @@ function _nextwaveWordsToNumber(phrase) {
   if (digitMatch) return { value: parseFloat(digitMatch[1].replace(/,/g, '')), suffix };
 
   let tokens = text.split(/[\s,-]+/).filter((t) => t && t !== 'and');
+
+  // Phase 2 decimal-integrity repair (2026-09-30) — "seven point five", "zero point zero six".
+  // The decimal side of "point" is a sequence of SINGLE DIGITS spoken one at a time (never a
+  // place-value word like "hundred"/"twenty"), concatenated as literal decimal digits: "point
+  // zero six" is 0.06 (six hundredths), not 0.6 or 6 — composed explicitly below, never inferred.
+  // More than one "point", an empty decimal side, or any non-digit word on the decimal side is an
+  // ambiguous/unsupported phrase: returns NaN rather than guessing, so parseNumeric()'s existing
+  // `!(value > 0)` check safely drops the mention (uncovered_numeric_token) instead of silently
+  // binding a wrong number.
+  const pointCount = tokens.filter((t) => t === 'point').length;
+  if (pointCount > 0) {
+    if (pointCount > 1) return { value: NaN, suffix };
+    const pi = tokens.indexOf('point');
+    const intWords = tokens.slice(0, pi);
+    const decWords = tokens.slice(pi + 1);
+    if (!decWords.length || decWords.some((w) => !(w in NEXTWAVE_V2_DIGIT_WORDS))) return { value: NaN, suffix };
+    const intValue = intWords.length ? _nextwaveWholeWordsToNumber(intWords) : 0;
+    if (!Number.isFinite(intValue)) return { value: NaN, suffix };
+    const decDigits = decWords.map((w) => String(NEXTWAVE_V2_DIGIT_WORDS[w])).join('');
+    return { value: intValue + parseFloat('0.' + decDigits), suffix };
+  }
+
   let halfBonus = 0;
   if (tokens.slice(-2).join(' ') === 'a half') { halfBonus = 0.5; tokens = tokens.slice(0, -2); }
   else if (tokens.slice(-2).join(' ') === 'a quarter') { halfBonus = 0.25; tokens = tokens.slice(0, -2); }
-
+  return { value: _nextwaveWholeWordsToNumber(tokens) + halfBonus, suffix };
+}
+// the pre-existing whole-number-only accumulation (ones/tens/hundred/scale), factored out so the
+// decimal path above can reuse it for the integer side of "point" instead of duplicating it.
+function _nextwaveWholeWordsToNumber(tokens) {
   let result = 0, current = 0;
   for (const tok of tokens) {
     if (tok in NEXTWAVE_V2_ONES) current += NEXTWAVE_V2_ONES[tok];
@@ -11812,8 +11859,7 @@ function _nextwaveWordsToNumber(phrase) {
     else if (tok in NEXTWAVE_V2_SCALES) { result += (current || 1) * NEXTWAVE_V2_SCALES[tok]; current = 0; }
     else if (tok === 'a') current += 1;
   }
-  result += current + halfBonus;
-  return { value: result, suffix };
+  return result + current;
 }
 
 function nextwaveFormatFinancialNumber(phrase) {
@@ -16882,6 +16928,36 @@ async function nextwaveV2StoryboardBrainAction(req, res) {
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
+// Creative B4 diagnostic (2026-09-30) — the CEO-gated production route's own status/summary
+// (nwv2rSummary) intentionally strips the semantic layer's result down to gate/exception for VA
+// display. This returns the FULL raw nextwaveV2BuildStoryboardSemantic() result (every proposal's
+// role/scenario decisions, every calculation attempt with stated-vs-computed detail, rejected
+// proposals) so a NEEDS_REVIEW/BLOCK from the real route can actually be diagnosed instead of just
+// observed. Same CEO gate as the real route: this makes the same two real (cheap) proposer calls
+// nextwaveV2RouteStart itself makes, no narration/render/storage spend beyond that.
+async function nextwaveV2StoryboardBrainSemanticAction(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const { script } = req.body || {};
+  if (!script || typeof script !== 'string' || !script.trim()) return res.status(400).json({ ok: false, error: 'script (string) required' });
+  if (script.length > 6000) return res.status(400).json({ ok: false, error: 'script too long (max 6000 characters)' });
+  const key = process.env.ANTHROPIC_API_KEY; if (!key) return res.status(500).json({ ok: false, error: 'anthropic_not_configured' });
+  try {
+    const L = await nwv2rLib();
+    const tallied = L.route.makeTalliedCaller(L.prop.makeLiveCaller(key), L.prop.costOf);
+    const out = await L.sem.nextwaveV2BuildStoryboardSemantic(script, {
+      segmentMeaningUnits: nextwaveSegmentMeaningUnits,
+      wordsToNumber: _nextwaveWordsToNumber,
+      numberRegexSource: NEXTWAVE_V2_DYNAMIC_NUMBER_RE.source,
+      classifyLongTreatment: nwv2ClassifyLongTreatment,
+      callModel: tallied.callModel,
+    });
+    out.vendor_tally = tallied.tally;
+    return res.status(out.ok ? 200 : 422).json(out);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // NextWave V2 PRODUCTION ROUTE — the accepted V2 Creative Production Standard (benchmark commit fa34eb0), integrated as ADDITIVE,
 // FEATURE-FLAGGED actions. Approved script -> guarded semantic Storyboard Brain -> PASS / NEEDS_REVIEW / BLOCK -> assets ->
@@ -16963,6 +17039,82 @@ async function nextwaveV2RouteStatus(req, res) {
   if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id_invalid' });
   const st = await nwv2rGetState(id); if (!st) return res.status(404).json({ ok: false, error: 'build_not_found' });
   return res.status(200).json(nwv2rSummary(st));
+}
+// CEO-gated diagnostic (2026-10-02, B4 consolidated review): lists every persisted NextWave V2 route
+// build (by scanning app_settings for the nwv2r_state_ key prefix) with just enough summary per build
+// to identify which pieces exist and reached ready_for_review, without needing to already know their
+// build_ids. Pure read, no vendor spend.
+async function nextwaveV2RouteListBuilds(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const rows = await sbGet(`app_settings?key=like.nwv2r_state_%25&select=key,value,updated_at&order=updated_at.asc`);
+    const builds = (rows || []).map((r) => {
+      let st = null; try { st = JSON.parse(r.value || 'null'); } catch {}
+      if (!st) return { key: r.key, parse_error: true };
+      return { build_id: st.build_id, format: st.format, status: st.status, title: st.title || null, video_url: (st.final && st.final.video_url) || null, updated_at: r.updated_at };
+    });
+    return res.status(200).json({ ok: true, count: builds.length, builds });
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+}
+// CEO-gated diagnostic (2026-09-30, Bounded Render-QC order Part 1): nwv2rSummary() strips
+// qc_pre_render down to {ok, numbers, idle_windows, captions} for client display, discarding
+// qc_pre_render.issues[].detail (the exact {t, token, in} entries numberProvenance() records per
+// unprovenanced number) and the full storyboard/scenes/renderer_params needed to trace a flagged
+// number back through the Brain/Scene-Spec/renderer chain. Returns the RAW persisted build state
+// exactly as stored — no summarization. Pure read of already-persisted state: no vendor call, no
+// spend, no write.
+async function nextwaveV2RouteDebugState(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const id = String((req.method === 'POST' ? (req.body || {}).build_id : req.query.build_id) || '');
+  if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id_invalid' });
+  const st = await nwv2rGetState(id); if (!st) return res.status(404).json({ ok: false, error: 'build_not_found' });
+  return res.status(200).json({ ok: true, raw: st });
+}
+// CEO-gated diagnostic (2026-10-03, Number Narration Clarity Gate order Part 1-2): synthesizes a
+// short, ARBITRARY text directly through the existing ElevenLabs integration (nextwaveSynthesizeNarrationElevenLabsWithTimestamps,
+// eleven_turbo_v2_5, the exact function the real route uses) — completely bypassing the Brain/
+// storyboard pipeline, for isolated narration-mechanism testing (does a <break> tag get spoken
+// literally or honored as audio timing? does a punctuation pause measurably widen the alignment
+// gap?) without spending on a full route_start. No new vendor; reuses the existing credentials/
+// function only. Uploads the resulting audio for real listening (by a human) and returns the full
+// alignment so the mechanism's effect can be verified structurally (literal-tag leakage would show
+// up as those characters in alignment.characters, exactly like the disclaimer-bracket defect did).
+async function nextwaveV2NarrationProbe(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const text = String((req.body || {}).text || '');
+  const label = String((req.body || {}).label || 'probe').replace(/[^a-z0-9_-]/gi, '_').slice(0, 60);
+  if (!text.trim() || text.length > 2000) return res.status(400).json({ ok: false, error: 'text (1..2000 chars) required' });
+  try {
+    const voiceId = (await nextwaveV2GetVoiceConfig()).voice_id || null;
+    const r = await nextwaveSynthesizeNarrationElevenLabsWithTimestamps(text, voiceId);
+    if (!r.ok) return res.status(502).json(r);
+    const id = `probe_${label}_${Date.now()}`;
+    const audio_url = await sbStorageUpload(`nextwave-v2-route/narration-probes/${id}.mp3`, r.buffer, 'audio/mpeg');
+    return res.status(200).json({ ok: true, text, audio_url, alignment: r.alignment, chars: text.length });
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+}
+// CEO-gated containment (2026-10-03, P0 Numeric Input Integrity order Part 1): marks a build
+// terminally invalid using the EXISTING 'blocked' status value — chunk/finish already refuse any
+// build whose status isn't 'planned'/'rendered'/'ready_for_review' (confirmed by existing e2e tests),
+// so 'blocked' is sufficient to make this build permanently unbuildable/unfinishable with no new
+// status value introduced. Archives the pre-containment state under a separate key FIRST (full byte-
+// for-byte copy — storyboard, qc_pre_render, narration/audio_url, script, vendor all preserved) so no
+// forensic evidence is lost, then patches only `status` and `exception` on the live key.
+async function nextwaveV2RouteContain(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const id = String((req.body || {}).build_id || ''); const reason = String((req.body || {}).reason || 'factual_integrity_contamination');
+  if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id_invalid' });
+  const st = await nwv2rGetState(id); if (!st) return res.status(404).json({ ok: false, error: 'build_not_found' });
+  if (st.status === 'blocked' && st.exception && st.exception.reasons && st.exception.reasons.some((r) => r.kind === 'contained_factual_integrity')) {
+    return res.status(200).json({ ok: true, already_contained: true, build_id: id, status: st.status });
+  }
+  const archiveKey = `nwv2r_state_${id}_precontainment_${Date.now()}`;
+  await nwv2rPutState(archiveKey, st); // full untouched snapshot, forensic record
+  const contained = { ...st, status: 'blocked', exception: { route: 'BLOCK', reasons: [{ kind: 'contained_factual_integrity', detail: reason }], owner: 'engineering_triage' }, prior_status: st.status, contained_at: new Date().toISOString() };
+  await nwv2rPutState(id, contained);
+  return res.status(200).json({ ok: true, build_id: id, prior_status: st.status, status: 'blocked', archive_key: archiveKey });
 }
 // START — Brain gate first. Vendor spend (narration) happens only after PASS. Idempotent: an existing planned build is returned as-is.
 async function nextwaveV2RouteStart(req, res) {
@@ -19019,10 +19171,15 @@ export default async function handler(req, res) {
     // panels only), comparison/timeline treatments for real visual variety.
     if (action === 'nextwave_v2_classify_long_beats')  return await nextwaveV2ClassifyLongBeats(req, res);
     if (action === 'nextwave_v2_storyboard_brain')     return await nextwaveV2StoryboardBrainAction(req, res);
+    if (action === 'nextwave_v2_storyboard_brain_semantic') return await nextwaveV2StoryboardBrainSemanticAction(req, res);
     if (action === 'nextwave_v2_route_config')       return await nextwaveV2RouteConfig(req, res);      // V2 production route (feature-flagged, default OFF)
     if (action === 'nextwave_v2_route_runtime_probe') return await nextwaveV2RouteRuntimeProbe(req, res);
     if (action === 'nextwave_v2_route_set_enabled')  return await nextwaveV2RouteSetEnabled(req, res);
     if (action === 'nextwave_v2_route_status')       return await nextwaveV2RouteStatus(req, res);
+    if (action === 'nextwave_v2_route_debug_state')  return await nextwaveV2RouteDebugState(req, res);
+    if (action === 'nextwave_v2_route_contain')      return await nextwaveV2RouteContain(req, res);
+    if (action === 'nextwave_v2_narration_probe')    return await nextwaveV2NarrationProbe(req, res);
+    if (action === 'nextwave_v2_route_list_builds')  return await nextwaveV2RouteListBuilds(req, res);
     if (action === 'nextwave_v2_route_start')        return await nextwaveV2RouteStart(req, res);
     if (action === 'nextwave_v2_route_chunk')        return await nextwaveV2RouteChunk(req, res);
     if (action === 'nextwave_v2_route_finish')       return await nextwaveV2RouteFinish(req, res);

@@ -15987,6 +15987,23 @@ async function nextwaveV2RouteBuild(pkg){
     const s=await sr.json();
     if(!s.ok){pkg.renderStatus='failed';pkg.renderError=s.error||('HTTP '+sr.status);pkg.nextwaveV2Route.status='failed';await _nextwaveV2RoutePersist(pkg);return{ok:false,reason:'start_failed',detail:pkg.renderError};}
     pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{buildId:s.build_id,status:s.status,gate:s.gate,exception:s.exception||null,vendor:s.vendor||null,durationSec:s.duration_sec||null,chunkCount:s.chunk_count||0,qcPre:s.qc_pre_render||null,illustration:s.illustration||null});
+    // v16.66.1 — idempotent re-entry fix: `start` returns the PRIOR persisted state (reused:true, zero vendor
+    // spend) whenever this exact build_id (a pure hash of route revision + format + script) already reached a
+    // terminal status. A build already at 'ready_for_review' already carries its finished `final` (video_url/
+    // thumbnail_url/encode) right here in `s` — chunking or finishing it again is not just wasted work, it is
+    // actively wrong: nextwave_v2_route_chunk refuses any state that isn't 'planned'/'rendered' (by design, so a
+    // finished video can never be silently re-rendered/overwritten), so calling it here always 409s with
+    // "build_not_renderable: ready_for_review" and the loop below used to read that as a real failure — marking a
+    // perfectly good, already-complete video as renderStatus='failed'. Recognize the already-done case and skip
+    // straight to the same terminal branch the finish path uses, unchanged.
+    if(s.status==='ready_for_review'&&s.final&&s.final.video_url){
+      pkg.videoUrl=s.final.video_url;pkg.thumbnailUrl=s.final.thumbnail_url||null;
+      pkg.renderDurationSec=(s.final.encode&&s.final.encode.duration)||s.duration_sec||null;pkg.renderCompletedAt=new Date().toISOString();
+      pkg.renderStatus='enhanced'; // the existing "publishable MP4 ready" terminal state: Approve/Publish/Done consume it unchanged
+      pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{final:s.final,progress:{done:s.chunk_count||0,total:s.chunk_count||0}});
+      await _nextwaveV2RoutePersist(pkg);
+      return{ok:true,video_url:pkg.videoUrl,reused:true};
+    }
     if(s.status==='needs_review'||s.status==='blocked'){
       // STOP. No narration/asset/render spend has happened. Routed to VA Production / Product QC (needs_review) or Engineering triage (blocked).
       pkg.renderStatus=s.status==='blocked'?'v2_blocked':'v2_needs_review';
@@ -19246,8 +19263,21 @@ async function _nextWaveRunPublish(pkgId,taskId){
   if(!videoUrl){if(statusEl)statusEl.textContent='No video URL — go back to Build.';return;}
   const task=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
   const _publishAt=task&&task.publishAt||null;
+  // Release A2 (2026-09-28) — operational Publish QC gate: an empty/placeholder description must
+  // not silently pass. Previously nothing here checked this, and today's real test publishes went
+  // out with an empty description (only the server's own safety-net AI-disclosure line survived).
+  const _nwDescription=(pkg.captionYT||pkg.captionYouTube||pkg.description||'').trim();
+  if(!_nwDescription||_nwDescription.length<20){
+    if(statusEl){statusEl.style.color='#ef4444';statusEl.innerHTML='⚠ Publish blocked: description is empty or too short ('+_nwDescription.length+' chars). Go back to Review and add a real YouTube description (captionYT) before publishing.<br><br><button onclick="_nextWaveSetStage(\''+taskId+'\',\'review\');if(typeof renderTab===\'function\')renderTab(currentTab)" style="padding:10px 18px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.4);border-radius:8px;color:#3b82f6;font-weight:700;font-size:12px;cursor:pointer;font-family:\'Syne\',sans-serif">← Back to Review</button>';}
+    return;
+  }
   try{
     if(statusEl)statusEl.textContent='Uploading to YouTube…';
+    // Release A2 — deterministic NextWave playlist rule: one playlist per content angle for
+    // Shorts (GROW/AVOID/SAVE/DECIDE), one shared "Long Form" playlist for Longs (which combine
+    // 3 angles and don't cleanly fit a single-pillar playlist).
+    const _nwAngle=String(pkg.angle||'').toUpperCase();
+    const _nwPlaylistCategory=(pkg.contentFormat==='long')?'Long Form':(['GROW','AVOID','SAVE','DECIDE'].find(function(a){return _nwAngle.indexOf(a)===0;})||null);
     const r=await fetch('/api/ops?action=youtube_upload_video',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -19255,12 +19285,20 @@ async function _nextWaveRunPublish(pkgId,taskId){
         videoUrl:videoUrl,
         engine:'NextWave',
         title:pkg.title||'NextWave',
-        description:pkg.captionYT||pkg.captionYouTube||pkg.description||'',
+        description:_nwDescription,
         tags:(pkg.hashtags||'').split(/[\s,#]+/).filter(Boolean),
-        categoryId:'22',
+        categoryId:'27', // Release A2 — Education (was 22 People & Blogs)
         privacyStatus:'private',
         madeForKids:false,
         publishAt:_publishAt,
+        playlistCategory:_nwPlaylistCategory,
+        // Release A3 (2026-09-28) — official, API-settable structured disclosure
+        // (status.containsSyntheticMedia; confirmed live via YouTube Data API docs).
+        // Every NextWave video is AI-narrated (ElevenLabs) and either uses a realistic
+        // AI avatar (HeyGen path) or AI-generated illustrated scenes (V2 route path) —
+        // both are exactly what this field exists to disclose, so it's set unconditionally
+        // rather than guessed per-package.
+        containsSyntheticMedia:true,
       }),
     });
     const d=await r.json().catch(function(){return {};});
@@ -19275,11 +19313,21 @@ async function _nextWaveRunPublish(pkgId,taskId){
       // reliably reflects whether it actually reached YouTube before Publish
       // reports success — the CEO's order is explicit that a thumbnail merely
       // existing in storage is not sufficient.
-      if(pkg.nextwaveV2ThumbnailUrl&&_ytId){
+      // Release A2 (2026-09-28) — two build paths now feed this same publish function:
+      // the default HeyGen/Submagic path (nwv2ProductionStartBuild) stores its deterministic
+      // thumbnail in pkg.nextwaveV2ThumbnailUrl specifically to dodge _pollHeygenRenders
+      // overwriting pkg.thumbnailUrl with a random presenter frame; the newer guarded-Brain
+      // V2 route (nextwaveV2RouteBuild) never touches nextwaveV2ThumbnailUrl and instead sets
+      // pkg.thumbnailUrl directly from its own final result, which nothing overwrites afterward
+      // (that route sets renderStatus:'enhanced', never 'rendering'+heygenJobId, so the generic
+      // poller's guard excludes it). Prefer the HeyGen-path field first to keep that path's
+      // existing behavior byte-for-byte, and fall back to thumbnailUrl to cover the V2 route.
+      const _nwThumbUrl=pkg.nextwaveV2ThumbnailUrl||pkg.thumbnailUrl;
+      if(_nwThumbUrl&&_ytId){
         try{
           const tr=await fetch('/api/ops?action=set_yt_thumbnail',{
             method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({videoId:_ytId,engine:'NextWave',thumbUrl:pkg.nextwaveV2ThumbnailUrl}),
+            body:JSON.stringify({videoId:_ytId,engine:'NextWave',thumbUrl:_nwThumbUrl}),
           });
           const td=await tr.json().catch(function(){return{};});
           pkg.thumbnailSetOnYoutube=!!(td&&td.ok);
