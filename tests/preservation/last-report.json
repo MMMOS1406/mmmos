@@ -1,0 +1,562 @@
+{
+ "at": "2026-10-04T15:33:37.112Z",
+ "total": 111,
+ "failed": 0,
+ "results": [
+  {
+   "name": "flag OFF · admin · home identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · finance identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · tasks identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · engines:overview identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · engines:analytics identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · engines:packages identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · marketing identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · human_resources identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · legal_compliance identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · system:settings identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · system:integrations identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · system:engineering identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · system:brain_validation identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · social_media_manager identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · constitution identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · continuity identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · factory identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · packages identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · analytics identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · integrations identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · settings identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · login makes the same set of requests",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · final task count identical (14)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · admin · console/page errors identical",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · family · home identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · family · finance identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · family · engines:overview identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · family · login makes the same set of requests",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · family · final task count identical (6)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · family · console/page errors identical",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · va · tasks identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · va · login makes the same set of requests",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · va · final task count identical (6)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · va · console/page errors identical",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag OFF · shell.js is never requested (all three roles)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · shell.js is requested for every role (it stays inert for Family and VA)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · family · home identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · family · finance identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · family · engines:overview identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · va · tasks identical to baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · shell loaded for Admin",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · exactly three primary surfaces: CEO · Money · Company",
+   "ok": true,
+   "detail": "🏛️ CEO | 💰 Money | 🏢 Company"
+  },
+  {
+   "name": "flag ON · shell.js was requested",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "flag ON · Admin login performs the same distinct write requests as classic login",
+   "ok": true,
+   "detail": "{\"shell\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\",\"POST /api/ops?action=finance_snapshot_save\",\"POST /api/ops?action=sync_marketing_work_items\"],\"classic\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\","
+  },
+  {
+   "name": "flag ON · Admin login adds no read request the classic login does not make",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface shows \"MMM MACHINE REVENUE\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface shows \"CEO DECISIONS\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface shows \"NEEDS YOU TO DO\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface shows \"ASK MMM\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface shows \"COMPANY HEALTH\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface shows \"PRODUCTION ENGINES\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface shows \"MORE FROM CEO HEADQUARTERS\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface keeps CEO decisions and owner actions separate (fixture: 1 decision, 1 owner action)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface: routine / advisory items are NOT counted as CEO decisions",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO surface lists all five engines",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "Ask MMM: typed text survives a background repaint",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "MONEY: opens from the nav and shows the executive summary",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "MONEY: numbers come from the existing finance computation",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "MONEY: headline does not elevate runway (production policy v16.17.0); runway is in detail",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "MONEY: an expanded section stays open through a repaint",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "MONEY: full existing Finance remains a drill-down",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY: five functions + two support functions",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO: returns from the nav",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY → finance: gateway lists existing screens",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY → growth: gateway lists existing screens",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY → operations: gateway lists existing screens",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY → technology: gateway lists existing screens",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY → governance: gateway lists existing screens",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY → human_resources: gateway lists existing screens",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "COMPANY → legal_compliance: gateway lists existing screens",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "shell navigation across every surface and gateway causes no data write",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "Back: All areas → Operations gateway",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "Back: Operations gateway → Company",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO-007 inventory: every navigation path is offered by the shell (63 rows)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO-007 inventory: every named function still exists (96 checks)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CEO-007 inventory: all 77 capability rows are accounted for",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "every classic screen opened through the shell is identical to the classic navigation (21 routes)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "Continuity and Factory (hidden today) stay reachable and behave exactly as they do today",
+   "ok": true,
+   "detail": "both throw today on data with a monthly Investment Engine task (pre-existing); the shell shows the same error as a notice"
+  },
+  {
+   "name": "unmounted section \"optasks\" is preserved and reachable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unmounted section \"pipeline\" is preserved and reachable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unmounted section \"approvals\" is preserved and reachable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unmounted section \"weekly\" is preserved and reachable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unmounted section \"queue\" is preserved and reachable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unmounted section \"sysintel\" is preserved and reachable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unmounted section \"legacyhome\" is preserved and reachable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "Ask MMM: the existing console answers a command on the CEO surface (and the surface survives the save that follows)",
+   "ok": true,
+   "detail": "8 -> 1094"
+  },
+  {
+   "name": "\"Classic navigation\" restores the existing nine primary tabs",
+   "ok": true,
+   "detail": "🏛️ CEO Headquarters | 💰 Finance | 🏭 Operations | 📣 Marketing & Sales | 👥 Human Resources | ⚖️ Legal & Compliance | 🖥️ Technology | 📋 Tasks | 📱 Social Media Manager | 🧭 New layout"
+  },
+  {
+   "name": "classic mode offers a way back (\"New layout\")",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "\"New layout\" returns to the three surfaces",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no runtime errors beyond the classic baseline (console + page)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "nothing outside the stub was contacted",
+   "ok": true,
+   "detail": "https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&family=Lalezar&fam https://cdn.plaid.com/link/v2/stable/link-initialize.js"
+  },
+  {
+   "name": "Tasks/cadence: opening Tasks creates the week's tasks (classic)",
+   "ok": true,
+   "detail": "6 -> 14"
+  },
+  {
+   "name": "Tasks/cadence: the shell path creates exactly the same tasks as classic",
+   "ok": true,
+   "detail": "6 -> 14 vs 6 -> 14"
+  },
+  {
+   "name": "Tasks/cadence: not duplicated on a second open",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "Tasks/cadence: same number of state saves as classic",
+   "ok": true,
+   "detail": "4 vs 4"
+  },
+  {
+   "name": "Shared state: no shell/UI preference ever reaches the shared state blob",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "Engine lifecycles (SRV Farsi · SRV English · AI Studio · NextWave): a stage advance behaves identically through the shell path",
+   "ok": true,
+   "detail": "{\"SRV Farsi\":\"review\",\"SRV English\":\"review\",\"AI Studio\":\"review\",\"NextWave\":\"review\"}"
+  },
+  {
+   "name": "Engine lifecycles: the same number of shared-state saves as classic",
+   "ok": true,
+   "detail": "4 vs 4"
+  },
+  {
+   "name": "flag default OFF: Admin sees the classic nine tabs and no shell",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "?shell=on turns the shell on for this browser",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "?shell=off turns it off again (immediate rollback)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "mobile (390px): every shell surface and gateway has no horizontal overflow and a fully visible 3-tab nav",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "mobile: Company → Operations reachable by tapping, without a fourth tab",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "mobile: Operations gateway opens and offers the production workspace",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "only the files this order authorizes were changed (no api/, vercel.json, migrations, lib, engine files)",
+   "ok": true,
+   "detail": "public/index.html, public/shell.js, tests/preservation/driver.mjs, tests/preservation/existing-suites.mjs, tests/preservation/fixtures.mjs, tests/preservation/golden/baseline.json, tests/preservation/golden/existing-suites.json, tests/preservation/golden/render-functions.json, tests/preservation/inventory.json, tests/preservation/last-report.json, tests/preservation/run.mjs, tests/preservation/shell-checks.mjs, tests/preservation/stub-server.mjs, tests/preservation/sweep.mjs"
+  },
+  {
+   "name": "public/index.html: zero lines deleted or modified — additions only",
+   "ok": true,
+   "detail": "+8 −0"
+  },
+  {
+   "name": "no top-level function removed or renamed (871 existing functions)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "all 114 existing screen/section render functions listed in CEO-007 still exist",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "shell.js performs no network call and no state write (no fetch/XHR, no saveAppState, no D assignment)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "shell.js reaches no CEO-gated or destructive action",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "feature flag is browser-local, default OFF, and requests shell.js only when \"on\"",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

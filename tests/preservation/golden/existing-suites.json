@@ -1,0 +1,193 @@
+{
+ "recordedFrom": "unmodified origin/main",
+ "results": [
+  {
+   "file": "test_p0_state_guard.cjs",
+   "exit": 1,
+   "pass": 0,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "  code: 'ERR_INVALID_ARG_TYPE'",
+    "}",
+    "Node.js v24.15.0"
+   ]
+  },
+  {
+   "file": "test_srv_farsi_p1_safety.cjs",
+   "exit": 0,
+   "pass": 37,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "PASS I: other engines' tasks (even test-looking) still count toward their load",
+    "PASS I: SRV test predicate is false for every non-SRV task",
+    "37 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "test_srv_farsi_va_artist_format.cjs",
+   "exit": 0,
+   "pass": 32,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "PASS render: explicit override selected, Auto still shows rotation value",
+    "PASS non-overridden tasks not stamped",
+    "32 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "test_nextwave_preview_close.cjs",
+   "exit": 0,
+   "pass": 27,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "  PASS H: reaching \"done\" via the normal flow still flips status correctly",
+    "  PASS H: a normally-completed package carries NO Close-Preview audit markers",
+    "  PASS I: the new/modified functions reference only NextWave task/package state, never SRV Farsi/English/AI Studio/SMM identifiers"
+   ]
+  },
+  {
+   "file": "test_automatic_git_commit_capture_fix.cjs",
+   "exit": 1,
+   "pass": 24,
+   "fail": 3,
+   "secs": 1,
+   "tail": [
+    "PASS  14c. structural: AGENT_GATEWAY_ALLOWED_OPS keeps every pre-existing op, purely additive",
+    "FAIL  15. only api/ops.js (+ this new test file) changed this turn -- no unrelated file touched",
+    "24 passed, 3 failed"
+   ]
+  },
+  {
+   "file": "test_ceo_production_release_ui_fix.cjs",
+   "exit": 0,
+   "pass": 29,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "PASS  16b. old productionDeploymentAuthorize backend action still present, untouched",
+    "PASS  16c. worker pairing UI section (b2_workers) still present, untouched",
+    "29 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "test_governed_production_execution.js",
+   "exit": 0,
+   "pass": 28,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "PASS  11: covered structurally — productionDeploymentAuthorize has zero diff lines (verified via git diff, see report)",
+    "PASS  12: covered structurally — zero diff lines in engineeringAgentGateway, AGENT_GATEWAY_ALLOWED_OPS, or any pairing function (see report)",
+    "28 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "test_nextwave_v2_closeout_regressions.mjs",
+   "exit": 0,
+   "pass": 0,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "closeout regression tests: 28 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "test_nextwave_v2_evidence_integrity.mjs",
+   "exit": 0,
+   "pass": 15,
+   "fail": 1,
+   "secs": 0,
+   "tail": [
+    "PASS  12. one-slot comparison with no recoverable second value -> downgrades to 'single'",
+    "13 PASS / 0 FAIL / 13 TOTAL",
+    "EVIDENCE-INTEGRITY MATRIX: 100% PASS"
+   ]
+  },
+  {
+   "file": "test_nextwave_v2_production_route.mjs",
+   "exit": 0,
+   "pass": 6,
+   "fail": 0,
+   "secs": 11,
+   "tail": [
+    "  ok   a script with zero script-sourced financial values is a true no-op — already-spelled-out scripts (e.g. the accepted PASS_SCRIPT fixture, which already re",
+    "  ok   REGRESSION (2026-10-03 real defect, script A): a duplicate span_text (\"$3,000\" appearing twice) resolves each occurrence to its OWN position via document",
+    "126 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "test_nextwave_v2_route_ops_e2e.mjs",
+   "exit": 0,
+   "pass": 3,
+   "fail": 0,
+   "secs": 52,
+   "tail": [
+    "  ok   BLOCK-class script (Brain has no recording -> model error) stops cleanly, narration never called",
+    "  ok   chunk/finish on a stopped (non-planned) build are refused",
+    "14 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "test_nextwave_v2_semantic_validators.mjs",
+   "exit": 0,
+   "pass": 0,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "validator helper tests: 27 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "tests/platform/test_state_isolation.mjs",
+   "exit": 0,
+   "pass": 33,
+   "fail": 0,
+   "secs": 8,
+   "tail": [
+    "PASS ROLE anon: shrink guard still blocks anon wipe via merge",
+    "PASS ROLE anon: anon delete of state row blocked",
+    "33 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "tests/platform/test_client_isolation_e2e.mjs",
+   "exit": 0,
+   "pass": 11,
+   "fail": 0,
+   "secs": 3,
+   "tail": [
+    "PASS COMPAT (client e2e): falls back to legacy write when merge RPC absent",
+    "PASS ENFORCE (client e2e): merge client still saves with enforcement on",
+    "11 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "tests/platform/test_release_isolation.mjs",
+   "exit": 0,
+   "pass": 13,
+   "fail": 0,
+   "secs": 0,
+   "tail": [
+    "PASS C: production from main carries BOTH businesses' accepted changes",
+    "PASS C: the only production-eligible ref (main) contains every accepted business commit",
+    "13 passed, 0 failed"
+   ]
+  },
+  {
+   "file": "tests/srv/test_srv_farsi_analytics_view.mjs",
+   "exit": 0,
+   "pass": 17,
+   "fail": 0,
+   "secs": 1,
+   "tail": [
+    "PASS G: weekly report generateShortFormIntelligence reads the view",
+    "PASS raw table still used by snapshot job (records kept)",
+    "17 passed, 0 failed"
+   ]
+  }
+ ]
+}
