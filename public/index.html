@@ -18998,11 +18998,27 @@ async function _nextWaveSetStage(taskId,stage){
 // production package can't reach this function's effect: it never sees this button in the
 // first place (it sees "✅ Approve & Publish to YouTube" instead), and this guard refuses even
 // a direct call, so there is no shortcut around Publish for real content.
+//
+// Confirmation (2026-10-04 correction): native confirm() blocks browser-automation VA operation
+// (it cannot be answered by anything but a real human in a real browser), so this reuses the
+// SAME in-page two-step pattern already shipped for Settings' "Reset All Data"
+// (settingsShowReset/settingsResetConfirm/settingsResetCancel): a first click only reveals an
+// inline confirm block (zero mutation); a second, explicit "Yes, Close Preview" click is what
+// actually calls this function. The eligibility guard below still runs on every call, so even a
+// direct call (console, or a stale/forged button) remains refused for ineligible content —
+// confirmation UX changed, nothing about what's allowed to happen or when did.
+function _nextWaveShowClosePreviewConfirm(taskId){
+  const c=document.getElementById('nw-close-preview-confirm-'+taskId);
+  if(c)c.style.display='block';
+}
+function _nextWaveCancelClosePreview(taskId){
+  const c=document.getElementById('nw-close-preview-confirm-'+taskId);
+  if(c)c.style.display='none';
+}
 async function _nextWaveClosePreview(taskId){
   const task=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId)||String(t.taskId||'')===String(taskId);});
   const pkg=(D.packages||[]).find(function(p){return String(p.taskId||'')===String(taskId);});
   if(!((task&&task.isTest)||(pkg&&pkg.isTest))){alert('Close Preview is only available for preview/test packages.');return;}
-  if(!confirm('Close this preview? Review/testing is finished — no external publication occurred.'))return;
   if(pkg){pkg.previewClosedAt=new Date().toISOString();pkg.previewClosedNoPublish=true;}
   if(task){task.closedAsPreview=true;}
   await _nextWaveSetStage(String(taskId),'done');
@@ -19791,7 +19807,14 @@ function renderNextWaveLifecycleCard(task){
       </div>`;
       if((task&&task.isTest)||(pkg&&pkg.isTest)){
         body+=`<div style="padding:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#f59e0b;font-size:12px;margin-bottom:10px">🧪 NEXTWAVE V2 PREVIEW TEST — Publish to YouTube is disabled for this task. This is a preview candidate for CEO visual/audio review only.</div>`;
-        body+=`<button style="${btnRed}" onclick="_nextWaveClosePreview('${taskId}')">🗂️ Close Preview</button>`;
+        body+=`<button style="${btnRed}" onclick="_nextWaveShowClosePreviewConfirm('${taskId}')">🗂️ Close Preview</button>`;
+        body+=`<div id="nw-close-preview-confirm-${taskId}" style="display:none;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:14px;margin-top:10px">
+          <div style="color:#ef4444;font-size:12px;margin-bottom:10px;font-weight:700">Close this preview? Review/testing is finished — no external publication occurred.</div>
+          <div style="display:flex;gap:10px">
+            <button onclick="_nextWaveClosePreview('${taskId}')" style="padding:8px 16px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);border-radius:8px;color:#ef4444;font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Yes, Close Preview</button>
+            <button onclick="_nextWaveCancelClosePreview('${taskId}')" style="padding:8px 16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--dim);font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Cancel</button>
+          </div>
+        </div>`;
       }else{
         body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
       }
