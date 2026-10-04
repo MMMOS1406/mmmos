@@ -18976,6 +18976,37 @@ async function _nextWaveSetStage(taskId,stage){
   if(typeof saveAppState==='function')saveAppState();
   if(typeof renderTab==='function' && typeof currentTab!=='undefined')renderTab(currentTab);
 }
+// "Close Preview" (2026-10-04) — a preview/test NextWave package can legitimately reach Approve
+// with external Publish intentionally disabled (see the banner just above where this button
+// renders), but before this there was no forward terminal action: it sat in the active queue
+// forever, permanently outranking every later legitimate production task via the per-engine
+// oldest-first fallback (nwPending[0] in VAOperatorMode). Proven instance: NextWave task 99.
+//
+// The fix reuses the EXISTING 'done' terminal stage rather than inventing new vocabulary —
+// _nextWaveSetStage('done') already durably persists pkg.lifecycleStage and correctly flips
+// task.status so the pending-queue filter (status!=='done'&&status!=='uploaded') drops it. It
+// deliberately never touches 'uploaded', youtube_video_id, or published_at — those remain
+// false/null, which is the truthful, already-meaningful signal that no publish happened; this
+// function only adds an explicit extra marker (previewClosedAt/previewClosedNoPublish/
+// closedAsPreview) so a closed preview is still distinguishable in history from a package that
+// reached 'done' via a normal Approve → Publish flow. Zero YouTube/vendor calls — same no-op
+// persistence path (saveAppState/savePackageToSupabase) every other stage transition already uses.
+//
+// Eligibility guard mirrors, verbatim, the SAME (task.isTest||pkg.isTest) condition the
+// Approve-stage renderer already uses to decide whether to show this banner instead of the
+// real Publish button — the authoritative preview/test identity, not title text. A normal
+// production package can't reach this function's effect: it never sees this button in the
+// first place (it sees "✅ Approve & Publish to YouTube" instead), and this guard refuses even
+// a direct call, so there is no shortcut around Publish for real content.
+async function _nextWaveClosePreview(taskId){
+  const task=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId)||String(t.taskId||'')===String(taskId);});
+  const pkg=(D.packages||[]).find(function(p){return String(p.taskId||'')===String(taskId);});
+  if(!((task&&task.isTest)||(pkg&&pkg.isTest))){alert('Close Preview is only available for preview/test packages.');return;}
+  if(!confirm('Close this preview? Review/testing is finished — no external publication occurred.'))return;
+  if(pkg){pkg.previewClosedAt=new Date().toISOString();pkg.previewClosedNoPublish=true;}
+  if(task){task.closedAsPreview=true;}
+  await _nextWaveSetStage(String(taskId),'done');
+}
 function _nextWavePkgForTask(task){
   if(!task)return null;
   const _tId=String(task.taskId||task.id||'');
@@ -19760,6 +19791,7 @@ function renderNextWaveLifecycleCard(task){
       </div>`;
       if((task&&task.isTest)||(pkg&&pkg.isTest)){
         body+=`<div style="padding:12px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:8px;color:#f59e0b;font-size:12px;margin-bottom:10px">🧪 NEXTWAVE V2 PREVIEW TEST — Publish to YouTube is disabled for this task. This is a preview candidate for CEO visual/audio review only.</div>`;
+        body+=`<button style="${btnRed}" onclick="_nextWaveClosePreview('${taskId}')">🗂️ Close Preview</button>`;
       }else{
         body+=`<button style="${btnGreen}" onclick="_nextWaveSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
       }
