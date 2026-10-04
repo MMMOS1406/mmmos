@@ -19023,6 +19023,26 @@ async function _nextWaveClosePreview(taskId){
   if(task){task.closedAsPreview=true;}
   await _nextWaveSetStage(String(taskId),'done');
 }
+// Discard & Regenerate in-page confirmation (2026-10-04) — same native-confirm() incompatibility
+// as Close Preview (confirmed live: a real click reached confirm('Discard package and regenerate?')
+// but the dialog was suppressed, so nothing happened — no error, no stage change, no new package).
+// Reuses the identical two-step pattern (reveal -> explicit second click), NOT a new mechanism.
+// Scope is the confirmation UX only: the action itself is still exactly
+// _nextWaveSetStage(taskId,'generate') — unchanged, same as the existing onclick before this fix —
+// so discard/regenerate behavior, the NEEDS_REVIEW/BLOCK gate that led here, and the Approve/Build
+// path are all untouched.
+function _nextWaveShowDiscardConfirm(taskId){
+  const c=document.getElementById('nw-discard-confirm-'+taskId);
+  if(c)c.style.display='block';
+}
+function _nextWaveCancelDiscard(taskId){
+  const c=document.getElementById('nw-discard-confirm-'+taskId);
+  if(c)c.style.display='none';
+}
+async function _nextWaveConfirmDiscard(taskId){
+  await _nextWaveSetStage(String(taskId),'generate');
+  if(typeof renderTab==='function'&&typeof currentTab!=='undefined')renderTab(currentTab);
+}
 // Package resolution integrity fix (2026-10-04) — the previous plain find() had two demonstrated
 // defects: (1) it matched the FIRST package in D.packages for this taskId, which is always the
 // OLDEST (packages are only ever appended via D.packages.push), so an old package (e.g. one
@@ -19487,7 +19507,14 @@ function renderNextWaveLifecycleCard(task){
       body+=`<div id="nw-rev-savestatus-${_rid}" style="font-size:10px;color:var(--dim);margin-bottom:8px;min-height:14px"></div>`;
       body+=`<button style="${btnBlue}" onclick="_nextWaveSaveReviewEdits('${pkgId}','${_rid}')">💾 Save Edits</button>`;
       body+=`<button style="${btnGreen}" onclick="_nextWaveApproveReview('${pkgId}','${taskId}')">✅ Approve Script → Build</button>`;
-      body+=`<button style="${btnRed}" onclick="if(confirm('Discard package and regenerate?')){_nextWaveSetStage('${taskId}','generate');if(typeof renderTab==='function')renderTab(currentTab)}">↺ Discard & Regenerate</button>`;
+      body+=`<button style="${btnRed}" onclick="_nextWaveShowDiscardConfirm('${taskId}')">↺ Discard & Regenerate</button>`;
+      body+=`<div id="nw-discard-confirm-${taskId}" style="display:none;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:14px;margin-top:10px">
+        <div style="color:#ef4444;font-size:12px;margin-bottom:10px;font-weight:700">Discard this package and regenerate? This cannot be undone.</div>
+        <div style="display:flex;gap:10px">
+          <button onclick="_nextWaveConfirmDiscard('${taskId}')" style="padding:8px 16px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);border-radius:8px;color:#ef4444;font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Yes, Discard & Regenerate</button>
+          <button onclick="_nextWaveCancelDiscard('${taskId}')" style="padding:8px 16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--dim);font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Cancel</button>
+        </div>
+      </div>`;
     }else{
       body+=`<div style="color:var(--dim);font-size:12px;margin-bottom:12px">Package not found — try generating again.</div>`;
       body+=`<button style="${btnBlue}" onclick="_nextWaveSetStage('${taskId}','generate');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Generate</button>`;

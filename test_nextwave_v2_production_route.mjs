@@ -244,6 +244,10 @@ const HTML_A2_ALLOWED_REMOVED_LINES = new Set([
   // engine filter, first-match = oldest-by-push-order) is replaced with an engine-filtered,
   // newest-by-generatedAt resolution; see the function's own comment in index.html.
   "return (D.packages||[]).find(function(p){return String(p.taskId||'')===_tId;})||".slice(0, 80),
+  // Discard & Regenerate in-page confirmation (2026-10-04) — the old native confirm() onclick is
+  // replaced with the same two-step reveal pattern already used for Close Preview; the underlying
+  // action (_nextWaveSetStage(taskId,'generate')) is unchanged. See the function's own comment.
+  "body+=`<button style=\"${btnRed}\" onclick=\"if(confirm('Discard package and regene".slice(0, 80),
 ]);
 // Reconciliation closeout (2026-10-03): same reasoning as MAIN_RECONCILE_BASELINE above — this test's
 // zero-point moves from fa34eb0 to origin/main's pre-merge HEAD, so main's own independent edits
