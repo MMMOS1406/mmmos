@@ -240,6 +240,10 @@ const HTML_A2_ALLOWED_REMOVED_LINES = new Set([
   "categoryId:'22',",
   'if(pkg.nextwaveV2ThumbnailUrl&&_ytId){',
   "body:JSON.stringify({videoId:_ytId,engine:'NextWave',thumbUrl:pkg.nextwaveV2ThumbnailUrl}),".slice(0, 80),
+  // Package resolution integrity fix (2026-10-04) — _nextWavePkgForTask's old plain find() (no
+  // engine filter, first-match = oldest-by-push-order) is replaced with an engine-filtered,
+  // newest-by-generatedAt resolution; see the function's own comment in index.html.
+  "return (D.packages||[]).find(function(p){return String(p.taskId||'')===_tId;})||".slice(0, 80),
 ]);
 // Reconciliation closeout (2026-10-03): same reasoning as MAIN_RECONCILE_BASELINE above — this test's
 // zero-point moves from fa34eb0 to origin/main's pre-merge HEAD, so main's own independent edits

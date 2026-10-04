@@ -19023,10 +19023,24 @@ async function _nextWaveClosePreview(taskId){
   if(task){task.closedAsPreview=true;}
   await _nextWaveSetStage(String(taskId),'done');
 }
+// Package resolution integrity fix (2026-10-04) — the previous plain find() had two demonstrated
+// defects: (1) it matched the FIRST package in D.packages for this taskId, which is always the
+// OLDEST (packages are only ever appended via D.packages.push), so an old package (e.g. one
+// generated while the engine was in TEST) stayed permanently selected even after a fresh
+// production regeneration; (2) it never filtered by engine, so a different engine's package
+// sharing the same numeric taskId (a real, observed collision — SRV Farsi packages reusing a
+// numeric id a NextWave task also happens to use) could be selected instead. Reuses the same
+// established pattern SRV Farsi's own _srvFarsiPkgForTask already uses for the equivalent
+// problem (filter to the owning engine, then resolve to the newest by generatedAt) rather than
+// inventing a parallel architecture — NextWave has no srvUid-style identity system, so this is
+// the directly-applicable subset of that pattern. Never mutates or removes any package: older
+// packages remain exactly as they were, simply no longer the one a fresh lookup returns.
 function _nextWavePkgForTask(task){
   if(!task)return null;
   const _tId=String(task.taskId||task.id||'');
-  return (D.packages||[]).find(function(p){return String(p.taskId||'')===_tId;})||null;
+  const nwPkgs=(D.packages||[]).filter(function(p){return p&&p.engine==='NextWave'&&String(p.taskId||'')===_tId;});
+  if(!nwPkgs.length)return null;
+  return nwPkgs.slice().sort(function(a,b){return String(b.generatedAt||'').localeCompare(String(a.generatedAt||''));})[0];
 }
 const NEXTWAVE_ROTATION_MODES=['Finance','AI / Tech','Motivation'];
 function _nextWaveNextMode(){
