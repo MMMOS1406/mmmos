@@ -767,4 +767,67 @@ await t('no other engine (SRV, AI Studio, SMM) was touched by this correction', 
   assert.ok(!/primaryTopicObject|PRIMARY TOPIC OBJECT/.test(afterNextwave), 'an engine defined after the NextWave branch (AI Studio) must not have been touched');
 });
 
+console.log('\n[18] Creative correction, REAL production path (2026-10-05) — api/generate.js is what the live NextWave lifecycle "Auto-Generate Package" button actually calls (fetch to API_URL=\'/api/generate\'), NOT api/ops.js\'s generatePackage (that only backs the separate, manual "Factory" wizard flow via /api/ops?action=generate_package). Section [17] above correctly scoped a bounded fix but shipped it to the wrong file for the real VA lifecycle path — discovered live during task 123 production. This section covers the correct file.');
+const genJs = fs.readFileSync('./api/generate.js', 'utf8');
+const { generateFactPacket: genFP, factPacketToPromptBlock: fpBlock } = await import('./lib/nextwaveV2FactPacket.mjs');
+await t('every DECIDE/GROW/AVOID/SAVE scenario_type resolves a non-null primary_object (system-owned, deterministic — never an LLM guess)', () => {
+  for (const angle of ['GROW', 'AVOID', 'SAVE', 'DECIDE']) {
+    for (let i = 0; i < 15; i++) {
+      const p = genFP(angle, []);
+      assert.ok(p.primary_object && typeof p.primary_object === 'string' && p.primary_object.length > 0, `${angle} scenario_type=${p.scenario_type} has no primary_object`);
+    }
+  }
+});
+await t('car_loan always resolves to \'the car\', mortgage always to \'the house\' — never swapped (deterministic lookup, not sampled)', () => {
+  let sawCar = false, sawHouse = false;
+  for (let i = 0; i < 40; i++) {
+    const p = genFP('DECIDE', []);
+    if (p.scenario_type === 'car_loan') { assert.equal(p.primary_object, 'the car'); sawCar = true; }
+    if (p.scenario_type === 'mortgage') { assert.equal(p.primary_object, 'the house'); sawHouse = true; }
+  }
+  assert.ok(sawCar && sawHouse, 'rotation did not surface both car_loan and mortgage in 40 draws — widen the sample or check pickScenario rotation');
+});
+await t('factPacketToPromptBlock emits a PRIMARY_OBJECT line that actually reaches the LLM-facing prompt block', () => {
+  const p = genFP('DECIDE', []);
+  const block = fpBlock(p);
+  assert.ok(block.includes(`PRIMARY_OBJECT: ${p.primary_object}`), 'PRIMARY_OBJECT line missing or mismatched in the rendered prompt block: ' + block);
+});
+await t('fact-packet-generated numbers (now carrying primary_object) still pass Brain arithmetic verification with zero blocking issues — the new field is additive, not a regression of Phase 2\'s math verification', () => {
+  for (const angle of ['GROW', 'AVOID', 'SAVE', 'DECIDE']) {
+    const p = genFP(angle, []);
+    const sb = nextwaveV2BuildStoryboard(scriptFor(p), baseDeps);
+    const blocking = sb.integrity.issues.filter((x) => x.severity === 'blocking');
+    assert.equal(blocking.length, 0, `${angle} (${p.scenario_type}) blocked after primary_object addition: ${JSON.stringify(blocking)}`);
+  }
+});
+const GEN_NW_BLOCK = genJs.slice(genJs.indexOf("const NEXTWAVE_PROMPT = `"), genJs.indexOf("const AI_STUDIO_PROMPT = `"));
+const GEN_NW_LONG_BLOCK = genJs.slice(genJs.indexOf("const NEXTWAVE_LONG_PROMPT = `"), genJs.indexOf("const TEMPLATES = {"));
+await t('the REAL short-form NextWave prompt (api/generate.js) requires naming PRIMARY_OBJECT in the opening and a NextWave-branded CTA in the closing, protected from the disclaimer', () => {
+  assert.ok(GEN_NW_BLOCK.length > 500, 'failed to isolate NEXTWAVE_PROMPT — marker drifted');
+  assert.ok(/PRIMARY TOPIC OBJECT/.test(GEN_NW_BLOCK), 'missing the primary-topic-object section');
+  assert.ok(/Name PRIMARY_OBJECT in plain words in the OPENING, in the same breath as the stakes/.test(GEN_NW_BLOCK), 'opening does not require stating stakes + object together');
+  assert.ok(/NextWave-branded growth line/.test(GEN_NW_BLOCK) && /always name "NextWave"/.test(GEN_NW_BLOCK), 'closing does not require a NextWave-branded CTA');
+  assert.ok(/the CTA is a separate sentence, not a reworded payoff/.test(GEN_NW_BLOCK), 'CTA could be satisfied by the existing payoff line alone — must be distinct');
+  assert.ok(/never substitutes for the CTA above, and both must be present/.test(GEN_NW_BLOCK), 'disclaimer is not explicitly protected from replacing the CTA');
+});
+await t('the REAL long-form NextWave prompt (api/generate.js) gets the same durable rule, respecting its existing strict per-section word-count ceilings (documented history of over/undershoot regressions — verified the new rules are additions to existing clauses, not new word-budget lines)', () => {
+  assert.ok(GEN_NW_LONG_BLOCK.length > 500, 'failed to isolate NEXTWAVE_LONG_PROMPT — marker drifted');
+  assert.ok(/naming that decision's own PRIMARY_OBJECT/.test(GEN_NW_LONG_BLOCK), 'long-form decisions do not require naming their own primary object');
+  assert.ok(/THEN a short NextWave-branded CTA that fits within the 24-word ceiling/.test(GEN_NW_LONG_BLOCK), 'long-form closing CTA requirement missing');
+  assert.ok(/required, not optional/.test(GEN_NW_LONG_BLOCK), 'long-form CTA must be required, not left as the old "only if it fits" optional allowance');
+  assert.ok(/CLOSING \(at least 20 words, up to 24 — this is a hard ceiling/.test(GEN_NW_LONG_BLOCK), 'the pre-existing word-count ceiling text must be preserved verbatim — this correction must not loosen it');
+});
+await t('no other engine prompt in api/generate.js (SRV Farsi, SRV English, AI Studio short/long) was touched', () => {
+  const beforeNW = genJs.slice(0, genJs.indexOf("const NEXTWAVE_PROMPT = `"));
+  const betweenNWandLong = genJs.slice(genJs.indexOf("const AI_STUDIO_PROMPT = `"), genJs.indexOf("const NEXTWAVE_LONG_PROMPT = `"));
+  const afterNWLong = genJs.slice(genJs.indexOf("const TEMPLATES = {"), genJs.indexOf("const TEMPLATES = {") + 4000);
+  assert.ok(!/PRIMARY_OBJECT|PRIMARY TOPIC OBJECT/.test(beforeNW), 'SRV Farsi/English prompts must not have been touched');
+  assert.ok(!/PRIMARY_OBJECT|PRIMARY TOPIC OBJECT/.test(betweenNWandLong), 'AI Studio short-form prompt must not have been touched');
+  assert.ok(!/PRIMARY_OBJECT|PRIMARY TOPIC OBJECT/.test(afterNWLong), 'AI Studio long-form prompt / TEMPLATES wiring must not have been touched');
+});
+await t('SCENARIO_OBJECT is a deterministic lookup, not touched by the Brain/math verification path — nextwaveV2FinanceCalculators.mjs and the calculation_method strings are byte-identical to before', () => {
+  const factPacketSrc = fs.readFileSync('./lib/nextwaveV2FactPacket.mjs', 'utf8');
+  ['compound_growth.end_value (monthly annuity, ', 'compound_growth.end_value (annual_compounding, net of fee)', 'compound_growth.end_value (annual_compounding)', 'loan_payment.total_paid (monthly_amortization)'].forEach((s) => assert.ok(factPacketSrc.includes(s), `calculation_method string changed/removed: ${s}`));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
