@@ -3053,19 +3053,21 @@ GOAL: Long-form YouTube video on ${topic}. Script MUST be 900-1000 words — cou
 Topic track: ${topic} | Look: ${look}
 Avoid (must be conceptually distinct): ${avoidList}
 
+PRIMARY TOPIC OBJECT: before writing, pick the ONE concrete physical subject this topic is actually about (car loan -> the car; mortgage -> the house; credit card debt -> the card/statement; retirement -> the retirement account) and name it in plain words in the HOOK and again later — not just implied.
+
 STRUCTURE (900-1000 words total — hit these targets):
-[0:00 HOOK] 70-80 words — one strong specific claim or question
+[0:00 HOOK] 70-80 words — one strong specific claim or question that lands the stakes (cost/mistake/outcome) and the primary topic object TOGETHER — never a slow topic-first build-up
 [0:35 SETUP] 200-220 words — the common wrong framing + why it's incomplete
 [2:00 CORE INSIGHT 1] 220-250 words — specific mechanism, real example, real numbers
 [4:00 CORE INSIGHT 2] 200-220 words — second angle that deepens the first, NOT a repeat
 [5:30 TAKEAWAY] 150-170 words — one clear action or framework the viewer can apply
-[7:00 CLOSE] 80-100 words — one-sentence summary + soft CTA${topic === 'Finance' ? ' + [DISCLAIMER: Not financial advice. Educational only.]' : ''}
+[7:00 CLOSE] 80-100 words — one-sentence summary + a NextWave-branded CTA (must name "NextWave", vary the wording, never dropped)${topic === 'Finance' ? ' + [DISCLAIMER: Not financial advice. Educational only.] (the disclaimer never replaces the CTA — both are required)' : ''}
 
 Rules: No hype, no filler, no lists of tips. Every sentence earns its place.
 
 Output JSON in <package> tags:
 <package>
-{"topic":"${topic}","angle":"specific angle","concept":"one-sentence thesis","title":"max 8 words no hype","mood":"${topic}","hook":"Colin's exact opening line","script":"Full Colin script with markers [0:00 HOOK] [0:35 SETUP] [2:00 CORE INSIGHT 1] [4:00 CORE INSIGHT 2] [5:30 TAKEAWAY] [7:00 CLOSE] — 900-1000 words${topic === 'Finance' ? ' ending with [DISCLAIMER: Not financial advice. Educational only.]' : ''}","thumbnailText":"max 6 words","captionYT":"2-3 sentences + CTA + #NextWave + hashtags","captionTikTok":"one line + 2 hashtags","captionIG":"3-4 lines + hashtags","hashtags":"#NextWave #${topicTag}","workflowNotes":"Long-form video ~6-7 min landscape 16:9"}
+{"topic":"${topic}","angle":"specific angle","concept":"one-sentence thesis","primaryTopicObject":"the ONE concrete physical object/subject this video is about — must appear as plain words in the script itself","title":"max 8 words no hype","mood":"${topic}","hook":"Colin's exact opening line — names the primary topic object and the stakes together","script":"Full Colin script with markers [0:00 HOOK] [0:35 SETUP] [2:00 CORE INSIGHT 1] [4:00 CORE INSIGHT 2] [5:30 TAKEAWAY] [7:00 CLOSE] — 900-1000 words, CLOSE ends with a NextWave-branded CTA${topic === 'Finance' ? ' then [DISCLAIMER: Not financial advice. Educational only.]' : ''}","thumbnailText":"max 6 words","captionYT":"2-3 sentences + CTA + #NextWave + hashtags","captionTikTok":"one line + 2 hashtags","captionIG":"3-4 lines + hashtags","hashtags":"#NextWave #${topicTag}","workflowNotes":"Long-form video ~6-7 min landscape 16:9"}
 </package>`;
     } else {
     prompt = `You are the NextWave Systems content engine for the Colin avatar (HeyGen).
@@ -3080,6 +3082,11 @@ Topic: ${topic} | Colin costume: ${look}
 - AI / Tech — what's actually shipping, what's actually possible, what's overhyped. Concrete examples. No vague "AI is changing everything".
 - Motivation — grounded action and mindset. NOT Tony Robbins yelling, NOT "5am club" cosplay. Real frictions, real moves.
 
+═══════════ PRIMARY TOPIC OBJECT — pick ONE concrete physical thing before you write the hook ═══════════
+Every topic has one concrete, physical, recognizable subject the viewer can picture instantly — not a generic "finance" abstraction. Identify it before writing: car loan -> the car; mortgage -> the house; credit card debt -> the card/the statement; retirement -> the retirement account/the timeline; grocery inflation -> the grocery cart; investing fees -> the fund statement. Pick the MOST SPECIFIC one the topic actually supports.
+That object's concrete noun MUST appear as plain words in the script itself (not just implied) — once in the hook/setup and again later — because the viewer (and the render pipeline) identifies the subject from what the script literally says, not from a vibe. "A car loan mistake" grounds the object; "a financing decision" does not.
+Record it in the "primaryTopicObject" field below as a short noun phrase.
+
 ═══════════ AVOID LIST — last ~50 packages + published YouTube content for this engine ═══════════
 ${avoidList}
 The new package MUST be conceptually distinct from EVERY item above. Different title surface words is NOT enough — the underlying concept/thesis must be new. Match against title, hook, concept, AND script angle.
@@ -3092,6 +3099,7 @@ Colin sounds like an analyst sharing a clear take that he actually believes — 
 specific · grounded · informed · "actually useful" · respectful of viewer's time · ONE clear claim per video · earned authority (not performed) · the energy of someone who works in the field, not someone selling a course about working in the field.
 
 ═══════════ HOOK LADDER — choose ONE pattern, rotate across packages ═══════════
+Every pattern below must land the STAKES (a cost, a mistake, an outcome, a surprising number) in the SAME breath as the primary topic object — never a slow build-up that introduces the topic first and the stakes later. The viewer decides whether to keep watching before the setup line; a hook that only orients ("Let's talk about car loans...") has already lost them. Prefer: mistake+cost, decision+outcome, surprising number+concrete subject — as a PRINCIPLE to express in Colin's own words each time, never the same sentence twice.
 1. CONFIDENT CONFESSION — "Most [audience] think [common belief]. The data says [concrete reveal]."
 2. SPECIFIC REVEAL — "Here's what changed about [X] in [timeframe] that most people missed."
 3. COUNTER-INTUITIVE — "The reason [X] doesn't work is the opposite of what you'd think."
@@ -3117,8 +3125,8 @@ NO get-rich-quick framing in Finance content. NO "AI will replace everyone" doom
 0:04–0:14 SETUP — one specific scenario, fact, or context. Concrete. Real.
 0:14–0:38 PAYOFF — the surprising mechanism, framework, or insight. THE reason this video exists. Bulk of the value lives here.
 0:38–0:46 IMPLICATION — what the viewer can actually do or notice differently as a result. ONE specific takeaway.
-0:46–0:50 SOFT CTA — "Follow for more ${topic} takes" OR "Next video: [specific tease]". NEVER "smash subscribe", NEVER "drop a comment".${topic === 'Finance' ? `
-APPEND TO SCRIPT END: " [DISCLAIMER: Not financial advice. Educational only.]" — this is required for every Finance package.` : ''}
+0:46–0:50 SOFT CTA — a NextWave-BRANDED growth line, not a generic sign-off. It must name "NextWave" explicitly (e.g. "Follow NextWave for more ${topic} breakdowns like this" / "NextWave breaks this down every week — follow along"), vary the exact wording package to package, and never be dropped even when the disclaimer follows it. NEVER "smash subscribe", NEVER "drop a comment", NEVER a bare "Follow for more ${topic} takes" with no brand name.${topic === 'Finance' ? `
+APPEND TO SCRIPT END, AFTER the CTA: " [DISCLAIMER: Not financial advice. Educational only.]" — this is required for every Finance package. The disclaimer is a legal notice, not a substitute for the CTA above — both must be present.` : ''}
 
 ═══════════ VOICE GUIDELINES ═══════════
 - First-person where it lands ("I looked at..." / "The data shows...")
@@ -3159,7 +3167,7 @@ Colin's energy is the energy of someone who actually works in the field giving y
 
 ═══════════ OUTPUT — JSON ONLY, WRAPPED IN <package> ═══════════
 <package>
-{"topic":"${topic}","angle":"the specific angle this video uses (e.g. 'why low-fee index funds outperform vs the usual fee story' / 'the AI replacement story most coverage misses' / 'morning routine variable that actually correlates')","concept":"one sentence — the unique angle of this video","hookPattern":"which of the 8 hook ladder patterns","title":"max 8 words, insight-framed, no all-caps, no hype words","mood":"${topic}","hook":"Colin's exact 0:00-0:03 opening line — confident, specific, NOT shouty, NOT hype-bro","script":"Full Colin script with timestamp markers: [0:00 HOOK] line | [0:03 SETUP] line | [0:10 PAYOFF] line(s) | [0:22 IMPLICATION] line | [0:28 SOFT CTA] line${topic === 'Finance' ? ' | END WITH: [DISCLAIMER: Not financial advice. Educational only.]' : ''}","visualInstructions":"HeyGen setup per the PRODUCTION rules above — Colin costume (${look}), background per topic, text overlay timing (HOOK 0:00-0:03, payoff term 0:10-0:15)","thumbnailText":"max 6 words, insight-framed, no theatrics, no all-caps","captionYT":"hook question + 1-line context + soft CTA + #NextWave + 2-3 topic hashtags","captionTikTok":"one line carrying the insight + 2 hashtags max","captionIG":"2-3 dot-spacer lines + soft CTA + 3-4 hashtags","hashtags":"#NextWave #${topicTag} + 2-3 specific topic tags","workflowNotes":"HeyGen production steps + which hook pattern was used so the next generation rotates to a different one"}
+{"topic":"${topic}","angle":"the specific angle this video uses (e.g. 'why low-fee index funds outperform vs the usual fee story' / 'the AI replacement story most coverage misses' / 'morning routine variable that actually correlates')","concept":"one sentence — the unique angle of this video","primaryTopicObject":"the ONE concrete physical object/subject this video is about (e.g. 'car', 'house', 'credit card statement', 'retirement account') — must appear as plain words in the script itself, not just here","hookPattern":"which of the 8 hook ladder patterns","title":"max 8 words, insight-framed, no all-caps, no hype words","mood":"${topic}","hook":"Colin's exact 0:00-0:03 opening line — confident, specific, NOT shouty, NOT hype-bro — names the primary topic object and the stakes together","script":"Full Colin script with timestamp markers: [0:00 HOOK] line | [0:03 SETUP] line | [0:10 PAYOFF] line(s) | [0:22 IMPLICATION] line | [0:28 SOFT CTA] line (NextWave-branded, names \"NextWave\")${topic === 'Finance' ? ' | END WITH: [DISCLAIMER: Not financial advice. Educational only.]' : ''}","visualInstructions":"HeyGen setup per the PRODUCTION rules above — Colin costume (${look}), background per topic, text overlay timing (HOOK 0:00-0:03, payoff term 0:10-0:15)","thumbnailText":"max 6 words, insight-framed, no theatrics, no all-caps","captionYT":"hook question + 1-line context + soft CTA + #NextWave + 2-3 topic hashtags","captionTikTok":"one line carrying the insight + 2 hashtags max","captionIG":"2-3 dot-spacer lines + soft CTA + 3-4 hashtags","hashtags":"#NextWave #${topicTag} + 2-3 specific topic tags","workflowNotes":"HeyGen production steps + which hook pattern was used so the next generation rotates to a different one"}
 </package>`;
     } // end short-form NextWave prompt
   } else if (engineId === 'ai_studio') {

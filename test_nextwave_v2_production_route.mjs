@@ -113,6 +113,18 @@ const OPS_A2_ALLOWED_REMOVED_LINES = new Set([
   "  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,",
   "  result += current + halfBonus;",
   "  return { value: result, suffix };",
+  // NextWave creative-rule correction (2026-10-05, CEO/PM task-123 review of task 113's real output) —
+  // 4 durable script-prompt rules added to the NextWave (Colin) short- and long-form generators:
+  // primary topic object grounding, stakes-first hook architecture, and a NextWave-branded CTA that
+  // survives the Finance disclaimer. These 6 lines are the exact pre-existing lines replaced to add
+  // those rules (new instruction text + 2 new "primaryTopicObject" JSON fields); nothing else in
+  // either prompt changed.
+  "[0:00 HOOK] 70-80 words — one strong specific claim or question",
+  "[7:00 CLOSE] 80-100 words — one-sentence summary + soft CTA${topic === 'Finance' ? ' + [DISCLAIMER: Not financial advice. Educational only.]' : ''}",
+  "{\"topic\":\"${topic}\",\"angle\":\"specific angle\",\"concept\":\"one-sentence thesis\",\"title\":\"max 8 words no hype\",\"mood\":\"${topic}\",\"hook\":\"Colin's exact opening line\",\"script\":\"Full Colin script with markers [0:00 HOOK] [0:35 SETUP] [2:00 CORE INSIGHT 1] [4:00 CORE INSIGHT 2] [5:30 TAKEAWAY] [7:00 CLOSE] — 900-1000 words${topic === 'Finance' ? ' ending with [DISCLAIMER: Not financial advice. Educational only.]' : ''}\",\"thumbnailText\":\"max 6 words\",\"captionYT\":\"2-3 sentences + CTA + #NextWave + hashtags\",\"captionTikTok\":\"one line + 2 hashtags\",\"captionIG\":\"3-4 lines + hashtags\",\"hashtags\":\"#NextWave #${topicTag}\",\"workflowNotes\":\"Long-form video ~6-7 min landscape 16:9\"}",
+  "0:46–0:50 SOFT CTA — \"Follow for more ${topic} takes\" OR \"Next video: [specific tease]\". NEVER \"smash subscribe\", NEVER \"drop a comment\".${topic === 'Finance' ? `",
+  "APPEND TO SCRIPT END: \" [DISCLAIMER: Not financial advice. Educational only.]\" — this is required for every Finance package.` : ''}",
+  "{\"topic\":\"${topic}\",\"angle\":\"the specific angle this video uses (e.g. 'why low-fee index funds outperform vs the usual fee story' / 'the AI replacement story most coverage misses' / 'morning routine variable that actually correlates')\",\"concept\":\"one sentence — the unique angle of this video\",\"hookPattern\":\"which of the 8 hook ladder patterns\",\"title\":\"max 8 words, insight-framed, no all-caps, no hype words\",\"mood\":\"${topic}\",\"hook\":\"Colin's exact 0:00-0:03 opening line — confident, specific, NOT shouty, NOT hype-bro\",\"script\":\"Full Colin script with timestamp markers: [0:00 HOOK] line | [0:03 SETUP] line | [0:10 PAYOFF] line(s) | [0:22 IMPLICATION] line | [0:28 SOFT CTA] line${topic === 'Finance' ? ' | END WITH: [DISCLAIMER: Not financial advice. Educational only.]' : ''}\",\"visualInstructions\":\"HeyGen setup per the PRODUCTION rules above — Colin costume (${look}), background per topic, text overlay timing (HOOK 0:00-0:03, payoff term 0:10-0:15)\",\"thumbnailText\":\"max 6 words, insight-framed, no theatrics, no all-caps\",\"captionYT\":\"hook question + 1-line context + soft CTA + #NextWave + 2-3 topic hashtags\",\"captionTikTok\":\"one line carrying the insight + 2 hashtags max\",\"captionIG\":\"2-3 dot-spacer lines + soft CTA + 3-4 hashtags\",\"hashtags\":\"#NextWave #${topicTag} + 2-3 specific topic tags\",\"workflowNotes\":\"HeyGen production steps + which hook pattern was used so the next generation rotates to a different one\"}",
 ]);
 // Reconciliation closeout (2026-10-03) — this test's comparison point was `BASELINE` (fa34eb0, the
 // commit immediately before NextWave existed in this file at all). That stopped being the right
@@ -698,6 +710,61 @@ await t('REGRESSION (2026-10-03 real defect, script A): a duplicate span_text ("
   assert.ok(ttsText.includes('same three thousand dollars buys fewer shares'), 'second $3,000 occurrence must resolve to ITS OWN position, not collide with the first one\'s');
   assert.ok(ttsText.includes('take 2 to 3 days to process'), '"2 to 3 days" is a range this gate does not cover — it must be left exactly as written, never truncated to "two days"');
   assert.equal(spans.length, 3, 'exactly 3 of the 4 script-sourced mentions expand ($3,000 x2, 2% — the range is correctly skipped)');
+});
+
+console.log('\n[17] Creative correction (2026-10-05) — CEO/PM task-113 review: primary topic object grounding, stakes-first hook, NextWave-branded CTA');
+const { kindFor, drawMetaphor, narrativeScene } = await import('./lib/nextwaveV2Renderer/production/narrative.mjs');
+const { makeCanvas } = await import('./lib/nextwaveV2Renderer/core.mjs');
+const { layoutFor: layoutForNW } = await import('./lib/nextwaveV2Renderer/production/templates.mjs');
+await t('car words resolve to the \'car\' kind, never the generic house/mortgage fallback — even though both are Brain topic \'loan\'', () => {
+  assert.equal(kindFor('A 5.5-point rate spread on a $43,000 car loan costs you $6,718.', 'loan', false, true, false), 'car');
+  assert.equal(kindFor('Say you borrow $350,000 for a mortgage at 6% versus 4%.', 'loan', false, true, false), 'house');
+  assert.equal(kindFor('The dealership markup adds thousands over the life of the loan.', 'loan', false, true, false), 'car');
+});
+await t('kindFor behavior for every other existing topic is byte-for-byte unchanged (car check is additive, checked first, never shadows anything else)', () => {
+  assert.equal(kindFor('Put $20,000 in a savings account.', 'savings', false, true, false), 'piggy');
+  assert.equal(kindFor('The first is when you start.', 'time', false, false, false), 'hourglass');
+  assert.equal(kindFor('Your index fund compounds and grows steadily each year.', 'invest', false, false, false), 'tree');
+  assert.equal(kindFor('Invest $400 every month into the fund.', 'invest', false, true, false), 'jar');
+  assert.equal(kindFor('Nothing topical here at all.', null, false, true, false), 'coins');
+});
+await t('drawMetaphor renders the new car prop without throwing, at both the normal metaphor scale and the small recurring-badge scale used alongside money stacks', () => {
+  const { g } = makeCanvas(1080, 1920);
+  assert.doesNotThrow(() => drawMetaphor(g, 'car', 540, 1200, { short: true, BN: null, w: 1 }), 'full-scale car');
+  assert.doesNotThrow(() => drawMetaphor(g, 'car', 390, 450, { short: true, BN: null, w: 0.22 }), 'small badge-scale car (no banked sprite required — pure vector, zero new vendor cost)');
+});
+await t('a money-stack scene (nM>0) with a recognized car subject paints zero unprovenanced numbers — the new recurring badge draws no text/numerals of its own', async () => {
+  const L = layoutForNW(STYLE.formats.short);
+  const sceneInfo = { narration: { text: 'At 4.5% you pay $48,099 for the car. At 10% you pay $54,817 for the same car.' }, reveal_steps: [{ entity_id: 'e1', meaning_event_pattern: '48,099' }, { entity_id: 'e2', meaning_event_pattern: '54,817' }], intent: 'explanation' };
+  const allScenes = [sceneInfo];
+  const valuesById = new Map([['e1', { kind: 'money', value: 48099, display: '$48,099' }], ['e2', { kind: 'money', value: 54817, display: '$54,817' }]]);
+  const poses = await loadHostPoses(); const bench = await loadBench();
+  const scene = narrativeScene({ L, p: {}, span: { start: 0, end: 8 }, words: [], poses, BN: bench, sceneInfo, valuesById, allScenes, G: { maxMoney: 54817 }, index: 0, intent: 'explanation' });
+  const drawn = collectDrawnText({ format: STYLE.formats.short, drawFrame: scene.draw, times: [5.0] });
+  const pv = numberProvenance({ drawn, allowed: allowedNumbers({ storyboard: { values: [...valuesById.values()], scenes: [] }, script: sceneInfo.narration.text, derived: [] }) });
+  assert.ok(pv.ok, 'the car badge must never paint a number the gate has not verified: ' + JSON.stringify(pv.unprovenanced));
+});
+const NW_BLOCK = ops.slice(ops.indexOf("} else if (engineId === 'nextwave') {"), ops.indexOf("} // end short-form NextWave prompt"));
+const NW_LONG_BLOCK = NW_BLOCK.slice(NW_BLOCK.indexOf('if (isLong) {'), NW_BLOCK.indexOf('    } else {\n    prompt = `You are the NextWave Systems content engine'));
+await t('NextWave short-form prompt: primary-topic-object rule, stakes-first hook rule, and a NextWave-branded (never dropped, never generic) CTA rule are present', () => {
+  assert.ok(/PRIMARY TOPIC OBJECT/.test(NW_BLOCK), 'short-form prompt missing the primary-topic-object section');
+  assert.ok(/must appear as plain words in the script itself/.test(NW_BLOCK), 'short-form prompt does not require the object to actually appear in the script text (inert metadata would not reach the renderer)');
+  assert.ok(/land the STAKES/.test(NW_BLOCK), 'short-form prompt missing the stakes-first hook principle');
+  assert.ok(/NextWave-BRANDED growth line/.test(NW_BLOCK) && /must name "NextWave" explicitly/.test(NW_BLOCK), 'short-form prompt does not require the CTA to be NextWave-branded');
+  assert.ok(/disclaimer is a legal notice, not a substitute for the CTA/.test(NW_BLOCK), 'short-form prompt does not protect the CTA from being silently replaced by the disclaimer');
+  assert.ok(/"primaryTopicObject":/.test(NW_BLOCK), 'short-form JSON schema missing the primaryTopicObject field');
+});
+await t('NextWave long-form prompt gets the same durable rule (same engine, same principle — not duplicated ad hoc per format)', () => {
+  assert.ok(NW_LONG_BLOCK.length > 200, 'failed to isolate the long-form sub-block — marker drifted');
+  assert.ok(/PRIMARY TOPIC OBJECT: before writing/.test(NW_LONG_BLOCK), 'long-form prompt missing the primary-topic-object rule');
+  assert.ok(/NextWave-branded CTA \(must name "NextWave"/.test(NW_LONG_BLOCK), 'long-form prompt missing the branded-CTA rule');
+  assert.ok(/"primaryTopicObject":/.test(NW_LONG_BLOCK), 'long-form JSON schema missing the primaryTopicObject field');
+});
+await t('no other engine (SRV, AI Studio, SMM) was touched by this correction', () => {
+  const beforeNextwave = ops.slice(0, ops.indexOf("} else if (engineId === 'nextwave') {"));
+  const afterNextwave = ops.slice(ops.indexOf("} // end short-form NextWave prompt"), ops.indexOf("} // end short-form NextWave prompt") + 8000);
+  assert.ok(!/primaryTopicObject|PRIMARY TOPIC OBJECT/.test(beforeNextwave), 'an engine defined before the NextWave branch (SRV) must not have been touched');
+  assert.ok(!/primaryTopicObject|PRIMARY TOPIC OBJECT/.test(afterNextwave), 'an engine defined after the NextWave branch (AI Studio) must not have been touched');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
