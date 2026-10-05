@@ -260,6 +260,17 @@ const HTML_A2_ALLOWED_REMOVED_LINES = new Set([
   // replaced with the same two-step reveal pattern already used for Close Preview; the underlying
   // action (_nextWaveSetStage(taskId,'generate')) is unchanged. See the function's own comment.
   "body+=`<button style=\"${btnRed}\" onclick=\"if(confirm('Discard package and regene".slice(0, 80),
+  // Duplicate-concept confirmation blocker correction (2026-10-05) — _confirmDupSave is now
+  // `async function` (NextWave routes to the new in-page _nextWaveShowDupConfirm modal; every
+  // other engine's native confirm() is byte-identical, just now `return`ed through an async
+  // function, which is a no-op for a non-Promise value). Both real call sites were updated to
+  // `await` it — injectToTask() (the Factory wizard's own dup-check) had to become `async
+  // function` too, since an un-awaited call to an async function is always truthy and would have
+  // silently disabled the dup-check gate for every engine on that path.
+  'function _confirmDupSave(existing,candidateEngine){',
+  'if(!_confirmDupSave(_dup,pkg.engine)){',
+  'function injectToTask(){',
+  'if(!_confirmDupSave(_dup,_dupEngine))return;',
 ]);
 // Reconciliation closeout (2026-10-03): same reasoning as MAIN_RECONCILE_BASELINE above — this test's
 // zero-point moves from fa34eb0 to origin/main's pre-merge HEAD, so main's own independent edits
@@ -829,5 +840,61 @@ await t('SCENARIO_OBJECT is a deterministic lookup, not touched by the Brain/mat
   const factPacketSrc = fs.readFileSync('./lib/nextwaveV2FactPacket.mjs', 'utf8');
   ['compound_growth.end_value (monthly annuity, ', 'compound_growth.end_value (annual_compounding, net of fee)', 'compound_growth.end_value (annual_compounding)', 'loan_payment.total_paid (monthly_amortization)'].forEach((s) => assert.ok(factPacketSrc.includes(s), `calculation_method string changed/removed: ${s}`));
 });
+
+console.log('\n[19] Blocker correction #2 (2026-10-05) — the house-detection regex matched bare "borrow" (used in EVERY DECIDE evidence sentence), so student_loan and personal_loan scripts incorrectly rendered a house; fixed by requiring an actual house/mortgage word, adding a distinct student-loan kind, and letting personal_loan correctly fall through to the generic coins default.');
+await t('"borrow" alone (no mortgage/house/home word) does not produce a house', () => {
+  assert.notEqual(kindFor('Say you borrow $10,500 for 3 years at a higher rate.', 'loan', false, true, false), 'house');
+  assert.notEqual(kindFor('The loan you borrow today determines what you repay.', 'loan', false, true, false), 'house');
+});
+await t('mortgage / home-loan concepts still produce house', () => {
+  assert.equal(kindFor('Say you borrow $350,000 for a mortgage at 6% versus 4%.', 'loan', false, true, false), 'house');
+  assert.equal(kindFor('A home loan with a lower rate saves you years of payments.', 'loan', false, true, false), 'house');
+  assert.equal(kindFor('Your house payment depends entirely on the rate you lock in.', 'loan', false, true, false), 'house');
+});
+await t('car-loan concepts still produce car (unaffected by the borrow-regex narrowing)', () => {
+  assert.equal(kindFor('A 5.5-point rate spread on a $43,000 car loan costs you $6,718.', 'loan', false, true, false), 'car');
+});
+await t('student-loan concepts produce the new distinct studentLoan kind, never house', () => {
+  assert.equal(kindFor('The interest rate on the student loan determines what you repay.', 'loan', false, true, false), 'studentLoan');
+  assert.equal(kindFor('Say you borrow $51000 for 17 years for your student loans.', 'loan', false, true, false), 'studentLoan');
+  assert.notEqual(kindFor('The interest rate on the student loan determines what you repay.', 'loan', false, true, false), 'house');
+});
+await t('personal-loan concepts (no specific object word) fall through to the generic coins default, never house', () => {
+  assert.equal(kindFor('Say you borrow $10500 for 3 years at 8.5 percent.', 'loan', false, true, false), 'coins');
+  assert.equal(kindFor('The rate on your personal loan decides the real cost.', 'loan', false, true, false), 'coins');
+});
+await t('drawMetaphor renders the new graduationCap (studentLoan) prop without throwing, at both scales', () => {
+  const { g } = makeCanvas(1080, 1920);
+  assert.doesNotThrow(() => drawMetaphor(g, 'studentLoan', 540, 1200, { short: true, BN: null, w: 1 }), 'full-scale graduation cap');
+  assert.doesNotThrow(() => drawMetaphor(g, 'studentLoan', 390, 450, { short: true, BN: null, w: 0.22 }), 'small badge-scale graduation cap');
+});
+await t('a student-loan money-stack scene paints zero unprovenanced numbers — the graduation-cap badge draws no text of its own', async () => {
+  const L = layoutForNW(STYLE.formats.short);
+  const sceneInfo = { narration: { text: 'The interest rate on the student loan determines what you repay. Say you borrow $51000 for 17 years. At a 4.5 percent rate, you will pay back about $73062 in total. At a 8.25 percent rate, you will pay back about $95011 in total.' }, reveal_steps: [{ entity_id: 'e1', meaning_event_pattern: '73062' }, { entity_id: 'e2', meaning_event_pattern: '95011' }], intent: 'explanation' };
+  // index:0 of a 2-scene array (not isLast) — isolates the money-stack/badge drawing this test
+  // targets from the unrelated pre-existing closing-takeaway text overlay (only drawn when
+  // isLast), which paints raw trailing-sentence script text and is not part of what's under test.
+  const closingScene = { narration: { text: 'Shop your rate before you sign.' }, reveal_steps: [], intent: 'close' };
+  const allScenes = [sceneInfo, closingScene];
+  const valuesById = new Map([['e1', { kind: 'money', value: 73062, display: '$73,062' }], ['e2', { kind: 'money', value: 95011, display: '$95,011' }]]);
+  const poses = await loadHostPoses(); const bench = await loadBench();
+  const scene = narrativeScene({ L, p: {}, span: { start: 0, end: 10 }, words: [], poses, BN: bench, sceneInfo, valuesById, allScenes, G: { maxMoney: 95011 }, index: 0, intent: 'explanation' });
+  const drawn = collectDrawnText({ format: STYLE.formats.short, drawFrame: scene.draw, times: [6.0] });
+  const pv = numberProvenance({ drawn, allowed: allowedNumbers({ storyboard: { values: [...valuesById.values()], scenes: [] }, script: sceneInfo.narration.text, derived: [] }) });
+  assert.ok(pv.ok, 'the graduation-cap badge must never paint a number the gate has not verified: ' + JSON.stringify(pv.unprovenanced));
+});
+await t('factual/provenance behavior (number-provenance robustness across the full recorded-script corpus) remains unaffected by the kindFor narrowing — zero new text/numerals introduced by any kind change', async () => {
+  let n = 0; const bad = []; const poses = await loadHostPoses(), bench = await loadBench();
+  for (const c of ALL) { let sb; try { sb = await brain(c.script); } catch { continue; } if (!sb.ok || sb.integrity.status !== 'clean') continue;
+    for (const fname of ['short', 'long']) { const fm = STYLE.formats[fname]; const words = wordsFromAlignment(c.script, synthAlign(c.script)); let C; try { C = composeStoryboard({ storyboard: sb, words, assets: { poses, bench }, format: fm }); } catch (e) { continue; }
+      const times = []; for (let x = 0.7; x < C.duration; x += 2.5) times.push(x);
+      const drawn = collectDrawnText({ format: fm, drawFrame: C.draw, times });
+      const pv = numberProvenance({ drawn, allowed: allowedNumbers({ storyboard: sb, script: c.script, derived: C.derived }) });
+      if (!pv.ok) bad.push(c.id + ':' + fname); n++;
+    }
+  }
+  assert.ok(n >= 20, 'too few scripts exercised: ' + n); assert.deepEqual(bad, []);
+});
+await t('existing NextWave renderer tests (sections [1]-[18]) all remain green — asserted by this full suite run itself having reached this point with zero prior failures', () => { assert.equal(fail, 0, `${fail} failure(s) already recorded earlier in this run`); });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

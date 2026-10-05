@@ -21928,11 +21928,46 @@ function findDuplicatePackage(engineStr,titleStr,ignoreTaskId,candidatePkg){
 // auto-accepts. Language guard is the quality gate; dup-blocking causes
 // infinite retry on small same-mood pools.
 let _srvFarsiGuardActive=false;
-function _confirmDupSave(existing,candidateEngine){
+// NextWave blocker correction #1 (2026-10-05) — native confirm() is suppressed by the
+// browser-automation environment used for VA production (confirmed via console: "Page dialog
+// suppressed (confirm): ... confirm() returned false to the page"), silently discarding
+// otherwise-valid generated packages. Same root cause and same proven fix already shipped for
+// Close Preview and Discard & Regenerate: an in-page two-step modal in place of the native
+// dialog. Scoped to NextWave ONLY — every other engine (SRV, AI Studio, SMM) still gets the
+// exact same native confirm() below, completely unchanged.
+function _nextWaveShowDupConfirm(existing,candidateEngine){
+  return new Promise(function(resolve){
+    const old=document.getElementById('nw-dup-confirm-modal');
+    if(old)old.remove();
+    const when=existing.generatedAt?new Date(existing.generatedAt).toLocaleDateString():'earlier';
+    const id=existing.id?' ('+existing.id+')':'';
+    const esc=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+    const modal=document.createElement('div');
+    modal.id='nw-dup-confirm-modal';
+    modal.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    modal.innerHTML='<div style="background:#0d1017;border:1px solid #c9a84c;border-radius:14px;padding:20px;width:100%;max-width:520px;display:flex;flex-direction:column;gap:14px">'
+      +'<div style="font-size:12px;font-weight:700;color:#c9a84c;font-family:JetBrains Mono,monospace;letter-spacing:2px">POSSIBLE DUPLICATE — NEXTWAVE</div>'
+      +'<div style="color:#e2e8f0;font-size:14px;line-height:1.6">A package titled "'+esc(existing.title||'(no title)')+'" was already generated for '
+      +esc(existing.engine||existing.engineName||candidateEngine||'this engine')+' on '+esc(when)+esc(id)+'.<br><br>Save the new one anyway?</div>'
+      +'<div style="display:flex;gap:8px">'
+      +'<button id="nw-dup-confirm-save" style="flex:1;padding:12px;background:#c9a84c;border:none;border-radius:8px;font-weight:700;font-family:Syne,sans-serif;cursor:pointer;color:#000">Save Anyway</button>'
+      +'<button id="nw-dup-confirm-cancel" style="flex:1;padding:12px;background:rgba(255,255,255,0.05);border:1px solid #1a2030;border-radius:8px;font-weight:700;font-family:Syne,sans-serif;cursor:pointer;color:#e2e8f0">Cancel / Regenerate</button>'
+      +'</div></div>';
+    document.body.appendChild(modal);
+    const cleanup=function(result){const m=document.getElementById('nw-dup-confirm-modal');if(m)m.remove();resolve(result);};
+    document.getElementById('nw-dup-confirm-save').onclick=function(){cleanup(true);};
+    document.getElementById('nw-dup-confirm-cancel').onclick=function(){cleanup(false);};
+  });
+}
+async function _confirmDupSave(existing,candidateEngine){
   if(_srvFarsiGuardActive){
     console.warn('[SRV Farsi] Guard: auto-accepting dup — "'+
       (existing.title||'(no title)')+'" vs candidate (guard active, lang-check is gate)');
     return true;
+  }
+  const _eng=String(candidateEngine||'').trim();
+  if(_eng==='NextWave'||_eng==='NextWave Systems'){
+    return await _nextWaveShowDupConfirm(existing,candidateEngine);
   }
   const when=existing.generatedAt?new Date(existing.generatedAt).toLocaleDateString():'earlier';
   const id=existing.id?' ('+existing.id+')':'';
@@ -22025,7 +22060,7 @@ async function generatePackage(taskId){
     const _dup=findDuplicatePackage(pkg.engine,pkg.title,taskId,pkg);
     if(_dup){
       console.log('[MMM v13.62.9] concept-overlap dup-detect (Task): candidate "'+pkg.title+'" overlaps with prior pkg:',_dup.id||'(yt:'+(_dup.title||'')+')','score:',_dup._z2OverlapScore);
-      if(!_confirmDupSave(_dup,pkg.engine)){
+      if(!(await _confirmDupSave(_dup,pkg.engine))){
         if(btn)btn.disabled=false;
         if(btnText)btnText.textContent='Generate package';
         if(errEl){errEl.style.display='block';errEl.textContent='Discarded — duplicate of '+(_dup.title||_dup.id||'an existing package')+'.';}
@@ -25520,7 +25555,7 @@ function renderPkgPreview(pkg){
     fields.map(f=>'<div class="pkg-section"><div class="pkg-section-label">'+f.label+'</div><div class="pkg-content">'+f.val+'</div></div>').join('');
 }
 
-function injectToTask(){
+async function injectToTask(){
   if(!fGeneratedPkg)return;
   if(!D.packages)D.packages=[];
   // v13.26 (Z.2 upgraded) — concept-overlap dedup on Factory write path
@@ -25528,7 +25563,7 @@ function injectToTask(){
   const _dup=findDuplicatePackage(_dupEngine,fGeneratedPkg.title,fTaskId,fGeneratedPkg);
   if(_dup){
     console.log('[MMM v13.62.9] concept-overlap dup-detect (Factory): candidate "'+fGeneratedPkg.title+'" overlaps with prior pkg:',_dup.id||'(yt:'+(_dup.title||'')+')','score:',_dup._z2OverlapScore);
-    if(!_confirmDupSave(_dup,_dupEngine))return;
+    if(!(await _confirmDupSave(_dup,_dupEngine)))return;
   }
   fGeneratedPkg.engineName=fEngine?fEngine.name:fGeneratedPkg.engineName;
   fGeneratedPkg.engineIcon=fEngine?fEngine.icon:fGeneratedPkg.engineIcon;
