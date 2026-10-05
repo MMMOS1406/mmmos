@@ -897,4 +897,72 @@ await t('factual/provenance behavior (number-provenance robustness across the fu
 });
 await t('existing NextWave renderer tests (sections [1]-[18]) all remain green — asserted by this full suite run itself having reached this point with zero prior failures', () => { assert.equal(fail, 0, `${fail} failure(s) already recorded earlier in this run`); });
 
+console.log('\n[20] Task-123 PM creative iteration (2026-10-05) — hook opens in a topic-specific environment immediately instead of always forcing a blank studio; car/mortgage get distinct environments; the closing recap resolves the same car/house/studentLoan kind as the main scene instead of collapsing every loan to a house; a branded NextWave CTA pill renders when the closing beat speaks the brand name.');
+const { pickEnv } = await import('./lib/nextwaveV2Renderer/production/narrative.mjs');
+const mkScene = (text, extra = {}) => ({ narration: { text }, ...extra });
+await t('hook scene (index 0) opens directly in a topic environment instead of always forcing studio — car loan hook gets \'city\'', () => {
+  const allScenes = [mkScene('The car loan rate you accept today decides what you pay.'), mkScene('Say you borrow $30000 for 5 years.'), mkScene('Shop around. Follow NextWave.')];
+  const r = pickEnv({ sceneInfo: allScenes[0], allScenes, index: 0 });
+  assert.equal(r.env, 'city', JSON.stringify(r));
+});
+await t('hook scene gets \'neighbourhood\' for a mortgage/home-loan hook', () => {
+  const allScenes = [mkScene('A rate difference on the house costs you more than you think.'), mkScene('Say you borrow $400000 for 20 years.'), mkScene('Follow NextWave.')];
+  const r = pickEnv({ sceneInfo: allScenes[0], allScenes, index: 0 });
+  assert.equal(r.env, 'neighbourhood', JSON.stringify(r));
+});
+await t('hook scene for a generic/unspecified loan (student, personal — no car/house word anywhere in the script) stays neutral studio rather than defaulting to suburban houses', () => {
+  const allScenes = [mkScene('The student loan rate you accept today determines what you repay.'), mkScene('Say you borrow $60000 for 10 years.'), mkScene('Follow NextWave.')];
+  const r = pickEnv({ sceneInfo: allScenes[0], allScenes, index: 0 });
+  assert.equal(r.env, 'studio', JSON.stringify(r));
+});
+await t('hook scene for non-loan topics also opens immediately in its topic environment (not just loan) — time/invest/price/savings', () => {
+  assert.equal(pickEnv({ sceneInfo: mkScene('The first is when you start investing.'), allScenes: [mkScene('The first is when you start investing.'), mkScene('x')], index: 0 }).env, 'road');
+  assert.equal(pickEnv({ sceneInfo: mkScene('Invest $400 every month into the fund.'), allScenes: [mkScene('Invest $400 every month into the fund.'), mkScene('x')], index: 0 }).env, 'finance');
+  assert.equal(pickEnv({ sceneInfo: mkScene('Prices rise 3% a year at the grocery store.'), allScenes: [mkScene('Prices rise 3% a year at the grocery store.'), mkScene('x')], index: 0 }).env, 'kitchen');
+  assert.equal(pickEnv({ sceneInfo: mkScene('Your savings account earns a better rate elsewhere.'), allScenes: [mkScene('Your savings account earns a better rate elsewhere.'), mkScene('x')], index: 0 }).env, 'office');
+});
+await t('the closing scene (isLast) is unaffected — still always the neutral studio for the takeaway', () => {
+  const allScenes = [mkScene('A car loan rate costs you more.'), mkScene('Say you borrow $30000 for 5 years.'), mkScene('Follow NextWave for more car loan breakdowns.')];
+  const r = pickEnv({ sceneInfo: allScenes[2], allScenes, index: 2 });
+  assert.equal(r.env, 'studio', JSON.stringify(r));
+});
+await t('middle (non-hook, non-closing) scenes are completely unaffected — unchanged byte-for-byte behavior', () => {
+  const allScenes = [mkScene('hook'), mkScene('Say you borrow $400000 for a mortgage.'), mkScene('close. Follow NextWave.')];
+  const r = pickEnv({ sceneInfo: allScenes[1], allScenes, index: 1 });
+  assert.equal(r.env, 'neighbourhood');
+});
+await t('comparisons() resolves a per-comparison kind (car/studentLoan/house/null) using the same kindFor logic as the main scene, instead of a flat topic==loan check', async () => {
+  const { comparisons } = await import('./lib/nextwaveV2Renderer/production/narrative.mjs');
+  const carScene = { narration: { text: 'At 4.5% you pay $48,099 for the car.' }, renderer_params: { displayMode: 'bar', beforeValue: '$48,099', afterValue: '$54,817', beforeLabel: 'Low rate', afterLabel: 'High rate', anchorText: 'Car loan' } };
+  const studentScene = { narration: { text: 'The student loan rate decides the total.' }, renderer_params: { displayMode: 'bar', beforeValue: '$86,714', afterValue: '$99,008', beforeLabel: 'Low rate', afterLabel: 'High rate', anchorText: 'Student loan' } };
+  const mortgageScene = { narration: { text: 'A rate difference on the house costs more.' }, renderer_params: { displayMode: 'bar', beforeValue: '$632,402', afterValue: '$777,825', beforeLabel: 'Low rate', afterLabel: 'High rate', anchorText: 'Mortgage' } };
+  const cs = comparisons([carScene]); assert.equal(cs[0].kind, 'car', JSON.stringify(cs));
+  const ss = comparisons([studentScene]); assert.equal(ss[0].kind, 'studentLoan', JSON.stringify(ss));
+  const ms = comparisons([mortgageScene]); assert.equal(ms[0].kind, 'house', JSON.stringify(ms));
+});
+await t('drawRecap renders car and studentLoan recap pedestals without throwing and without painting any unprovenanced number (real closing-recap frame, multiple comparison kinds together)', async () => {
+  const L = layoutForNW(STYLE.formats.short);
+  const carScene = { narration: { text: 'At 4.5% you pay $48,099 for the car.' }, intent: 'explanation', reveal_steps: [], renderer_params: { displayMode: 'bar', beforeValue: '$48,099', afterValue: '$54,817', beforeLabel: 'Low rate', afterLabel: 'High rate', anchorText: 'Car loan' } };
+  const studentScene = { narration: { text: 'The student loan rate decides the total: $86,714 versus $99,008.' }, intent: 'explanation', reveal_steps: [], renderer_params: { displayMode: 'bar', beforeValue: '$86,714', afterValue: '$99,008', beforeLabel: 'Low rate', afterLabel: 'High rate', anchorText: 'Student loan' } };
+  const closingScene = { narration: { text: 'Follow NextWave for more breakdowns like this.' }, intent: 'presenter_conclusion', reveal_steps: [] };
+  const allScenes = [carScene, studentScene, closingScene];
+  const valuesById = new Map();
+  const poses = await loadHostPoses(); const bench = await loadBench();
+  const scene = narrativeScene({ L, p: {}, span: { start: 0, end: 6 }, words: [], poses, BN: bench, sceneInfo: closingScene, valuesById, allScenes, G: { maxMoney: 99008 }, index: 2, intent: 'presenter_conclusion' });
+  const drawn = collectDrawnText({ format: STYLE.formats.short, drawFrame: scene.draw, times: [2.0, 4.0] });
+  const pv = numberProvenance({ drawn, allowed: allowedNumbers({ storyboard: { values: [], scenes: allScenes }, script: allScenes.map((s) => s.narration.text).join(' '), derived: [{ display: '$6,718' }, { display: '$12,294' }] }) });
+  assert.ok(pv.ok, 'recap must never paint a number the gate has not verified: ' + JSON.stringify(pv.unprovenanced));
+});
+await t('the branded NextWave CTA pill renders without throwing when the closing beat speaks the brand name, and is a no-op (no exception, no stray text) when it does not', async () => {
+  const L = layoutForNW(STYLE.formats.short);
+  const poses = await loadHostPoses(); const bench = await loadBench();
+  const withCta = { narration: { text: 'Follow NextWave for more breakdowns like this.' }, intent: 'presenter_conclusion', reveal_steps: [] };
+  const withoutCta = { narration: { text: 'Shop your rate before you sign.' }, intent: 'presenter_conclusion', reveal_steps: [] };
+  for (const sceneInfo of [withCta, withoutCta]) {
+    const allScenes = [mkScene('hook'), sceneInfo];
+    const scene = narrativeScene({ L, p: {}, span: { start: 0, end: 6 }, words: [], poses, BN: bench, sceneInfo, valuesById: new Map(), allScenes, G: { maxMoney: 1 }, index: 1, intent: 'presenter_conclusion' });
+    assert.doesNotThrow(() => collectDrawnText({ format: STYLE.formats.short, drawFrame: scene.draw, times: [1.5] }), sceneInfo.narration.text);
+  }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
