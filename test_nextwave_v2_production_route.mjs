@@ -965,4 +965,51 @@ await t('the branded NextWave CTA pill renders without throwing when the closing
   }
 });
 
+console.log('\n[21] Long-format production blocker (2026-10-06, task 125) — 3/3 real Long candidates blocked before render: two with scene_not_located_in_narration (identical on retry) traced to placeScenes() advancing its cursor by a failed scene\'s own text length even when nothing matched, landing on an arbitrary position that could sit AFTER where a later, genuinely-present scene\'s text actually starts, turning one miss into a cascade of false negatives. The third (unbound_value x2) traced to the Long prompt\'s OPENING rule banning only a combined/aggregate dollar figure, not an individual decision\'s own gap figure previewed in rounded form before that decision\'s own evidence sentence states it precisely — producing two different numbers for the same fact, which the Brain correctly cannot bind to either value. Short format never exercises either path (one topic, no multi-decision opening preview).');
+await t('placeScenes: a scene whose exact text genuinely is not in the narration is still correctly flagged unlocated (no silent pass)', () => {
+  const words = 'alpha beta gamma delta echo quebec romeo sierra tango uniform victor whiskey xray yankee zulu'.split(' ').map((w, i) => ({ w, start: i * 0.3, end: i * 0.3 + 0.25 }));
+  const scenes = [
+    { scene_id: 'S1', narration: { text: 'alpha beta gamma delta echo' } },
+    { scene_id: 'S2', narration: { text: 'foxtrot golf hotel india juliet kilo lima mike november oscar papa' } }, // never appears anywhere in the stream
+  ];
+  const spans = placeScenes(scenes, words);
+  assert.equal(spans[0].located, true);
+  assert.equal(spans[1].located, false, 'a genuinely absent scene must still be flagged — the fix must not mask real problems');
+});
+await t('placeScenes: regression fix — one scene failing to locate no longer cascades into a false negative for a LATER scene whose text genuinely is present', () => {
+  // S3's real text sits immediately after S1's in the stream. The old code advanced the cursor by S2's
+  // own (unmatched) text length on failure, landing past S3's true position; indexOf only searches
+  // forward, so S3 then falsely reported unlocated too — this reproduces exactly that shape.
+  const words = 'alpha beta gamma delta echo quebec romeo sierra tango uniform victor whiskey xray yankee zulu'.split(' ').map((w, i) => ({ w, start: i * 0.3, end: i * 0.3 + 0.25 }));
+  const scenes = [
+    { scene_id: 'S1', narration: { text: 'alpha beta gamma delta echo' } },
+    { scene_id: 'S2', narration: { text: 'foxtrot golf hotel india juliet kilo lima mike november oscar papa' } }, // not present; longer than the real gap to S3
+    { scene_id: 'S3', narration: { text: 'quebec romeo sierra tango' } }, // genuinely present, right after S1
+  ];
+  const spans = placeScenes(scenes, words);
+  assert.equal(spans[0].located, true);
+  assert.equal(spans[1].located, false);
+  assert.equal(spans[2].located, true, 'cascading false negative: S3 is genuinely present but was not located');
+});
+await t('placeScenes: normal fully-locatable storyboard is byte-for-byte unaffected (cursor advancement on success is unchanged)', () => {
+  const spans = placeScenes(sbPass.scenes, wordsPass);
+  assert.ok(spans.every((s) => s.located));
+  spans.forEach((s, i) => { assert.ok(s.end > s.start); if (i) assert.ok(Math.abs(s.start - spans[i - 1].end) < 1e-6); });
+});
+await t('Long prompt: the OPENING rule now also forbids previewing an individual decision\'s own number (rounded or exact), not just a combined/aggregate figure', () => {
+  const gen = fs.readFileSync('./api/generate.js', 'utf8');
+  const m = gen.match(/OPENING \(at least 20 words[\s\S]*?(?=\nDECISION 1)/);
+  assert.ok(m, 'OPENING rule block not found');
+  const rule = m[0];
+  assert.ok(/combined\/total\/aggregate/.test(rule), 'pre-existing aggregate-figure ban must remain');
+  assert.ok(/preview an INDIVIDUAL decision.?s own number/i.test(rule), 'new individual-decision preview ban is missing');
+});
+await t('Short prompt and all other engine prompts (SRV Farsi/English, AI Studio short/long) are untouched by the Long-opening fix', () => {
+  const gen = fs.readFileSync('./api/generate.js', 'utf8');
+  assert.ok(!/preview an INDIVIDUAL decision.?s own number/i.test(gen.split('NEXTWAVE_LONG_PROMPT')[0]), 'the new rule must not appear before NEXTWAVE_LONG_PROMPT (i.e. not in an earlier/unrelated prompt)');
+  const longIdx = gen.indexOf('const NEXTWAVE_LONG_PROMPT'); const afterLong = gen.indexOf('`;', longIdx);
+  const restOfFile = gen.slice(afterLong);
+  assert.ok(!/preview an INDIVIDUAL decision.?s own number/i.test(restOfFile), 'the new rule must not leak into any prompt after NEXTWAVE_LONG_PROMPT (AI Studio, etc.)');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
