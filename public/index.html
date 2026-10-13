@@ -20699,12 +20699,13 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 // the existing Pexels-photo renderer below is unchanged for every other engine.
 // Strength of the warm soft-light wash over the colour cover photo (0 = untouched photo). One knob,
 // so the look can be tuned to the benchmark without touching the renderer.
-const SRV_FARSI_WARM_GRADE_ALPHA=0.28;
+const SRV_FARSI_WARM_GRADE_ALPHA=0.20; // light enough to keep natural skin tones
 const SRV_FARSI_MOOD_PALETTES={
   romantic:{gradient:['#6b3420','#3a1810','#1c0e0c'],tint:'#c9793f',frame:'#e0b56a',word:'عاشقانه',particle:'#f4d9a8'},
-  emotional:{gradient:['#4a2a2e','#2a1618','#140b0c'],tint:'#b0705a',frame:'#d9a78a',word:'احساسی',particle:'#f0cdb8'}, // warm dusk (replaces the old gray-blue Emotional palette)
+  emotional:{gradient:['#3a2518','#20140d','#0f0906'],tint:'#a8744a',frame:'#d2a878',word:'احساسی',particle:'#e8cfae'}, // benchmark: darker than the others but warm brown/amber (replaces the old gray-blue Emotional palette)
   happy:{gradient:['#7a4a1e','#4a2a12','#241408'],tint:'#e0a544',frame:'#f4cf8a',word:'شاد',particle:'#ffe6ae'},
 };
+function _srvFarsiHexRgb(hex){const n=parseInt(String(hex).replace('#',''),16);return ((n>>16)&255)+','+((n>>8)&255)+','+(n&255);}
 function _srvFarsiMoodKey(mood){
   const m=String(mood||'').toLowerCase();
   if(m.includes('emotional'))return 'emotional';
@@ -20917,6 +20918,7 @@ async function _srvRenderVideo(opts){
 
   // ── SRV Farsi V2 Phase 2 composed-cover frame (canvas port of VISUAL_BASELINE_v1) ──
   let _farsiPal=null,_farsiAtmo=null,_farsiAtmoKind=null,_farsiGrainPattern=null,_farsiT_ATMO=20;
+  let _farsiLongVeil=null; // cached title-side veil for the frameless Long cover (static, built once per render)
   // v2-phase2 — intensity scalar (soft/standard/vivid) modulates atmo density + zoom amplitude;
   // background archetype (a/b) modulates gradient direction. Both are tracked anti-repetition
   // dimensions (see saveMemoryItem('visual_mood_intensity'/'visual_background_archetype')) — a
@@ -21122,14 +21124,39 @@ async function _srvRenderVideo(opts){
     const zoom=1+(0.028*_farsiIntensityMul)*Math.sin(2*Math.PI*(t%_farsiT_ATMO)/_farsiT_ATMO);
     const isMirror=!!mirror;
     if(!isShort){
-      // ── LONG: 46%-width framed panel on left/right + typography zone opposite ──
-      const panelW=Math.round(W*0.46), panelH=Math.round(H-90*H/720), panelTop=Math.round(45*H/720), panelSide=Math.round(45*H/720);
-      const panelX=isMirror?panelSide:(W-panelSide-panelW);
-      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,18,true,true);
+      // ── LONG (visual benchmark): frameless 16:9 cinematic cover. The photo fills the subject side
+      // edge-to-edge — no box, no border, no rounded frame — and dissolves into warm dark negative
+      // space on the title side, where the large Farsi title sits.
+      const panelW=Math.round(W*0.64), panelH=H, panelTop=0;
+      const panelX=isMirror?0:(W-panelW);
+      const _zoomL=1.03+(zoom-1); // always >= 1 so the edge-to-edge photo never reveals a gap while it breathes
+      _drawFarsiPanel(panelX,panelTop,panelW,panelH,_zoomL,0,false,false);
+      // Title-side veil: one clean warm-dark field over the title side that dissolves into the photo
+      // (no visible edge). A vertical warm gradient masked by a horizontal alpha ramp; static, so it
+      // is built once and reused every frame.
+      if(!_farsiLongVeil){
+        _farsiLongVeil=document.createElement('canvas'); _farsiLongVeil.width=W; _farsiLongVeil.height=H;
+        const vx=_farsiLongVeil.getContext('2d');
+        const vg=vx.createLinearGradient(0,0,0,H);
+        vg.addColorStop(0,_farsiPal.gradient[1]); vg.addColorStop(1,_farsiPal.gradient[2]);
+        vx.fillStyle=vg; vx.fillRect(0,0,W,H);
+        const _edge=isMirror?panelW:panelX;                     // photo's inner edge
+        const _solidTo=isMirror?(_edge-W*0.02):(_edge+W*0.02);  // fully covered just past the edge
+        const _clearAt=isMirror?(_edge-W*0.34):(_edge+W*0.34);  // photo fully visible from here
+        const vm=vx.createLinearGradient(_solidTo,0,_clearAt,0);
+        vm.addColorStop(0,'rgba(0,0,0,1)'); vm.addColorStop(0.45,'rgba(0,0,0,0.62)'); vm.addColorStop(1,'rgba(0,0,0,0)');
+        vx.globalCompositeOperation='destination-in'; vx.fillStyle=vm; vx.fillRect(0,0,W,H);
+        vx.globalCompositeOperation='source-over';
+      }
+      ctx.drawImage(_farsiLongVeil,0,0);
+      // soft cinematic floor so the lower edge reads as film, not a crop
+      const _floor=ctx.createLinearGradient(0,H*0.72,0,H);
+      _floor.addColorStop(0,'rgba(10,6,4,0)'); _floor.addColorStop(1,'rgba(10,6,4,0.42)');
+      ctx.fillStyle=_floor; ctx.fillRect(0,0,W,H);
       _drawFarsiAtmo(t);
       // title zone
       const titleSide=isMirror?'right':'left';
-      const titleW=W-panelW-Math.round(40*W/1280);
+      const titleW=Math.round(W*0.46); // title may extend over the faded seam, never over the subject
       const pad=Math.round(W*0.036);
       const tx=titleSide==='left'?pad:(W-pad);
       ctx.textAlign=titleSide==='left'?'left':'right';
@@ -21152,7 +21179,7 @@ async function _srvRenderVideo(opts){
       // orphaned) two-line split only if the title genuinely can't fit on one line at the floor
       // size. Replaces the old fixed-size/greedy-wrap approach that could strand a short last
       // word alone on its own line.
-      const _titleMaxFont=Math.round(W*0.072), _titleMinFont=Math.round(W*0.048);
+      const _titleMaxFont=Math.round(W*0.078), _titleMinFont=Math.round(W*0.048);
       const _titleFontStr=function(px){ return `600 ${px}px 'Noto Nastaliq Urdu', serif`; };
       const _titleMaxW=titleW-pad*2;
       const _titleFit=_srvFitFarsiTitle(ctx,_rawTitle,_titleMaxW,_titleMaxFont,_titleMinFont,_titleFontStr);
@@ -21166,7 +21193,9 @@ async function _srvRenderVideo(opts){
       const _stackH=(_nTitleLines*_titleLineH)+_ruleGap+3+_finglishH+_wordmarkGap+_wordmarkH;
       const titleTopY=Math.max(Math.round(H*0.16),Math.round(H*0.5-_stackH/2));
       ctx.fillStyle='#fdf6e8';
+      ctx.save(); ctx.shadowColor='rgba(8,4,2,0.55)'; ctx.shadowBlur=Math.round(W*0.012); ctx.shadowOffsetY=2; // keeps the title readable over the image fade
       const titleBottomY=_srvDrawPreSplitLinesTop(ctx,_titleFit.lines,tx,titleTopY,_titleLineH);
+      ctx.restore();
       // rule
       const ruleY=titleBottomY+_ruleGap;
       ctx.fillStyle=_farsiPal.frame;
@@ -21179,10 +21208,12 @@ async function _srvRenderVideo(opts){
       // this deterministically without touching frozen title-generation logic.
       if(titleFinglish){
         ctx.direction='ltr'; ctx.textAlign=titleSide;
-        ctx.font=`600 ${Math.round(W*0.0195)}px 'IBM Plex Mono', monospace`;
-        ctx.fillStyle='rgba(253,246,232,0.82)';
+        ctx.font=`500 ${Math.round(W*0.0185)}px 'Vazirmatn', sans-serif`;
+        ctx.fillStyle='rgba(253,246,232,0.80)';
         _stackY+=_finglishH;
+        try{ctx.letterSpacing=Math.round(W*0.0032)+'px';}catch(_){}
         ctx.fillText(String(titleFinglish).toUpperCase(),tx,_stackY);
+        try{ctx.letterSpacing='0px';}catch(_){}
       }
       ctx.direction='ltr';
       // wordmark + music-mark row — grouped directly under the title stack (previously pinned to
@@ -21193,7 +21224,7 @@ async function _srvRenderVideo(opts){
       _drawFarsiPanel(0,0,W,H,zoom,0,false,false);
       // extra fade for legibility (Python .fade gradient)
       const fg=ctx.createLinearGradient(0,0,0,H);
-      fg.addColorStop(0,'rgba(28,14,12,0.25)'); fg.addColorStop(0.30,'rgba(0,0,0,0)'); fg.addColorStop(0.55,'rgba(0,0,0,0)'); fg.addColorStop(1,'rgba(20,10,8,0.75)');
+      fg.addColorStop(0,'rgba(28,14,12,0.28)'); fg.addColorStop(0.30,'rgba(0,0,0,0)'); fg.addColorStop(0.50,'rgba(0,0,0,0)'); fg.addColorStop(0.80,'rgba(18,9,6,0.66)'); fg.addColorStop(1,'rgba(14,7,5,0.86)'); // warm floor behind the lyric line
       ctx.fillStyle=fg; ctx.fillRect(0,0,W,H);
       _drawFarsiAtmo(t);
       ctx.direction='rtl'; ctx.textAlign='right';
@@ -21229,7 +21260,9 @@ async function _srvRenderVideo(opts){
       // than Lalezar did. The corner safe-box position/width/top-margin (tuned across multiple
       // avatar-clearance passes) is completely untouched.
       ctx.font=`600 ${Math.round(W*0.050)}px 'Noto Nastaliq Urdu', serif`;
+      ctx.save(); ctx.shadowColor='rgba(8,4,2,0.85)'; ctx.shadowBlur=Math.round(W*0.012); ctx.shadowOffsetY=2;
       _srvWrapLinesTop(ctx,_hook,_titleBoxRightX,_titleBoxTopY,_titleBoxMaxW,Math.round(W*0.060),3,false);
+      ctx.restore();
       // caption (current lyric line), styled per baseline spec
       if(lyricLines.length){
         let idx=0;
@@ -21238,7 +21271,7 @@ async function _srvRenderVideo(opts){
         const nextT=lyricTimings[idx+1]!==undefined?lyricTimings[idx+1]:targetDur;
         const lineDur=Math.max(0.5,nextT-lyricTimings[idx]);
         const inWin=t-lyricTimings[idx];
-        const alpha=Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35)));
+        const alpha=skipFade?1:Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35))); // skipFade = cover/thumbnail capture: lyric fully visible
         ctx.save(); ctx.globalAlpha=alpha;
         // v2-short-lyric-font-fix — the on-screen lyric caption was still on Vazirmatn sans-serif,
         // the same pre-correction treatment the title moved away from in v2-short-title-font-fix
@@ -21249,13 +21282,15 @@ async function _srvRenderVideo(opts){
         // ~1.16x->~1.21x font size, the same small ratio increase already made for the title, since
         // Nastaliq's diagonal flow needs slightly more vertical room per line than Vazirmatn did —
         // safe-zone, bottom placement, timing, wrapping line-count, and content are all untouched.
-        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.043)}px 'Noto Nastaliq Urdu', serif`;
-        ctx.fillStyle='#fff';
-        ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=6;
+        // visual benchmark: lyric must be clean and readable — same calligraphic family, larger, cream,
+        // with a soft deep shadow over the warm floor (was 0.043W white with a thin shadow).
+        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.054)}px 'Noto Nastaliq Urdu', serif`;
+        ctx.fillStyle='#fdf6e8';
+        ctx.shadowColor='rgba(8,4,2,0.92)'; ctx.shadowBlur=Math.round(W*0.014); ctx.shadowOffsetY=2;
         // v2-phase2 — bottom margin widened to ~18% of height (was ~6%) to clear the platform-UI
         // safe zone (username/caption/like-share rail) that Shorts/Reels/TikTok reserve at the bottom.
-        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.88,Math.round(W*0.052),2);
-        ctx.shadowBlur=0; ctx.restore();
+        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.86,Math.round(W*0.068),2);
+        ctx.shadowBlur=0; ctx.shadowOffsetY=0; ctx.restore();
       }
       ctx.direction='ltr';
       ctx.textAlign='left'; ctx.fillStyle='rgba(253,246,232,0.6)';

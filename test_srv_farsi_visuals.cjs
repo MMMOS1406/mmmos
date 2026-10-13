@@ -18,6 +18,20 @@ const warm=hex=>{const n=parseInt(hex.slice(1),16),r=n>>16,g=(n>>8)&255,b=n&255;
 ok('every mood palette is warm (red > blue) incl. Emotional',Object.values(pal).every(p=>warm(p.tint)&&p.gradient.every(warm)&&warm(p.frame)),JSON.stringify(Object.fromEntries(Object.entries(pal).map(([k,v])=>[k,v.tint]))));
 ok('old gray-blue Emotional colours are gone',!/#5f7290|#23283a|#9aa9c2/.test(h));
 
+// ── 1b. Benchmark layout: frameless Long, readable Short lyric, restrained secondary line ──
+const comp=(()=>{const s=h.indexOf('  function _drawFarsiComposedFrame(');return h.slice(s,h.indexOf('\n  // ── Main frame renderer',s));})();
+ok('Long: photo drawn edge-to-edge with no border and no rounded frame',/_drawFarsiPanel\(panelX,panelTop,panelW,panelH,_zoomL,0,false,false\)/.test(comp)&&/panelH=H, panelTop=0/.test(comp));
+ok('Long: no framed-panel call remains',!/_drawFarsiPanel\([^)]*,18,true,true\)/.test(comp));
+ok('Long: title side is a masked veil that dissolves into the photo',/_farsiLongVeil/.test(comp)&&/destination-in/.test(comp));
+ok('Long: photo never shrinks below its edge while animating',/const _zoomL=1\.03\+\(zoom-1\)/.test(comp));
+ok('Long: romanized line is a restrained sans (no monospace caps block)',/500 \$\{Math\.round\(W\*0\.0185\)\}px 'Vazirmatn'/.test(comp)&&!/IBM Plex Mono', monospace`;\s*\n\s*ctx\.fillStyle='rgba\(253,246,232,0\.82\)'/.test(comp));
+ok('Long/Short: title type is cream, not pure white',(comp.match(/#fdf6e8/g)||[]).length>=3);
+ok('Short: lyric line larger and cream with a deep soft shadow',/600 \$\{Math\.round\(W\*0\.054\)\}px 'Noto Nastaliq Urdu'/.test(comp)&&/shadowColor='rgba\(8,4,2,0\.92\)'/.test(comp));
+ok('Short: cover frame shows the lyric line (not captured mid fade-in)',/const alpha=skipFade\?1:/.test(comp));
+ok('grade is light enough for natural skin tones (<= 0.25)',(()=>{const m=h.match(/const SRV_FARSI_WARM_GRADE_ALPHA=([0-9.]+)/);return m&&+m[1]>0&&+m[1]<=0.25;})());
+const lum=hex=>{const n=parseInt(hex.slice(1),16);return 0.299*(n>>16)+0.587*((n>>8)&255)+0.114*(n&255);};
+ok('Emotional is the darkest palette but still warm',lum(pal.emotional.gradient[0])<lum(pal.romantic.gradient[0])&&lum(pal.emotional.gradient[0])<lum(pal.happy.gradient[0])&&warm(pal.emotional.tint));
+
 // ── 2. Rebuild image rotation: the real picker cycles the WHOLE pool before any reuse ──
 const D={};
 const pick=new Function('D',nested('    function _farsiPickAvatar(pool,bucketKey){')+'\nreturn _farsiPickAvatar;')(D);
