@@ -237,10 +237,10 @@ export async function runShellChecks(publicDir, golden) {
   const git = (...a) => execFileSync('git', ['-C', repo, ...a], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const base = 'origin/main';
   const changed = git('diff', '--name-only', base).split('\n').filter(Boolean).concat(git('ls-files', '--others', '--exclude-standard').split('\n').filter(Boolean));
-  const allowed = (f) => f === 'public/index.html' || f === 'public/shell.js' || f.startsWith('tests/preservation/');
-  check('only the files this order authorizes were changed (no api/, vercel.json, migrations, lib, engine files)', changed.every(allowed), changed.filter((f) => !allowed(f)).join(', ') || changed.join(', '));
-  const num = git('diff', '--numstat', base, '--', 'public/index.html').trim().split('\t');
-  check('public/index.html: zero lines deleted or modified — additions only', num[1] === '0' && Number(num[0]) > 0, `+${num[0]} −${num[1]}`);
+  const allowed = (f) => f === 'public/shell.js' || f.startsWith('tests/preservation/');
+  check('only the files this order authorizes were changed (public/shell.js and tests/preservation/ — no index.html, api/, vercel.json, migrations, lib, engine files)', changed.every(allowed), changed.filter((f) => !allowed(f)).join(', ') || changed.join(', '));
+  const idxDiff = git('diff', '--numstat', base, '--', 'public/index.html').trim();
+  check('public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the only shell hook)', idxDiff === '', idxDiff);
   const names = (src) => new Set([...src.matchAll(/^(?:async )?function\s+([A-Za-z0-9_$]+)/gm)].map((m) => m[1]));
   const was = names(git('show', `${base}:public/index.html`)), now = names(fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8'));
   check(`no top-level function removed or renamed (${was.size} existing functions)`, [...was].every((n) => now.has(n)), [...was].filter((n) => !now.has(n)).join(', '));
