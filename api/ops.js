@@ -7366,7 +7366,10 @@ async function setYtThumbnail(req, res) {
   const { videoId, engine, thumbUrl } = body;
   if (!videoId || !thumbUrl) return res.status(400).json({ ok: false, error: 'missing_params' });
   try {
-    const conn = await _getYoutubeConnectionByTitle(engine);
+    // SRV Farsi: the engine name is not the channel title ("Silk Road Voices"), so resolve it the same
+    // way youtubeUploadVideo does. Scoped to SRV Farsi — every other engine keeps its existing lookup.
+    const connTitle = engine === 'SRV Farsi' ? (YT_ENGINE_TO_TITLE[engine] || engine) : engine;
+    const conn = await _getYoutubeConnectionByTitle(connTitle);
     if (!conn) return res.status(401).json({ ok: false, error: 'no_yt_connection' });
     const { accessToken } = await _refreshYoutubeToken(conn.refresh_token);
     const imgRes = await fetch(thumbUrl);
