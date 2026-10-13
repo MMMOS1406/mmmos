@@ -14,7 +14,7 @@ import { STYLE } from './lib/nextwaveV2Renderer/core.mjs';
 import { wordsFromAlignment } from './lib/nextwaveV2Renderer/captions.mjs';
 import { loadHostPoses } from './lib/nextwaveV2Renderer/assets.mjs';
 import { loadBench } from './lib/nextwaveV2Renderer/props3.mjs';
-import { startRoute, classifyGate, planAssets, chunkPlan, compileFromState, buildStateFrom } from './lib/nextwaveV2Renderer/production/route.mjs';
+import { startRoute, classifyGate, planAssets, chunkPlan, compileFromState, buildStateFrom, parseFreezeDetect, ROUTE_VERSION } from './lib/nextwaveV2Renderer/production/route.mjs';
 import { composeStoryboard } from './lib/nextwaveV2Renderer/production/compose.mjs';
 import { runQc, collectDrawnText, numberProvenance, allowedNumbers, occupancy, idleWindows } from './lib/nextwaveV2Renderer/production/qc.mjs';
 import { placeScenes, eventTime } from './lib/nextwaveV2Renderer/production/timing.mjs';
@@ -125,6 +125,15 @@ const OPS_A2_ALLOWED_REMOVED_LINES = new Set([
   "0:46–0:50 SOFT CTA — \"Follow for more ${topic} takes\" OR \"Next video: [specific tease]\". NEVER \"smash subscribe\", NEVER \"drop a comment\".${topic === 'Finance' ? `",
   "APPEND TO SCRIPT END: \" [DISCLAIMER: Not financial advice. Educational only.]\" — this is required for every Finance package.` : ''}",
   "{\"topic\":\"${topic}\",\"angle\":\"the specific angle this video uses (e.g. 'why low-fee index funds outperform vs the usual fee story' / 'the AI replacement story most coverage misses' / 'morning routine variable that actually correlates')\",\"concept\":\"one sentence — the unique angle of this video\",\"hookPattern\":\"which of the 8 hook ladder patterns\",\"title\":\"max 8 words, insight-framed, no all-caps, no hype words\",\"mood\":\"${topic}\",\"hook\":\"Colin's exact 0:00-0:03 opening line — confident, specific, NOT shouty, NOT hype-bro\",\"script\":\"Full Colin script with timestamp markers: [0:00 HOOK] line | [0:03 SETUP] line | [0:10 PAYOFF] line(s) | [0:22 IMPLICATION] line | [0:28 SOFT CTA] line${topic === 'Finance' ? ' | END WITH: [DISCLAIMER: Not financial advice. Educational only.]' : ''}\",\"visualInstructions\":\"HeyGen setup per the PRODUCTION rules above — Colin costume (${look}), background per topic, text overlay timing (HOOK 0:00-0:03, payoff term 0:10-0:15)\",\"thumbnailText\":\"max 6 words, insight-framed, no theatrics, no all-caps\",\"captionYT\":\"hook question + 1-line context + soft CTA + #NextWave + 2-3 topic hashtags\",\"captionTikTok\":\"one line carrying the insight + 2 hashtags max\",\"captionIG\":\"2-3 dot-spacer lines + soft CTA + 3-4 hashtags\",\"hashtags\":\"#NextWave #${topicTag} + 2-3 specific topic tags\",\"workflowNotes\":\"HeyGen production steps + which hook pattern was used so the next generation rotates to a different one\"}",
+  // Final-encode integrity recovery (2026-10-07, task 125 finalization defect) — nextwave_v2_route_chunk and
+  // nextwave_v2_route_finish both used a /tmp working directory keyed only by build_id (+chunk index for chunk),
+  // shared across every invocation. Two overlapping client build loops calling finish concurrently for the same
+  // build_id raced on those shared local filenames, corrupting the locally-staged chunk files before ffmpeg's
+  // `-c:v copy` concat — producing a structurally valid but mostly-frozen final.mp4 that probe() alone could not
+  // catch. These 2 exact pre-existing lines are replaced with a per-invocation-unique dir (randomBytes suffix);
+  // nothing else in either handler's control flow changed.
+  "  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-c${i}`);",
+  "  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-final`);",
 ]);
 // Reconciliation closeout (2026-10-03) — this test's comparison point was `BASELINE` (fa34eb0, the
 // commit immediately before NextWave existed in this file at all). That stopped being the right
@@ -1012,4 +1021,90 @@ await t('Short prompt and all other engine prompts (SRV Farsi/English, AI Studio
   assert.ok(!/preview an INDIVIDUAL decision.?s own number/i.test(restOfFile), 'the new rule must not leak into any prompt after NEXTWAVE_LONG_PROMPT (AI Studio, etc.)');
 });
 
+console.log('\n[22] Final-encode integrity recovery (2026-10-07, task 125 finalization defect) — a concat/stitch race downstream of finalizeVideo produced a structurally-valid-but-mostly-frozen final.mp4 (16 genuinely distinct chunks, final.mp4 ~4x smaller than their sum) that probe() (duration/resolution/streams) could not catch. Root cause: nextwave_v2_route_chunk and nextwave_v2_route_finish both used a /tmp dir keyed only by build_id(+index), shared across every invocation — two overlapping client build loops calling finish concurrently raced on those shared local filenames. Fix: per-invocation-unique temp dirs (removes the race) + a new ffmpeg-freezedetect-based final-encode integrity check (catches the defect class even if it recurs) + a governed, explicitly-labeled client recovery action that re-finalizes from the existing, already-correct chunks without any script/render regeneration.');
+await t('parseFreezeDetect: a genuine long freeze run is parsed with the correct start/duration/end and counted as longest_sec', () => {
+  const stderr = [
+    '[freezedetect @ 0x1] freeze_start: 10.53',
+    'frame=  300 fps=60 q=-1.0 size=    2048kB time=00:00:20.00 bitrate= 838.9kbits/s speed=   2x',
+    '[freezedetect @ 0x1] freeze_duration: 90.30',
+    '[freezedetect @ 0x1] freeze_end: 100.83',
+  ].join('\n');
+  const r = parseFreezeDetect(stderr);
+  assert.equal(r.runs.length, 1);
+  assert.equal(r.runs[0].start, 10.53); assert.equal(r.runs[0].duration, 90.30); assert.equal(r.runs[0].end, 100.83);
+  assert.equal(r.longest_sec, 90.30);
+});
+await t('parseFreezeDetect: multiple freeze events are all parsed, longest_sec picks the largest', () => {
+  const stderr = '[freezedetect] freeze_start: 1.0\n[freezedetect] freeze_duration: 2.0\n[freezedetect] freeze_end: 3.0\n'
+    + '[freezedetect] freeze_start: 50.0\n[freezedetect] freeze_duration: 12.5\n[freezedetect] freeze_end: 62.5\n';
+  const r = parseFreezeDetect(stderr);
+  assert.equal(r.runs.length, 2);
+  assert.equal(r.longest_sec, 12.5);
+});
+await t('parseFreezeDetect: no freeze events (healthy video) returns an empty run list and longest_sec 0 — a clean final.mp4 must never be flagged', () => {
+  const stderr = 'frame=  900 fps=60 q=-1.0 Lsize=    6390kB time=00:02:05.94 bitrate= 414.1kbits/s speed=3.1x\nvideo:6200kB audio:190kB subtitle:0kB\n';
+  const r = parseFreezeDetect(stderr);
+  assert.deepEqual(r.runs, []); assert.equal(r.longest_sec, 0);
+});
+await t('parseFreezeDetect: a short, legitimate freeze below the detector\'s own minimum duration is never reported (freezedetect itself filters sub-threshold stillness, not this function) — malformed/incomplete triples are also dropped rather than crashing', () => {
+  const r = parseFreezeDetect('[freezedetect] freeze_start: 5.0\n[freezedetect] freeze_start: 6.0\n[freezedetect] freeze_duration: 3.0\n'); // 2 starts, 1 duration, 0 ends -> only the first pairs to a real duration, second has no duration and is dropped
+  assert.equal(r.runs.length, 1);
+  assert.equal(r.runs[0].start, 5.0); assert.equal(r.runs[0].duration, 3.0);
+});
+await t('ops.js: nextwave_v2_route_chunk and nextwave_v2_route_finish temp dirs are now unique per invocation (randomBytes suffix), not shared across concurrent/duplicate calls for the same build_id', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  assert.ok(/const dir = join\(tmpdir\(\), `\$\{id\}-c\$\{i\}-\$\{randomBytes\(6\)\.toString\('hex'\)\}`\)/.test(ops), 'chunk handler dir is not uniquely suffixed');
+  assert.ok(/const dir = join\(tmpdir\(\), `\$\{id\}-final-\$\{randomBytes\(6\)\.toString\('hex'\)\}`\)/.test(ops), 'finish handler dir is not uniquely suffixed');
+  assert.ok(!/\$\{id\}-c\$\{i\}`\)/.test(ops), 'old unsuffixed chunk dir pattern must not remain anywhere');
+  assert.ok(!/\$\{id\}-final`\)/.test(ops), 'old unsuffixed finish dir pattern must not remain anywhere');
+});
+await t('ops.js: nextwave_v2_route_finish calls the final-encode integrity check and blocks ready_for_review when it fires', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const finishIdx = ops.indexOf('async function nextwaveV2RouteFinish'); const finishEnd = ops.indexOf('\nasync function nextwaveV2CompositeLongSegmentRender');
+  const body = ops.slice(finishIdx, finishEnd);
+  assert.ok(/L\.route\.detectFreeze\(/.test(body), 'finish handler does not call detectFreeze');
+  assert.ok(/freeze\.longest_sec\s*>=\s*5/.test(body), 'freeze threshold check missing');
+  assert.ok(/issues\.push\('frozen_final_output'\)/.test(body), 'frozen_final_output must feed the SAME issues[] array that already blocks ready_for_review (missing_stream/wrong_resolution/duration_mismatch) — no parallel/weaker gate');
+  assert.ok(/state\.status = issues\.length \? 'needs_review' : 'ready_for_review'/.test(body), 'a non-empty issues[] (now including frozen_final_output) must still route to needs_review, same existing terminal-state logic, unchanged');
+});
+await t('route.mjs: ROUTE_VERSION was NOT bumped by this fix — intentional. The defect and its fix are both in finalize/chunk infrastructure (temp-dir isolation, a new post-encode check), never in template/compose output, so existing healthy chunks for ANY in-flight build remain valid and reusable; bumping it would have invalidated every chunk (forcing full, costly regeneration) for a defect that never touched chunk content.', () => {
+  assert.equal(ROUTE_VERSION, '2.4');
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  assert.ok(/const NWV2R_REV = '2\.4';/.test(ops), 'ops.js NWV2R_REV must still equal route.mjs ROUTE_VERSION (existing invariant, unchanged)');
+});
+await t('index.html: a governed, explicitly-labeled re-finalize recovery action exists, reuses the existing finish endpoint (no new endpoint, no CEO DevTools), and never fires automatically', () => {
+  const html = fs.readFileSync('./public/index.html', 'utf8');
+  assert.ok(/async function nextwaveV2RouteRefinalize\(pkg\)/.test(html), 'nextwaveV2RouteRefinalize function missing');
+  const fnIdx = html.indexOf('async function nextwaveV2RouteRefinalize'); const fnEnd = html.indexOf('\nfunction _nextwaveV2RoutePanel', fnIdx);
+  const fnBody = html.slice(fnIdx, fnEnd);
+  assert.ok(/nextwave_v2_route_finish/.test(fnBody), 'must call the existing nextwave_v2_route_finish action, not a new endpoint');
+  assert.ok(!/nextwave_v2_route_start/.test(fnBody), 'must not re-run route_start (no Brain re-classification, no extra Anthropic spend)');
+  assert.ok(!/nextwave_v2_route_chunk/.test(fnBody), 'must not re-render chunks — only re-finalize from what already exists');
+  // the trigger button only renders inside the rs==='enhanced' branch (a finished build), never inside the
+  // v2_building/needs_review/blocked/failed branches — i.e. it is a deliberate, visible, explicitly-clicked
+  // action on an already-complete build, never something that fires as part of the normal build/retry flow.
+  const panelIdx = html.indexOf('function _nextwaveV2RoutePanel'); const enhancedIdx = html.indexOf('rs===\'enhanced\'', panelIdx); const nextBranchIdx = html.indexOf('}else if(rs===\'v2_needs_review\'', panelIdx);
+  const enhancedBranch = html.slice(enhancedIdx, nextBranchIdx);
+  assert.ok(/nextwaveV2RouteRefinalize/.test(enhancedBranch), 'recovery button must be inside the enhanced (finished-build) branch');
+  const otherBranches = html.slice(nextBranchIdx, html.indexOf('function _nextwaveV2RoutePanel', panelIdx + 1) === -1 ? nextBranchIdx + 6000 : html.indexOf('function _nextwaveV2RoutePanel', panelIdx + 1));
+  assert.ok(!/nextwaveV2RouteRefinalize/.test(otherBranches.slice(0, 2500)), 'recovery action must not appear in the building/needs_review/blocked/failed branches');
+});
+await t('index.html: re-finalize is scoped to NextWave V2 only — no other engine (SRV Farsi/English, AI Studio, SMM) file or build path references it', () => {
+  const html = fs.readFileSync('./public/index.html', 'utf8');
+  const occurrences = (html.match(/nextwaveV2RouteRefinalize/g) || []).length;
+  assert.equal(occurrences, 2, 'expected exactly 2 references: the function definition and its single onclick call-site inside _nextwaveV2RoutePanel — any more suggests it leaked into another engine\'s code path');
+});
+await t('healthy multi-chunk Long build is unaffected end to end: compile_qc, scene placement and provenance are unchanged by the finalize/chunk infrastructure fix (which never touches compose/render output, only post-render temp-file isolation and a post-encode-only check)', async () => {
+  const sbB = await brain(scriptOf('B'));
+  const wB = wordsFromAlignment(scriptOf('B'), synthAlign(scriptOf('B')));
+  const C = composeStoryboard({ storyboard: sbB, words: wB, assets: { poses: await loadHostPoses(), bench: await loadBench() }, format: fmtLong });
+  const q = runQc({ format: fmtLong, formatName: 'long', drawFrame: C.draw, duration: C.duration, scenes: C.scenes, storyboard: sbB, script: scriptOf('B'), derived: C.derived, words: wB });
+  assert.equal(q.ok, true, JSON.stringify(q.issues));
+});
+await t('Short-format behavior does not regress: placeScenes/compose/QC paths are identical regardless of this fix (it lives entirely downstream, in the serverless chunk/finish handlers, which Short and Long both share unchanged)', async () => {
+  const sbA = await brain(PASS_SHORT);
+  const wA = wordsFromAlignment(PASS_SHORT, synthAlign(PASS_SHORT));
+  const C = composeStoryboard({ storyboard: sbA, words: wA, assets: { poses: await loadHostPoses(), bench: await loadBench() }, format: STYLE.formats.short });
+  assert.ok(C.scenes.every((s) => s.located));
+});
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
