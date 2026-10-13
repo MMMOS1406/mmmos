@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { sweepAll } from './sweep.mjs';
 import { runShellChecks } from './shell-checks.mjs';
+import { runRoleSwitchChecks } from './role-switch-checks.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
@@ -72,10 +73,18 @@ if (cmd === 'baseline') {
   // 3. Shell checks (flag ON, admin).
   const shell = await runShellChecks(publicDir, g);
   shell.forEach((s) => { results.push(s); console.log(`${s.ok ? 'PASS' : 'FAIL'}  ${s.name}${s.detail ? '  — ' + s.detail : ''}`); });
+  // 4. CEO-010: role switching without a reload (defect F-1)
+  const roles = await runRoleSwitchChecks(publicDir);
+  roles.forEach((s) => { results.push(s); console.log(`${s.ok ? 'PASS' : 'FAIL'}  ${s.name}${s.detail ? '  — ' + s.detail : ''}`); });
   const fails = results.filter((r) => !r.ok);
   fs.writeFileSync(path.join(here, 'last-report.json'), JSON.stringify({ at: new Date().toISOString(), total: results.length, failed: fails.length, results }, null, 1));
   console.log(`\n${results.length} checks, ${fails.length} failed`);
   process.exit(fails.length ? 1 : 0);
+} else if (cmd === 'roleswitch') {
+  // CEO-010 only: role-switching safety checks (fast loop)
+  const res = await runRoleSwitchChecks(publicDir);
+  res.forEach((s) => console.log(`${s.ok ? 'PASS' : 'FAIL'}  ${s.name}${s.detail ? '  — ' + s.detail : ''}`));
+  const bad = res.filter((r) => !r.ok); console.log(`\n${res.length} checks, ${bad.length} failed`); process.exit(bad.length ? 1 : 0);
 } else {
-  console.log('usage: run.mjs baseline|verify [--public DIR] [--out FILE]'); process.exit(2);
+  console.log('usage: run.mjs baseline|verify|roleswitch [--public DIR] [--out FILE]'); process.exit(2);
 }

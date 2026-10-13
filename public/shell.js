@@ -6,8 +6,13 @@
  *
  * What it does:  replaces the nine primary tabs, for the Admin only, with three surfaces — CEO · MONEY · COMPANY —
  * and gives every existing screen a drill-down path back through the ORIGINAL router.
- * What it does NOT do:  it removes, hides, rebuilds or rewires nothing; it adds no authorization, writes nothing
- * to the shared state, and calls no write action itself. Every number comes from the app's own computations.
+ * What it does NOT do:  it removes, hides, rebuilds or rewires nothing; it writes nothing to the shared state and calls no
+ * write action itself. Every number comes from the app's own computations.
+ *
+ * Role safety (CEO-010): the shell belongs to the signed-in Admin only. These are UI-level checks — the server's own
+ * authentication and authorization are unchanged and remain the actual gate. On logout, or whenever a non-Admin is on screen,
+ * every trace of the shell (bar, nav, state, shell_* tab alias, content) is removed, and every ShellApp.* entry point
+ * refuses to act for anyone but the Admin.
  *
  * Reversible at any time: ?shell=off, or "Classic navigation" in the shell bar (this tab only).
  */
@@ -21,13 +26,14 @@
   function classicOverride() { try { return sessionStorage.getItem(CLASSIC_KEY) === '1'; } catch (e) { return false; } }
   function isAdmin() { return typeof currentUser !== 'undefined' && !!currentUser && currentUser.id === 'admin'; }
   function isActive() { return flagOn() && isAdmin() && !classicOverride(); }
+  function authorized() { return flagOn() && isAdmin(); }   // may this user use the shell at all (even if currently in classic navigation)?
 
   var _renderTab = window.renderTab;               // the ORIGINAL router — every existing screen still renders through it
   var _renderNav = window.renderNav;
   if (typeof _renderTab !== 'function' || typeof _renderNav !== 'function') return;
 
   /* ------------------------------------------------------------------ state */
-  var S = { user: null, mode: null, arg: null, surface: 'ceo', stack: [], legacyTab: null, legacySub: null, legacyLabel: '', consoleNode: null, timer: null };
+  var S = { user: null, ownerId: null, mode: null, arg: null, surface: 'ceo', stack: [], legacyTab: null, legacySub: null, legacyLabel: '', consoleNode: null, timer: null };
   var SURFACES = { ceo: 1, money: 1, company: 1 };
   var ALIAS = { ceo: 'home', money: 'shell_money', company: 'shell_company' };
 
@@ -359,7 +365,51 @@
   }
 
   /* ------------------------------------------------------------------ navigation */
-  function resetIfNewUser() { if (S.user !== currentUser) { S.user = currentUser; S.mode = null; S.stack = []; S.surface = 'ceo'; S.consoleNode = null; } }
+  function resetState() { S.user = null; S.ownerId = null; S.mode = null; S.arg = null; S.surface = 'ceo'; S.stack = []; S.legacyTab = null; S.legacySub = null; S.legacyLabel = ''; S.consoleNode = null; }
+  function resetIfNewUser() {
+    var id = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.id : null;
+    if (S.user !== currentUser || S.ownerId !== id) { resetState(); S.user = currentUser; S.ownerId = id; }   // a different person (or a fresh sign-in) never inherits a previous view or history
+  }
+
+  /* ------------------------------------------------------------------ role safety (CEO-010) */
+  function ownTab() { return (typeof currentUser !== 'undefined' && currentUser && currentUser.id === 'va') ? 'tasks' : 'home'; }   // the landing tab the app itself uses for this user
+  function appShown() { var a = $('appScreen'); return !!a && a.classList.contains('show'); }
+  function stale() {                                              // does anything of the shell remain on the page?
+    var mc = $('mainContent');
+    return S.mode !== null || S.ownerId !== null || !!$('shellBar') || !!document.querySelector('.shl-newlayout') || (!!mc && mc.classList.contains('shl-wide')) ||
+      (typeof currentTab === 'string' && currentTab.indexOf('shell_') === 0);
+  }
+  function scrub() {                                              // remove every trace of the shell's presentation and state; returns true if there was anything to remove
+    var had = stale();
+    if (S.timer) { clearTimeout(S.timer); S.timer = null; }
+    resetState();
+    var b = $('shellBar'); if (b) b.remove();
+    var mc = $('mainContent'); if (mc) mc.classList.remove('shl-wide');
+    var chip = document.querySelector('.shl-newlayout'); if (chip && chip.parentNode) chip.parentNode.removeChild(chip);
+    if (typeof currentTab === 'string' && currentTab.indexOf('shell_') === 0) currentTab = ownTab();
+    return had;
+  }
+  function rebuildOwn() {                                         // give whoever is signed in their own, original navigation and landing screen
+    if (!appShown() || typeof currentUser === 'undefined' || !currentUser) return;
+    try { _renderNav.call(window); _renderTab.call(window, ownTab()); } catch (e) { /* the original screen shows its own state */ }
+  }
+  function refuse() { if (scrub()) rebuildOwn(); }                // a caller who may not use the shell: clear any leftover and restore their own view
+  function onLogout() {                                           // the previous user's shell presentation must not survive the sign-out
+    var had = stale();
+    scrub();
+    try { sessionStorage.removeItem(CLASSIC_KEY); } catch (e) { /* ignore */ }
+    if (had) { var mc = $('mainContent'); if (mc) mc.innerHTML = ''; var nb = $('navBar'); if (nb) nb.innerHTML = ''; }
+  }
+  function relinquish() {                                         // called when a request is passed straight to the original app
+    if (authorized()) { var b = $('shellBar'); if (b) b.remove(); var mc = $('mainContent'); if (mc) mc.classList.remove('shl-wide'); return; }   // Admin in classic navigation
+    scrub();
+  }
+  function reconcile() {                                          // the app screen opened or closed: make sure the shell matches who is actually signed in
+    if (!appShown()) { onLogout(); return; }
+    if (!authorized()) { refuse(); return; }
+    if (S.ownerId && typeof currentUser !== 'undefined' && currentUser && S.ownerId !== currentUser.id) resetState();
+  }
+  function guarded(fn) { return function () { if (!authorized()) { refuse(); return; } return fn.apply(this, arguments); }; }
   function pushCurrent() {
     if (S.mode == null) return;
     if (S.mode === 'legacy') S.stack.push({ view: 'legacy', tab: S.legacyTab, sub: S.legacySub, label: S.legacyLabel });
@@ -432,7 +482,12 @@
 
   /* ------------------------------------------------------------------ routing hooks (the ONLY places the original behavior is intercepted) */
   window.renderTab = function (tab) {
-    if (!isActive()) return _renderTab.apply(this, arguments);
+    if (!isActive()) {
+      relinquish();
+      var args = arguments;
+      if (typeof tab === 'string' && tab.indexOf('shell_') === 0) { args = Array.prototype.slice.call(arguments); args[0] = ownTab(); }   // a shell alias is never a route for anyone who is not in the shell
+      return _renderTab.apply(this, args);
+    }
     resetIfNewUser();
     if (S.mode === null) return go('ceo');                                   // first call after login lands on the CEO surface
     if (typeof tab === 'string' && tab.indexOf('shell_') === 0) {            // a refresh of a shell view
@@ -450,15 +505,25 @@
   if (typeof _syncState === 'function') {
     window.syncState = function () {
       if (isActive() && S.mode === 'ceo' && currentTab === ALIAS.ceo) { paintContent(); return; }
+      if (!isActive()) relinquish();
       return _syncState.apply(this, arguments);
     };
   }
   window.renderNav = function () {
-    if (!isActive()) { var r = _renderNav.apply(this, arguments); addNewLayoutChip(); return r; }
+    if (!isActive()) { relinquish(); var r = _renderNav.apply(this, arguments); addNewLayoutChip(); return r; }
     paintNav(); schedule();
   };
 
-  window.ShellApp = { go: go, show: show, open: open, back: back, classic: classic, newLayout: newLayout, mount: mount, _state: S };
+  window.ShellApp = { go: guarded(go), show: guarded(show), open: guarded(open), back: guarded(back), classic: guarded(classic), newLayout: guarded(newLayout), mount: guarded(mount), _state: S };
+
+  // Sign-out never reloads this app, so the shell must clean up after itself — by hooking logout() AND by watching the app screen,
+  // so that it does not depend on any single call path (and again when a page is restored from the browser's back/forward cache).
+  var _logout = window.logout;
+  if (typeof _logout === 'function') {
+    window.logout = function () { try { return _logout.apply(this, arguments); } finally { try { onLogout(); } catch (e) { /* never block a sign-out */ } } };
+  }
+  try { var app = $('appScreen'); if (app && window.MutationObserver) new MutationObserver(function () { try { reconcile(); } catch (e) { /* ignore */ } }).observe(app, { attributes: true, attributeFilter: ['class'] }); } catch (e) { /* ignore */ }
+  window.addEventListener('pageshow', function (ev) { if (ev && ev.persisted) { try { reconcile(); } catch (e) { /* ignore */ } } });
 
   // If the app was already showing a screen when this file finished loading (session restore), switch to the shell now.
   if (isActive() && $('appScreen') && $('appScreen').classList.contains('show')) { S.user = null; S.mode = null; window.renderTab('home'); }

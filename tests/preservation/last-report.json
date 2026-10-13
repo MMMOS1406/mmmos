@@ -1,6 +1,6 @@
 {
- "at": "2026-10-04T15:33:37.112Z",
- "total": 111,
+ "at": "2026-10-13T21:39:21.690Z",
+ "total": 141,
  "failed": 0,
  "results": [
   {
@@ -524,17 +524,17 @@
    "detail": ""
   },
   {
-   "name": "only the files this order authorizes were changed (no api/, vercel.json, migrations, lib, engine files)",
+   "name": "only the files this order authorizes were changed (public/shell.js and tests/preservation/ — no index.html, api/, vercel.json, migrations, lib, engine files)",
    "ok": true,
-   "detail": "public/index.html, public/shell.js, tests/preservation/driver.mjs, tests/preservation/existing-suites.mjs, tests/preservation/fixtures.mjs, tests/preservation/golden/baseline.json, tests/preservation/golden/existing-suites.json, tests/preservation/golden/render-functions.json, tests/preservation/inventory.json, tests/preservation/last-report.json, tests/preservation/run.mjs, tests/preservation/shell-checks.mjs, tests/preservation/stub-server.mjs, tests/preservation/sweep.mjs"
+   "detail": "public/shell.js, tests/preservation/role-switch-checks.mjs, tests/preservation/run.mjs, tests/preservation/shell-checks.mjs"
   },
   {
-   "name": "public/index.html: zero lines deleted or modified — additions only",
+   "name": "public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the only shell hook)",
    "ok": true,
-   "detail": "+8 −0"
+   "detail": ""
   },
   {
-   "name": "no top-level function removed or renamed (871 existing functions)",
+   "name": "no top-level function removed or renamed (879 existing functions)",
    "ok": true,
    "detail": ""
   },
@@ -555,6 +555,156 @@
   },
   {
    "name": "feature flag is browser-local, default OFF, and requests shell.js only when \"on\"",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "setup: the Admin session really has shell chrome to leave behind (bar, legacy mode, shell_* alias possible)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "1. Admin → logout: shell bar, shell state, wide layout and shell_* tab are all gone",
+   "ok": true,
+   "detail": "{\"bar\":false,\"shlNodes\":0,\"wide\":false,\"chip\":false,\"tab\":\"finance\",\"mode\":null,\"stack\":0,\"nav\":[],\"user\":null,\"classicKey\":null}"
+  },
+  {
+   "name": "1. Admin → logout: nothing of the Admin's navigation or content stays in the hidden app screen",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "1. Admin → logout → Family: Family sees exactly its own navigation and nothing from the shell",
+   "ok": true,
+   "detail": "nav=🏛️ CEO Headquarters|💰 Finance|🏭 Operations tab=home bar=false shl=0"
+  },
+  {
+   "name": "7. Family: every direct ShellApp.* call is refused — nothing rendered, nothing requested (15 calls)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "7. Family: renderTab('shell_*') and syncState never produce shell content or a shell_* tab",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "7. Family: no write request came from any of those attempts",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "7. Family: family still sees exactly its own workspace afterwards",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "2. Admin → logout → VA: VA sees exactly its own navigation and nothing from the shell",
+   "ok": true,
+   "detail": "nav=🖥️ Technology|📋 Tasks tab=tasks bar=false shl=0"
+  },
+  {
+   "name": "7. VA: every direct ShellApp.* call is refused — nothing rendered, nothing requested (15 calls)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "7. VA: renderTab('shell_*') and syncState never produce shell content or a shell_* tab",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "7. VA: no write request came from any of those attempts",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "7. VA: va still sees exactly its own workspace afterwards",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "3. Family → logout → Admin: Admin gets the three surfaces on the CEO view, with no family content",
+   "ok": true,
+   "detail": "nav=🏛️ CEO|💰 Money|🏢 Company mode=ceo"
+  },
+  {
+   "name": "3. Admin role is fully intact afterwards (all surfaces and the shell bar work)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "4. VA → logout → Admin: Admin gets the three surfaces on the CEO view, with no va content",
+   "ok": true,
+   "detail": "nav=🏛️ CEO|💰 Money|🏢 Company mode=ceo"
+  },
+  {
+   "name": "4. Admin role is fully intact afterwards (all surfaces and the shell bar work)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "5. Admin → logout: the per-tab \"classic navigation\" preference is cleared too",
+   "ok": true,
+   "detail": "classicKey=null"
+  },
+  {
+   "name": "5. Admin → logout → Admin: lands on the CEO surface with an empty history (previous view is not resumed)",
+   "ok": true,
+   "detail": "mode=ceo stack=0 tab=home"
+  },
+  {
+   "name": "6. repeated role switching (12 transitions, Admin state seeded before each logout): every step is clean and correct",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "defence: even if logout() were bypassed, the shell removes the previous user's chrome as soon as the app screen closes",
+   "ok": true,
+   "detail": "{\"bar\":false,\"shlNodes\":0,\"wide\":false,\"chip\":false,\"tab\":\"finance\",\"mode\":null,\"stack\":0,\"nav\":[],\"user\":null,\"classicKey\":null}"
+  },
+  {
+   "name": "defence: …and a following Family sign-in is clean",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "8. page restored from the browser back/forward cache while logged out: stale shell chrome is removed",
+   "ok": true,
+   "detail": "{\"bar\":false,\"shlNodes\":0,\"wide\":false,\"chip\":false,\"tab\":\"home\",\"mode\":null,\"stack\":0,\"nav\":[],\"user\":null,\"classicKey\":null}"
+  },
+  {
+   "name": "8. browser Back after logout: the login screen is shown and no shell chrome is present",
+   "ok": true,
+   "detail": "{\"login\":true,\"app\":false,\"bar\":false}"
+  },
+  {
+   "name": "8. …and signing in as VA afterwards is clean",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no runtime errors on any of the role-switching pages beyond the classic baseline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "9. shell flag turned OFF mid-session: Admin is back on the classic nine tabs with no shell chrome",
+   "ok": true,
+   "detail": "nav=9 bar=false"
+  },
+  {
+   "name": "9. …and ShellApp.* is refused while the flag is OFF",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "10. flag ON, authorised Admin: every surface, drill-down, Back, Classic navigation and New layout still work",
+   "ok": true,
+   "detail": "true"
+  },
+  {
+   "name": "mobile (390px): Admin → Family → VA → Admin switching is clean, nothing overflows, and the nav is fully visible each time",
    "ok": true,
    "detail": ""
   }
