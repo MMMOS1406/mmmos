@@ -44,16 +44,43 @@ ok('buckets rotate independently (per format.artist.mood)',pick(p4,'short.duet.h
 const D2=JSON.parse(JSON.stringify(D));const pick2=new Function('D',nested('    function _farsiPickAvatar(pool,bucketKey){')+'\nreturn _farsiPickAvatar;')(D2);
 ok('rotation position survives reload (persisted pointer)',pick2(p4,'long.duet.romantic')===pick(p4,'long.duet.romantic'));
 
-// ── 3. Asset pool audit: manifest vs files ──
-const lib=(()=>{const s=h.indexOf('avatarLibrary:{',h.indexOf('id:"srv_farsi"'));const e=h.indexOf('\n   }},',s);return new Function('return {'+h.slice(s,e)+'\n   }}')().avatarLibrary;})();
-const buckets=[];for(const f of Object.keys(lib))for(const a of Object.keys(lib[f]))for(const m of Object.keys(lib[f][a]))buckets.push([f+'.'+a+'.'+m,lib[f][a][m]]);
-ok('18 buckets (2 formats x 3 artists x 3 moods)',buckets.length===18);
-const missing=buckets.flatMap(([k,arr])=>arr.filter(u=>!fs.existsSync(require('path').join(require('path').dirname(process.argv[2]||'public/index.html'),u))));
-ok('every manifest photo exists on disk',missing.length===0,missing.slice(0,2).join(','));
-const counts=buckets.map(([k,arr])=>k+'='+arr.length);
-ok('per-bucket image counts recorded',true,counts.join(' '));
-const thin=buckets.filter(([k,arr])=>arr.length<3).map(([k])=>k);
-out.push('INFO buckets with fewer than 3 photos (cannot rotate beyond two): '+thin.length+'/18');
+// ── 3. Shared visual pool: ONE pool per artist x mood, used by Shorts and Longs ──
+const path=require('path');const pubDir=path.dirname(process.argv[2]||'public/index.html');
+const farsiCfg=(()=>{const s=h.indexOf('{id:"srv_farsi"');const e=h.indexOf('\n  {id:"srv_english"',s);return h.slice(s,e);})();
+ok('no separate Short/Long library remains for SRV Farsi',!/avatarLibrary/.test(farsiCfg)&&/avatarPool:\{/.test(farsiCfg));
+const pools=(()=>{const s=farsiCfg.indexOf('avatarPool:{');const e=farsiCfg.lastIndexOf('}},');return new Function('return {'+farsiCfg.slice(s,e)+'}}')().avatarPool;})();
+const src=e=>typeof e==='string'?e:e.src;
+const plist=[];for(const a of Object.keys(pools))for(const m of Object.keys(pools[a]))plist.push([a+'.'+m,pools[a][m]]);
+ok('9 pools: 3 artists x 3 moods, no format level',plist.length===9&&Object.keys(pools).sort().join()==='duet,female,male'&&Object.values(pools).every(x=>Object.keys(x).sort().join()==='emotional,happy,romantic'));
+const missing=plist.flatMap(([k,arr])=>arr.map(src).filter(u=>fs.existsSync(pubDir)&&!fs.existsSync(path.join(pubDir,u))));
+ok('every pool image exists on disk',missing.length===0,missing.slice(0,2).join(','));
+ok('no image is listed twice anywhere',new Set(plist.flatMap(([k,arr])=>arr.map(src))).size===plist.reduce((n,[k,arr])=>n+arr.length,0));
+ok('every image belongs to its pool (artist + mood in the file name)',plist.every(([k,arr])=>{const [a,m]=k.split('.');return arr.every(e=>src(e).includes('_'+a+'_'+m+'_'));}));
+ok('every pool has more than two images',plist.every(([k,arr])=>arr.length>2),plist.map(([k,arr])=>k+'='+arr.length).join(' '));
+ok('landscape sources carry a subject focal point for the 9:16 crop',plist.every(([k,arr])=>arr.every(e=>!/\/long\//.test(src(e))||(typeof e==='object'&&e.fx>0&&e.fx<1))));
+out.push('INFO usable images per pool: '+plist.map(([k,arr])=>k+'='+arr.length).join(' ')+' | total '+plist.reduce((n,[k,arr])=>n+arr.length,0));
+out.push('INFO missing to reach 6 per pool: '+plist.map(([k,arr])=>k+'='+Math.max(0,6-arr.length)).join(' ')+' | total '+plist.reduce((n,[k,arr])=>n+Math.max(0,6-arr.length),0));
+// real picker on the REAL pools: every rebuild moves to the next source, whole pool before any repeat
+{ const Dr={};const pk=new Function('D',nested('    function _farsiPickAvatar(pool,bucketKey){')+'\nreturn _farsiPickAvatar;')(Dr);
+  let allOk=true;for(const [k,arr] of plist){const got=Array.from({length:arr.length+1},()=>src(pk(arr,k)));
+    if(new Set(got.slice(0,arr.length)).size!==arr.length||got[arr.length]!==got[0])allOk=false;}
+  ok('REAL pools: A -> B -> C -> D -> A in every one of the 9 pools',allOk);
+  ok('REAL pools: each pool keeps its own pointer',Object.keys(Dr.srvFarsiAvatarIdx).sort().join()===plist.map(x=>x[0]).sort().join()&&Object.values(Dr.srvFarsiAvatarIdx).every(v=>v===1)); }
+const build0=top('_srvFarsiBuildTrigger');
+ok('build picks by artist.mood (no format in the pointer key), so Short and Long share the rotation',/_farsiPickAvatar\(_fPool,_fGroup\+'\.'\+_fMoodKey\)/.test(build0)&&!/_fFormatKey/.test(build0));
+ok('build passes the focal point to both the Short and the Long render',(build0.match(/avatarFocusX:_fAvFocus\.x, avatarFocusY:_fAvFocus\.y/g)||[]).length===2);
+// focal crop maths (the real expressions from the painter)
+{ const pn=(()=>{const s=h.indexOf('  function _drawFarsiPanel(');return h.slice(s,h.indexOf('\n  }\n',s));})();
+  const a=pn.indexOf('const _fx='),b=pn.indexOf('\n',pn.indexOf('else { sw=iw;'));
+  const crop=new Function('iw','ih','pw','ph','avatarFocusX','avatarFocusY','const ir=iw/ih,pr=pw/ph;let sw,sh,sx,sy;'+pn.slice(a,b)+'\nreturn {sx,sy,sw,sh};');
+  const L=crop(1672,941,1080,1920,0.33,undefined);            // landscape source -> 9:16 Short, subject at 33%
+  ok('landscape -> Short crop is centred on the subject and stays inside the image',Math.abs((L.sx+L.sw/2)/1672-0.33)<0.01&&L.sx>=0&&L.sx+L.sw<=1672&&Math.round(L.sh)===941);
+  const C=crop(1672,941,1080,1920,undefined,undefined);
+  ok('no focal point -> centred crop (previous behaviour)',Math.abs((C.sx+C.sw/2)/1672-0.5)<0.001);
+  const E=crop(1672,941,1080,1920,0.02,undefined);
+  ok('extreme focal point is clamped to the image edge',E.sx===0);
+  const P=crop(941,1672,1229,1080,undefined,undefined);       // portrait source -> Long subject panel
+  ok('portrait -> Long crop keeps the upper (face) area',Math.abs(P.sy-(1672-P.sh)*0.2)<0.001&&P.sw===941); }
 
 // ── 4. Thumbnails: real helper with mocked network ──
 function env(setOk,uploadFails){
