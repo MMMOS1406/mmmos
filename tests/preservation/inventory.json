@@ -1,0 +1,895 @@
+[
+ {
+  "id": "A1",
+  "area": "Access & shell",
+  "capability": "Role selector and login",
+  "flag": "protect",
+  "fns": [
+   "renderUsers",
+   "tryLogin",
+   "selectUser",
+   "_activateUser"
+  ],
+  "how": "login screen untouched; flag-OFF and non-admin sweeps identical"
+ },
+ {
+  "id": "A2",
+  "area": "Access & shell",
+  "capability": "Top bar",
+  "flag": "",
+  "fns": [
+   "toggleNotifPanel",
+   "startNotifPolling",
+   "logout"
+  ],
+  "how": "top bar untouched"
+ },
+ {
+  "id": "A3",
+  "area": "Access & shell",
+  "capability": "Primary navigation",
+  "flag": "decision",
+  "fns": [
+   "renderNav",
+   "renderTab"
+  ],
+  "reach": [
+   "ShellApp.classic()"
+  ],
+  "how": "classic navigation restorable from the shell"
+ },
+ {
+  "id": "A4",
+  "area": "Access & shell",
+  "capability": "Session restore",
+  "flag": "",
+  "static": "index.html changed by additions only",
+  "how": "session restore code unchanged"
+ },
+ {
+  "id": "B1",
+  "area": "CEO Headquarters",
+  "capability": "Weekly CEO Brief",
+  "flag": "decision",
+  "fns": [
+   "computeWeeklyCEOBrief",
+   "_renderWeeklyCEOBrief"
+  ],
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B2",
+  "area": "CEO Headquarters",
+  "capability": "Company Health",
+  "flag": "",
+  "fns": [
+   "_ceoHQDeptHealth"
+  ],
+  "reach": [
+   "open('home')"
+  ],
+  "shell": "CEO health card"
+ },
+ {
+  "id": "B3",
+  "area": "CEO Headquarters",
+  "capability": "Net worth and trend chart",
+  "flag": "gap",
+  "fns": [
+   "_homeRenderChart",
+   "computeNetWorth"
+  ],
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B4",
+  "area": "CEO Headquarters",
+  "capability": "Ask MMM command console",
+  "flag": "protect",
+  "fns": [
+   "renderOperatorConsole",
+   "runConsoleCommand"
+  ],
+  "shell": "#shlConsole",
+  "reach": [
+   "open('home')"
+  ],
+  "how": "real console embedded on the CEO surface"
+ },
+ {
+  "id": "B5",
+  "area": "CEO Headquarters",
+  "capability": "Balance sheet summary",
+  "flag": "",
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B6",
+  "area": "CEO Headquarters",
+  "capability": "Monthly P&L",
+  "flag": "",
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B7",
+  "area": "CEO Headquarters",
+  "capability": "Cash position (live Plaid)",
+  "flag": "",
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B8",
+  "area": "CEO Headquarters",
+  "capability": "Strategic goals",
+  "flag": "",
+  "reach": [
+   "open('home')"
+  ],
+  "shell": "Money goals"
+ },
+ {
+  "id": "B9",
+  "area": "CEO Headquarters",
+  "capability": "Major risks",
+  "flag": "gap",
+  "reach": [
+   "open('home')"
+  ],
+  "shell": "Major risks (existing signals)"
+ },
+ {
+  "id": "B10",
+  "area": "CEO Headquarters",
+  "capability": "Executive Inbox",
+  "flag": "protect",
+  "fns": [
+   "_cdpCCApprove",
+   "_cdpCCReject"
+  ],
+  "reach": [
+   "open('home')"
+  ],
+  "shell": "CEO decisions list"
+ },
+ {
+  "id": "B11",
+  "area": "CEO Headquarters",
+  "capability": "Other Pending Reviews",
+  "flag": "decision",
+  "reach": [
+   "open('home')"
+  ],
+  "shell": "Other pending reviews"
+ },
+ {
+  "id": "B12",
+  "area": "CEO Headquarters",
+  "capability": "Department Status",
+  "flag": "",
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B13",
+  "area": "CEO Headquarters",
+  "capability": "Portfolio Intelligence and Opportunity Pipeline",
+  "flag": "",
+  "fns": [
+   "computePortfolioIntelligence",
+   "_renderPortfolioIntelligence"
+  ],
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B14",
+  "area": "CEO Headquarters",
+  "capability": "Executive Calendar",
+  "flag": "gap",
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "B15",
+  "area": "CEO Headquarters",
+  "capability": "Home data loaders",
+  "flag": "protect",
+  "fns": [
+   "loadWeeklyReport",
+   "loadOperatorTasks",
+   "loadApprovals",
+   "loadEngTasksHome",
+   "_ensureYouTubeAnalyticsLoaded"
+  ],
+  "reach": [
+   "open('home')"
+  ],
+  "how": "CEO surface runs the original Home route first, so Home side effects fire as before"
+ },
+ {
+  "id": "B16",
+  "area": "CEO Headquarters",
+  "capability": "Notification bell and panel",
+  "flag": "",
+  "fns": [
+   "toggleNotifPanel"
+  ]
+ },
+ {
+  "id": "C1",
+  "area": "Finance",
+  "capability": "Finance dashboard (department template + full tab)",
+  "flag": "",
+  "fns": [
+   "renderFinanceWithDept",
+   "renderFinance"
+  ],
+  "reach": [
+   "open('finance')"
+  ]
+ },
+ {
+  "id": "C2",
+  "area": "Finance",
+  "capability": "Manual finance entry",
+  "flag": "protect",
+  "reach": [
+   "open('finance')"
+  ]
+ },
+ {
+  "id": "C3",
+  "area": "Finance",
+  "capability": "Bank connections (Plaid)",
+  "flag": "protect",
+  "fns": [
+   "renderBankConnectionsCard"
+  ],
+  "reach": [
+   "open('finance')"
+  ]
+ },
+ {
+  "id": "C4",
+  "area": "Finance",
+  "capability": "Engine revenue entry",
+  "flag": "protect",
+  "fns": [
+   "renderEngineRevenueCard"
+  ],
+  "reach": [
+   "open('finance')"
+  ]
+ },
+ {
+  "id": "C5",
+  "area": "Finance",
+  "capability": "Investment Engine monthly card",
+  "flag": "",
+  "fns": [
+   "renderInvestmentEngineMonthlyCard"
+  ],
+  "reach": [
+   "open('finance')"
+  ]
+ },
+ {
+  "id": "C6",
+  "area": "Finance",
+  "capability": "Finance snapshots history",
+  "flag": "protect",
+  "fns": [
+   "computeNetWorth"
+  ],
+  "static": "finance_snapshots history untouched (no data code)"
+ },
+ {
+  "id": "D1",
+  "area": "Operations & engines",
+  "capability": "Operations dashboard",
+  "flag": "",
+  "fns": [
+   "renderOperationsTab"
+  ],
+  "reach": [
+   "open('engines')"
+  ]
+ },
+ {
+  "id": "D2",
+  "area": "Operations & engines",
+  "capability": "Engines overview",
+  "flag": "",
+  "fns": [
+   "renderEngines"
+  ],
+  "reach": [
+   "open('engines','setEnginesSub','overview')"
+  ]
+ },
+ {
+  "id": "D3",
+  "area": "Operations & engines",
+  "capability": "Engine analytics",
+  "flag": "protect",
+  "fns": [
+   "renderEngineAnalytics"
+  ],
+  "reach": [
+   "open('engines','setEnginesSub','analytics')"
+  ]
+ },
+ {
+  "id": "D4",
+  "area": "Operations & engines",
+  "capability": "Packages history and viewer",
+  "flag": "protect",
+  "fns": [
+   "renderPackagesPage",
+   "renderPackageViewer"
+  ],
+  "reach": [
+   "open('engines','setEnginesSub','packages')"
+  ]
+ },
+ {
+  "id": "D5",
+  "area": "Operations & engines",
+  "capability": "\"Open Production Tasks (Factory)\" button",
+  "flag": "",
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E1",
+  "area": "Tasks & production lifecycle",
+  "capability": "Tasks console",
+  "flag": "protect",
+  "fns": [
+   "renderTasks",
+   "autoCreateCadenceTasksForCurrentWeek"
+  ],
+  "reach": [
+   "open('tasks')"
+  ],
+  "how": "cadence regression test"
+ },
+ {
+  "id": "E2",
+  "area": "Tasks & production lifecycle",
+  "capability": "Exec Mode (task execution)",
+  "flag": "",
+  "fns": [
+   "renderExecMode",
+   "openExec"
+  ],
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E3",
+  "area": "Tasks & production lifecycle",
+  "capability": "SRV Farsi lifecycle",
+  "flag": "protect",
+  "fns": [
+   "renderSRVFarsiLifecycleCard",
+   "_srvFarsiSetStage"
+  ],
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E4",
+  "area": "Tasks & production lifecycle",
+  "capability": "SRV English lifecycle",
+  "flag": "protect",
+  "fns": [
+   "renderSRVEnglishLifecycleCard",
+   "_srvEnglishSetStage"
+  ],
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E5",
+  "area": "Tasks & production lifecycle",
+  "capability": "AI Creation Studio lifecycle",
+  "flag": "protect",
+  "fns": [
+   "renderAIStudioLifecycleCard",
+   "_aiStudioSetStage"
+  ],
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E6",
+  "area": "Tasks & production lifecycle",
+  "capability": "NextWave lifecycle and V2 route",
+  "flag": "protect",
+  "fns": [
+   "renderNextWaveLifecycleCard",
+   "_nextWaveSetStage"
+  ],
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E7",
+  "area": "Tasks & production lifecycle",
+  "capability": "SMM lifecycle",
+  "flag": "protect",
+  "fns": [
+   "renderSmmExecMode"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "E8",
+  "area": "Tasks & production lifecycle",
+  "capability": "Cadence and scheduling automation",
+  "flag": "protect",
+  "fns": [
+   "autoCreateCadenceTasksForCurrentWeek",
+   "_assignPublishSlot",
+   "next7DaysSchedule"
+  ],
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E9",
+  "area": "Tasks & production lifecycle",
+  "capability": "Engine state control",
+  "flag": "protect",
+  "fns": [
+   "_getEngineState",
+   "_setEngineState",
+   "cmdPauseEngine"
+  ],
+  "shell": "#shlConsole"
+ },
+ {
+  "id": "E10",
+  "area": "Tasks & production lifecycle",
+  "capability": "Developer card",
+  "flag": "protect",
+  "fns": [
+   "renderDeveloperCard"
+  ],
+  "reach": [
+   "open('tasks')"
+  ]
+ },
+ {
+  "id": "E11",
+  "area": "Tasks & production lifecycle",
+  "capability": "Operator tasks section",
+  "flag": "dormant",
+  "fns": [
+   "renderOperatorTasksSection"
+  ],
+  "reach": [
+   "mount('optasks')"
+  ]
+ },
+ {
+  "id": "E12",
+  "area": "Tasks & production lifecycle",
+  "capability": "Pipeline section",
+  "flag": "dormant",
+  "fns": [
+   "renderPipelineSection"
+  ],
+  "reach": [
+   "mount('pipeline')"
+  ]
+ },
+ {
+  "id": "E13",
+  "area": "Tasks & production lifecycle",
+  "capability": "Generic approvals section",
+  "flag": "dormant",
+  "fns": [
+   "renderApprovalsSection"
+  ],
+  "reach": [
+   "mount('approvals')"
+  ]
+ },
+ {
+  "id": "E14",
+  "area": "Tasks & production lifecycle",
+  "capability": "Publishing and upload queue",
+  "flag": "protect",
+  "fns": [
+   "ytForceUploadLatest",
+   "autoStartYoutubeUpload",
+   "retryYoutubeUpload"
+  ],
+  "reach": [
+   "open('system','setSystemSub','integrations')"
+  ]
+ },
+ {
+  "id": "F1",
+  "area": "Social Media Manager",
+  "capability": "Business registry and detail",
+  "flag": "",
+  "fns": [
+   "renderSocialMediaManager"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "F2",
+  "area": "Social Media Manager",
+  "capability": "Business operations layer",
+  "flag": "",
+  "fns": [
+   "renderBolSection"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "F3",
+  "area": "Social Media Manager",
+  "capability": "Content planning",
+  "flag": "",
+  "fns": [
+   "renderCpSection"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "F4",
+  "area": "Social Media Manager",
+  "capability": "SMM VA tasks",
+  "flag": "",
+  "fns": [
+   "renderVaSection"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "F5",
+  "area": "Social Media Manager",
+  "capability": "Video production",
+  "flag": "",
+  "fns": [
+   "renderVideoProductionSection"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "F6",
+  "area": "Social Media Manager",
+  "capability": "CEO review queue",
+  "flag": "decision",
+  "fns": [
+   "renderCeoReviewQueueSection"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "F7",
+  "area": "Social Media Manager",
+  "capability": "Business assets and music library",
+  "flag": "protect",
+  "fns": [
+   "renderBusinessAssetsSection"
+  ],
+  "reach": [
+   "open('social_media_manager')"
+  ]
+ },
+ {
+  "id": "G1",
+  "area": "VA / Operator",
+  "capability": "Operator Mode",
+  "flag": "protect",
+  "fns": [
+   "renderVAOperatorMode"
+  ],
+  "how": "VA sweep identical with flag OFF and ON"
+ },
+ {
+  "id": "G2",
+  "area": "VA / Operator",
+  "capability": "VA navigation",
+  "flag": "decision",
+  "how": "VA navigation unchanged (VA sweep identical)"
+ },
+ {
+  "id": "G3",
+  "area": "VA / Operator",
+  "capability": "VA Library, Resources, Schedule",
+  "flag": "gap",
+  "how": "prototype-only (not in production); out of scope for Phase 1",
+  "outOfScope": true
+ },
+ {
+  "id": "H1",
+  "area": "Family",
+  "capability": "Family experience today",
+  "flag": "decision",
+  "how": "Family sweep identical with flag OFF and ON"
+ },
+ {
+  "id": "I1",
+  "area": "Marketing & Sales",
+  "capability": "Marketing dashboard and analytics",
+  "flag": "",
+  "fns": [
+   "renderMarketingTab"
+  ],
+  "reach": [
+   "open('marketing')"
+  ]
+ },
+ {
+  "id": "I2",
+  "area": "Marketing & Sales",
+  "capability": "Weekly intelligence report",
+  "flag": "dormant",
+  "fns": [
+   "renderWeeklyPanel",
+   "loadWeeklyReport"
+  ],
+  "reach": [
+   "mount('weekly')"
+  ]
+ },
+ {
+  "id": "I3",
+  "area": "Marketing & Sales",
+  "capability": "AI recommendations and reliability metrics",
+  "flag": "",
+  "fns": [
+   "loadAIRecommendations",
+   "loadReliabilityMetrics"
+  ],
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "I4",
+  "area": "Marketing & Sales",
+  "capability": "Optimization engine",
+  "flag": "protect",
+  "static": "api/ops.js unchanged"
+ },
+ {
+  "id": "J1",
+  "area": "HR and Legal",
+  "capability": "Human Resources",
+  "flag": "",
+  "fns": [
+   "renderHRPlaceholder"
+  ],
+  "reach": [
+   "open('human_resources')"
+  ]
+ },
+ {
+  "id": "J2",
+  "area": "HR and Legal",
+  "capability": "Legal and Compliance",
+  "flag": "",
+  "fns": [
+   "renderLegalCompliancePlaceholder"
+  ],
+  "reach": [
+   "open('legal_compliance')"
+  ]
+ },
+ {
+  "id": "K1",
+  "area": "Technology",
+  "capability": "Technology dashboard",
+  "flag": "",
+  "fns": [
+   "renderSystemShell"
+  ],
+  "reach": [
+   "open('system')"
+  ]
+ },
+ {
+  "id": "K2",
+  "area": "Technology",
+  "capability": "Settings",
+  "flag": "protect",
+  "fns": [
+   "renderSettings"
+  ],
+  "reach": [
+   "open('system','setSystemSub','settings')"
+  ]
+ },
+ {
+  "id": "K3",
+  "area": "Technology",
+  "capability": "Integrations",
+  "flag": "protect",
+  "fns": [
+   "renderIntegrations"
+  ],
+  "reach": [
+   "open('system','setSystemSub','integrations')"
+  ]
+ },
+ {
+  "id": "K4",
+  "area": "Technology",
+  "capability": "Engineering Brain",
+  "flag": "protect",
+  "fns": [
+   "renderEngineeringBrain"
+  ],
+  "reach": [
+   "open('system','setSystemSub','engineering')"
+  ]
+ },
+ {
+  "id": "K5",
+  "area": "Technology",
+  "capability": "Brain Validation",
+  "flag": "protect",
+  "fns": [
+   "renderBrainValidation"
+  ],
+  "reach": [
+   "open('system','setSystemSub','brain_validation')"
+  ]
+ },
+ {
+  "id": "K6",
+  "area": "Technology",
+  "capability": "Constitution",
+  "flag": "hidden",
+  "fns": [
+   "renderConstitution"
+  ],
+  "reach": [
+   "open('constitution')"
+  ]
+ },
+ {
+  "id": "K7",
+  "area": "Technology",
+  "capability": "Continuity",
+  "flag": "hidden",
+  "fns": [
+   "renderContinuity"
+  ],
+  "reach": [
+   "open('continuity')"
+  ]
+ },
+ {
+  "id": "K8",
+  "area": "Technology",
+  "capability": "Factory",
+  "flag": "hidden",
+  "fns": [
+   "renderFactory",
+   "renderSRVAssetLibrary",
+   "renderCapCutTemplateSystem"
+  ],
+  "reach": [
+   "open('factory')"
+  ]
+ },
+ {
+  "id": "K9",
+  "area": "Technology",
+  "capability": "Queue health and system intelligence panels",
+  "flag": "dormant",
+  "fns": [
+   "loadQueueStatus",
+   "renderSystemIntelligencePanel"
+  ],
+  "reach": [
+   "mount('queue')",
+   "mount('sysintel')"
+  ]
+ },
+ {
+  "id": "L1",
+  "area": "Governance",
+  "capability": "CEO decision protocol",
+  "flag": "protect",
+  "fns": [
+   "_cdpCCApprove",
+   "_cdpBrainApprove"
+  ],
+  "reach": [
+   "open('home')"
+  ]
+ },
+ {
+  "id": "L2",
+  "area": "Governance",
+  "capability": "Production release authorization",
+  "flag": "protect",
+  "fns": [
+   "_ebCeoApprove"
+  ],
+  "reach": [
+   "open('system','setSystemSub','engineering')"
+  ]
+ },
+ {
+  "id": "L3",
+  "area": "Governance",
+  "capability": "Roadmap phases",
+  "flag": "",
+  "fns": [
+   "_ebApprovePhase"
+  ],
+  "reach": [
+   "open('system','setSystemSub','engineering')"
+  ]
+ },
+ {
+  "id": "M1",
+  "area": "Background and platform",
+  "capability": "Scheduled jobs",
+  "flag": "protect",
+  "static": "vercel.json unchanged"
+ },
+ {
+  "id": "M2",
+  "area": "Background and platform",
+  "capability": "OAuth callbacks and sync endpoints",
+  "flag": "protect",
+  "static": "api/** unchanged"
+ },
+ {
+  "id": "M3",
+  "area": "Background and platform",
+  "capability": "Shared-state persistence",
+  "flag": "protect",
+  "fns": [
+   "saveAppState",
+   "loadAppState"
+  ],
+  "static": "shell.js never touches shared state"
+ }
+]

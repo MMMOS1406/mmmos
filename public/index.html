@@ -28624,5 +28624,13 @@ function renderFactory(){
   </div>
   <div id="notifList"><div class="notif-empty">No new notifications</div></div>
 </div>
+<script>
+/* CEO-008 Phase 1 — Admin shell feature flag. DEFAULT OFF. This is the only change to this file.
+   shell.js is requested ONLY when this browser has opted in (?shell=on, stored locally as mmm_shell_admin_v1="on").
+   ?shell=off turns it off again. With the flag off nothing is requested and nothing runs. The flag is browser-local and
+   is never written to the shared state. shell.js acts for the Admin user only. */
+(function(){try{var m=/[?&]shell=(on|off)\b/.exec(location.search);if(m){localStorage.setItem('mmm_shell_admin_v1',m[1]);}
+if(localStorage.getItem('mmm_shell_admin_v1')==='on'){var s=document.createElement('script');s.src='/shell.js';document.head.appendChild(s);}}catch(e){}})();
+</script>
 </body>
 </html>
