@@ -793,45 +793,55 @@ const ENGINES_CONFIG=[
    longFormDay:"Friday",
    // v13.69.80 — SRV Farsi Lifecycle: Generate→Review→Build→Approve→Publish→Done (mirrors English)
    lifecycle:{musicAdapter:'manual',imageAdapter:'pexels',rendererAdapter:'canvas',requireApprove:true},
-   // v2-avatar-library-v2 — SRV Farsi Avatar Library: format(long|short) x artist(female|male|duet)
-   // x mood(happy|emotional|romantic), exactly 2 approved photos per bucket (36 total). Replaces
-   // the prior flat 6-per-artist/index-sliced library (v13.69.81) — format and mood are now each
-   // their own manifest key instead of an implicit index-range convention, so a Long task can
-   // structurally never draw a Short-shaped (or wrong-mood) photo. See _srvFarsiPickAvatarFor.
-   avatarLibrary:{
-     long:{
-       female:{
-         happy:['/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_01.png','/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_02.png'],
-         emotional:['/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_01.png','/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_02.png'],
-         romantic:['/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_01.png','/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_02.png'],
-       },
-       male:{
-         happy:['/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_01.png','/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_02.png'],
-         emotional:['/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_01.png','/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_02.png'],
-         romantic:['/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_01.png','/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_02.png'],
-       },
-       duet:{
-         happy:['/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_01.png','/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_02.png'],
-         emotional:['/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_01.png','/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_02.png'],
-         romantic:['/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_01.png','/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_02.png'],
-       },
+   // SRV Farsi visual pool — ONE source-image pool per ARTIST x MOOD (9 pools), shared by Shorts and
+   // Longs. There is no separate Short/Long library: each format crops the same source image its own
+   // way (see _drawFarsiPanel). An entry is a path, or {src,fx,fy} where fx/fy (0..1) mark where the
+   // subject sits in the source so both crops keep the subject in frame (default: centre, upper area).
+   // Rotation is per pool (artist.mood), A -> B -> C -> ... -> A, persisted in D.srvFarsiAvatarIdx.
+   // Order alternates portrait/landscape sources so consecutive rebuilds differ in framing too.
+   // To add images: drop the file under /assets/srv-farsi-avatars/ and add one entry to its pool.
+   avatarPool:{
+     female:{
+       romantic:['/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_01.png',
+         {src:'/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_01.png',fx:0.44},
+         '/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_02.png',
+         {src:'/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_02.png',fx:0.38}],
+       emotional:['/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_01.png',
+         {src:'/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_01.png',fx:0.36},
+         '/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_02.png',
+         {src:'/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_02.png',fx:0.44}],
+       happy:['/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_01.png',
+         {src:'/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_01.png',fx:0.38},
+         '/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_02.png',
+         {src:'/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_02.png',fx:0.33}],
      },
-     short:{
-       female:{
-         happy:['/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_01.png','/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_02.png'],
-         emotional:['/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_01.png','/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_02.png'],
-         romantic:['/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_01.png','/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_02.png'],
-       },
-       male:{
-         happy:['/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_01.png','/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_02.png'],
-         emotional:['/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_01.png','/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_02.png'],
-         romantic:['/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_01.png','/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_02.png'],
-       },
-       duet:{
-         happy:['/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_01.png','/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_02.png'],
-         emotional:['/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_01.png','/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_02.png'],
-         romantic:['/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_01.png','/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_02.png'],
-       },
+     male:{
+       romantic:['/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_01.png',
+         {src:'/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_01.png',fx:0.4},
+         '/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_02.png',
+         {src:'/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_02.png',fx:0.42}],
+       emotional:['/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_01.png',
+         {src:'/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_01.png',fx:0.44},
+         '/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_02.png',
+         {src:'/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_02.png',fx:0.42}],
+       happy:['/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_01.png',
+         {src:'/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_01.png',fx:0.4},
+         '/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_02.png',
+         {src:'/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_02.png',fx:0.4}],
+     },
+     duet:{
+       romantic:['/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_01.png',
+         {src:'/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_01.png',fx:0.46},
+         '/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_02.png',
+         {src:'/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_02.png',fx:0.45}],
+       emotional:['/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_01.png',
+         {src:'/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_01.png',fx:0.48},
+         '/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_02.png',
+         {src:'/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_02.png',fx:0.45}],
+       happy:['/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_01.png',
+         {src:'/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_01.png',fx:0.46},
+         '/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_02.png',
+         {src:'/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_02.png',fx:0.46}],
      },
    }},
   {id:"srv_english",name:"SRV English",icon:"🎵",hint:"English indie pop songs",
@@ -17955,8 +17965,8 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     // saveAppState()/app_settings path (same mechanism as srvFarsiArtistIdx/MoodIdx) so it
     // survives refresh/logout/new session. Guarantees: never the same avatar twice in a row
     // (for pool.length>=2) and the full pool cycles before any reuse, for whatever pool size the
-    // avatarLibrary manifest holds — 2 today, transparently becomes 4-way once the bucket is
-    // expanded to 4 approved photos, no further code change needed. SRV Farsi only.
+    // pool manifest holds (avatarPool) — it transparently follows the pool size as images are
+    // added, no further code change needed. SRV Farsi only.
     function _farsiPickAvatar(pool,bucketKey){
       if(!pool.length)return null;
       if(pool.length===1)return pool[0];
@@ -17989,25 +17999,25 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const _fresh=_recent?_levels.filter(function(l){return l!==_recent.value;}):_levels;
       return _fresh[Math.floor(Math.random()*_fresh.length)];
     }
-    let _fAvUrlForRender=null, _fMirror=_farsiPickMirror();
+    let _fAvUrlForRender=null, _fAvFocus={}, _fMirror=_farsiPickMirror();
     const _fBgArchetype=_farsiPickBgArchetype(), _fIntensity=_farsiPickIntensity();
     const _fSeed=Math.floor(Math.random()*1e9); // fresh atmo/particle layout every render, no repetition concept needed
     (function(){
       const _fCfg=_srvFarsiEngineConfig();
-      const _fLib=_fCfg&&_fCfg.avatarLibrary;
+      const _fLib=_fCfg&&_fCfg.avatarPool;
       if(!_fLib)return;
-      // v2-avatar-library-v2 — strict format+artist+mood lookup (never an index-range slice), so
-      // a Long task can only ever draw from long/*, Short only from short/*, and each artist/mood
-      // only from its own exact bucket — the wrong pose/mood/format cannot structurally leak in.
-      const _fFormatKey=isLongTask?'long':'short';
+      // One pool per artist x mood, shared by Short and Long (each format crops the same source its
+      // own way). The rotation pointer is per pool, so every rebuild of either format moves that
+      // pool to its next source image, and the whole pool is used before any image repeats.
       const _fMoodKey=String(_fMoodOnly||'').toLowerCase().trim();
-      const _fFormatBucket=_fLib[_fFormatKey];
-      const _fArtistBucket=_fFormatBucket&&_fFormatBucket[_fGroup];
-      const _fPool=(_fArtistBucket&&_fArtistBucket[_fMoodKey])||[];
+      const _fArtistPools=_fLib[_fGroup];
+      const _fPool=(_fArtistPools&&_fArtistPools[_fMoodKey])||[];
       if(!_fPool.length){
-        console.warn('[SRV Farsi] avatar library: no photos for '+_fFormatKey+'/'+_fGroup+'/'+_fMoodKey+' — check avatarLibrary manifest');
+        console.warn('[SRV Farsi] visual pool: no images for '+_fGroup+'/'+_fMoodKey+' — check avatarPool manifest');
       }
-      _fAvUrlForRender=_farsiPickAvatar(_fPool,_fFormatKey+'.'+_fGroup+'.'+_fMoodKey);
+      const _fPicked=_farsiPickAvatar(_fPool,_fGroup+'.'+_fMoodKey);
+      _fAvUrlForRender=_fPicked&&(typeof _fPicked==='string'?_fPicked:_fPicked.src)||null;
+      _fAvFocus=(_fPicked&&typeof _fPicked==='object')?{x:_fPicked.fx,y:_fPicked.fy}:{};
     })();
 
     // Step 2: SHORT render (9:16) — only for Short tasks
@@ -18025,13 +18035,14 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
         // v13.69.80 — Farsi Short: shortLyrics (camelCase from generate) or short_lyrics (legacy snake) or pkg.lyrics
         lyrics:pkg.shortLyrics||pkg.short_lyrics||pkg.lyrics||'',
         statusCb:function(msg){setStatus(msg,'#8b5cf6');},
-        avatarUrl:_fAvUrlForRender,
+        avatarUrl:_fAvUrlForRender, avatarFocusX:_fAvFocus.x, avatarFocusY:_fAvFocus.y,
         mood:_fMoodOnly, mirror:_fMirror, seed:_fSeed, hookText:pkg.hook||'', bgArchetype:_fBgArchetype, moodIntensity:_fIntensity,
       });
       setStatus('Uploading SHORT video…','#8b5cf6');
       const shortFile=new File([shortResult.blob],'srv_farsi_short.webm',{type:shortResult.blob.type});
       const shortUrl=await _srvUploadToStorage(pkgId,shortFile,'short');
       pkg._srvShortVideoUrl=shortUrl;
+      if(shortResult.thumbDataUrl){pkg._srvThumbDataUrl=shortResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
     }
@@ -18049,14 +18060,14 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
         channel:'SRV Farsi',
         lyrics:pkg.lyrics||'',
         statusCb:function(msg){setStatus(msg,'#8b5cf6');},
-        avatarUrl:_fAvUrlForRender,         // v13.69.91 — time-fraction placement (Long only)
+        avatarUrl:_fAvUrlForRender, avatarFocusX:_fAvFocus.x, avatarFocusY:_fAvFocus.y,         // v13.69.91 — time-fraction placement (Long only)
         mood:_fMoodOnly, mirror:_fMirror, seed:_fSeed, hookText:pkg.hook||'', bgArchetype:_fBgArchetype, moodIntensity:_fIntensity,
       });
       setStatus('Uploading LONG video…','#8b5cf6');
       const longFile=new File([longResult.blob],'srv_farsi_long.webm',{type:longResult.blob.type});
       const longUrl=await _srvUploadToStorage(pkgId,longFile,'long');
       pkg._srvLongVideoUrl=longUrl;
-      if(longResult.thumbDataUrl)pkg._srvThumbDataUrl=longResult.thumbDataUrl;
+      if(longResult.thumbDataUrl){pkg._srvThumbDataUrl=longResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
     }
@@ -18087,6 +18098,31 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
 }
 
 // ── Farsi publish runner ──────────────────────────────────────────────────────
+// SRV Farsi thumbnails — upload the package's rendered cover (captured at build) and set it as the
+// YouTube thumbnail. Non-fatal: a failure never blocks publishing, and the outcome is recorded on the
+// package (thumbnailSetOnYoutube / thumbnailError). Used for Longs and Shorts.
+async function _srvFarsiSetYouTubeThumbnail(pkg,videoId){
+  if(!pkg||!videoId)return {ok:false,error:'missing_video'};
+  if(!pkg._srvThumbDataUrl&&!pkg._srvThumbUrl){pkg.thumbnailSetOnYoutube=false;pkg.thumbnailError='no_cover_captured';return {ok:false,error:'no_cover_captured'};}
+  try{
+    if(!pkg._srvThumbUrl){
+      const blob=await (await fetch(pkg._srvThumbDataUrl)).blob();
+      pkg._srvThumbUrl=await _srvUploadToStorage(pkg.id,new File([blob],'thumb.jpg',{type:'image/jpeg'}),'thumb');
+      if(pkg._srvThumbUrl)delete pkg._srvThumbDataUrl; // stored once; keep the package record small
+    }
+    const r=await fetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({videoId,engine:'SRV Farsi',thumbUrl:pkg._srvThumbUrl})});
+    const d=await r.json().catch(function(){return {};});
+    pkg.thumbnailSetOnYoutube=!!(d&&d.ok);
+    pkg.thumbnailError=(d&&d.ok)?null:String((d&&(d.error||d.detail))||('http_'+r.status)).slice(0,200);
+    if(!pkg.thumbnailSetOnYoutube)console.warn('[SRV Farsi] YouTube thumbnail not set:',pkg.thumbnailError);
+    return d||{ok:false};
+  }catch(e){
+    pkg.thumbnailSetOnYoutube=false;pkg.thumbnailError=String(e&&e.message||e).slice(0,200);
+    console.warn('[SRV Farsi] YouTube thumbnail error:',pkg.thumbnailError);
+    return {ok:false,error:pkg.thumbnailError};
+  }
+}
 async function _srvFarsiRunPublish(pkgId,taskId){
   const statusEl=document.getElementById('srv-farsi-publish-status-'+pkgId);
   try{
@@ -18158,6 +18194,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     // Package format is Long here, so youtubeVideoId (-> packages.youtube_video_id) tracks the
     // Long's own id, matching how _srvFarsiPublishYouTube already sets it for pure-Short packages.
     if(_longYtId)pkg.youtubeVideoId=_longYtId;
+    if(_longYtId)await _srvFarsiSetYouTubeThumbnail(pkg,_longYtId); // SRV Farsi thumbnails (Long)
     // v15.20.0 — TikTok is no longer auto-fired here (Engineering Task 1c0e3090): it's now
     // an independent, operator-visible action (_srvFarsiPublishTikTok) triggered from the
     // Done stage UI, with its own Ready/Publishing/Published/Failed status. This keeps
@@ -18232,6 +18269,7 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
     if(d&&d.ok!==false&&(_ytId||d.ok===true)){
       pkg._srvYtShortId=_ytId||pkg._srvYtShortId;
       pkg.youtubeVideoId=_ytId||pkg.youtubeVideoId;
+      if(_ytId)await _srvFarsiSetYouTubeThumbnail(pkg,_ytId); // SRV Farsi thumbnails (Short)
       pkg.youtubePublishState='published';
       pkg.youtubeWatchUrl=d.watchUrl||(_ytId?('https://www.youtube.com/watch?v='+_ytId):pkg.youtubeWatchUrl);
       pkg.youtubePublishError=null;
@@ -20669,11 +20707,15 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 // source/gen_motion_frames_SOURCE.py) from the HTML/CSS proof into canvas.
 // Additive only — gated behind channel==='SRV Farsi' everywhere it's used;
 // the existing Pexels-photo renderer below is unchanged for every other engine.
+// Strength of the warm soft-light wash over the colour cover photo (0 = untouched photo). One knob,
+// so the look can be tuned to the benchmark without touching the renderer.
+const SRV_FARSI_WARM_GRADE_ALPHA=0.20; // light enough to keep natural skin tones
 const SRV_FARSI_MOOD_PALETTES={
   romantic:{gradient:['#6b3420','#3a1810','#1c0e0c'],tint:'#c9793f',frame:'#e0b56a',word:'عاشقانه',particle:'#f4d9a8'},
-  emotional:{gradient:['#23283a','#171b28','#0d0f18'],tint:'#5f7290',frame:'#9aa9c2',word:'احساسی',particle:'#c7d4e8'},
+  emotional:{gradient:['#3a2518','#20140d','#0f0906'],tint:'#a8744a',frame:'#d2a878',word:'احساسی',particle:'#e8cfae'}, // benchmark: darker than the others but warm brown/amber (replaces the old gray-blue Emotional palette)
   happy:{gradient:['#7a4a1e','#4a2a12','#241408'],tint:'#e0a544',frame:'#f4cf8a',word:'شاد',particle:'#ffe6ae'},
 };
+function _srvFarsiHexRgb(hex){const n=parseInt(String(hex).replace('#',''),16);return ((n>>16)&255)+','+((n>>8)&255)+','+(n&255);}
 function _srvFarsiMoodKey(mood){
   const m=String(mood||'').toLowerCase();
   if(m.includes('emotional'))return 'emotional';
@@ -20734,7 +20776,7 @@ async function _srvFarsiEnsureFonts(){
 }
 
 async function _srvRenderVideo(opts){
-  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration, mood, mirror, seed, hookText, bgArchetype, moodIntensity, titleFinglish } = opts;
+  const { photoUrl, photoUrls, audioFile, type, title, channel, lyrics, statusCb, skipChorusSync, avatarIndices, avatarUrl, maxDuration, mood, mirror, seed, hookText, bgArchetype, moodIntensity, titleFinglish, avatarFocusX, avatarFocusY } = opts;
   const isFarsiComposed = channel==='SRV Farsi';
   let _thumbCaptureMode = false; // v2-visual-refinement — true only for the single pre-recording drawFrame(0) call used to capture the thumbnail
   if(isFarsiComposed) await _srvFarsiEnsureFonts();
@@ -20886,6 +20928,7 @@ async function _srvRenderVideo(opts){
 
   // ── SRV Farsi V2 Phase 2 composed-cover frame (canvas port of VISUAL_BASELINE_v1) ──
   let _farsiPal=null,_farsiAtmo=null,_farsiAtmoKind=null,_farsiGrainPattern=null,_farsiT_ATMO=20;
+  let _farsiLongVeil=null; // cached title-side veil for the frameless Long cover (static, built once per render)
   // v2-phase2 — intensity scalar (soft/standard/vivid) modulates atmo density + zoom amplitude;
   // background archetype (a/b) modulates gradient direction. Both are tracked anti-repetition
   // dimensions (see saveMemoryItem('visual_mood_intensity'/'visual_background_archetype')) — a
@@ -20943,17 +20986,25 @@ async function _srvRenderVideo(opts){
       const iw=_avatarImg.naturalWidth,ih=_avatarImg.naturalHeight;
       const ir=iw/ih,pr=pw/ph;
       let sw,sh,sx,sy;
-      if(ir>pr){ sh=ih; sw=ih*pr; sx=(iw-sw)/2; sy=0; } else { sw=iw; sh=iw/pr; sx=0; sy=(ih-sh)*0.2; }
-      ctx.filter='grayscale(1) contrast(1.08) brightness(1.02)';
+      // Format-specific crop of the shared source image, centred on the subject's focal point when the
+      // pool entry gives one (fx/fy), so a landscape source still frames the subject in a 9:16 Short.
+      const _fx=(typeof avatarFocusX==='number')?avatarFocusX:0.5;
+      if(ir>pr){ sh=ih; sw=ih*pr; sx=Math.min(iw-sw,Math.max(0,iw*_fx-sw/2)); sy=0; }
+      else { sw=iw; sh=iw/pr; sx=0; sy=(typeof avatarFocusY==='number')?Math.min(ih-sh,Math.max(0,ih*avatarFocusY-sh/2)):(ih-sh)*0.2; }
+      // Visual benchmark alignment: the cover photo keeps its real colours (the old grayscale(1) +
+      // single-colour duotone made every Short/Long look black-and-white / gray-blue).
+      ctx.filter='contrast(1.05) saturate(1.08) brightness(1.02)';
       ctx.drawImage(_avatarImg,sx,sy,sw,sh,px,py,pw,ph);
       ctx.filter='none';
     } else {
       ctx.fillStyle='#1a1210'; ctx.fillRect(px,py,pw,ph);
     }
-    // duotone tint (mix-blend-mode:color equivalent)
-    ctx.globalCompositeOperation='color';
+    // warm grade: a light soft-light wash of the mood's warm tint over the colour photo
+    ctx.globalCompositeOperation='soft-light';
+    ctx.globalAlpha=SRV_FARSI_WARM_GRADE_ALPHA;
     ctx.fillStyle=_farsiPal.tint;
     ctx.fillRect(px,py,pw,ph);
+    ctx.globalAlpha=1;
     ctx.globalCompositeOperation='source-over';
     if(withDarkFade){
       const g=ctx.createLinearGradient(0,py+ph*0.55,0,py+ph);
@@ -21087,14 +21138,39 @@ async function _srvRenderVideo(opts){
     const zoom=1+(0.028*_farsiIntensityMul)*Math.sin(2*Math.PI*(t%_farsiT_ATMO)/_farsiT_ATMO);
     const isMirror=!!mirror;
     if(!isShort){
-      // ── LONG: 46%-width framed panel on left/right + typography zone opposite ──
-      const panelW=Math.round(W*0.46), panelH=Math.round(H-90*H/720), panelTop=Math.round(45*H/720), panelSide=Math.round(45*H/720);
-      const panelX=isMirror?panelSide:(W-panelSide-panelW);
-      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,18,true,true);
+      // ── LONG (visual benchmark): frameless 16:9 cinematic cover. The photo fills the subject side
+      // edge-to-edge — no box, no border, no rounded frame — and dissolves into warm dark negative
+      // space on the title side, where the large Farsi title sits.
+      const panelW=Math.round(W*0.64), panelH=H, panelTop=0;
+      const panelX=isMirror?0:(W-panelW);
+      const _zoomL=1.03+(zoom-1); // always >= 1 so the edge-to-edge photo never reveals a gap while it breathes
+      _drawFarsiPanel(panelX,panelTop,panelW,panelH,_zoomL,0,false,false);
+      // Title-side veil: one clean warm-dark field over the title side that dissolves into the photo
+      // (no visible edge). A vertical warm gradient masked by a horizontal alpha ramp; static, so it
+      // is built once and reused every frame.
+      if(!_farsiLongVeil){
+        _farsiLongVeil=document.createElement('canvas'); _farsiLongVeil.width=W; _farsiLongVeil.height=H;
+        const vx=_farsiLongVeil.getContext('2d');
+        const vg=vx.createLinearGradient(0,0,0,H);
+        vg.addColorStop(0,_farsiPal.gradient[1]); vg.addColorStop(1,_farsiPal.gradient[2]);
+        vx.fillStyle=vg; vx.fillRect(0,0,W,H);
+        const _edge=isMirror?panelW:panelX;                     // photo's inner edge
+        const _solidTo=isMirror?(_edge-W*0.02):(_edge+W*0.02);  // fully covered just past the edge
+        const _clearAt=isMirror?(_edge-W*0.34):(_edge+W*0.34);  // photo fully visible from here
+        const vm=vx.createLinearGradient(_solidTo,0,_clearAt,0);
+        vm.addColorStop(0,'rgba(0,0,0,1)'); vm.addColorStop(0.45,'rgba(0,0,0,0.62)'); vm.addColorStop(1,'rgba(0,0,0,0)');
+        vx.globalCompositeOperation='destination-in'; vx.fillStyle=vm; vx.fillRect(0,0,W,H);
+        vx.globalCompositeOperation='source-over';
+      }
+      ctx.drawImage(_farsiLongVeil,0,0);
+      // soft cinematic floor so the lower edge reads as film, not a crop
+      const _floor=ctx.createLinearGradient(0,H*0.72,0,H);
+      _floor.addColorStop(0,'rgba(10,6,4,0)'); _floor.addColorStop(1,'rgba(10,6,4,0.42)');
+      ctx.fillStyle=_floor; ctx.fillRect(0,0,W,H);
       _drawFarsiAtmo(t);
       // title zone
       const titleSide=isMirror?'right':'left';
-      const titleW=W-panelW-Math.round(40*W/1280);
+      const titleW=Math.round(W*0.46); // title may extend over the faded seam, never over the subject
       const pad=Math.round(W*0.036);
       const tx=titleSide==='left'?pad:(W-pad);
       ctx.textAlign=titleSide==='left'?'left':'right';
@@ -21117,7 +21193,7 @@ async function _srvRenderVideo(opts){
       // orphaned) two-line split only if the title genuinely can't fit on one line at the floor
       // size. Replaces the old fixed-size/greedy-wrap approach that could strand a short last
       // word alone on its own line.
-      const _titleMaxFont=Math.round(W*0.072), _titleMinFont=Math.round(W*0.048);
+      const _titleMaxFont=Math.round(W*0.078), _titleMinFont=Math.round(W*0.048);
       const _titleFontStr=function(px){ return `600 ${px}px 'Noto Nastaliq Urdu', serif`; };
       const _titleMaxW=titleW-pad*2;
       const _titleFit=_srvFitFarsiTitle(ctx,_rawTitle,_titleMaxW,_titleMaxFont,_titleMinFont,_titleFontStr);
@@ -21131,7 +21207,9 @@ async function _srvRenderVideo(opts){
       const _stackH=(_nTitleLines*_titleLineH)+_ruleGap+3+_finglishH+_wordmarkGap+_wordmarkH;
       const titleTopY=Math.max(Math.round(H*0.16),Math.round(H*0.5-_stackH/2));
       ctx.fillStyle='#fdf6e8';
+      ctx.save(); ctx.shadowColor='rgba(8,4,2,0.55)'; ctx.shadowBlur=Math.round(W*0.012); ctx.shadowOffsetY=2; // keeps the title readable over the image fade
       const titleBottomY=_srvDrawPreSplitLinesTop(ctx,_titleFit.lines,tx,titleTopY,_titleLineH);
+      ctx.restore();
       // rule
       const ruleY=titleBottomY+_ruleGap;
       ctx.fillStyle=_farsiPal.frame;
@@ -21144,10 +21222,12 @@ async function _srvRenderVideo(opts){
       // this deterministically without touching frozen title-generation logic.
       if(titleFinglish){
         ctx.direction='ltr'; ctx.textAlign=titleSide;
-        ctx.font=`600 ${Math.round(W*0.0195)}px 'IBM Plex Mono', monospace`;
-        ctx.fillStyle='rgba(253,246,232,0.82)';
+        ctx.font=`500 ${Math.round(W*0.0185)}px 'Vazirmatn', sans-serif`;
+        ctx.fillStyle='rgba(253,246,232,0.80)';
         _stackY+=_finglishH;
+        try{ctx.letterSpacing=Math.round(W*0.0032)+'px';}catch(_){}
         ctx.fillText(String(titleFinglish).toUpperCase(),tx,_stackY);
+        try{ctx.letterSpacing='0px';}catch(_){}
       }
       ctx.direction='ltr';
       // wordmark + music-mark row — grouped directly under the title stack (previously pinned to
@@ -21158,7 +21238,7 @@ async function _srvRenderVideo(opts){
       _drawFarsiPanel(0,0,W,H,zoom,0,false,false);
       // extra fade for legibility (Python .fade gradient)
       const fg=ctx.createLinearGradient(0,0,0,H);
-      fg.addColorStop(0,'rgba(28,14,12,0.25)'); fg.addColorStop(0.30,'rgba(0,0,0,0)'); fg.addColorStop(0.55,'rgba(0,0,0,0)'); fg.addColorStop(1,'rgba(20,10,8,0.75)');
+      fg.addColorStop(0,'rgba(28,14,12,0.28)'); fg.addColorStop(0.30,'rgba(0,0,0,0)'); fg.addColorStop(0.50,'rgba(0,0,0,0)'); fg.addColorStop(0.80,'rgba(18,9,6,0.66)'); fg.addColorStop(1,'rgba(14,7,5,0.86)'); // warm floor behind the lyric line
       ctx.fillStyle=fg; ctx.fillRect(0,0,W,H);
       _drawFarsiAtmo(t);
       ctx.direction='rtl'; ctx.textAlign='right';
@@ -21194,7 +21274,9 @@ async function _srvRenderVideo(opts){
       // than Lalezar did. The corner safe-box position/width/top-margin (tuned across multiple
       // avatar-clearance passes) is completely untouched.
       ctx.font=`600 ${Math.round(W*0.050)}px 'Noto Nastaliq Urdu', serif`;
+      ctx.save(); ctx.shadowColor='rgba(8,4,2,0.85)'; ctx.shadowBlur=Math.round(W*0.012); ctx.shadowOffsetY=2;
       _srvWrapLinesTop(ctx,_hook,_titleBoxRightX,_titleBoxTopY,_titleBoxMaxW,Math.round(W*0.060),3,false);
+      ctx.restore();
       // caption (current lyric line), styled per baseline spec
       if(lyricLines.length){
         let idx=0;
@@ -21203,7 +21285,7 @@ async function _srvRenderVideo(opts){
         const nextT=lyricTimings[idx+1]!==undefined?lyricTimings[idx+1]:targetDur;
         const lineDur=Math.max(0.5,nextT-lyricTimings[idx]);
         const inWin=t-lyricTimings[idx];
-        const alpha=Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35)));
+        const alpha=skipFade?1:Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35))); // skipFade = cover/thumbnail capture: lyric fully visible
         ctx.save(); ctx.globalAlpha=alpha;
         // v2-short-lyric-font-fix — the on-screen lyric caption was still on Vazirmatn sans-serif,
         // the same pre-correction treatment the title moved away from in v2-short-title-font-fix
@@ -21214,13 +21296,15 @@ async function _srvRenderVideo(opts){
         // ~1.16x->~1.21x font size, the same small ratio increase already made for the title, since
         // Nastaliq's diagonal flow needs slightly more vertical room per line than Vazirmatn did —
         // safe-zone, bottom placement, timing, wrapping line-count, and content are all untouched.
-        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.043)}px 'Noto Nastaliq Urdu', serif`;
-        ctx.fillStyle='#fff';
-        ctx.shadowColor='rgba(0,0,0,0.9)'; ctx.shadowBlur=6;
+        // visual benchmark: lyric must be clean and readable — same calligraphic family, larger, cream,
+        // with a soft deep shadow over the warm floor (was 0.043W white with a thin shadow).
+        ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.054)}px 'Noto Nastaliq Urdu', serif`;
+        ctx.fillStyle='#fdf6e8';
+        ctx.shadowColor='rgba(8,4,2,0.92)'; ctx.shadowBlur=Math.round(W*0.014); ctx.shadowOffsetY=2;
         // v2-phase2 — bottom margin widened to ~18% of height (was ~6%) to clear the platform-UI
         // safe zone (username/caption/like-share rail) that Shorts/Reels/TikTok reserve at the bottom.
-        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.88,Math.round(W*0.052),2);
-        ctx.shadowBlur=0; ctx.restore();
+        _srvWrapLines(ctx,line,W/2,H-Math.round(H*0.18),W*0.86,Math.round(W*0.068),2);
+        ctx.shadowBlur=0; ctx.shadowOffsetY=0; ctx.restore();
       }
       ctx.direction='ltr';
       ctx.textAlign='left'; ctx.fillStyle='rgba(253,246,232,0.6)';
@@ -21342,12 +21426,12 @@ async function _srvRenderVideo(opts){
   // v2-visual-refinement — skip the composed-frame fade-in ONLY for this explicit pre-recording
   // capture so the automatic YouTube thumbnail shows the full cover, not a black frame (t=0 fade
   // alpha was previously 1.0, i.e. solid black). The real recorded video's own fade-in is untouched.
-  _thumbCaptureMode = isFarsiComposed && !isShort;
+  _thumbCaptureMode = isFarsiComposed; // SRV Farsi: clean (no fade) cover frame for Longs AND Shorts
   drawFrame(0);
   await new Promise(r => setTimeout(r, 100));
   // v13.69.8 — capture first frame as thumbnail JPEG before recorder starts (clean frame, no mid-animation state)
   let thumbDataUrl = null;
-  if(!isShort){
+  if(!isShort||isFarsiComposed){ // SRV Farsi also keeps a cover for Shorts
     try { thumbDataUrl = canvas.toDataURL('image/jpeg', 0.92); } catch(_){}
   }
   _thumbCaptureMode = false;
