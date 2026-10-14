@@ -20,12 +20,12 @@ ok('old gray-blue Emotional colours are gone',!/#5f7290|#23283a|#9aa9c2/.test(h)
 
 // ── 1b. Benchmark layout: frameless Long, readable Short lyric, restrained secondary line ──
 const comp=(()=>{const s=h.indexOf('  function _drawFarsiComposedFrame(');return h.slice(s,h.indexOf('\n  // ── Main frame renderer',s));})();
-ok('Long: photo drawn edge-to-edge with no border and no rounded frame',/_drawFarsiPanel\(panelX,panelTop,panelW,panelH,_zoomL,0,false,false\)/.test(comp)&&/panelH=H, panelTop=0/.test(comp));
+ok('Long: photo drawn edge-to-edge with no border and no rounded frame',/_drawFarsiPanel\(panelX,panelTop,panelW,panelH,zoom,0,\{aim:/.test(comp)&&!/_drawFarsiPanel\(panelX[^\n]*border:true/.test(comp)&&/panelH=H, panelTop=0/.test(comp));
 ok('Long: no framed-panel call remains',!/_drawFarsiPanel\([^)]*,18,true,true\)/.test(comp));
 ok('Long: title side is a masked veil that dissolves into the photo',/_farsiLongVeil/.test(comp)&&/destination-in/.test(comp));
-ok('Long: photo never shrinks below its edge while animating',/const _zoomL=1\.03\+\(zoom-1\)/.test(comp));
-ok('Long: romanized line is a restrained sans (no monospace caps block)',/500 \$\{Math\.round\(W\*0\.0185\)\}px 'Vazirmatn'/.test(comp)&&!/IBM Plex Mono', monospace`;\s*\n\s*ctx\.fillStyle='rgba\(253,246,232,0\.82\)'/.test(comp));
-ok('Long/Short: title type is cream, not pure white',(comp.match(/#fdf6e8/g)||[]).length>=3);
+ok('photo never shrinks below its edge while animating (zoom floor 1, pan limited to the zoom margin)',/const z=Math\.max\(1,zoom\|\|1\)/.test(panel)&&/\*\(z-1\)\*0\.9/.test(panel));
+ok('Long: romanized line is a restrained sans (no monospace caps block)',/500 \$\{Math\.round\(W\*0\.0195\)\}px 'Vazirmatn'/.test(comp)&&!/IBM Plex Mono', monospace`;\s*\n\s*ctx\.fillStyle='rgba\(253,246,232,0\.82\)'/.test(comp));
+ok('Long/Short: title type is cream, not pure white',(comp.match(/#fdf6e8/g)||[]).length>=2&&!/fillStyle='#fff(fff)?'/.test(comp));
 ok('Short: lyric line larger and cream with a deep soft shadow',/600 \$\{Math\.round\(W\*0\.054\)\}px 'Noto Nastaliq Urdu'/.test(comp)&&/shadowColor='rgba\(8,4,2,0\.92\)'/.test(comp));
 ok('Short: cover frame shows the lyric line (not captured mid fade-in)',/const alpha=skipFade\?1:/.test(comp));
 ok('grade is light enough for natural skin tones (<= 0.25)',(()=>{const m=h.match(/const SRV_FARSI_WARM_GRADE_ALPHA=([0-9.]+)/);return m&&+m[1]>0&&+m[1]<=0.25;})());
@@ -69,18 +69,63 @@ out.push('INFO missing to reach 6 per pool: '+plist.map(([k,arr])=>k+'='+Math.ma
 const build0=top('_srvFarsiBuildTrigger');
 ok('build picks by artist.mood (no format in the pointer key), so Short and Long share the rotation',/_farsiPickAvatar\(_fPool,_fGroup\+'\.'\+_fMoodKey\)/.test(build0)&&!/_fFormatKey/.test(build0));
 ok('build passes the focal point to both the Short and the Long render',(build0.match(/avatarFocusX:_fAvFocus\.x, avatarFocusY:_fAvFocus\.y/g)||[]).length===2);
-// focal crop maths (the real expressions from the painter)
-{ const pn=(()=>{const s=h.indexOf('  function _drawFarsiPanel(');return h.slice(s,h.indexOf('\n  }\n',s));})();
-  const a=pn.indexOf('const _fx='),b=pn.indexOf('\n',pn.indexOf('else { sw=iw;'));
-  const crop=new Function('iw','ih','pw','ph','avatarFocusX','avatarFocusY','const ir=iw/ih,pr=pw/ph;let sw,sh,sx,sy;'+pn.slice(a,b)+'\nreturn {sx,sy,sw,sh};');
-  const L=crop(1672,941,1080,1920,0.33,undefined);            // landscape source -> 9:16 Short, subject at 33%
-  ok('landscape -> Short crop is centred on the subject and stays inside the image',Math.abs((L.sx+L.sw/2)/1672-0.33)<0.01&&L.sx>=0&&L.sx+L.sw<=1672&&Math.round(L.sh)===941);
-  const C=crop(1672,941,1080,1920,undefined,undefined);
-  ok('no focal point -> centred crop (previous behaviour)',Math.abs((C.sx+C.sw/2)/1672-0.5)<0.001);
-  const E=crop(1672,941,1080,1920,0.02,undefined);
-  ok('extreme focal point is clamped to the image edge',E.sx===0);
-  const P=crop(941,1672,1229,1080,undefined,undefined);       // portrait source -> Long subject panel
-  ok('portrait -> Long crop keeps the upper (face) area',Math.abs(P.sy-(1672-P.sh)*0.2)<0.001&&P.sw===941); }
+// ── Fix pass: face-first framing (the real expressions from the painter) ──
+{ const a=panel.indexOf('const fx='),b=panel.indexOf('const z=Math.max');
+  const frame=new Function('iw','ih','px','py','pw','ph','aim','avatarFocusX','avatarFocusY','avatarFaceW','let faceX=px+pw*aim.x, faceY=py+ph*aim.y, faceR=pw*0.2;'+panel.slice(a,b)+'\nreturn {sx,sy,sw,sh,sc,cover,faceX,faceY,faceW:fw*iw*sc};');
+  const LONG={x:0.60,y:0.40,face:0.21}, CARD={x:0.5,y:0.37,face:0.30};
+  const inside=(r,iw,ih)=>r.sx>=-1e-6&&r.sy>=-1e-6&&r.sx+r.sw<=iw+1e-6&&r.sy+r.sh<=ih+1e-6;
+  let allIn=true,faceIn=true,faceBig=true,notSoft=true,n=0; const worst=[];
+  for(const [key,pool] of plist) for(const e of pool){
+    const land=/\/long\//.test(e.src), iw=land?1672:941, ih=land?941:1672;
+    for(const [nm,pw,ph,aim] of [['long',1267,1080,LONG],['card',929,1008,CARD]]){
+      const r=frame(iw,ih,0,0,pw,ph,aim,e.fx,e.fy,e.fw); n++;
+      if(!inside(r,iw,ih))allIn=false;
+      // whole face (plus a margin) inside the panel
+      if(!(r.faceX-r.faceW*0.55>=0&&r.faceX+r.faceW*0.55<=pw&&r.faceY-r.faceW*0.62>=0&&r.faceY+r.faceW*0.62<=ph)){faceIn=false;worst.push(key+':'+nm+':'+e.src.split('_').slice(-1));}
+      if(r.faceW/pw<0.11)faceBig=false;
+      if(r.sc>r.cover*1.7+1e-9)notSoft=false; } }
+  ok('face framing: every pool image, Long panel + Short card ('+n+' crops) — crop stays inside the source',allIn);
+  ok('face framing: the whole face is inside the frame for every image and both formats',faceIn,worst.join(' '));
+  ok('face framing: the face is a prominent share of the frame for every image',faceBig);
+  ok('face framing: enlargement is capped so the photo never goes soft',notSoft);
+  ok('every pool entry carries a face box (fx, fy, fw)',plist.every(([k,pool])=>pool.every(e=>typeof e==='object'&&[e.fx,e.fy,e.fw].every(v=>typeof v==='number'&&v>0&&v<1))));
+  ok('face light + face-centred vignette keep the face the brightest, clearest area',/createRadialGradient\(faceX,faceY,0,faceX,faceY,faceR\*2\.4\)/.test(panel)&&/createRadialGradient\(faceX,faceY,faceR\*1\.7/.test(panel));
+  ok('camera moves about the face (zoom + pan pivot on the face, not the panel centre)',/ctx\.translate\(faceX\+\(o\.panX\|\|0\)\*mx,faceY\+\(o\.panY\|\|0\)\*my\); ctx\.scale\(z,z\); ctx\.translate\(-faceX,-faceY\)/.test(panel));
+  ok('photo is drawn with high-quality smoothing and real colour',/imageSmoothingQuality='high'/.test(panel)&&!/ctx\.filter='[^']*grayscale/.test(panel)); }
+// ── Fix pass: motion ──
+{ const atmo=(()=>{const s2=h.indexOf('  function _drawFarsiAtmo(');return h.slice(s2,h.indexOf('\n  }\n',s2));})();
+  const sp=atmo.match(/p\.y0-\(([\d.]+)\+([\d.]+)\*d\)\*t/);
+  ok('particles rise faster than before (was 0.077 of the frame height per second)',sp&&parseFloat(sp[1])>0.077&&parseFloat(sp[1])+parseFloat(sp[2])>=0.2,sp&&('now '+sp[1]+' to '+(parseFloat(sp[1])+parseFloat(sp[2])).toFixed(3)));
+  ok('particle field is denser (was 20-22)',/_srvFarsiMoodKey\(mood\)==='happy'\?46:42/.test(h));
+  ok('three depth layers: drifting bokeh + particles + (Emotional) rain',/for\(let i=0;i<7;i\+\+\)/.test(atmo)&&/_farsiAtmoKind==='particle'/.test(atmo)&&/d\.y0\+0\.46\*t/.test(atmo));
+  ok('no per-particle blur filter (sprite stamping keeps the denser field real-time)',!/ctx\.filter=`blur/.test(atmo)&&/drawImage\(sp,/.test(atmo));
+  const z=comp.match(/const zoom=1\.09\+_live\*\(\(([\d.]+)\*_farsiIntensityMul\)\*_cyc\((\d+),0\)\+([\d.]+)\*_cyc\(([\d.]+),1\)\)/);
+  ok('camera push is stronger and quicker (was +/-2.8% over 15-20s)',z&&parseFloat(z[1])>0.028&&parseInt(z[2])<15,z&&('now +/-'+(z[1]*100)+'% over '+z[2]+'s plus a '+z[4]+'s breath'));
+  ok('camera zoom can never drop below 1 at any intensity (no photo edge revealed)',z&&1.09-parseFloat(z[1])*1.3-parseFloat(z[3])>=1);
+  ok('camera also pans, and a light sweep crosses the photo',/panX:panX,panY:panY,sweep:sweep/.test(comp)&&(comp.match(/panX:panX,panY:panY,sweep:sweep/g)||[]).length===2);
+  ok('Short backdrop drifts (blurred photo + moving gradient)',/_farsiShortBg/.test(comp)&&/_cyc\(17,0\)/.test(comp)&&/_cyc\(21,0\)/.test(comp)); }
+// ── Fix pass: text animation ──
+{ ok('ease-out slide helper; the cover/thumbnail capture is always the settled frame',/const _in=function\(a,b\)\{ if\(skipFade\)return 1;/.test(comp)&&/const _live=skipFade\?0:1;/.test(comp));
+  const long=comp.slice(comp.indexOf('if(!isShort){'),comp.indexOf('// ── SHORT (visual benchmark)'));
+  const short=comp.slice(comp.indexOf('// ── SHORT (visual benchmark)'));
+  ok('Long: title, Latin title and wordmark each slide in from the title side, staggered',/ctx\.translate\(\(1-pT\)\*_dir\*W\*0\.09/.test(long)&&/ctx\.translate\(\(1-pF\)\*_dir\*W\*0\.07/.test(long)&&/ctx\.translate\(\(1-pW\)\*_dir\*W\*0\.05/.test(long)&&/_in\(0\.35,1\.30\)/.test(long)&&/_in\(0\.75,1\.60\)/.test(long)&&/_in\(1\.05,1\.90\)/.test(long));
+  ok('Long: slide direction follows the title side (left or right)',/const _dir=titleSide==='left'\?-1:1;/.test(long));
+  ok('Short: title slides in from the right, Latin title from the left',/ctx\.translate\(\(1-pT\)\*W\*0\.10,0\)/.test(short)&&/ctx\.translate\(-\(1-pF\)\*W\*0\.10,0\)/.test(short));
+  ok('Short: header slides down, card rises, footer slides up',/ctx\.translate\(0,-\(1-pH\)\*H\*0\.04\)/.test(short)&&/\(1-pC\)\*H\*0\.025/.test(short)&&/ctx\.translate\(0,\(1-pFo\)\*H\*0\.03\)/.test(short));
+  ok('Short: each lyric line slides in from alternating sides',/\(\(idx%2\)\?-1:1\)\*W\*0\.07/.test(short));
+  // ── Fix pass: Short text information ──
+  ok('Short: channel header',/fillText\('SILK ROAD VOICES',W\/2/.test(short)&&/fillText\('PERSIAN LOVE SONGS',W\/2/.test(short));
+  ok('Short: cover card carries Farsi title, Latin title and genre',/_srvFitFarsiTitle\(ctx,_rawTitle,cW-_cPad\*2/.test(short)&&/String\(titleFinglish\)\.toUpperCase\(\),W\/2,_finY/.test(short)&&/fillText\('PERSIAN LOVE SONG',W\/2,_genreY\)/.test(short));
+  ok('Short: brand + follow line',/const _brand='SRV FARSI'/.test(short)&&/آهنگ‌های بیشتر در کانال ما/.test(short));
+  const ys=[...short.matchAll(/Math\.round\(H\*(0\.\d+)\)/g)].map(m=>parseFloat(m[1]));
+  ok('Short: all text sits inside the platform safe zones (below the top 8%, above the bottom 15%)',Math.min(...ys)>=0.08&&Math.max(...ys)<=0.85,'y range '+Math.min(...ys)+' to '+Math.max(...ys));
+  ok('Short: lyric keeps the benchmark treatment (Nastaliq, cream, deep shadow)',/600 \$\{Math\.round\(W\*0\.054\)\}px 'Noto Nastaliq Urdu'/.test(short)&&/rgba\(8,4,2,0\.92\)/.test(short)); }
+// ── Fix pass: fonts ready before the cover, rotation visible at Approve ──
+ok('fonts are loaded with the real title/lyric text before the cover is captured',/_srvFarsiEnsureFonts\(\[title,titleFinglish,hookText,lyrics\]\.join\(' '\)\)/.test(h)&&/document\.fonts\.load\("600 58px 'Noto Nastaliq Urdu'",_txt\)/.test(h));
+ok('build records which pool image it used',/pkg\._srvVisualPoolPos=\{n:_fPool\.indexOf\(_fPicked\)\+1,of:_fPool\.length/.test(build0));
+ok('Approve stage shows "Image N of M" so a Rebuild\'s rotation is visible',/Image \$\{Number\(pkg\._srvVisualPoolPos\.n\)\|\|'\?'\} of \$\{Number\(pkg\._srvVisualPoolPos\.of\)/.test(h));
+ok('build passes the face box to both the Short and the Long render',(build0.match(/avatarFaceW:_fAvFocus\.w/g)||[]).length===2);
+
 
 // ── 4. Thumbnails: real helper with mocked network ──
 function env(setOk,uploadFails){
