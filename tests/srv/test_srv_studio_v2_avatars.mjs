@@ -34,8 +34,8 @@ ok('Registry: crop is the whole image (no sheet residue to remove)', R.every((a)
 ok('Registry: focus point inside the image', R.every((a) => a.focus.fx > 0 && a.focus.fx < 1 && a.focus.fy > 0 && a.focus.fy < 1));
 ok('Registry: moods limited to romantic / emotional / hopeful; formats long + short; pose group set', R.every((a) => a.moods.length && a.moods.every((m) => ['romantic', 'emotional', 'hopeful'].includes(m)) && a.formats.join() === 'long,short' && a.pose));
 const pool = A.srv2AvatarPool();
-ok('Registry: 18 rotation-eligible; #09 (near-duplicate of #15) and #14 (wardrobe) held with the reason recorded', pool.length === 18 && R.filter((a) => !a.rotationEligible).map((a) => a.number).join() === '9,14' && /near-duplicate of #15/.test(R[8].flags.join()) && /lingerie-forward/.test(R[13].flags.join()));
-ok('Registry: #13 flagged for CEO identity confirmation (still in rotation)', R[12].rotationEligible && /identity/.test(R[12].flags.join()));
+ok('Registry: 19 rotation-eligible after CEO decisions; #09 kept as alternate to #15; #14 approved (recorded)', pool.length === 19 && R.filter((a) => !a.rotationEligible).map((a) => a.number).join() === '9' && /kept as an alternate to #15 \(CEO decision/.test(R[8].flags.join()) && R[13].rotationEligible && /approved by the CEO for rotation and thumbnails/.test(R[13].flags.join()));
+ok('Registry: #13 confirmed by the CEO as the same artist (in rotation)', R[12].rotationEligible && /confirmed by the CEO as the same artist/.test(R[12].flags.join()) && !/CEO to confirm/.test(R[12].flags.join()));
 ok('Registry: every mood has at least 5 eligible avatars and at least 6 pose groups rotate', ['romantic', 'emotional', 'hopeful'].every((m) => pool.filter((a) => a.moods.includes(m)).length >= 5) && new Set(pool.map((a) => a.pose)).size >= 6);
 ok('Registry: one female artist only — no male/duet entries or fields', !/\b(male|duet|man|boy)\b/i.test(JSON.stringify(R).replace(/female/gi, '')));
 ok('Registry: client copy in public/index.html is byte-identical to the lib block', (() => { const a = LIB.indexOf('// <srv-v2-avatars>'), b = LIB.indexOf('// </srv-v2-avatars>') + '// </srv-v2-avatars>'.length; return H.includes(LIB.slice(a, b)); })());
@@ -57,7 +57,7 @@ ok('Archive: quality labels are honest for both collections', /below full HD/.te
   ok('Rotation: 200 picks with the task mood mix → zero immediate repeats', seq.every((x, i) => !i || x !== seq[i - 1]));
   ok('Rotation: only final, rotation-eligible avatars are ever picked (never held, never archived)', seqA.every((a) => a.rotationEligible && !a.archived && a.collection === 'final'));
   ok('Rotation: no two consecutive picks share a pose group', seqA.every((a, i) => !i || a.pose !== seqA[i - 1].pose));
-  ok('Rotation: every eligible avatar is used within the first 40 mixed picks', new Set(seq.slice(0, 40)).size === 18);
+  ok('Rotation: every eligible avatar is used within the first 40 mixed picks', new Set(seq.slice(0, 40)).size === 19);
   for (const m of ['romantic', 'emotional', 'hopeful']) {
     const s2 = runA(60, () => m); const suited = pool.filter((a) => a.moods.includes(m)).length;
     ok(`Rotation (${m} only): suited avatars only, all ${suited} used within ${2 * suited} picks, no immediate repeats`, s2.every((a) => a.moods.includes(m)) && new Set(s2.slice(0, 2 * suited).map((a) => a.id)).size === suited && s2.every((a, i) => !i || a.id !== s2[i - 1].id));
@@ -66,7 +66,7 @@ ok('Archive: quality labels are honest for both collections', /below full HD/.te
   ok('Rotation: deterministic — same history gives the same pick', A.srv2AvatarPick({ history: [{ id: 'srv2-fm-01', at: at(0) }], moodKey: 'emotional' }).id === A.srv2AvatarPick({ history: [{ id: 'srv2-fm-01', at: at(0) }], moodKey: 'emotional' }).id);
   ok('Rotation: excludeId is never returned (Next avatar)', pool.map((a) => a.id).every((id) => A.srv2AvatarPick({ history: [], excludeId: id }).id !== id));
   ok('Rotation: history built from packages, oldest first, ignoring packages without avatars', (() => { const h = A.srv2AvatarHistory([{ srvAvatar: { id: 'b', assignedAt: '2' } }, { title: 'x' }, { srvAvatar: { id: 'a', assignedAt: '1' } }]); return h.map((x) => x.id).join() === 'a,b'; })());
-  ok('Rotation: pool position labels ("Image N of 18"; held and archived = 0)', A.srv2AvatarPoolPos('srv2-fm-01').n === 1 && A.srv2AvatarPoolPos('srv2-fm-01').of === 18 && A.srv2AvatarPoolPos('srv2-fm-09').n === 0 && A.srv2AvatarPoolPos('srv2-av-01').n === 0);
+  ok('Rotation: pool position labels ("Image N of 19"; held and archived = 0)', A.srv2AvatarPoolPos('srv2-fm-01').n === 1 && A.srv2AvatarPoolPos('srv2-fm-01').of === 19 && A.srv2AvatarPoolPos('srv2-fm-09').n === 0 && A.srv2AvatarPoolPos('srv2-av-01').n === 0);
 }
 
 // ── 3. Lifecycle persistence in the real client code (sandbox) ──
@@ -117,7 +117,7 @@ function makeEnv() {
   ok('EnsureAvatar is idempotent — an existing avatar is never replaced silently', (() => { const before = p2.srvAvatar.id; vm.runInContext('_srvEnglishV2EnsureAvatar(D.tasks[1], D.packages.find(p=>p.id==="' + p2.id + '"))', ctx); return p2.srvAvatar.id === before; })());
   ok('V1 avatar pointer srvEnglishAvatarIdx untouched by V2 selection', ctx.D.srvEnglishAvatarIdx === 0);
   const html = vm.runInContext("_srvEnglishV2SetStage('2','build'); renderSRVEnglishLifecycleCard(D.tasks[1])", ctx);
-  ok('Card: Build shows the task\'s avatar, rotation position and the honest quality label', html.includes(A.srv2AvatarById(p2.srvAvatar.id).src) && /Image \d+ of 18 in rotation/.test(html) && /Final master \d+×\d+ — HD for thumbnails, below full HD/.test(html) && /Next avatar/.test(html));
+  ok('Card: Build shows the task\'s avatar, rotation position and the honest quality label', html.includes(A.srv2AvatarById(p2.srvAvatar.id).src) && /Image \d+ of 19 in rotation/.test(html) && /Final master \d+×\d+ — HD for thumbnails, below full HD/.test(html) && /Next avatar/.test(html));
   const appr = vm.runInContext("_srvEnglishV2SetStage('2','approve'); renderSRVEnglishLifecycleCard(D.tasks[1])", ctx);
   ok('Card: Approve shows the avatar but no Next avatar (the avatar is fixed once the video is built)', appr.includes('ARTIST IMAGE') && !/Next avatar/.test(appr));
   // A package assigned during Checkpoint C (archived concept avatar) still resolves, and Next avatar moves it to the final collection.

@@ -132,7 +132,7 @@ function card(a) {
     </div></div>`;
 }
 function drawHeld() {
-  const rows = AV.filter((a) => !a.rotationEligible || a.flags.some((f) => /identity|near-duplicate|wardrobe: most/.test(f)));
+  const rows = AV.filter((a) => !a.rotationEligible || a.flags.some((f) => /CEO to confirm|pending CEO/.test(f)));
   document.getElementById('heldrows').innerHTML = rows.map((a) => `<tr><td>${String(a.number).padStart(2, '0')}</td><td><img src="${a.src}" alt="" style="width:110px;height:auto;border-radius:4px;display:block"><div style="font-size:12px;margin-top:4px">${esc(a.title)}</div></td><td><span class="chip ${a.rotationEligible ? 'ok' : 'warn'}">${a.rotationEligible ? 'in rotation (flagged)' : 'held'}</span></td><td style="font-size:12px">${a.flags.filter((f) => !/^tone:/.test(f)).map(esc).join('<br>')}</td></tr>`).join('');
   document.getElementById('archived').innerHTML = ARCH.map(card).join('');
 }
