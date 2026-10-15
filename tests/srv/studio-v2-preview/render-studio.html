@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SRV Studio V2 · Render studio</title>
+<style>
+  :root{--bg:#0c0b10;--panel:#15131c;--line:#2a2633;--text:#ece8df;--dim:#9b95a8;--acc:#a78bfa;--ok:#22c55e;--warn:#fbbf24;--bad:#ef4444}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 system-ui,-apple-system,sans-serif}
+  header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+  header h1{margin:0;font-size:16px}header span{color:var(--dim);font-size:12px}
+  main{display:grid;grid-template-columns:320px 1fr;gap:16px;padding:16px}
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  label{display:block;font-size:11px;color:var(--dim);margin:8px 0 3px;letter-spacing:.04em}
+  select,input,textarea{width:100%;background:#0f0e14;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+  textarea{height:110px;font:12px/1.4 ui-monospace,monospace}
+  button{background:rgba(139,92,246,.16);color:var(--acc);border:1px solid rgba(139,92,246,.5);border-radius:8px;padding:8px 10px;font-weight:700;cursor:pointer;margin:8px 6px 0 0}
+  button:disabled{opacity:.5;cursor:default}
+  h2{font-size:11px;letter-spacing:.12em;color:var(--dim);margin:0 0 8px}
+  .stage{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+  canvas.live{background:#000;border-radius:8px;max-width:100%}
+  #longC{width:min(100%,640px);aspect-ratio:16/9}#shortC{height:360px;aspect-ratio:9/16}
+  video{background:#000;border-radius:8px;max-width:100%}
+  table{border-collapse:collapse;font:12px ui-monospace,monospace}td{padding:2px 10px 2px 0;border-bottom:1px solid #1f1c26;vertical-align:top}td:first-child{color:var(--dim)}
+  pre{white-space:pre-wrap;font:12px/1.45 ui-monospace,monospace;background:#0f0e14;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:280px;overflow:auto;margin:0}
+  .rot{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}.rot figure{margin:0}.rot img{width:100%;border-radius:6px;display:block}.rot figcaption{font-size:11px;color:var(--dim)}
+  .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+  section{margin-bottom:16px}
+</style></head>
+<body>
+<header><h1>SRV Studio V2 · Render studio</h1><span>Preview only · sample data · the real srv2-render.mjs module and the browser's real recorder · nothing is published</span></header>
+<main>
+  <div class="panel">
+    <label>Avatar</label><select id="avatar"></select>
+    <label>Format</label><select id="kind"><option value="long">Long · 1920×1080 · 8 Mbps</option><option value="short">Short · 1080×1920 · 6 Mbps</option></select>
+    <label>Length to render (seconds, up to the song length)</label><input id="dur" type="number" min="5" max="360" value="30">
+    <label>Title</label><input id="title" value="Neon Nights">
+    <label>Hook (Long, shown at the detected chorus)</label><input id="hook" value="Under neon lights I find my way back to you">
+    <label>Lyrics (Short lines)</label><textarea id="lyrics">[Verse]
+Under neon lights
+I find my way back to you
+City breathing slow tonight
+Hold me through the night drive
+[Chorus]
+Under neon lights
+I find my way back to you</textarea>
+    <label>Audio</label><select id="audio"><option value="/__v2/test-audio.mp3">Sample MP3 on this computer (read-only)</option></select>
+    <div><button id="animate">▶ Animate preview</button><button id="stopAnim" disabled>■ Stop</button></div>
+    <div><button id="render">● Render test video</button></div>
+    <div id="status" style="margin-top:10px;color:var(--dim);font-size:12px"></div>
+  </div>
+  <div>
+    <section class="panel"><h2>ANIMATED PREVIEW (LIVE, NOT RECORDED)</h2>
+      <div class="stage"><canvas id="longC" class="live" width="1920" height="1080"></canvas><canvas id="shortC" class="live" width="1080" height="1920"></canvas></div></section>
+    <section class="panel"><h2>RENDERED TEST VIDEO</h2><div class="stage"><video id="out" controls playsinline style="max-height:420px"></video><table id="stats"></table></div></section>
+    <section class="panel"><h2>THUMBNAIL (1280×720)</h2><div class="stage"><img id="thumb" alt="" style="width:min(100%,640px);border-radius:8px;background:#000"><table id="tstats"></table></div></section>
+    <section class="panel"><h2>PUBLISH METADATA (DRY RUN)</h2><div class="stage" style="align-items:stretch"><div style="flex:1;min-width:280px"><h2>LONG</h2><pre id="metaL"></pre></div><div style="flex:1;min-width:280px"><h2>SHORT</h2><pre id="metaS"></pre></div></div></section>
+    <section class="panel"><h2>ROTATION — NEXT 19 PACKAGES FROM AN EMPTY HISTORY (MOODS CYCLING)</h2><div id="rot" class="rot"></div></section>
+  </div>
+</main>
+<script type="module">
+import * as R from '/srv-studio-v2/srv2-render.mjs';
+import * as A from '/__v2/avatars.mjs';
+const $ = (id) => document.getElementById(id);
+const say = (t, c) => { $('status').textContent = t; $('status').className = c || ''; };
+const finals = A.SRV_STUDIO_V2_AVATARS;
+for (const a of finals) { const o = document.createElement('option'); o.value = a.id; o.textContent = `#${a.number} ${a.title}${a.rotationEligible ? '' : ' (alternate, not in rotation)'}`; $('avatar').appendChild(o); }
+const q = new URLSearchParams(location.search);
+if (q.get('avatar')) $('avatar').value = q.get('avatar');
+if (q.get('kind')) $('kind').value = q.get('kind');
+if (q.get('dur')) $('dur').value = q.get('dur');
+const av = () => A.srv2AvatarById($('avatar').value);
+const lines = () => R.srv2LyricLines($('lyrics').value);
+const prepCache = new Map();
+async function prepared(a) { if (!prepCache.has(a.id)) prepCache.set(a.id, R.srv2PrepareSource(await R.srv2LoadImage(a.src), a.crop)); return prepCache.get(a.id); }
+const tbl = (el, rows) => { el.innerHTML = rows.map(([k, v, c]) => `<tr><td>${k}</td><td class="${c || ''}">${v}</td></tr>`).join(''); };
+
+function showMeta() {
+  const pkg = { title: $('title').value, lyrics: $('lyrics').value, hook: $('hook').value, mood: 'Female — Romantic', captionYT: 'A late-night drive through the city, and the one person you still look for in the lights. 🌃 #vibes' };
+  const fmt = (m) => `Title (${m.title.length}/100): ${m.title}\nPrivacy: ${m.privacyStatus} · category ${m.categoryId} · madeForKids ${m.madeForKids} · containsSyntheticMedia ${m.containsSyntheticMedia}\nTags: ${m.tags.join(', ')}\n\n${m.description}`;
+  $('metaL').textContent = fmt(R.srv2YouTubeMetadata('long', pkg, {})); $('metaS').textContent = fmt(R.srv2YouTubeMetadata('short', pkg, {}));
+}
+async function showThumb() {
+  await R.srv2LoadFonts(); const a = av(); const c = document.createElement('canvas'); c.width = 1280; c.height = 720;
+  const info = R.srv2PaintThumbnail(c.getContext('2d'), await prepared(a), a, { title: $('title').value });
+  const b = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9)); $('thumb').src = URL.createObjectURL(b);
+  tbl($('tstats'), [['Size', '1280×720 JPEG q0.9'], ['Bytes', (b.size / 1024).toFixed(0) + ' KB', b.size < 2 * 1048576 ? 'ok' : 'bad'], ['Layout', info.layout], ['Source used', info.sourcePx + ' px (×' + info.sourceScale + ', downscaled)'], ['Avatar', a.id]]);
+  window.__srv2Thumb = { bytes: b.size, info };
+}
+async function showRotation() {
+  await R.srv2LoadFonts(); const hist = []; const moods = ['romantic', 'emotional', 'hopeful']; $('rot').innerHTML = '';
+  const seen = [];
+  for (let i = 0; i < 19; i++) {
+    const moodKey = moods[i % 3]; const pick = A.srv2AvatarPick({ history: hist, moodKey });
+    hist.push({ id: pick.id, at: new Date(Date.UTC(2026, 9, 15, 0, i)).toISOString() }); seen.push(pick.id);
+    const c = document.createElement('canvas'); c.width = 640; c.height = 360;
+    const ctx = c.getContext('2d'); ctx.scale(0.5, 0.5);
+    R.srv2PaintThumbnail(ctx, await prepared(pick), pick, { title: $('title').value });
+    const f = document.createElement('figure'); f.innerHTML = `<img src="${c.toDataURL('image/jpeg', 0.8)}" alt=""><figcaption>${i + 1}. #${pick.number} · ${moodKey} · ${pick.pose}</figcaption>`; $('rot').appendChild(f);
+  }
+  const uniq = new Set(seen).size; const adj = seen.some((x, i) => i && seen[i - 1] === x);
+  window.__srv2Rotation = { picks: seen, unique: uniq, adjacentRepeat: adj, held: finals.filter((a) => !a.rotationEligible).map((a) => a.id) };
+}
+
+// ── live animation (no recording) ──
+let anim = null;
+async function animate() {
+  stopAnim(); await R.srv2LoadFonts(); const a = av(); const prep = await prepared(a); say('Decoding audio…');
+  const ab = await (await fetch($('audio').value)).arrayBuffer();
+  const actx = new AudioContext(); const buf = await actx.decodeAudioData(ab);
+  const dur = Math.min(buf.duration, Number($('dur').value) || 30);
+  const an1 = R.srv2AnalyzeAudio(buf.getChannelData(0), buf.sampleRate, { lineCount: 0 });
+  const an2 = R.srv2AnalyzeAudio(buf.getChannelData(0), buf.sampleRate, { lineCount: lines().length, windowSec: Math.min(dur, 30), fromStart: true });
+  const L = R.srv2CreateScene({ kind: 'long', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2LongTimeline({ duration: dur, chorusStart: Math.min(an1.chorusStart + an1.vocalOnset, dur - 18), hook: $('hook').value, seed: a.id }) });
+  const S = R.srv2CreateScene({ kind: 'short', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2ShortTimeline({ duration: Math.min(dur, 30), lines: lines(), lineTimings: an2.lineTimings }) });
+  const src = actx.createBufferSource(); src.buffer = buf; const an = actx.createAnalyser(); an.fftSize = 2048; src.connect(an); an.connect(actx.destination);
+  const bins = new Uint8Array(an.frequencyBinCount); const bass = R.srv2BassFollower(); const t0 = actx.currentTime + 0.1; src.start(t0, 0, dur);
+  const lc = $('longC').getContext('2d'), sc = $('shortC').getContext('2d'); let f = 0;
+  anim = { actx, src, raf: 0 }; $('stopAnim').disabled = false;
+  const loop = () => {
+    const t = Math.max(0, actx.currentTime - t0); if (t >= dur) { stopAnim(); return; }
+    an.getByteFrequencyData(bins); const lv = bass(bins, actx.sampleRate / an.fftSize);
+    R.srv2DrawFrame(lc, L, t, lv, f); if (t < S.timeline.duration) R.srv2DrawFrame(sc, S, t, lv, f); f++;
+    say(`Animating ${t.toFixed(1)} / ${dur.toFixed(0)} s · bass ${lv.toFixed(2)} · chorus at ${(an1.chorusStart + an1.vocalOnset).toFixed(1)} s · Short lines: ${an2.method}`);
+    anim.raf = requestAnimationFrame(loop);
+  };
+  loop();
+}
+function stopAnim() { if (!anim) return; cancelAnimationFrame(anim.raf); try { anim.src.stop(); } catch (_) {} anim.actx.close(); anim = null; $('stopAnim').disabled = true; }
+
+// ── real recorder test ──
+async function renderTest() {
+  stopAnim(); $('render').disabled = true; const a = av(); const kind = $('kind').value;
+  try {
+    const ab = await (await fetch($('audio').value)).arrayBuffer();
+    const out = await R.srv2RenderVideo({ kind, audio: ab, avatar: a, title: $('title').value, hook: $('hook').value, lyrics: $('lyrics').value, shortLyrics: $('lyrics').value,
+      maxDuration: Number($('dur').value) || undefined, canvas: kind === 'long' ? $('longC') : $('shortC'), onProgress: (m) => say(m) });
+    $('out').src = URL.createObjectURL(out.blob);
+    const s = out.stats, f = s.frames;
+    tbl($('stats'), [['Container / codecs', `${s.container} · ${s.videoCodec} / ${s.audioCodec}`], ['MIME', s.mime], ['Resolution', `${s.width}×${s.height} @ ${s.fps} fps`],
+      ['Bitrate', `${s.videoBitsPerSecondTarget / 1e6} Mbps target · ${(s.measuredKbps / 1000).toFixed(2)} Mbps overall`], ['Duration', s.durationSec + ' s'], ['File', (s.sizeBytes / 1048576).toFixed(2) + ' MB'],
+      ['Frames drawn', `${f.drawn} / ${f.expected} · dropped ${f.droppedPct}%`, f.warn ? 'bad' : 'ok'], ['Paint time', `p50 ${f.paintMsP50} ms · p95 ${f.paintMsP95} ms`], ['Max gap', f.maxGapMs + ' ms'],
+      ['Render time', s.renderSec + ' s'], ['Source enlargement', '×' + s.maxSourceUpscale], ['Audio analysis', `${s.analysis.method} · chorus ${s.analysis.chorusStart}s · onset ${s.analysis.vocalOnset}s`],
+      ['Hooks / lines', `${s.hooks.length} / ${s.lyricLines}`], ['Fonts loaded', String(s.fontsLoaded)], ['Tab hidden', String(s.hiddenDuringRender), s.hiddenDuringRender ? 'warn' : '']]);
+    if (out.thumbBlob) $('thumb').src = URL.createObjectURL(out.thumbBlob);
+    say('Rendered.', 'ok');
+    const name = q.get('save');
+    if (name) {
+      const r1 = await fetch('/__stub/save-render?name=' + encodeURIComponent(name + '.' + out.ext), { method: 'POST', body: out.blob });
+      const r2 = out.thumbBlob ? await fetch('/__stub/save-render?name=' + encodeURIComponent(name + '-thumb.jpg'), { method: 'POST', body: out.thumbBlob }) : null;
+      window.__srv2Saved = { video: await r1.json(), thumb: r2 && await r2.json() };
+    }
+    window.__srv2Result = { stats: s };
+  } catch (e) { say('Render failed: ' + e.message, 'bad'); window.__srv2Result = { error: String(e.message || e) }; }
+  $('render').disabled = false;
+}
+$('animate').onclick = animate; $('stopAnim').onclick = stopAnim; $('render').onclick = renderTest;
+for (const id of ['avatar', 'title']) $(id).addEventListener('change', () => { showThumb(); showMeta(); if (id === 'title') showRotation(); });
+showMeta(); await showThumb(); await showRotation(); window.__srv2Ready = true;
+if (q.get('auto') === 'render') renderTest();
+</script>
+</body></html>

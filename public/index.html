@@ -16264,6 +16264,161 @@ function _srvEnglishV2BuildSummaryHtml(task,pkg,taskId){
     </div>`;
 }
 
+// ── SRV Studio V2 — cinematic render and publish (Checkpoint D2) ─────────────
+// The renderer is /srv-studio-v2/srv2-render.mjs, loaded with import() only from these V2 functions.
+// V2 never calls the shared _srvRenderVideo; SRV Farsi and the flag-OFF SRV English path are unchanged.
+const SRV2_RENDER_MODULE='/srv-studio-v2/srv2-render.mjs';
+let _srv2RenderModP=null;
+function _srvEnglishV2Renderer(){
+  if(!_srv2RenderModP)_srv2RenderModP=import(SRV2_RENDER_MODULE).catch(function(e){_srv2RenderModP=null;throw e;});
+  return _srv2RenderModP;
+}
+function _srvEnglishV2IsLong(task,pkg){return !!(task&&task.isLong)||_srvEnglishV2BuildKeys(task,pkg).isLong;}
+const SRV2_BUILD_LABEL='⚡ Build Package — Render Cinematic Video';
+async function _srvEnglishV2Build(pkgId,taskId){
+  const btn=document.getElementById('srv-lc-build-btn-'+pkgId);
+  const statusEl=document.getElementById('srv-lc-build-status-'+pkgId);
+  const setStatus=function(msg,col){if(statusEl){statusEl.textContent=msg;if(col)statusEl.style.color=col;}};
+  const resetBtn=function(){if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent=SRV2_BUILD_LABEL;}};
+  const audio=_srvAudioData[pkgId];
+  if(!audio){setStatus('⚠ Upload MP3 first (Step 2).','#ef4444');return;}
+  const task=_srvEnglishTaskById(taskId);
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(!task||!pkg){setStatus('⚠ This task or its package could not be identified — build refused.','#ef4444');return;}
+  if(!pkg.srvAvatar)_srvEnglishV2EnsureAvatar(task,pkg,null);
+  const av=pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
+  if(!av){setStatus('⚠ No V2 avatar is assigned to this package.','#ef4444');return;}
+  const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  if(btn){btn.disabled=true;btn.style.opacity='0.6';btn.textContent='⏳ Rendering…';}
+  try{
+    setStatus('Loading the SRV Studio V2 renderer…','#c9a84c');
+    const R=await _srvEnglishV2Renderer();
+    pkg._srvShortVideoUrl=null;pkg._srvLongVideoUrl=null;pkg._srvThumbUrl=null;pkg.srvRender=null;
+    if(typeof saveAppState==='function')saveAppState();
+    const out=await R.srv2RenderVideo({
+      kind,audio:audio.file,avatar:av,imageUrl:av.src,title:pkg.title||'',
+      lyrics:pkg[used.lyrics]||'',shortLyrics:pkg[used.lyrics]||'',hook:R.srv2HookLine(pkg),
+      onProgress:function(m){setStatus(m,'#8b5cf6');},
+    });
+    setStatus('Uploading '+kind.toUpperCase()+' video ('+(out.blob.size/1048576).toFixed(1)+' MB)…','#8b5cf6');
+    const vUrl=await _srvUploadToStorage(pkgId,new File([out.blob],'srv2_'+kind+'.'+out.ext,{type:out.blob.type}),kind);
+    let thumbUrl=null;
+    if(out.thumbBlob)thumbUrl=await _srvUploadToStorage(pkgId,new File([out.thumbBlob],'srv2_thumb.jpg',{type:'image/jpeg'}),'thumb');
+    if(kind==='long')pkg._srvLongVideoUrl=vUrl;else pkg._srvShortVideoUrl=vUrl;
+    pkg._srvThumbUrl=thumbUrl;
+    pkg.srvRender=Object.assign({},out.stats,{builtAt:new Date().toISOString(),videoUrl:vUrl,thumbUrl,lyricsField:used.lyrics});
+    if(typeof saveAppState==='function')saveAppState();
+    const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    if(ok!==true){setStatus('⚠ The video was rendered and uploaded, but the package could not be saved. Check the connection and build again.','#ef4444');resetBtn();return;}
+    _srvEnglishV2SetStage(taskId,'approve');
+    _srvEnglishV2Show(taskId);
+  }catch(e){
+    setStatus('Build failed: '+((e&&e.message)||e),'#ef4444');resetBtn();
+  }
+}
+// Approve under V2: same stage change as _srvEnglishApproveVideo, but keeps the task open so the Publish
+// stage (which starts the upload when it renders) runs at once instead of after the task is reopened.
+function _srvEnglishV2ApproveVideo(pkgId,taskId){
+  _srvEnglishV2SetStage(taskId,'publish');
+  _srvEnglishV2Show(taskId);
+}
+async function _srvEnglishV2Publish(pkgId,taskId){
+  const statusEl=document.getElementById('srv-lc-publish-status-'+pkgId);
+  const say=function(t,c){if(statusEl){statusEl.textContent=t;if(c)statusEl.style.color=c;}};
+  try{
+    const task=_srvEnglishTaskById(taskId);
+    const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+    if(!task||!pkg){say('⚠ This task or its package could not be identified — publish refused.','#ef4444');return;}
+    const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+    const videoUrl=kind==='long'?pkg._srvLongVideoUrl:pkg._srvShortVideoUrl;
+    if(!videoUrl){
+      say('⚠ No video for this package. Go back to Build.','#fbbf24');
+      if(statusEl){const b=document.createElement('button');b.textContent='← Back to Build';b.style.cssText='display:block;margin:10px auto 0;padding:10px 20px;background:#8b5cf6;border:none;border-radius:8px;color:#fff;font-weight:700;font-size:12px;cursor:pointer;font-family:\'Syne\',sans-serif';b.onclick=function(){_srvEnglishV2SetStage(taskId,'build');_srvEnglishV2Show(taskId);};statusEl.appendChild(b);}
+      return;
+    }
+    if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
+    const test=_getEngineState('SRV English')==='test'||_srvEnglishV2IsTestPublish(taskId,pkg);
+    const R=await _srvEnglishV2Renderer();
+    const meta=R.srv2YouTubeMetadata(kind,pkg,{test,moodKey:srvStudioV2MoodKeyClient(task.mood||task.mode),publishAt:pkg.publishAt||null});
+    say('Uploading '+kind.toUpperCase()+' to YouTube…');
+    const r=await fetch('/api/ops?action=youtube_upload_video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({videoUrl,engine:'SRV English'},meta))});
+    const up=await r.json().catch(function(){return {};});
+    if(!up||up.ok===false||!up.videoId){say('Upload failed — '+((up&&(up.error||up.message||up.hint))||('HTTP '+r.status)),'#ef4444');return;}
+    if(kind==='long')pkg._srvYtLongId=up.videoId;else pkg._srvYtShortId=up.videoId;
+    let thumb=null;
+    if(pkg._srvThumbUrl){
+      say('Setting the thumbnail…');
+      // set_yt_thumbnail looks the channel up by the engine name, so V2 passes the channel title.
+      const tr=await fetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({videoId:up.videoId,engine:'SRV Studio',thumbUrl:pkg._srvThumbUrl})});
+      thumb=await tr.json().catch(function(){return {ok:false,error:'HTTP '+tr.status};});
+    }
+    pkg.srvPublish={kind,at:new Date().toISOString(),test,videoId:up.videoId,dryRun:!!up.dryRun,title:meta.title,privacyStatus:meta.privacyStatus,publishAt:meta.publishAt,containsSyntheticMedia:meta.containsSyntheticMedia,thumbnail:thumb?(thumb.ok?'set':'failed: '+(thumb.error||'unknown')):'none'};
+    if(typeof saveAppState==='function')saveAppState();
+    if(typeof savePackageToSupabase==='function')await _srvSavePackageQueued(pkg);
+    _srvEnglishV2SetStage(taskId,'done');
+    task.status='done';
+    if(typeof saveAppState==='function')saveAppState();
+    _srvEnglishV2Show(taskId);
+  }catch(e){
+    say('Publish error: '+((e&&e.message)||e),'#ef4444');
+  }
+}
+// Build / Approve / Done panel: render targets, the cover, measured quality and the exact publish metadata.
+function _srvEnglishV2RenderHtml(task,pkg,taskId,stage){
+  if(!pkg)return '';
+  const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+  const r=pkg.srvRender||null;
+  const lab=function(t){return `<div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin:0 0 6px;font-family:'JetBrains Mono',monospace">${t}</div>`;};
+  const row=function(k,v,c){return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)"><span style="color:var(--dim)">${k}</span><span style="color:${c||'var(--text)'};text-align:right">${v}</span></div>`;};
+  const box=function(inner){return `<div style="margin-bottom:16px;padding:12px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.22);border-radius:10px;font-size:11px;font-family:'JetBrains Mono',monospace">${inner}</div>`;};
+  const target=kind==='long'?'1920×1080 · 30 fps · 8 Mbps':'1080×1920 · 30 fps · 6 Mbps · up to 30 s';
+  if(stage==='build'){
+    return box(lab('V2 CINEMATIC RENDER — '+kind.toUpperCase())+
+      row('Output',target)+row('Codec','H.264 MP4 (VP9 WebM if the browser has no H.264)')+
+      row('Visuals','assigned avatar · black-and-white grade · slow push-in')+row('Thumbnail','1280×720 from the same avatar')+
+      `<div style="margin-top:8px;color:var(--dim);font-family:inherit">Renders in real time (as long as the song). Keep this tab open and in front until it finishes.</div>`);
+  }
+  if(stage==='done'){
+    const p=pkg.srvPublish;
+    if(!p)return '';
+    return box(lab('V2 PUBLISH RECORD')+row('Video',escHTML(String(p.videoId))+(p.dryRun?' (dry run)':''))+row('Title',escHTML(p.title))+
+      row('Privacy',escHTML(p.privacyStatus+(p.publishAt?' · scheduled '+p.publishAt:'')))+row('AI disclosure',p.containsSyntheticMedia?'containsSyntheticMedia: true':'—')+
+      row('Thumbnail',escHTML(p.thumbnail),/^failed/.test(p.thumbnail)?'#fbbf24':null)+row('Mode',p.test?'TEST':'LIVE',p.test?'#fbbf24':'#22c55e'));
+  }
+  // approve
+  if(!r)return box(lab('V2 RENDER')+'<div style="color:#fbbf24">No V2 render is recorded for this package. Rebuild to render it.</div>');
+  const f=r.frames||{};
+  const mb=(r.sizeBytes/1048576).toFixed(1);
+  const cover=pkg._srvThumbUrl?`<div style="margin-bottom:10px">${lab('THUMBNAIL (1280×720)')}<img src="${escHTML(pkg._srvThumbUrl)}" alt="thumbnail" style="width:100%;border-radius:8px;display:block;background:#000"></div>`:'';
+  setTimeout(function(){_srvEnglishV2FillMeta(taskId,pkg.id);},0);
+  return box(cover+lab('RENDER QUALITY')+
+    row('Resolution',r.width+'×'+r.height+' · '+r.fps+' fps')+
+    row('Codec',escHTML(r.videoCodec+' / '+r.audioCodec+' · '+r.container.toUpperCase()))+
+    row('Bitrate',Math.round(r.videoBitsPerSecondTarget/1e6)+' Mbps target · '+(r.measuredKbps/1000).toFixed(1)+' Mbps measured')+
+    row('Duration',r.durationSec+' s (song '+r.audioDurationSec+' s)')+
+    row('File',mb+' MB')+
+    row('Frames',(f.drawn||0)+' / '+(f.expected||0)+' · '+(f.droppedPct||0)+'% dropped',f.warn?'#ef4444':'#22c55e')+
+    (r.hiddenDuringRender?row('Warning','the tab was hidden during the render','#fbbf24'):'')+
+    row('Source enlargement','×'+r.maxSourceUpscale+(r.maxSourceUpscale>1?' (final masters are below full HD)':''),r.maxSourceUpscale>1.2?'#fbbf24':null)+
+    `<div style="margin-top:12px">${lab('PUBLISH METADATA (DRY RUN — WHAT APPROVE WILL SEND)')}<div id="srv2meta_${escHTML(String(pkg.id))}" style="white-space:pre-wrap;color:var(--text);max-height:220px;overflow-y:auto;line-height:1.5">Loading…</div></div>`);
+}
+async function _srvEnglishV2FillMeta(taskId,pkgId){
+  const el=document.getElementById('srv2meta_'+pkgId);
+  if(!el)return;
+  try{
+    const task=_srvEnglishTaskById(taskId);
+    const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+    const R=await _srvEnglishV2Renderer();
+    const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+    const test=_getEngineState('SRV English')==='test'||_srvEnglishV2IsTestPublish(taskId,pkg);
+    const m=R.srv2YouTubeMetadata(kind,pkg,{test,moodKey:srvStudioV2MoodKeyClient(task&&(task.mood||task.mode)),publishAt:pkg&&pkg.publishAt||null});
+    el.textContent='Title ('+m.title.length+'/100): '+m.title+'\nPrivacy: '+m.privacyStatus+(m.publishAt?' · publishAt '+m.publishAt:' · no schedule')+(test?' · TEST':'')+
+      '\nCategory: '+m.categoryId+' (Music) · madeForKids: false · containsSyntheticMedia: true\nThumbnail: '+(pkg&&pkg._srvThumbUrl?'set after upload (channel "SRV Studio")':'none')+
+      '\nTags: '+m.tags.join(', ')+'\n\nDescription:\n'+m.description;
+  }catch(e){el.textContent='Metadata preview unavailable: '+((e&&e.message)||e);}
+}
+
 // ── V2 stage actions ─────────────────────────────────────────────────────────
 // Re-render and keep the task open (the flag-OFF actions return to the task list).
 function _srvEnglishV2Show(taskId){
@@ -16609,6 +16764,7 @@ function renderSRVEnglishLifecycleCard(task){
   }
 
   const _v2On=_srvStudioV2On();
+  if(_v2On&&(stage==='build'||stage==='approve'||stage==='done'))stageContent=_srvEnglishV2RenderHtml(task,pkg,taskId,stage)+(stage==='build'?stageContent.replace('⚡ Build Package — Fetch Background + Render Video',SRV2_BUILD_LABEL):stage==='approve'?stageContent.replace("onclick=\"_srvEnglishApproveVideo('","onclick=\"_srvEnglishV2ApproveVideo('"):stageContent);
   if(_v2On&&stage==='build')stageContent=_srvEnglishV2BuildSummaryHtml(task,pkg,taskId)+stageContent;
   if(_v2On&&(stage==='review'||stage==='build'||stage==='approve'))stageContent=_srvEnglishV2AvatarHtml(task,pkg,taskId,stage)+stageContent;
   return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
@@ -17784,6 +17940,7 @@ function _srvEnglishCancelTask(taskId){
 // ── Build trigger — canvas renderer path (no Shotstack) ──────────────────────
 // Flow: Pexels image → canvas render SHORT → upload → canvas render LONG → upload → Approve
 async function _srvEnglishBuildTrigger(pkgId,taskId){
+  if(_srvStudioV2On())return _srvEnglishV2Build(pkgId,taskId); // SRV Studio V2 cinematic renderer (flag OFF in production)
   const btn=document.getElementById('srv-lc-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-lc-build-status-'+pkgId);
   const audio=_srvAudioData[pkgId];
@@ -17795,7 +17952,7 @@ async function _srvEnglishBuildTrigger(pkgId,taskId){
   const setStatus=function(msg,col){if(statusEl){statusEl.textContent=msg;if(col)statusEl.style.color=col;}};
   try{
     const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);})||{};
-    const task=_srvStudioV2On()?_srvEnglishTaskById(taskId):(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);}); // V2: identity-safe lookup
+    const task=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);});
     const isLongTask=!!(task&&task.isLong); // true → render LONG+SHORT; false → SHORT only
 
     // ── Clear old render artifacts so Approve always shows fresh video ────────
@@ -17830,14 +17987,6 @@ async function _srvEnglishBuildTrigger(pkgId,taskId){
     // SHORT: 1 dedicated scene at position 1 of 5; same contain mode
     const _avatarIdxSet = new Set();
     (function(){
-      // SRV Studio V2 (Checkpoint C): the task's own V2 avatar; the V1 library and its pointer are not touched.
-      if(_srvStudioV2On()){
-        const _v2Url=_srvEnglishV2AvatarUrl(pkg);
-        if(!_v2Url)return;
-        if(isLongTask){_bgUrls.unshift(_v2Url);_avatarIdxSet.add(0);const _mid=Math.floor(_bgUrls.length/2);_bgUrls.splice(_mid,0,_v2Url);_avatarIdxSet.add(_mid);_bgUrls.push(_v2Url);_avatarIdxSet.add(_bgUrls.length-1);}
-        else{const _ip=Math.min(1,_bgUrls.length);_bgUrls.splice(_ip,0,_v2Url);_avatarIdxSet.add(_ip);}
-        return;
-      }
       const _engCfg=(ENGINES_CONFIG||[]).find(function(e){return e.id==='srv_english';});
       const _avLib=_engCfg&&_engCfg.avatarLibrary;
       if(_avLib&&_avLib.avatars&&_avLib.avatars.length){
@@ -17972,6 +18121,7 @@ async function _srvEnglishPollRender(pkgId,taskId){
 
 // ── Publish runner (reuses existing YouTube upload from srvBuildPackage) ──────
 async function _srvEnglishRunPublish(pkgId,taskId){
+  if(_srvStudioV2On())return _srvEnglishV2Publish(pkgId,taskId); // SRV Studio V2 publish (flag OFF in production)
   const statusEl=document.getElementById('srv-lc-publish-status-'+pkgId);
   try{
     const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId))||{};
@@ -17993,7 +18143,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
     const pkgChannel='SRV English';
     const _buildEngineState=_getEngineState(pkgChannel);
-    const _inTestMode=_buildEngineState==='test'||(_srvStudioV2On()&&_srvEnglishV2IsTestPublish(taskId,pkg)); // V2: task-level TEST
+    const _inTestMode=_buildEngineState==='test';
     const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
     const pkgTitle=_inTestMode?'[TEST] '+(pkg.title||'SRV English'):(pkg.title||'SRV English');
 
@@ -18015,7 +18165,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     }
 
     // For Short tasks: only upload SHORT; for Long tasks: upload both
-    const _pubTask=_srvStudioV2On()?_srvEnglishTaskById(taskId):(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);}); // V2: identity-safe lookup
+    const _pubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
     const _isLongPub=!!(_pubTask&&_pubTask.isLong);
     const [longUp,shortUp]=await Promise.all([
       _isLongPub?doUpload(longUrl,'LONG'):Promise.resolve(null),
@@ -18031,7 +18181,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     if(allOk){
       // Mark task done
       _srvEnglishSetStage(taskId,'done');
-      const task=_srvStudioV2On()?_srvEnglishTaskById(taskId):(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId)); // V2: identity-safe lookup
+      const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
       if(task)task.status='done';
       if(typeof saveAppState==='function')saveAppState();
       if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');

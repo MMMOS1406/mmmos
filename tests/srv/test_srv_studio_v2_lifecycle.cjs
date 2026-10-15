@@ -152,7 +152,8 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const html = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
     ok('TEST: card shows V2 + TEST TASK badges', />V2</.test(html) && /TEST TASK/.test(html));
     const pub = top(H, '_srvEnglishRunPublish');
-    ok('TEST: publish adds task-level test only when V2 is on (engine-wide test kept)', /const _inTestMode=_buildEngineState==='test'\|\|\(_srvStudioV2On\(\)&&_srvEnglishV2IsTestPublish\(taskId,pkg\)\);/.test(pub));
+    const pub2 = top(H, '_srvEnglishV2Publish');
+    ok('TEST: V2 publish (D2) adds task-level test on top of engine-wide test; V1 publish returns into it only when V2 is on', /if\(_srvStudioV2On\(\)\)return _srvEnglishV2Publish\(pkgId,taskId\);/.test(pub) && /const test=_getEngineState\('SRV English'\)==='test'\|\|_srvEnglishV2IsTestPublish\(taskId,pkg\);/.test(pub2));
   }
 
   // ── 5. Review editor + persistence ──

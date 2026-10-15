@@ -134,9 +134,11 @@ function makeEnv() {
 // ── 4. Build stage uses the V2 avatar; V1 path unchanged ──
 {
   const bt = top(H, '_srvEnglishBuildTrigger'), bt0 = top(BASE_H, '_srvEnglishBuildTrigger');
-  ok('Build: V2 branch inserts the task\'s V2 avatar and returns before the V1 library code', /if\(_srvStudioV2On\(\)\)\{\n\s+const _v2Url=_srvEnglishV2AvatarUrl\(pkg\);/.test(bt) && bt.indexOf('_srvEnglishV2AvatarUrl') < bt.indexOf('_avLib.avatars.length'));
-  const stripped = bt.replace(/      \/\/ SRV Studio V2 \(Checkpoint C\)[^\n]*\n      if\(_srvStudioV2On\(\)\)\{[\s\S]*?\n        return;\n      \}\n/, '').replace("const task=_srvStudioV2On()?_srvEnglishTaskById(taskId):(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);}); // V2: identity-safe lookup", "const task=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);});");
-  ok('Build: with V2 off, _srvEnglishBuildTrigger is byte-identical to main (V1 avatar library + pointer)', stripped === bt0);
+  const v2Line = "  if(_srvStudioV2On())return _srvEnglishV2Build(pkgId,taskId); // SRV Studio V2 cinematic renderer (flag OFF in production)\n";
+  ok('Build (D2): V2 returns into _srvEnglishV2Build before any V1 code runs', bt.split('\n')[1] + '\n' === v2Line);
+  const vb = top(H, '_srvEnglishV2Build');
+  ok('Build (D2): the V2 render uses the package\'s own V2 avatar (pkg.srvAvatar → registry src)', /const av=pkg\.srvAvatar&&srv2AvatarById\(pkg\.srvAvatar\.id\);/.test(vb) && /avatar:av,imageUrl:av\.src/.test(vb) && !/srvEnglishAvatarIdx|avatarLibrary/.test(vb));
+  ok('Build: with V2 off, _srvEnglishBuildTrigger is byte-identical to main (V1 avatar library + pointer)', bt.replace(v2Line, '') === bt0);
 }
 
 // ── 5. Protected avatar systems unchanged ──
