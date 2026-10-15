@@ -33,7 +33,7 @@ ok('Registry: crop trims the 2 px sheet gutters on both sides', R.every((a) => a
 ok('Registry: focus point inside the crop', R.every((a) => a.focus.fx > 0 && a.focus.fx < 1 && a.focus.fy > 0 && a.focus.fy < 1));
 ok('Registry: moods limited to romantic / emotional / hopeful; formats long + short', R.every((a) => a.moods.length && a.moods.every((m) => ['romantic', 'emotional', 'hopeful'].includes(m)) && a.formats.join() === 'long,short'));
 const pool = A.srv2AvatarPool();
-ok('Registry: 16 rotation-eligible; 05, 07, 12, 13 held pending CEO age-appearance confirmation', pool.length === 16 && R.filter((a) => !a.rotationEligible).map((a) => a.number).join() === '5,7,12,13' && R.filter((a) => !a.rotationEligible).every((a) => a.flags.some((f) => /age-appearance/.test(f))));
+ok('Registry: all 20 rotation-eligible after CEO confirmation of 05, 07, 12, 13 (recorded on each entry)', pool.length === 20 && [5, 7, 12, 13].every((n) => R[n - 1].flags.some((f) => /confirmed clearly adult by the CEO/.test(f))) && !R.some((a) => a.flags.some((f) => /CEO to confirm \(reads at the young end/.test(f))));
 ok('Registry: every mood has at least 5 eligible avatars', ['romantic', 'emotional', 'hopeful'].every((m) => pool.filter((a) => a.moods.includes(m)).length >= 5));
 ok('Registry: one female artist only — no male/duet entries or fields', !/\b(male|duet|man|boy)\b/i.test(JSON.stringify(R).replace(/female/gi, '')));
 ok('Registry: client copy in public/index.html is byte-identical to the lib block', (() => { const a = LIB.indexOf('// <srv-v2-avatars>'), b = LIB.indexOf('// </srv-v2-avatars>') + '// </srv-v2-avatars>'.length; return H.includes(LIB.slice(a, b)); })());
@@ -46,15 +46,16 @@ ok('Registry: client copy in public/index.html is byte-identical to the lib bloc
   const seq = run(200, (i) => mix[i % 5]);
   ok('Rotation: 200 picks with the task mood mix → zero immediate repeats', seq.every((x, i) => !i || x !== seq[i - 1]));
   ok('Rotation: only rotation-eligible avatars are ever picked', seq.every((id) => A.srv2AvatarById(id).rotationEligible));
-  ok('Rotation: the first 16 mixed picks use every eligible avatar once (least recently used)', new Set(seq.slice(0, 16)).size === 16);
+  ok('Rotation: every eligible avatar is used within the first 40 mixed picks', new Set(seq.slice(0, 40)).size === 20);
+  ok('Rotation: an avatar is never reused while an unused mood-suited one exists', (() => { const used = new Set(); for (let i = 0; i < 40; i++) { const m = mix[i % 5]; const id = seq[i]; const unusedSuited = pool.filter((a) => a.moods.includes(m) && !used.has(a.id) && a.id !== seq[i - 1]); if (used.has(id) && unusedSuited.length) return false; used.add(id); } return true; })());
   for (const m of ['romantic', 'emotional', 'hopeful']) {
     const s = run(60, () => m); const suited = pool.filter((a) => a.moods.includes(m)).length;
     ok(`Rotation (${m} only): suited avatars only, cycles through all ${suited} before reuse, no immediate repeats`, s.every((id) => A.srv2AvatarById(id).moods.includes(m)) && new Set(s.slice(0, suited)).size === suited && s.every((x, i) => !i || x !== s[i - 1]));
   }
   ok('Rotation: deterministic — same history gives the same pick', A.srv2AvatarPick({ history: [{ id: 'srv2-av-01', at: at(0) }], moodKey: 'emotional' }).id === A.srv2AvatarPick({ history: [{ id: 'srv2-av-01', at: at(0) }], moodKey: 'emotional' }).id);
-  ok('Rotation: excludeId is never returned (Next avatar)', Array.from({ length: 16 }, (_, i) => pool[i].id).every((id) => A.srv2AvatarPick({ history: [], excludeId: id }).id !== id));
+  ok('Rotation: excludeId is never returned (Next avatar)', pool.map((a) => a.id).every((id) => A.srv2AvatarPick({ history: [], excludeId: id }).id !== id));
   ok('Rotation: history built from packages, oldest first, ignoring packages without avatars', (() => { const h = A.srv2AvatarHistory([{ srvAvatar: { id: 'b', assignedAt: '2' } }, { title: 'x' }, { srvAvatar: { id: 'a', assignedAt: '1' } }]); return h.map((x) => x.id).join() === 'a,b'; })());
-  ok('Rotation: pool position labels ("Image N of 16")', A.srv2AvatarPoolPos('srv2-av-01').n === 1 && A.srv2AvatarPoolPos('srv2-av-01').of === 16 && A.srv2AvatarPoolPos('srv2-av-05').n === 0);
+  ok('Rotation: pool position labels ("Image N of 20")', A.srv2AvatarPoolPos('srv2-av-01').n === 1 && A.srv2AvatarPoolPos('srv2-av-01').of === 20 && A.srv2AvatarPoolPos('srv2-av-05').n === 5);
 }
 
 // ── 3. Lifecycle persistence in the real client code (sandbox) ──
@@ -105,7 +106,7 @@ function makeEnv() {
   ok('EnsureAvatar is idempotent — an existing avatar is never replaced silently', (() => { const before = p2.srvAvatar.id; vm.runInContext('_srvEnglishV2EnsureAvatar(D.tasks[1], D.packages.find(p=>p.id==="' + p2.id + '"))', ctx); return p2.srvAvatar.id === before; })());
   ok('V1 avatar pointer srvEnglishAvatarIdx untouched by V2 selection', ctx.D.srvEnglishAvatarIdx === 0);
   const html = vm.runInContext("_srvEnglishV2SetStage('2','build'); renderSRVEnglishLifecycleCard(D.tasks[1])", ctx);
-  ok('Card: Build shows the task\'s avatar, rotation position and the not-HD label', html.includes(A.srv2AvatarById(p2.srvAvatar.id).src) && /Image \d+ of 16 in rotation/.test(html) && /not an HD master/.test(html) && /Next avatar/.test(html));
+  ok('Card: Build shows the task\'s avatar, rotation position and the not-HD label', html.includes(A.srv2AvatarById(p2.srvAvatar.id).src) && /Image \d+ of 20 in rotation/.test(html) && /not an HD master/.test(html) && /Next avatar/.test(html));
   const appr = vm.runInContext("_srvEnglishV2SetStage('2','approve'); renderSRVEnglishLifecycleCard(D.tasks[1])", ctx);
   ok('Card: Approve shows the avatar but no Next avatar (the avatar is fixed once the video is built)', appr.includes('ARTIST IMAGE') && !/Next avatar/.test(appr));
 }
