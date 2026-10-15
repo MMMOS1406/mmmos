@@ -3013,7 +3013,7 @@ async function ytForceUploadLatest(){
     tags = [];
   }
   try{
-    const r = await fetch('/api/ops?action=youtube_upload_video', {
+    const r = await _publishFetch('/api/ops?action=youtube_upload_video', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -3442,7 +3442,7 @@ async function ytShowTopPerformers(){
 // Without this, the auto-upload will silently fail with "Insufficient Permission".
 async function ytCheckUploadScope(){
   try{
-    const r = await fetch('/api/ops?action=youtube_check_scope');
+    const r = await _publishFetch('/api/ops?action=youtube_check_scope');
     const d = await r.json();
     if(!d.ok){
       alert('Scope check failed: ' + (d.error || d.message || 'unknown'));
@@ -4101,6 +4101,32 @@ async function _ceoAuthedFetch(url, bodyObj){
   const body=Object.assign({}, bodyObj||{}, token?{ceo_session_token:token}:{});
   return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
+// SRV-STUDIO-V2-017 — VA (operator) session, issued by the server after action=operator_login once the CEO
+// has set a VA PIN. Like the CEO token it is only a claim: the server re-verifies it on every publishing call.
+function _operatorGetSessionToken(){
+  try{ const raw=sessionStorage.getItem('mmm_operator_session'); if(!raw)return null; const obj=JSON.parse(raw); if(!obj||!obj.token)return null; if(obj.expires_at&&Date.parse(obj.expires_at)<Date.now())return null; return obj.token; }catch{ return null; }
+}
+function _operatorSetSessionToken(token,expiresAt){
+  try{ sessionStorage.setItem('mmm_operator_session', JSON.stringify({token,expires_at:expiresAt})); }catch{}
+}
+function _operatorClearSessionToken(){
+  try{ sessionStorage.removeItem('mmm_operator_session'); }catch{}
+}
+// Every publishing call (YouTube upload/thumbnail, TikTok, SMM mark-published) goes through here and carries
+// whichever session this browser holds — the CEO's, else the VA's.
+async function _publishAuthedFetch(url, bodyObj){
+  const ceo=_ceoGetSessionToken();
+  const op=ceo?null:_operatorGetSessionToken();
+  const body=Object.assign({}, bodyObj||{}, ceo?{ceo_session_token:ceo}:(op?{operator_session_token:op}:{}));
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+}
+// Drop-in for fetch(url, init) at the existing publishing call sites: same arguments, same JSON body, plus
+// the session. A bodyless call (the scope check) becomes a POST with only the session.
+function _publishFetch(url, init){
+  let bodyObj={};
+  try{ if(init&&typeof init.body==='string')bodyObj=JSON.parse(init.body)||{}; }catch(e){ bodyObj={}; }
+  return _publishAuthedFetch(url, bodyObj);
+}
 async function tryLogin(){
   const pin=document.getElementById('pinInput').value;
   if(!selectedUser)return;
@@ -4134,6 +4160,32 @@ async function tryLogin(){
       el.style.display='block';
     }
     return;
+  }
+  // SRV-STUDIO-V2-017 — the VA signs in on the server once the CEO has set a VA PIN (System → Integrations →
+  // Publishing sign-in); the session it returns is what lets the VA publish. Only a definite refusal (wrong
+  // PIN, lockout) stops here. Anything else — no VA PIN set yet (operator_not_configured), an older server,
+  // a network error — falls through to the legacy browser PIN check below. That grants the screens only:
+  // once the CEO requires sign-in, the server refuses publishing calls that carry no VA session.
+  if(selectedUser&&selectedUser.id==='va'){
+    let j=null;
+    try{
+      const r=await fetch('/api/ops?action=operator_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+      j=await r.json().catch(function(){return null;});
+    }catch(e){ j=null; }
+    if(j&&j.ok===true&&j.operator_session_token){
+      _operatorSetSessionToken(j.operator_session_token, j.expires_at);
+      document.getElementById('pinInput').value='';
+      await _activateUser(selectedUser);
+      return;
+    }
+    if(j&&(j.error==='invalid_credentials'||j.error==='temporarily_locked')){
+      const el=document.getElementById('pinErr');
+      el.textContent = j.error==='temporarily_locked' ? ('Too many attempts. Try again in '+(j.retry_after_seconds||900)+'s.') : 'Incorrect PIN.';
+      el.style.display='block';
+      document.getElementById('pinInput').value='';
+      document.getElementById('pinInput').focus();
+      return;
+    }
   }
   if(selectedUser&&selectedUser.pin===pin){
     console.log('[v14.9.0] Login — activating user and loading state...');
@@ -4170,6 +4222,7 @@ function logout(){
   activeExec=null;
   try{ sessionStorage.removeItem('mmm_session_user'); }catch(e){} // v14.9.0 — clear session on explicit logout
   try{ _ceoClearSessionToken(); }catch(e){} // v16.30.0 — clear CEO session on explicit logout
+  try{ _operatorClearSessionToken(); }catch(e){} // SRV-STUDIO-V2-017 — and the VA's operator session
 }
 
 // ── v14.9.0 GLOBAL APP REFRESH MANAGER ───────────────────────────────────────
@@ -11662,7 +11715,7 @@ async function _smmExecMarkPublished(){
   if(!_smmExecActiveTaskId||_smmExecState.publishing)return;
   _smmExecState.publishing=true;_smmExecRerenderIfMounted();
   try{
-    const r=await fetch('/api/ops?action=sm_va_task_mark_published',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
+    const r=await _publishFetch('/api/ops?action=sm_va_task_mark_published',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
     const j=await r.json().catch(function(){return{};});
     if(!r.ok||!j.ok)throw new Error(j.error||('request failed ('+r.status+')'));
   }catch(e){alert('Publish failed: '+e.message);}
@@ -13759,7 +13812,7 @@ async function autoStartYoutubeUpload(pkg){
   };
   const ytCategory = ENGINE_TO_CATEGORY[engine] || '22';
   try{
-    const r = await fetch('/api/ops?action=youtube_upload_video', {
+    const r = await _publishFetch('/api/ops?action=youtube_upload_video', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -16383,7 +16436,7 @@ async function _srvEnglishV2Publish(pkgId,taskId){
     }else{
       meta=R.srv2YouTubeMetadata(kind,pkg,{test,moodKey,publishAt:pkg.publishAt||null});
       say('Uploading '+kind.toUpperCase()+' to YouTube…');
-      r=await fetch('/api/ops?action=youtube_upload_video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({videoUrl,engine:'SRV English'},meta))});
+      r=await _publishFetch('/api/ops?action=youtube_upload_video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({videoUrl,engine:'SRV English'},meta))});
       up=await r.json().catch(function(){return {};});
     }
     // youtube_upload_video answers with youtubeVideoId (videoId only in older/dry-run responses)
@@ -16395,7 +16448,7 @@ async function _srvEnglishV2Publish(pkgId,taskId){
     if(pkg._srvThumbUrl){
       say('Setting the thumbnail…');
       // set_yt_thumbnail looks the channel up by the engine name, so V2 passes the channel title.
-      const tr=await fetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({videoId:vid,engine:'SRV Studio',thumbUrl:pkg._srvThumbUrl})});
+      const tr=await _publishFetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({videoId:vid,engine:'SRV Studio',thumbUrl:pkg._srvThumbUrl})});
       thumb=await tr.json().catch(function(){return {ok:false,error:'HTTP '+tr.status};});
     }
     pkg.srvPublish={kind,at:new Date().toISOString(),test,pilot:!!pilot,videoId:vid,channelId:up.channelId||null,uploadedAt:up.uploadedAt||null,dryRun:!!up.dryRun,title:meta.title,privacyStatus:meta.privacyStatus,publishAt:meta.publishAt,containsSyntheticMedia:meta.containsSyntheticMedia,thumbnail:thumb?(thumb.ok?'set':'failed: '+(thumb.error||'unknown')):'none'};
@@ -18243,7 +18296,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     async function doUpload(videoUrl,label){
       if(!videoUrl)return null;
       if(statusEl)statusEl.textContent=`Uploading ${label} to YouTube…`;
-      const r=await fetch('/api/ops?action=youtube_upload_video',{
+      const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -19118,7 +19171,7 @@ async function _srvFarsiSetYouTubeThumbnail(pkg,videoId){
       pkg._srvThumbUrl=await _srvUploadToStorage(pkg.id,new File([blob],'thumb.jpg',{type:'image/jpeg'}),'thumb');
       if(pkg._srvThumbUrl)delete pkg._srvThumbDataUrl; // stored once; keep the package record small
     }
-    const r=await fetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await _publishFetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({videoId,engine:'SRV Farsi',thumbUrl:pkg._srvThumbUrl})});
     const d=await r.json().catch(function(){return {};});
     pkg.thumbnailSetOnYoutube=!!(d&&d.ok);
@@ -19166,7 +19219,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
       if(!videoUrl)return null;
       if(statusEl)statusEl.textContent=`Uploading ${label} to YouTube…`;
       const _title=_srvFarsiYouTubeTitle(pkg,isLong);
-      const r=await fetch('/api/ops?action=youtube_upload_video',{
+      const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -19255,7 +19308,7 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
   pkg.youtubePublishState='publishing'; pkg.youtubePublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         videoUrl:shortUrl,engine:pkgChannel,title:_inTestMode?'[TEST] '+_pkgTitle:_pkgTitle,
@@ -19317,7 +19370,7 @@ async function _srvFarsiPublishTikTok(pkgId,taskId){
   pkg.tiktokPublishState='publishing'; pkg.tiktokPublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=tiktok_publish_draft',{
+    const r=await _publishFetch('/api/ops?action=tiktok_publish_draft',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engine:'SRV Farsi',videoUrl:shortUrl,title:pkg.title||'SRV Farsi',caption:_ttCaption,hashtags:pkg.hashtags||''}),
     });
@@ -20405,7 +20458,7 @@ async function _nextWaveRunPublish(pkgId,taskId){
     // 3 angles and don't cleanly fit a single-pillar playlist).
     const _nwAngle=String(pkg.angle||'').toUpperCase();
     const _nwPlaylistCategory=(pkg.contentFormat==='long')?'Long Form':(['GROW','AVOID','SAVE','DECIDE'].find(function(a){return _nwAngle.indexOf(a)===0;})||null);
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -20452,7 +20505,7 @@ async function _nextWaveRunPublish(pkgId,taskId){
       const _nwThumbUrl=pkg.nextwaveV2ThumbnailUrl||pkg.thumbnailUrl;
       if(_nwThumbUrl&&_ytId){
         try{
-          const tr=await fetch('/api/ops?action=set_yt_thumbnail',{
+          const tr=await _publishFetch('/api/ops?action=set_yt_thumbnail',{
             method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({videoId:_ytId,engine:'NextWave',thumbUrl:_nwThumbUrl}),
           });
@@ -21257,7 +21310,7 @@ async function _aiStudioRunPublish(pkgId,taskId){
   const isLongTask=!!(task&&(task.isLong||task.contentFormat==='long'));
   try{
     if(statusEl)statusEl.textContent='Uploading to YouTube…';
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -21342,7 +21395,7 @@ async function _aiStudioPublishYouTube(pkgId,taskId){
   pkg.youtubePublishState='publishing'; pkg.youtubePublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         videoUrl,engine:'AI Studio',title:pkg.title||'AI Creation Studio',
@@ -21389,7 +21442,7 @@ async function _aiStudioPublishTikTok(pkgId,taskId){
   pkg.tiktokPublishState='publishing'; pkg.tiktokPublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=tiktok_publish_draft',{
+    const r=await _publishFetch('/api/ops?action=tiktok_publish_draft',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engine:'AI Studio',videoUrl,title:pkg.title||'AI Creation Studio',caption:_ttCaption,hashtags:pkg.hashtags||''}),
     });
@@ -22702,7 +22755,7 @@ async function srvBuildPackage(pkgId){
     const _srvPublishAt = _inTestMode ? null : (_pkgLocal.publishAt || null);
     const _uploadTitle = _inTestMode ? '[TEST] ' + pkgTitle : pkgTitle;
     async function ytPrivateUpload(videoUrl, label){
-      const r2 = await fetch('/api/ops?action=youtube_upload_video', {
+      const r2 = await _publishFetch('/api/ops?action=youtube_upload_video', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -22720,7 +22773,7 @@ async function srvBuildPackage(pkgId){
     const shortUp = await ytPrivateUpload(shortUrl, 'SHORT');
     // v13.69.8 — set thumbnail on LONG video after upload (fire and forget)
     if(thumbUrl && longUp && longUp.ok && longUp.videoId){
-      fetch('/api/ops?action=set_yt_thumbnail', {
+      _publishFetch('/api/ops?action=set_yt_thumbnail', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ videoId: longUp.videoId, engine: pkgChannel, thumbUrl }),
       }).catch(()=>{});
@@ -25544,7 +25597,58 @@ function renderIntegrations(){
     }).join('')}
     ${integrations.finance.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">Finance</div>${integrations.finance.map(intCard).join('')}` : ''}
     ${integrations.system.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">System</div>${integrations.system.map(intCard).join('')}` : ''}
+    ${isAdmin?_publishAuthCardHtml():''}
   `;
+}
+
+// SRV-STUDIO-V2-017 — Publishing sign-in (CEO only). Sets the VA PIN the server checks and the enforcement
+// switch; both live server-side in ceo_auth_config. Status is read after render, never cached in app state.
+function _publishAuthCardHtml(){
+  setTimeout(function(){ _publishAuthRefresh(); }, 0);
+  return `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">Publishing sign-in</div>
+    <div class="card" id="pubauth-card" style="padding:14px;margin-bottom:10px">
+      <div id="pubauth-status" style="font-size:12px;color:var(--dim)">Checking…</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+        <input id="pubauth-pin" type="password" inputmode="numeric" autocomplete="new-password" placeholder="New VA PIN (6+ characters)" style="flex:1;min-width:160px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
+        <button onclick="_publishAuthSetPin()" style="padding:8px 12px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">Set VA PIN</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button onclick="_publishAuthSetMode('enforce')" style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer">Require sign-in</button>
+        <button onclick="_publishAuthSetMode('observe')" style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer">Log only (rollback)</button>
+        <button onclick="_publishAuthSetMode('auto')" style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer">Automatic</button>
+      </div>
+      <div id="pubauth-msg" style="font-size:11px;color:var(--dim);margin-top:8px"></div>
+    </div>`;
+}
+async function _publishAuthRefresh(){
+  const el=document.getElementById('pubauth-status');if(!el)return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=publish_auth_status',{});
+    const d=await r.json().catch(function(){return {};});
+    if(!d.ok){el.textContent=d.error==='ceo_authorization_required'?'Sign in again as CEO to manage publishing sign-in.':'Status unavailable ('+(d.error||('HTTP '+r.status))+').';return;}
+    const enforced=d.effectiveMode==='enforce';
+    el.innerHTML='<b style="color:'+(enforced?'#22c55e':'#f59e0b')+'">'+(enforced?'Sign-in required for publishing':'Log only: unsigned publishing is still allowed')+'</b><br>VA PIN: '+(d.operatorPinSet?'set':'not set (the VA still uses the old browser PIN)')+' · switch: '+d.modeSetting;
+  }catch(e){el.textContent='Status unavailable: '+e.message;}
+}
+async function _publishAuthSetPin(){
+  const inp=document.getElementById('pubauth-pin');const msg=document.getElementById('pubauth-msg');
+  const pin=inp?inp.value:'';
+  if(inp)inp.value='';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=publish_auth_set_operator_pin',{pin});
+    const d=await r.json().catch(function(){return {};});
+    if(msg)msg.textContent=d.ok?'VA PIN saved. Every VA must sign in again with the new PIN.':('Not saved: '+(d.error||('HTTP '+r.status)).replace(/_/g,' '));
+  }catch(e){if(msg)msg.textContent='Not saved: '+e.message;}
+  _publishAuthRefresh();
+}
+async function _publishAuthSetMode(mode){
+  const msg=document.getElementById('pubauth-msg');
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=publish_auth_set_mode',{mode});
+    const d=await r.json().catch(function(){return {};});
+    if(msg)msg.textContent=d.ok?('Saved. Publishing is now: '+(d.effectiveMode==='enforce'?'sign-in required':'log only')+'. Takes effect within 30 seconds.'):('Not saved: '+(d.error||('HTTP '+r.status)));
+  }catch(e){if(msg)msg.textContent='Not saved: '+e.message;}
+  _publishAuthRefresh();
 }
 
 // ── CONSTITUTION ──

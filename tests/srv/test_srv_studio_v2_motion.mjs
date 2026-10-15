@@ -14,6 +14,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html'), MOD = read('public/srv-studio-v2/srv2-render.mjs');
 const show = (ref, f) => execSync(`git show ${ref}:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+const n017 = (s) => s.replace(/_publishFetch\('/g, "fetch('"); // SRV-STUDIO-V2-017: the only allowed change to shared publish functions is fetch( → _publishFetch(
 let pass = 0, fail = 0, skip = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); };
 const top = (src, name) => { const m = src.match(new RegExp('\\n(async )?function ' + name + '\\(')); if (!m) throw new Error('missing ' + name); const s = m.index + 1; return src.slice(s, src.indexOf('\n}\n', s) + 2); };
@@ -172,7 +173,7 @@ else {
   const fns = [...hd.matchAll(/^@@[^@]*@@ (?:async )?function ([A-Za-z0-9_$]+)/gm)].map((m) => m[1]);
   ok('Scope: every index.html hunk is inside a V2 function', fns.length > 0 && fns.every((f) => /^_srvEnglishV2/.test(f)), fns.join(','));
   const base = show('origin/main', 'public/index.html');
-  ok('Protected: _srvRenderVideo, _assignPublishSlot and SRV Farsi build/publish byte-identical to main', ['_srvRenderVideo', '_assignPublishSlot', '_srvFarsiBuildTrigger', '_srvFarsiRunPublish'].every((n) => top(H, n) === top(base, n)));
+  ok('Protected: _srvRenderVideo, _assignPublishSlot and SRV Farsi build/publish byte-identical to main', ['_srvRenderVideo', '_assignPublishSlot', '_srvFarsiBuildTrigger', '_srvFarsiRunPublish'].every((n) => n017(top(H, n)) === top(base, n)));
   ok('Protected: api/ and lib/ untouched by D5', execSync(`git diff ${D4_COMMIT} ${D5_COMMIT} --name-only -- api lib`, { cwd: repo }).toString().trim() === '');
 }
 

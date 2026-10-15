@@ -272,8 +272,11 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
 
   // ── 9. Shared systems untouched ──
   const baseOps = execSync('git show origin/main:api/ops.js', { maxBuffer: 64 << 20 }).toString('utf8');
+  // youtubeUploadVideo/_getYoutubeConnectionByTitle: unchanged by the V2 checkpoints (pre-017 tip); SRV-STUDIO-V2-017 hardens them,
+  // covered by tests/platform/test_publish_auth.mjs.
+  const pre017Ops = execSync('git show 1724aed:api/ops.js', { maxBuffer: 64 << 20 }).toString('utf8');
   for (const fn of ['farsiRegenCaption', 'youtubeUploadVideo', '_getYoutubeConnectionByTitle']) {
-    let same = false; try { same = top(OPS, fn) === top(baseOps, fn); } catch (e) { same = false; }
+    let same = false; try { same = top(fn === 'farsiRegenCaption' ? OPS : pre017Ops, fn) === top(baseOps, fn); } catch (e) { same = false; }
     ok('Shared unchanged (ops.js): ' + fn, same);
   }
   for (const fn of ['savePackageToSupabase', '_srvSavePackageQueued', 'fetchPackagesFromTable', 'renderSRVFarsiLifecycleCard', '_farsisaveEdit', '_srvFarsiSetStage', '_srvRenderVideo', 'saveAppState', 'loadAppState']) {

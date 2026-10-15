@@ -92,6 +92,14 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
     if (u.pathname === '/api/ops') {
       if (action === 'ceo_login') return send(res, 200, { ok: true, ceo_session_token: 'stub.session', expires_at: new Date(Date.now() + 3600e3).toISOString() });
       if (action === 'ceo_check_session') return send(res, 200, { ok: true });
+      // SRV-STUDIO-V2-017 — VA sign-in, modelled on production: no VA PIN set → operator_not_configured (the
+      // browser keeps its legacy PIN); with fixture.operatorPin set → server-verified session or invalid_credentials.
+      if (action === 'operator_login') {
+        if (!fixture.operatorPin) return send(res, 200, { ok: false, error: 'operator_not_configured' });
+        return json && json.pin === fixture.operatorPin
+          ? send(res, 200, { ok: true, operator_session_token: 'stub.operator', expires_at: new Date(Date.now() + 3600e3).toISOString() })
+          : send(res, 401, { ok: false, error: 'invalid_credentials' });
+      }
       const canned = fixture.api[action];
       if (canned !== undefined) return send(res, 200, typeof canned === 'function' ? canned(json, store) : canned);
       unknown.add(action || '(none)');

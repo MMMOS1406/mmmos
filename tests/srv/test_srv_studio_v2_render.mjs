@@ -14,6 +14,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html');
 const BASE_H = execSync('git show origin/main:public/index.html', { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+const n017 = (s) => s.replace(/_publishFetch\('/g, "fetch('"); // SRV-STUDIO-V2-017: the only allowed change to shared publish functions is fetch( → _publishFetch(
 let pass = 0, fail = 0, skip = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); };
 const skipped = (n, why) => { skip++; out.push('SKIP ' + n + '  (' + why + ')'); };
@@ -181,11 +182,11 @@ else {
   ok('Protected: shared _srvRenderVideo byte-identical to main', top(H, '_srvRenderVideo') === top(BASE_H, '_srvRenderVideo'));
   const v2fns = ['_srvEnglishV2Build', '_srvEnglishV2Publish', '_srvEnglishV2RenderHtml', '_srvEnglishV2FillMeta', '_srvEnglishV2Renderer'];
   ok('Protected: no V2 function calls _srvRenderVideo', v2fns.every((n) => !/_srvRenderVideo\(/.test(top(H, n))));
-  const pub = top(H, '_srvEnglishRunPublish'), pub0 = top(BASE_H, '_srvEnglishRunPublish');
+  const pub = n017(top(H, '_srvEnglishRunPublish')), pub0 = top(BASE_H, '_srvEnglishRunPublish');
   const pLine = "  if(_srvStudioV2On())return _srvEnglishV2Publish(pkgId,taskId); // SRV Studio V2 publish (flag OFF in production)\n";
   ok('Protected: with V2 off, _srvEnglishRunPublish is byte-identical to main (one early V2 line)', pub.split('\n')[1] + '\n' === pLine && pub.replace(pLine, '') === pub0);
   const farsi = ['_srvFarsiBuildTrigger', '_srvFarsiRunPublish', '_srvChorusSync', '_srvUploadToStorage', 'srvLoadMp3', '_assignPublishSlot', '_srvEnglishApproveVideo'];
-  ok('Protected: SRV Farsi build/publish and shared helpers byte-identical to main', farsi.every((n) => top(H, n) === top(BASE_H, n)), farsi.filter((n) => top(H, n) !== top(BASE_H, n)).join());
+  ok('Protected: SRV Farsi build/publish and shared helpers byte-identical to main', farsi.every((n) => n017(top(H, n)) === top(BASE_H, n)), farsi.filter((n) => n017(top(H, n)) !== top(BASE_H, n)).join());
   const imports = H.match(/import\(\s*SRV2_RENDER_MODULE\s*\)/g) || [];
   ok('Lazy load: the module is imported in exactly one place, by dynamic import(), never by a <script> tag', imports.length === 1 && !/<script[^>]+srv2-render/.test(H) && /const SRV2_RENDER_MODULE='\/srv-studio-v2\/srv2-render\.mjs';/.test(H));
   ok('Lazy load: only V2 functions reach the loader', (H.match(/await _srvEnglishV2Renderer\(\)/g) || []).length === 3 && [ '_srvEnglishV2Build', '_srvEnglishV2Publish', '_srvEnglishV2FillMeta' ].every((n) => /_srvEnglishV2Renderer\(\)/.test(top(H, n))));

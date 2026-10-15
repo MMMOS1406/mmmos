@@ -14,6 +14,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html'), OPS = read('api/ops.js');
 const base = (f) => execSync(`git show origin/main:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+const n017 = (s) => s.replace(/_publishFetch\('/g, "fetch('"); // SRV-STUDIO-V2-017: the only allowed change to shared publish functions is fetch( → _publishFetch(
 const BASE_H = base('public/index.html'), BASE_OPS = base('api/ops.js');
 let pass = 0, fail = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); };
@@ -46,6 +47,7 @@ function makeEnv({ saveOk = true, engineState = {} } = {}) {
     saveAppState() {}, renderTab() {}, openExec() {}, closeExec() {}, currentTab: 'tasks', activeExec: null,
     escHTML: (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     _srvAudioData: {},
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} }, // SRV-STUDIO-V2-017 publishing session helpers read it
     _srvUploadToStorage: async (pkgId, file, kind) => { calls.uploads.push({ pkgId, kind, name: file.name }); return `https://stub.invalid/storage/v1/object/public/srv-assets/${pkgId}/${kind}_${file.name}`; },
   };
   vm.createContext(ctx);
@@ -55,6 +57,7 @@ function makeEnv({ saveOk = true, engineState = {} } = {}) {
     top(H, '_nextPublishSlotCandidates'), top(H, '_assignPublishSlot'), top(H, '_getEngineState'),
     top(H, 'savePackageToSupabase'), slice(H, 'const _farsiPkgSaveQueues={};', '// Write all packages as a backup'),
     top(H, 'writePackagesBackup'), top(H, 'fetchPackagesFromTable'),
+    top(H, '_ceoGetSessionToken'), top(H, '_operatorGetSessionToken'), top(H, '_publishAuthedFetch'), top(H, '_publishFetch'),
     slice(H, '// ── Lifecycle helpers', '// ── Stage transition actions'),
   ].join('\n'), ctx);
   vm.runInContext("_srvStudioV2Flag.state='on';", ctx);
@@ -118,7 +121,7 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
     E2.ctx.D.tasks = [t]; E2.ctx.D.packages = [p]; await E2.run("_srvEnglishV2Publish('p6','6')"); await E2.settle();
     const fp2 = { id: 'pkg_farsi_x', engine: 'SRV Farsi' }; E2.ctx.__fp = fp2; E2.run('_assignPublishSlot(__fp)');
     ok('Farsi: after an SRV Studio TEST publish, the next SRV Farsi package gets the same slot it would have had', fp1.publishAt && fp2.publishAt === fp1.publishAt);
-    ok('Farsi: _assignPublishSlot, _nextPublishSlotCandidates, _srvFarsiRunPublish, _srvFarsiPublishYouTube byte-identical to main', ['_assignPublishSlot', '_nextPublishSlotCandidates', '_srvFarsiRunPublish', '_srvFarsiPublishYouTube', '_srvFarsiBuildTrigger'].every((n) => top(H, n) === top(BASE_H, n)));
+    ok('Farsi: _assignPublishSlot, _nextPublishSlotCandidates, _srvFarsiRunPublish, _srvFarsiPublishYouTube byte-identical to main', ['_assignPublishSlot', '_nextPublishSlotCandidates', '_srvFarsiRunPublish', '_srvFarsiPublishYouTube', '_srvFarsiBuildTrigger'].every((n) => n017(top(H, n)) === top(BASE_H, n)));
   }
   // ── 4/5. F-1: archived avatars never enter Build; the replacement persists ──
   {

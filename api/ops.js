@@ -223,6 +223,198 @@ async function ceoCheckSession(req, res) {
   return res.status(200).json({ ok });
 }
 
+// ── Publishing sign-in (order SRV-STUDIO-V2-017) ──────────────────────────────
+// Every action that can put content on a connected channel, or use a channel's stored token, needs a
+// server-verified session: the existing CEO session, or an operator (VA) session issued by
+// operator_login. The VA PIN hash, the operator lockout state and the enforcement switch live in
+// ceo_auth_config (RLS on, zero policies → server-only; anon can neither read nor write them). The CEO
+// manages them from System → Integrations → Publishing sign-in. Until a VA PIN exists the gate only
+// logs, so the VA keeps working on the legacy browser PIN; once one exists it enforces, unless the CEO
+// switches it back to log-only (instant, no deploy). The operator signing key is derived from the CEO
+// session secret, never stored, and an operator token can never pass requireCeoSession (sub differs).
+// Changing the VA PIN revokes every operator session (the token carries a PIN-hash fingerprint).
+const PUBLISH_GATED_ACTIONS = new Set([
+  'youtube_upload_video', 'set_yt_thumbnail', 'tiktok_publish_draft', 'tiktok_check_publish_status',
+  'youtube_video_status', 'youtube_check_scope', 'sm_va_task_mark_published',
+]);
+const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
+const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const PUBLISH_AUTH_CACHE_MS = 30 * 1000;
+let _publishAuthCache = null;
+
+function _operatorSecret(ceoSecret) {
+  return createHmac('sha256', String(ceoSecret)).update('mmmos-operator-session-v1').digest('base64url');
+}
+function _operatorVerifySession(token, secret, pinFingerprint) {
+  if (typeof token !== 'string' || !token.includes('.') || !pinFingerprint) return null;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const expected = createHmac('sha256', secret).update(payload).digest('base64url');
+  const sigBuf = Buffer.from(sig, 'utf8');
+  const expBuf = Buffer.from(expected, 'utf8');
+  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
+  let obj;
+  try { obj = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; }
+  if (!obj || obj.sub !== 'operator' || !obj.exp || Date.now() > obj.exp || obj.pv !== pinFingerprint) return null;
+  return obj;
+}
+async function _publishAuthLoad(force) {
+  if (!force && _publishAuthCache && Date.now() - _publishAuthCache.at < PUBLISH_AUTH_CACHE_MS) return _publishAuthCache;
+  const rows = await sbGet(`ceo_auth_config?key=in.(operator_pin_hash_production,publish_auth_mode)&select=key,value`);
+  const map = {};
+  for (const r of (rows || [])) map[r.key] = r.value;
+  _publishAuthCache = { at: Date.now(), pinHash: map.operator_pin_hash_production || null, modeRow: map.publish_auth_mode || null };
+  return _publishAuthCache;
+}
+function _publishAuthMode(cfg) {
+  if (cfg.modeRow === 'observe' || cfg.modeRow === 'enforce') return cfg.modeRow;
+  return cfg.pinHash ? 'enforce' : 'observe';
+}
+async function _publisherFromRequest(req) {
+  if (await requireCeoSession(req)) return { role: 'ceo' };
+  const src = (req.method === 'POST' ? req.body : req.query) || {};
+  const token = src && typeof src === 'object' ? src.operator_session_token : null;
+  if (!token) return null;
+  try {
+    const [cfg, pub] = await Promise.all([_ceoLoadAuthConfig(), _publishAuthLoad()]);
+    if (!pub.pinHash) return null;
+    return _operatorVerifySession(token, _operatorSecret(cfg.sessionSecret), pub.pinHash.slice(0, 12)) ? { role: 'operator' } : null;
+  } catch (e) {
+    console.error('[publish-auth] operator verify failed:', e.message);
+    return null;
+  }
+}
+// Fails closed: if the switch cannot be read, unsigned calls are refused (a signed-in CEO or VA is unaffected).
+async function _publishGate(req, action) {
+  const who = await _publisherFromRequest(req);
+  if (who) return { ok: true, who };
+  let mode = 'enforce';
+  try { mode = _publishAuthMode(await _publishAuthLoad()); } catch (e) { console.error('[publish-auth] config load failed:', e.message); }
+  console.warn('[publish-auth] ' + (mode === 'enforce' ? 'refused' : 'allowed (log-only)') + ' ' + action + ' without a session · origin=' + ((req.headers && req.headers.origin) || '-'));
+  return mode === 'enforce' ? { ok: false } : { ok: true, who: { role: 'unsigned' } };
+}
+
+async function _operatorGetLoginSecurity() {
+  const rows = await sbGetSafe(`ceo_auth_config?key=eq.operator_login_security_production&select=value&limit=1`);
+  try { return JSON.parse((rows[0] && rows[0].value) || '{}'); } catch { return {}; }
+}
+async function _ceoAuthConfigUpsert(key, value) {
+  const existing = await sbGetSafe(`ceo_auth_config?key=eq.${key}&select=key&limit=1`);
+  if (existing.length) await sbPatch('ceo_auth_config', `key=eq.${key}`, { key, value });
+  else await sbInsert('ceo_auth_config', { key, value });
+}
+
+// VA sign-in. Answers operator_not_configured (200) until the CEO has set a VA PIN, so the browser can
+// fall back to its legacy local PIN check during the transition; the gate is log-only in that state.
+async function operatorLogin(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  const pin = (req.body || {}).pin;
+  if (!pin || typeof pin !== 'string') return res.status(400).json({ ok: false, error: 'pin required' });
+  let cfg, pub;
+  try { [cfg, pub] = await Promise.all([_ceoLoadAuthConfig(), _publishAuthLoad(true)]); }
+  catch (e) { return res.status(500).json({ ok: false, error: 'auth_config_unavailable' }); }
+  if (!pub.pinHash) return res.status(200).json({ ok: false, error: 'operator_not_configured' });
+  const sec = await _operatorGetLoginSecurity();
+  const now = Date.now();
+  if (sec.lockedUntil && now < sec.lockedUntil) {
+    return res.status(429).json({ ok: false, error: 'temporarily_locked', retry_after_seconds: Math.ceil((sec.lockedUntil - now) / 1000) });
+  }
+  const a = Buffer.from(_ceoHashHex(pin), 'utf8');
+  const b = Buffer.from(String(pub.pinHash), 'utf8');
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    const failCount = (sec.failCount || 0) + 1;
+    const next = { failCount, lastAttemptAt: new Date(now).toISOString() };
+    if (failCount >= CEO_LOGIN_MAX_ATTEMPTS) { next.lockedUntil = now + CEO_LOGIN_LOCKOUT_MS; next.failCount = 0; }
+    await _ceoAuthConfigUpsert('operator_login_security_production', JSON.stringify(next)).catch((e) => console.error('[operatorLogin] lockout persist failed:', e.message));
+    return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+  }
+  if (sec.failCount || sec.lockedUntil) await _ceoAuthConfigUpsert('operator_login_security_production', JSON.stringify({ failCount: 0, lastAttemptAt: new Date(now).toISOString() })).catch(() => {});
+  const exp = now + OPERATOR_SESSION_TTL_MS;
+  const token = _ceoSignSession({ sub: 'operator', iat: now, exp, pv: pub.pinHash.slice(0, 12) }, _operatorSecret(cfg.sessionSecret));
+  return res.status(200).json({ ok: true, operator_session_token: token, expires_at: new Date(exp).toISOString() });
+}
+
+async function operatorCheckSession(req, res) {
+  const who = await _publisherFromRequest(req);
+  return res.status(200).json({ ok: !!(who && who.role === 'operator') });
+}
+
+// CEO-only: what the gate is doing right now. Never returns the PIN hash.
+async function publishAuthStatus(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const pub = await _publishAuthLoad(true);
+    return res.status(200).json({ ok: true, operatorPinSet: !!pub.pinHash, modeSetting: pub.modeRow || 'auto', effectiveMode: _publishAuthMode(pub) });
+  } catch (e) { return res.status(502).json({ ok: false, error: 'auth_config_unavailable' }); }
+}
+
+// CEO-only: set or change the VA PIN (6–32 characters; must differ from the CEO PIN; the old public
+// default 0000 is refused). Changing it signs every VA out.
+async function publishAuthSetOperatorPin(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const pin = (req.body || {}).pin;
+  if (typeof pin !== 'string' || pin.length < 6 || pin.length > 32 || /^0+$/.test(pin)) return res.status(400).json({ ok: false, error: 'pin_must_be_6_to_32_characters' });
+  try {
+    const cfg = await _ceoLoadAuthConfig();
+    if (_ceoHashHex(pin) === cfg.pinHash) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_ceo_pin' });
+    await _ceoAuthConfigUpsert('operator_pin_hash_production', _ceoHashHex(pin));
+    await _ceoAuthConfigUpsert('operator_login_security_production', JSON.stringify({ failCount: 0 })).catch(() => {});
+    _publishAuthCache = null;
+    const pub = await _publishAuthLoad(true);
+    return res.status(200).json({ ok: true, operatorPinSet: true, effectiveMode: _publishAuthMode(pub) });
+  } catch (e) { return res.status(502).json({ ok: false, error: 'auth_config_write_failed' }); }
+}
+
+// CEO-only: 'enforce' | 'observe' (log-only) | 'auto' (enforce once a VA PIN exists). The rollback switch.
+async function publishAuthSetMode(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const mode = (req.body || {}).mode;
+  if (!['enforce', 'observe', 'auto'].includes(mode)) return res.status(400).json({ ok: false, error: 'mode must be enforce, observe or auto' });
+  try {
+    await _ceoAuthConfigUpsert('publish_auth_mode', mode);
+    _publishAuthCache = null;
+    const pub = await _publishAuthLoad(true);
+    return res.status(200).json({ ok: true, modeSetting: mode, effectiveMode: _publishAuthMode(pub) });
+  } catch (e) { return res.status(502).json({ ok: false, error: 'auth_config_write_failed' }); }
+}
+
+// Publishing sources: only this project's srv-assets public objects, HeyGen's CDN, or a Submagic project
+// (resolved through the Submagic API with our key). Everything else — other buckets, signed paths, other
+// hosts, http:, credentials or ports in the URL — is refused before any token is refreshed or byte fetched.
+const PUBLISH_SRV_ASSETS_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/`;
+const PUBLISH_HEYGEN_HOSTS = ['files.heygen.ai', 'files2.heygen.ai', 'resource.heygen.ai', 'resource2.heygen.ai', 'assets.heygen.ai'];
+function _publishSourceKind(raw, kind) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const s = raw.trim();
+  if (kind === 'video' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return 'submagic';
+  let u;
+  try { u = new URL(s); } catch { return null; }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null;
+  if (u.href.startsWith(PUBLISH_SRV_ASSETS_PREFIX) && !/\.\.|%2e|%2f|%5c/i.test(u.pathname)) return 'srv-assets';
+  if (PUBLISH_HEYGEN_HOSTS.includes(u.hostname)) return 'heygen';
+  if (kind === 'video' && u.hostname === 'app.submagic.co' && u.pathname.startsWith('/api/file/download')) return 'submagic';
+  return null;
+}
+function _isSubmagicHost(raw) {
+  try { const h = new URL(raw).hostname; return h === 'submagic.co' || h.endsWith('.submagic.co'); } catch { return false; }
+}
+// Fetches a publishing source. A URL that Submagic's own API returned is trusted as-is; anything else is
+// fetched without blindly following redirects — every hop must itself be an allowed source.
+async function _publishFetchSource(url, headers, trusted, kind) {
+  if (trusted) return fetch(url, { headers, redirect: 'follow' });
+  let current = url;
+  for (let hop = 0; hop < 4; hop++) {
+    const r = await fetch(current, { headers, redirect: 'manual' });
+    if (r.status < 300 || r.status >= 400) return r;
+    const loc = r.headers.get('location');
+    if (!loc) return r;
+    const next = new URL(loc, current).href;
+    if (!_publishSourceKind(next, kind)) throw new Error('source_redirect_not_allowed');
+    current = next;
+  }
+  throw new Error('source_too_many_redirects');
+}
+
 // ── Engineering Agent Authorization / Claim (v16.35.0 — Phase 4B, CEO-approved
 // 2026-08-16) ────────────────────────────────────────────────────────────────
 // Deliberately SEPARATE from CEO session auth above — different secret material,
@@ -7118,7 +7310,9 @@ async function _refreshYoutubeToken(refreshToken) {
 // v13.54.6 — Look up the YouTube connection row by channel title (e.g. 'AI Creation Studio').
 // Returns { channel_id, refresh_token, access_token, ..., _matchedChannelTitle } or null.
 // Matches exact title (case-insensitive) first, then loose normalized fallback.
-async function _getYoutubeConnectionByTitle(title) {
+// opts.exact (publishing, SRV-STUDIO-V2-017): only an exact, case-insensitive, trimmed title match routes —
+// never the loose "contains" fallback, so a publish can only land on the channel its engine maps to.
+async function _getYoutubeConnectionByTitle(title, opts) {
   if (!title) return null;
   try {
     const channels = await sbGet('youtube_channels?select=channel_id,title');
@@ -7130,7 +7324,7 @@ async function _getYoutubeConnectionByTitle(title) {
       return (c.title || '').toLowerCase().trim() === wantLower;
     });
     // Then loose normalized match (drop punctuation/spaces)
-    if (!target) {
+    if (!target && !(opts && opts.exact)) {
       target = channels.find(function(c){
         const t = (c.title || '').toLowerCase().replace(/[^a-z0-9]/g,'');
         return t === wantNorm || t.includes(wantNorm) || wantNorm.includes(t);
@@ -7191,18 +7385,23 @@ async function _resolveSubmagicProjectId(projectId) {
 // v13.55.1 — Auto-resolves Submagic SPA download URLs to real API/CDN URLs.
 async function _youtubeResumableUpload(accessToken, videoUrl, metadata) {
   // 0. If the source is a Submagic SPA URL, resolve to the real CDN URL via API
+  const _inputUrl = String(videoUrl || '').trim();
   videoUrl = await _resolveSubmagicUrl(videoUrl);
+  const _fromSubmagicApi = videoUrl !== _inputUrl; // the URL came back from Submagic's own API
   // 1. Fetch the source MP4. Keep x-api-key fallback for resolved URLs that still happen to be on
-  // Submagic's domain (api.submagic.co etc).
+  // Submagic's domain (api.submagic.co etc). SRV-STUDIO-V2-017: the key goes ONLY to a real
+  // submagic.co host (it used to go to any URL merely containing "submagic.co").
   const srcHeaders = {};
-  if (/submagic\.co/i.test(videoUrl) && SUBMAGIC_API_KEY) {
+  if (_isSubmagicHost(videoUrl) && SUBMAGIC_API_KEY) {
     srcHeaders['x-api-key'] = SUBMAGIC_API_KEY;
   }
-  const srcRes = await fetch(videoUrl, { headers: srcHeaders, redirect: 'follow' });
+  const srcRes = await _publishFetchSource(videoUrl, srcHeaders, _fromSubmagicApi, 'video');
   if (!srcRes.ok) {
+    // Upstream bodies are logged server-side only, never returned to the caller (SRV-STUDIO-V2-017).
     let bodyPreview = '';
     try { bodyPreview = (await srcRes.text()).slice(0, 300); } catch(_) {}
-    throw new Error('source_fetch_failed: HTTP ' + srcRes.status + ' · body: ' + bodyPreview);
+    console.error('[youtubeUpload] source fetch failed:', srcRes.status, bodyPreview);
+    throw new Error('source_fetch_failed: HTTP ' + srcRes.status);
   }
   const contentType = (srcRes.headers.get('content-type') || '').toLowerCase();
   const contentLength = srcRes.headers.get('content-length');
@@ -7211,7 +7410,8 @@ async function _youtubeResumableUpload(accessToken, videoUrl, metadata) {
   if (!/^video\//i.test(contentType) && !/octet-stream|application\/binary/i.test(contentType)) {
     let bodyPreview = '';
     try { bodyPreview = (await srcRes.text()).slice(0, 300); } catch(_) {}
-    throw new Error('source_not_video: content-type="' + contentType + '" · length=' + contentLength + ' · body-preview: ' + bodyPreview);
+    console.error('[youtubeUpload] source not video:', contentType, bodyPreview);
+    throw new Error('source_not_video: content-type="' + contentType + '" · length=' + contentLength);
   }
   // v13.69.2 — Use the actual source MIME type instead of hardcoding video/mp4.
   const uploadMime = /^video\//i.test(contentType) ? contentType.split(';')[0].trim() : 'video/mp4';
@@ -7353,26 +7553,28 @@ async function youtubeUploadVideo(req, res) {
                              // today, so this changes nothing unless a caller explicitly opts in.
   } = body;
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'missing_video_url' });
+  // SRV-STUDIO-V2-017 — the source must be this project's srv-assets storage, HeyGen or a Submagic project.
+  // Checked before any token refresh or byte fetch.
+  if (!_publishSourceKind(videoUrl, 'video')) {
+    return res.status(400).json({ ok: false, error: 'source_not_allowed', hint: 'Videos can only be published from MMMOS storage (srv-assets), HeyGen or a Submagic project.' });
+  }
 
-  // v13.54.6 — channelHandle param kept for backward compatibility but now treated as title
+  // v13.54.6 — channelHandle param kept for backward compatibility but now treated as title.
+  // SRV-STUDIO-V2-017 — it must name one of the mapped channels, and routing is exact (no loose match).
+  if (channelHandle && !Object.values(YT_ENGINE_TO_TITLE).includes(channelHandle)) {
+    return res.status(400).json({ ok: false, error: 'unknown_channel' });
+  }
   const channelTitle = channelHandle || YT_ENGINE_TO_TITLE[engine] || null;
   if (!channelTitle) return res.status(400).json({ ok: false, error: 'no_engine_mapping', engine, knownEngines: Object.keys(YT_ENGINE_TO_TITLE) });
 
   // Look up the connection row by channel title
-  const conn = await _getYoutubeConnectionByTitle(channelTitle);
+  const conn = await _getYoutubeConnectionByTitle(channelTitle, { exact: true });
   if (!conn) {
-    // Diagnostic: dump available channel titles so we can see what's actually stored
-    let availableTitles = [];
-    try {
-      const all = await sbGet('youtube_channels?select=title');
-      availableTitles = (Array.isArray(all) ? all : []).map(function(c){ return c.title; });
-    } catch(_) {}
     return res.status(404).json({
       ok: false,
       error: 'no_connection_for_title',
       requestedTitle: channelTitle,
-      availableTitles,
-      hint: 'Engine maps to "' + channelTitle + '" but this title was not found in youtube_channels table. Available titles listed above — verify the mapping.',
+      hint: 'Engine maps to "' + channelTitle + '" but no connected YouTube channel has that exact title. Reconnect the channel in System → Integrations.',
     });
   }
   if (!conn.refresh_token) return res.status(400).json({ ok: false, error: 'no_refresh_token_on_record', channelTitle });
@@ -7427,6 +7629,14 @@ async function youtubeUploadVideo(req, res) {
   if (containsSyntheticMedia === true) {
     metadata.status.containsSyntheticMedia = true;
   }
+  // SRV-STUDIO-V2-017 — only a CEO session may upload as public/unlisted. A VA (or an unsigned call while
+  // the gate is log-only) always uploads private; a scheduled publishAt still works. In-process callers
+  // (the SRV Studio V2 pilot, already CEO-verified) carry no _publisher and are unchanged.
+  let privacyCoerced = false;
+  if (req._publisher && req._publisher.role !== 'ceo' && metadata.status.privacyStatus !== 'private') {
+    metadata.status.privacyStatus = 'private';
+    privacyCoerced = true;
+  }
 
   try {
     const result = await _youtubeResumableUpload(accessToken, videoUrl, metadata);
@@ -7456,6 +7666,7 @@ async function youtubeUploadVideo(req, res) {
       channelTitle: conn._matchedChannelTitle,
       channelHandle: conn._matchedChannelTitle, // legacy alias for front-end
       privacyStatus: metadata.status.privacyStatus,
+      privacyCoerced,
       watchUrl: youtubeVideoId ? ('https://youtube.com/watch?v=' + youtubeVideoId) : null,
       studioUrl: youtubeVideoId ? ('https://studio.youtube.com/video/' + youtubeVideoId + '/edit') : null,
       uploadedAt: new Date().toISOString(),
@@ -7484,19 +7695,26 @@ async function setYtThumbnail(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const { videoId, engine, thumbUrl } = body;
   if (!videoId || !thumbUrl) return res.status(400).json({ ok: false, error: 'missing_params' });
+  // SRV-STUDIO-V2-017 — the image must come from MMMOS storage (srv-assets) or HeyGen's CDN.
+  if (!_publishSourceKind(thumbUrl, 'image')) return res.status(400).json({ ok: false, error: 'source_not_allowed' });
   try {
-    // SRV Farsi: the engine name is not the channel title ("Silk Road Voices"), so resolve it the same
-    // way youtubeUploadVideo does. Scoped to SRV Farsi — every other engine keeps its existing lookup.
-    const connTitle = engine === 'SRV Farsi' ? (YT_ENGINE_TO_TITLE[engine] || engine) : engine;
-    const conn = await _getYoutubeConnectionByTitle(connTitle);
+    // SRV-STUDIO-V2-017 — routing is exact: an engine name maps through YT_ENGINE_TO_TITLE ('SRV Farsi' →
+    // Silk Road Voices, 'NextWave' → NextWave Systems, 'SRV English' → SRV Studio), or the caller passes a
+    // mapped channel title itself (SRV Studio V2 sends 'SRV Studio'). Anything else is refused; the old
+    // loose "contains" lookup is no longer used here.
+    const connTitle = YT_ENGINE_TO_TITLE[engine] || (Object.values(YT_ENGINE_TO_TITLE).includes(engine) ? engine : null);
+    const conn = connTitle ? await _getYoutubeConnectionByTitle(connTitle, { exact: true }) : null;
     if (!conn) return res.status(401).json({ ok: false, error: 'no_yt_connection' });
     const { accessToken } = await _refreshYoutubeToken(conn.refresh_token);
-    const imgRes = await fetch(thumbUrl);
+    const imgRes = await _publishFetchSource(thumbUrl, {}, false, 'image');
     if (!imgRes.ok) return res.status(500).json({ ok: false, error: 'thumb_fetch_failed' });
+    const imgType = (imgRes.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (imgType && !/^image\/|octet-stream/.test(imgType)) return res.status(400).json({ ok: false, error: 'thumb_not_image' });
     const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+    if (imgBuf.length > 2 * 1024 * 1024) return res.status(400).json({ ok: false, error: 'thumb_too_large' }); // YouTube's limit
     const ytRes = await fetch(
       `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`,
-      { method: 'POST', headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'image/jpeg', 'Content-Length': String(imgBuf.length) }, body: imgBuf }
+      { method: 'POST', headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': imgType === 'image/png' ? 'image/png' : 'image/jpeg', 'Content-Length': String(imgBuf.length) }, body: imgBuf }
     );
     if (!ytRes.ok) {
       const t = await ytRes.text();
@@ -19230,11 +19448,27 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // SRV-STUDIO-V2-017 — publishing actions answer cross-origin requests only for the app's own origin
+  // (same-origin calls from MMMOS need no CORS header at all). Every other action keeps '*'.
+  const _gatedAction = PUBLISH_GATED_ACTIONS.has(req.query?.action);
+  if (_gatedAction) {
+    const origin = req.headers && req.headers.origin;
+    if (origin && PUBLISH_ALLOWED_ORIGINS.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+    else res.removeHeader('Access-Control-Allow-Origin');
+    res.setHeader('Vary', 'Origin');
+  }
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const action = req.query?.action;
 
   try {
+    // SRV-STUDIO-V2-017 — publishing sign-in gate (see PUBLISH_GATED_ACTIONS). In-process callers such as
+    // the SRV Studio V2 pilot call youtubeUploadVideo directly after their own CEO check and never pass here.
+    if (_gatedAction) {
+      const gate = await _publishGate(req, action);
+      if (!gate.ok) return res.status(401).json({ ok: false, error: 'publisher_session_required', message: 'Sign in to MMMOS again, then retry.' });
+      req._publisher = gate.who;
+    }
     if (action === 'list_tasks')           return await listTasks(req, res);
     if (action === 'create_task')          return await createTask(req, res);
     if (action === 'update_task')          return await updateTask(req, res);
@@ -19502,6 +19736,11 @@ export default async function handler(req, res) {
     // v16.30.0 — CEO Operating Loop Phase 2C: server-verified CEO session auth
     if (action === 'ceo_login')                     return await ceoLogin(req, res);
     if (action === 'ceo_check_session')              return await ceoCheckSession(req, res);
+    if (action === 'operator_login')                 return await operatorLogin(req, res);              // SRV-STUDIO-V2-017
+    if (action === 'operator_check_session')         return await operatorCheckSession(req, res);       // SRV-STUDIO-V2-017
+    if (action === 'publish_auth_status')            return await publishAuthStatus(req, res);          // SRV-STUDIO-V2-017 (CEO)
+    if (action === 'publish_auth_set_operator_pin')  return await publishAuthSetOperatorPin(req, res);  // SRV-STUDIO-V2-017 (CEO)
+    if (action === 'publish_auth_set_mode')          return await publishAuthSetMode(req, res);         // SRV-STUDIO-V2-017 (CEO)
 
     // v15.8.0 — CEO Decision Execution Protocol (execution gate ACTIVATED; finance hard-guarded)
     if (action === 'cdp_list')                      return await cdpList(req, res);
@@ -22810,7 +23049,9 @@ async function tiktokPublishDraft(req, res) {
 
     // Fetch source video bytes server-side (works for any hosting domain — Submagic CDN or
     // Supabase Storage — since TikTok never touches the source URL directly with this method).
-    let videoRes = await fetch(videoUrl);
+    // SRV-STUDIO-V2-017 — same source allowlist as YouTube, in place before any future unfreeze.
+    if (!_publishSourceKind(videoUrl, 'video')) return res.status(400).json({ ok: false, error: 'source_not_allowed' });
+    let videoRes = await _publishFetchSource(videoUrl, {}, false, 'video');
     if (!videoRes.ok) {
       return res.status(200).json({ ok: false, error: `source_fetch_failed_${videoRes.status}` });
     }

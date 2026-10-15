@@ -14,6 +14,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html'), OPS = read('api/ops.js');
 const base = (f) => execSync(`git show origin/main:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+const n017 = (s) => s.replace(/_publishFetch\('/g, "fetch('"); // SRV-STUDIO-V2-017: the only allowed change to shared publish functions is fetch( → _publishFetch(
 const BASE_H = base('public/index.html'), BASE_OPS = base('api/ops.js');
 let pass = 0, fail = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  ' + (typeof x === 'string' ? x : JSON.stringify(x)) : '')); };
@@ -184,7 +185,7 @@ function env(o = {}) {
       vm.createContext(ctx);
       vm.runInContext(["const _PUBLISH_SLOT_DAYS=['Thursday','Friday','Saturday','Sunday','Monday'];", lineOf(H, /^const _PUBLISH_SLOT_TIMES = /), lineOf(H, /^const _DAY_NAMES = /),
         top(H, '_nextPublishSlotCandidates'), top(H, '_assignPublishSlot'), top(H, '_getEngineState'), top(H, 'savePackageToSupabase'), slice(H, 'const _farsiPkgSaveQueues={};', '// Write all packages as a backup'),
-        top(H, 'writePackagesBackup'), top(H, 'fetchPackagesFromTable'), top(H, '_ceoGetSessionToken'), top(H, '_ceoAuthedFetch'), slice(H, '// ── Lifecycle helpers', '// ── Stage transition actions')].join('\n'), ctx);
+        top(H, 'writePackagesBackup'), top(H, 'fetchPackagesFromTable'), top(H, '_ceoGetSessionToken'), top(H, '_ceoAuthedFetch'), top(H, '_operatorGetSessionToken'), top(H, '_publishAuthedFetch'), top(H, '_publishFetch'), slice(H, '// ── Lifecycle helpers', '// ── Stage transition actions')].join('\n'), ctx);
       vm.runInContext("_srvStudioV2Flag.state='on';", ctx); ctx.__R = RM; vm.runInContext('_srv2RenderModP=Promise.resolve(__R);', ctx);
       return { ctx, calls };
     }
@@ -197,7 +198,7 @@ function env(o = {}) {
       const slots0 = JSON.stringify(E.ctx.D._publishSlots);
       await vm.runInContext("_srvEnglishV2Publish('pkg_l','137')", E.ctx); await vm.runInContext("_srvEnglishV2Publish('pkg_s','131')", E.ctx); await vm.runInContext("_srvEnglishV2Publish('pkg_o','133')", E.ctx);
       const [cl, cs] = E.calls.pilot;
-      ok('E4 Client: pilot requests carry the CEO session token (through _ceoAuthedFetch)', E.calls.pilot.length === 2 && E.calls.pilot.every((b) => b.ceo_session_token === 'ceo.tok') && E.calls.yt.every((b) => !('ceo_session_token' in b)));
+      ok('E4 Client: pilot requests carry the CEO session token (through _ceoAuthedFetch); since SRV-STUDIO-V2-017 the normal upload carries it too (_publishFetch)', E.calls.pilot.length === 2 && E.calls.pilot.every((b) => b.ceo_session_token === 'ceo.tok') && E.calls.yt.length === 1 && E.calls.yt.every((b) => b.ceo_session_token === 'ceo.tok'));
       ok('Client: the two authorized tasks go to the pilot action with their normal titles (no [TEST])', E.calls.pilot.length === 2 && cl.title === 'Leave the Engine Running | Emotional Deep House | Night Drive | SRV Studio' && cs.title === "Don't Let Me Go Tonight | Night Drive Deep House | SRV Studio #Shorts" && cl.taskUid === 'srve_1791661440767_137' && cl.kind === 'long' && cs.kind === 'short');
       ok('Client: the unlisted task still publishes as TEST ([TEST] title, private, no schedule) through the normal action', E.calls.yt.length === 1 && /^\[TEST\] Other Song/.test(E.calls.yt[0].title) && E.calls.yt[0].privacyStatus === 'private' && E.calls.yt[0].publishAt === null);
       ok('Client: pilot packages stay isTest, take zero publishing slots, record the YouTube id/time/channel', pl.isTest === true && ps.isTest === true && JSON.stringify(E.ctx.D._publishSlots) === slots0 && pl.srvPilot.youtubeVideoId === 'ytp1' && pl.srvPilot.channelId === CH && pl.srvPilot.uploadedAt && pl.srvPublish.pilot === true && pl._srvYtLongId === 'ytp1' && ps._srvYtShortId === 'ytp2');
@@ -217,12 +218,13 @@ function env(o = {}) {
   }
   // ── 8. Protection and scope ──
   {
-    ok('Protected: youtubeUploadVideo, setYtThumbnail, _getYoutubeConnectionByTitle and SRV Farsi caption byte-identical to main', ['youtubeUploadVideo', 'setYtThumbnail', '_getYoutubeConnectionByTitle', 'farsiRegenCaption'].every((n) => top(OPS, n) === top(BASE_OPS, n)));
-    ok('Protected: V1 publish, _assignPublishSlot, _srvRenderVideo and SRV Farsi publish byte-identical to main', ['_assignPublishSlot', '_srvRenderVideo', '_srvFarsiRunPublish', '_srvFarsiPublishYouTube'].every((n) => top(H, n) === top(BASE_H, n)) && top(H, '_srvEnglishRunPublish').replace("  if(_srvStudioV2On())return _srvEnglishV2Publish(pkgId,taskId); // SRV Studio V2 publish (flag OFF in production)\n", '') === top(BASE_H, '_srvEnglishRunPublish'));
-    const d = execSync('git diff ff5cc43 -U0 -- api/ops.js', { cwd: repo }).toString();
+    { const PRE017 = execSync('git show 1724aed:api/ops.js', { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8'); // V2 checkpoints never touched these; SRV-STUDIO-V2-017 hardens them (tests/platform/test_publish_auth.mjs)
+    ok('Protected: youtubeUploadVideo, setYtThumbnail, _getYoutubeConnectionByTitle unchanged by the V2 checkpoints; SRV Farsi caption byte-identical to main', ['youtubeUploadVideo', 'setYtThumbnail', '_getYoutubeConnectionByTitle'].every((n) => top(PRE017, n) === top(BASE_OPS, n)) && top(OPS, 'farsiRegenCaption') === top(BASE_OPS, 'farsiRegenCaption')); }
+    ok('Protected: V1 publish, _assignPublishSlot, _srvRenderVideo and SRV Farsi publish byte-identical to main', ['_assignPublishSlot', '_srvRenderVideo', '_srvFarsiRunPublish', '_srvFarsiPublishYouTube'].every((n) => n017(top(H, n)) === top(BASE_H, n)) && n017(top(H, '_srvEnglishRunPublish')).replace("  if(_srvStudioV2On())return _srvEnglishV2Publish(pkgId,taskId); // SRV Studio V2 publish (flag OFF in production)\n", '') === top(BASE_H, '_srvEnglishRunPublish'));
+    const d = execSync('git diff ff5cc43 62ef91c -U0 -- api/ops.js', { cwd: repo }).toString(); // pinned to the E3 commit (SRV-STUDIO-V2-017 changes ops.js later)
     const minus = d.split('\n').filter((l) => /^-[^-]/.test(l));
     ok('Scope (server): E3 only adds to api/ops.js — the pilot import, three V2 pilot functions and one dispatcher line', minus.length === 0 && (d.match(/^\+\s*if \(action === /gm) || []).length === 1 && /srv_studio_v2_pilot_upload/.test(d));
-    const files = execSync('git diff ff5cc43 --name-only', { cwd: repo }).toString().trim().split('\n').filter(Boolean);
+    const files = execSync('git diff ff5cc43 1724aed --name-only', { cwd: repo }).toString().trim().split('\n').filter(Boolean); // E3+E4 scope, pinned before SRV-STUDIO-V2-017
     const allowed = ['api/ops.js', 'lib/srvStudioV2Pilot.mjs', 'docs/srv-studio-v2/e4-app-settings-v2-write-lock.sql', 'tests/srv/test_srv_studio_v2_e4_security.mjs', 'public/index.html', 'tests/srv/studio-v2-preview/server.mjs', 'tests/srv/studio-v2-preview/fixture.mjs', 'tests/srv/test_srv_studio_v2_pilot.mjs', 'tests/srv/test_srv_studio_v2_isolation.mjs', 'tests/srv/test_srv_studio_v2_render.mjs', 'tests/srv/test_srv_studio_v2_lifecycle.cjs', 'tests/srv/studio-v2-preview/headless-pilot.mjs'];
     ok('Scope: E3 changes only V2 files, the V2 pilot server action, the preview and V2 tests', files.every((f) => allowed.includes(f)), files.join(', '));
   }
