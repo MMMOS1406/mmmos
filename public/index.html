@@ -16308,6 +16308,7 @@ async function _srvEnglishV2Build(pkgId,taskId){
     const out=await R.srv2RenderVideo({
       kind,audio:audio.file,avatar:av,imageUrl:av.src,title:pkg.title||'',
       lyrics:pkg[used.lyrics]||'',shortLyrics:pkg[used.lyrics]||'',hook:R.srv2HookLine(pkg),
+      fx:R.SRV2_FX_DEFAULTS, // D5 production defaults: camera, atmosphere, film, music response on; rain off
       onProgress:function(m){setStatus(m,'#8b5cf6');},
     });
     setStatus('Uploading '+kind.toUpperCase()+' video ('+(out.blob.size/1048576).toFixed(1)+' MB)…','#8b5cf6');
@@ -16421,7 +16422,7 @@ function _srvEnglishV2RenderHtml(task,pkg,taskId,stage){
   if(stage==='build'){
     return box(lab('V2 CINEMATIC RENDER — '+kind.toUpperCase())+
       row('Output',target)+row('Codec','H.264 MP4 (VP9 WebM if the browser has no H.264)')+
-      row('Visuals','assigned avatar · black-and-white grade · slow push-in')+row('Thumbnail','1280×720 from the same avatar')+
+      row('Visuals','assigned avatar · black-and-white grade')+row('Motion','cinematic camera · night atmosphere · film texture · music response')+row('Thumbnail','1280×720 from the same avatar')+
       `<div style="margin-top:8px;color:var(--dim);font-family:inherit">Renders in real time (as long as the song). Keep this tab open and in front until it finishes.</div>`);
   }
   if(stage==='done'){
@@ -16445,6 +16446,7 @@ function _srvEnglishV2RenderHtml(task,pkg,taskId,stage){
     row('File',mb+' MB')+
     row('Frames',(f.drawn||0)+' / '+(f.expected||0)+' · '+(f.droppedPct||0)+'% dropped',f.warn?'#ef4444':'#22c55e')+
     (r.hiddenDuringRender?row('Warning','the tab was hidden during the render','#fbbf24'):'')+
+    (r.fx?row('Motion',Object.keys(r.fx).filter(function(k){return r.fx[k];}).join(' · ')||'static (D4)'):'')+
     row('Source enlargement','×'+r.maxSourceUpscale+(r.maxSourceUpscale>1?' (final masters are below full HD)':''),r.maxSourceUpscale>1.2?'#fbbf24':null)+
     `<div style="margin-top:12px">${lab('PUBLISH METADATA (DRY RUN — WHAT APPROVE WILL SEND)')}<div id="srv2meta_${escHTML(String(pkg.id))}" style="white-space:pre-wrap;color:var(--text);max-height:220px;overflow-y:auto;line-height:1.5">Loading…</div></div>`);
 }

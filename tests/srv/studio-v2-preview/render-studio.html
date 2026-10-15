@@ -17,7 +17,13 @@
   h2{font-size:11px;letter-spacing:.12em;color:var(--dim);margin:0 0 8px}
   .stage{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
   canvas.live{background:#000;border-radius:8px;max-width:100%}
-  #longC{width:min(100%,640px);aspect-ratio:16/9}#shortC{height:360px;aspect-ratio:9/16}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px}.cmp figure{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+  .cmp figcaption{font-size:12px;color:var(--dim)}.cmp figcaption b{color:var(--text)}
+  .cmp canvas{width:100%;aspect-ratio:16/9}.cmp.short canvas{width:auto;height:min(62vh,560px);aspect-ratio:9/16;align-self:center}
+  @media (max-width:700px){.cmp{grid-template-columns:1fr}}
+  fieldset{border:1px solid var(--line);border-radius:8px;margin:10px 0 0;padding:6px 10px 10px}legend{font-size:11px;color:var(--dim);letter-spacing:.04em}
+  .tog{display:flex;align-items:center;gap:8px;margin:6px 0 0;font-size:12px;color:var(--text)}.tog input{width:auto;margin:0}
+  .perf{font:12px ui-monospace,monospace;color:var(--dim)}
   video{background:#000;border-radius:8px;max-width:100%}
   table{border-collapse:collapse;font:12px ui-monospace,monospace}td{padding:2px 10px 2px 0;border-bottom:1px solid #1f1c26;vertical-align:top}td:first-child{color:var(--dim)}
   pre{white-space:pre-wrap;font:12px/1.45 ui-monospace,monospace;background:#0f0e14;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:280px;overflow:auto;margin:0}
@@ -43,13 +49,26 @@ Hold me through the night drive
 Under neon lights
 I find my way back to you</textarea>
     <label>Audio</label><select id="audio"><option value="/__v2/test-audio.mp3">Sample MP3 on this computer (read-only)</option></select>
+    <fieldset><legend>B · CINEMATIC MOTION LAYERS (preview evaluation)</legend>
+      <label class="tog"><input type="checkbox" id="fx_camera" checked> Camera movement</label>
+      <label class="tog"><input type="checkbox" id="fx_atmosphere" checked> Night atmosphere</label>
+      <label class="tog"><input type="checkbox" id="fx_film" checked> Film texture</label>
+      <label class="tog"><input type="checkbox" id="fx_reactive" checked> Music-responsive effects</label>
+      <label class="tog"><input type="checkbox" id="fx_rain"> Rain texture (optional)</label>
+      <div class="perf" style="margin-top:6px">Production default: camera, atmosphere, film and music on; rain off. <a href="#" id="fx_reset" style="color:var(--acc)">Reset to default</a></div>
+    </fieldset>
     <div><button id="animate">▶ Animate preview</button><button id="stopAnim" disabled>■ Stop</button></div>
+    <label>Version to render</label><select id="version"><option value="motion">B · cinematic motion (production default)</option><option value="static">A · current static presentation</option></select>
     <div><button id="render">● Render test video</button></div>
     <div id="status" style="margin-top:10px;color:var(--dim);font-size:12px"></div>
   </div>
   <div>
-    <section class="panel"><h2>ANIMATED PREVIEW (LIVE, NOT RECORDED) · POSTER FRAME UNTIL ▶ IS PRESSED</h2>
-      <div class="stage"><canvas id="longC" class="live" width="1920" height="1080"></canvas><canvas id="shortC" class="live" width="1080" height="1920"></canvas></div></section>
+    <section class="panel"><h2>A / B COMPARISON (LIVE, NOT RECORDED) · SAME AVATAR, TITLE AND AUDIO · POSTER FRAME UNTIL ▶ IS PRESSED</h2>
+      <div id="cmp" class="cmp">
+        <figure><canvas id="cmpA" class="live" width="1920" height="1080"></canvas><figcaption><b>A · current</b> static presentation (D4)</figcaption></figure>
+        <figure><canvas id="cmpB" class="live" width="1920" height="1080"></canvas><figcaption><b>B · cinematic motion</b> <span id="fxlabel"></span></figcaption></figure>
+      </div>
+      <div id="perf" class="perf" style="margin-top:8px"></div></section>
     <section class="panel"><h2>RENDERED TEST VIDEO</h2><div class="stage"><video id="out" controls playsinline style="max-height:420px"></video><table id="stats"></table></div></section>
     <section class="panel"><h2>THUMBNAIL (1280×720)</h2><div class="stage"><img id="thumb" alt="" style="width:min(100%,640px);border-radius:8px;background:#000"><table id="tstats"></table></div></section>
     <section class="panel"><h2>PUBLISH METADATA (DRY RUN)</h2><div class="stage" style="align-items:stretch"><div style="flex:1;min-width:280px"><h2>LONG</h2><pre id="metaL"></pre></div><div style="flex:1;min-width:280px"><h2>SHORT</h2><pre id="metaS"></pre></div></div></section>
@@ -68,6 +87,10 @@ if (q.get('avatar')) $('avatar').value = q.get('avatar');
 if (q.get('kind')) $('kind').value = q.get('kind');
 if (q.get('dur')) $('dur').value = q.get('dur');
 const av = () => A.srv2AvatarById($('avatar').value);
+const fxB = () => { const o = {}; for (const k of R.SRV2_FX_KEYS) o[k] = $('fx_' + k).checked; return o; };
+const fxLabel = () => { const f = fxB(); $('fxlabel').textContent = '· ' + (R.SRV2_FX_KEYS.filter((k) => f[k]).join(' · ') || 'all layers off (= A)'); };
+if (q.get('fx') === 'static') $('version').value = 'static';
+const sizeCanvases = () => { const k = $('kind').value; const [w, h] = k === 'long' ? [1920, 1080] : [1080, 1920]; for (const id of ['cmpA', 'cmpB']) { $(id).width = w; $(id).height = h; } $('cmp').className = 'cmp' + (k === 'short' ? ' short' : ''); };
 const lines = () => R.srv2LyricLines($('lyrics').value);
 const prepCache = new Map();
 async function prepared(a) { if (!prepCache.has(a.id)) prepCache.set(a.id, R.srv2PrepareSource(await R.srv2LoadImage(a.src), a.crop)); return prepCache.get(a.id); }
@@ -103,10 +126,10 @@ async function showRotation() {
 // ── poster frames (D4, F-4): both panels open on a real graded frame, never black ──
 async function showPoster() {
   await R.srv2LoadFonts(); const a = av(); const prep = await prepared(a);
-  const L = R.srv2CreateScene({ kind: 'long', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2LongTimeline({ duration: 60, chorusStart: null, hook: '', seed: a.id }) });
-  const S = R.srv2CreateScene({ kind: 'short', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2ShortTimeline({ duration: 30, lines: lines() }) });
-  R.srv2DrawFrame($('longC').getContext('2d'), L, 4.2, 0, 126);   // title card fully in
-  R.srv2DrawFrame($('shortC').getContext('2d'), S, 2.0, 0, 60);   // first lyric line in
+  sizeCanvases(); fxLabel(); const kind = $('kind').value;
+  const tl = kind === 'long' ? R.srv2LongTimeline({ duration: 60, chorusStart: null, hook: '', seed: a.id }) : R.srv2ShortTimeline({ duration: 30, lines: lines() });
+  const t = kind === 'long' ? 4.2 : 2.0; // Long: title card fully in · Short: first lyric line in
+  for (const [id, fx] of [['cmpA', R.SRV2_FX_STATIC], ['cmpB', fxB()]]) R.srv2DrawFrame($(id).getContext('2d'), R.srv2CreateScene({ kind, img: null, avatar: a, title: $('title').value, prepared: prep, timeline: tl, fx }), t, 0, Math.round(t * 30));
   if (!anim) say('Poster frames shown · press ▶ Animate preview to play them with the sample song');
   window.__srv2Poster = true;
 }
@@ -119,17 +142,24 @@ async function animate() {
   const dur = Math.min(buf.duration, Number($('dur').value) || 30);
   const an1 = R.srv2AnalyzeAudio(buf.getChannelData(0), buf.sampleRate, { lineCount: 0 });
   const an2 = R.srv2AnalyzeAudio(buf.getChannelData(0), buf.sampleRate, { lineCount: lines().length, windowSec: Math.min(dur, 30), fromStart: true });
-  const L = R.srv2CreateScene({ kind: 'long', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2LongTimeline({ duration: dur, chorusStart: Math.min(an1.chorusStart + an1.vocalOnset, dur - 18), hook: $('hook').value, seed: a.id }) });
-  const S = R.srv2CreateScene({ kind: 'short', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2ShortTimeline({ duration: Math.min(dur, 30), lines: lines(), lineTimings: an2.lineTimings }) });
+  const kind = $('kind').value; sizeCanvases();
+  const tl = kind === 'long' ? R.srv2LongTimeline({ duration: dur, chorusStart: Math.min(an1.chorusStart + an1.vocalOnset, dur - 18), hook: $('hook').value, seed: a.id })
+    : R.srv2ShortTimeline({ duration: Math.min(dur, 30), lines: lines(), lineTimings: an2.lineTimings });
+  const SA = R.srv2CreateScene({ kind, img: null, avatar: a, title: $('title').value, prepared: prep, timeline: tl, fx: R.SRV2_FX_STATIC });
+  const SB = R.srv2CreateScene({ kind, img: null, avatar: a, title: $('title').value, prepared: prep, timeline: tl, fx: fxB() });
+  const pA = [], pB = []; const p95 = (a) => { const s = a.slice(-150).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length * 0.95)].toFixed(1) : '–'; };
   const src = actx.createBufferSource(); src.buffer = buf; const an = actx.createAnalyser(); an.fftSize = 2048; src.connect(an); an.connect(actx.destination);
   const bins = new Uint8Array(an.frequencyBinCount); const bass = R.srv2BassFollower(); const t0 = actx.currentTime + 0.1; src.start(t0, 0, dur);
-  const lc = $('longC').getContext('2d'), sc = $('shortC').getContext('2d'); let f = 0;
-  anim = { actx, src, raf: 0 }; $('stopAnim').disabled = false;
+  const ca = $('cmpA').getContext('2d'), cb = $('cmpB').getContext('2d'); let f = 0; const end = tl.duration;
+  anim = { actx, src, raf: 0, SB }; $('stopAnim').disabled = false;
   const loop = () => {
-    const t = Math.max(0, actx.currentTime - t0); if (t >= dur) { stopAnim(); return; }
+    const t = Math.max(0, actx.currentTime - t0); if (t >= end) { stopAnim(); return; }
     an.getByteFrequencyData(bins); const lv = bass(bins, actx.sampleRate / an.fftSize);
-    R.srv2DrawFrame(lc, L, t, lv, f); if (t < S.timeline.duration) R.srv2DrawFrame(sc, S, t, lv, f); f++;
-    say(`Animating ${t.toFixed(1)} / ${dur.toFixed(0)} s · bass ${lv.toFixed(2)} · chorus at ${(an1.chorusStart + an1.vocalOnset).toFixed(1)} s · Short lines: ${an2.method}`);
+    let m = performance.now(); R.srv2DrawFrame(ca, SA, t, lv, f); pA.push(performance.now() - m);
+    m = performance.now(); R.srv2DrawFrame(cb, SB, t, lv, f); pB.push(performance.now() - m); f++;
+    $('perf').textContent = `Main-thread paint per frame (p95, last 5 s): A ${p95(pA)} ms · B ${p95(pB)} ms · budget 33 ms at 30 fps`;
+    window.__srv2Perf = { a: p95(pA), b: p95(pB), frames: f };
+    say(`Animating ${t.toFixed(1)} / ${end.toFixed(0)} s · bass ${lv.toFixed(2)} · chorus at ${(an1.chorusStart + an1.vocalOnset).toFixed(1)} s · Short lines: ${an2.method}`);
     anim.raf = requestAnimationFrame(loop);
   };
   loop();
@@ -141,15 +171,16 @@ async function renderTest() {
   stopAnim(); $('render').disabled = true; const a = av(); const kind = $('kind').value;
   try {
     const ab = await (await fetch($('audio').value)).arrayBuffer();
-    const out = await R.srv2RenderVideo({ kind, audio: ab, avatar: a, title: $('title').value, hook: $('hook').value, lyrics: $('lyrics').value, shortLyrics: $('lyrics').value,
-      maxDuration: Number($('dur').value) || undefined, canvas: kind === 'long' ? $('longC') : $('shortC'), onProgress: (m) => say(m) });
+    const motion = $('version').value === 'motion'; const fx = motion ? fxB() : R.SRV2_FX_STATIC;
+    const out = await R.srv2RenderVideo({ kind, audio: ab, avatar: a, title: $('title').value, hook: $('hook').value, lyrics: $('lyrics').value, shortLyrics: $('lyrics').value, fx,
+      maxDuration: Number($('dur').value) || undefined, canvas: motion ? $('cmpB') : $('cmpA'), onProgress: (m) => say(m) });
     $('out').src = URL.createObjectURL(out.blob);
     const s = out.stats, f = s.frames;
     tbl($('stats'), [['Container / codecs', `${s.container} · ${s.videoCodec} / ${s.audioCodec}`], ['MIME', s.mime], ['Resolution', `${s.width}×${s.height} @ ${s.fps} fps`],
       ['Bitrate', `${s.videoBitsPerSecondTarget / 1e6} Mbps target · ${(s.measuredKbps / 1000).toFixed(2)} Mbps overall`], ['Duration', s.durationSec + ' s'], ['File', (s.sizeBytes / 1048576).toFixed(2) + ' MB'],
       ['Frames drawn', `${f.drawn} / ${f.expected} · dropped ${f.droppedPct}%`, f.warn ? 'bad' : 'ok'], ['Paint time', `p50 ${f.paintMsP50} ms · p95 ${f.paintMsP95} ms`], ['Max gap', f.maxGapMs + ' ms'],
       ['Render time', s.renderSec + ' s'], ['Source enlargement', '×' + s.maxSourceUpscale], ['Audio analysis', `${s.analysis.method} · chorus ${s.analysis.chorusStart}s · onset ${s.analysis.vocalOnset}s`],
-      ['Hooks / lines', `${s.hooks.length} / ${s.lyricLines}`], ['Fonts loaded', String(s.fontsLoaded)], ['Tab hidden', String(s.hiddenDuringRender), s.hiddenDuringRender ? 'warn' : '']]);
+      ['Version', motion ? 'B · cinematic motion (' + (R.SRV2_FX_KEYS.filter((k) => s.fx[k]).join(', ') || 'none') + ')' : 'A · current static'], ['Hooks / lines', `${s.hooks.length} / ${s.lyricLines}`], ['Fonts loaded', String(s.fontsLoaded)], ['Tab hidden', String(s.hiddenDuringRender), s.hiddenDuringRender ? 'warn' : '']]);
     if (out.thumbBlob) $('thumb').src = URL.createObjectURL(out.thumbBlob);
     say('Rendered.', 'ok');
     const name = q.get('save');
@@ -163,6 +194,9 @@ async function renderTest() {
   $('render').disabled = false;
 }
 $('animate').onclick = animate; $('stopAnim').onclick = stopAnim; $('render').onclick = renderTest;
+for (const k of R.SRV2_FX_KEYS) $('fx_' + k).addEventListener('change', () => { fxLabel(); if (anim) anim.SB.fx = R.srv2NormalizeFx(fxB()); else showPoster(); });
+$('fx_reset').onclick = (e) => { e.preventDefault(); for (const k of R.SRV2_FX_KEYS) $('fx_' + k).checked = !!R.SRV2_FX_DEFAULTS[k]; fxLabel(); if (anim) anim.SB.fx = R.srv2NormalizeFx(fxB()); else showPoster(); };
+$('kind').addEventListener('change', () => { if (anim) stopAnim(); else showPoster(); });
 for (const id of ['avatar', 'title']) $(id).addEventListener('change', () => { showThumb(); showMeta(); if (!anim) showPoster(); if (id === 'title') showRotation(); });
 showMeta(); await showThumb(); await showPoster(); await showRotation(); window.__srv2Ready = true;
 if (q.get('auto') === 'render') renderTest();

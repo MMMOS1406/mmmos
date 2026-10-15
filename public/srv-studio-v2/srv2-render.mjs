@@ -17,7 +17,22 @@
 // Painters are plain canvas-2D code, so they run in the browser and in Node (@napi-rs/canvas) for tests
 // and report samples. Browser-only parts (fonts, image loading, recording) are guarded.
 
-export const SRV2_RENDER_VERSION = 'srv2-render-1';
+export const SRV2_RENDER_VERSION = 'srv2-render-2';
+
+// ═══ Cinematic motion layers (Checkpoint D5, order SRV-STUDIO-V2-010) ═══════
+// Each layer is an add-on over the D2/D4 presentation; with every layer off a frame is pixel-identical to
+// the D4 renderer (test-enforced), which is the "A · current" side of the Render Studio comparison.
+//   camera ....... slow continuous breathing zoom + horizontal/vertical sway, eased, always inside the image
+//   atmosphere ... drifting monochrome bokeh (kept off the face), soft city-light reflections, a slow light sweep
+//   film ......... soft luminance variation, breathing vignette, depth falloff (grain is part of the base look)
+//   reactive ..... restrained music response: smoothed bass lifts the atmosphere and adds ≤0.5% zoom; text never moves
+//   rain ......... optional fine rain texture (off by default)
+export const SRV2_FX_KEYS = ['camera', 'atmosphere', 'film', 'reactive', 'rain'];
+export const SRV2_FX_DEFAULTS = Object.freeze({ camera: true, atmosphere: true, film: true, reactive: true, rain: false }); // production
+export const SRV2_FX_STATIC = Object.freeze({ camera: false, atmosphere: false, film: false, reactive: false, rain: false }); // = D4
+export function srv2NormalizeFx(fx) { const o = {}; for (const k of SRV2_FX_KEYS) o[k] = !!(fx && fx[k]); return o; }
+export const SRV2_MOTION = { overscan: 1.06, breathe: 0.035, breatheSec: 16, breathe2: 0.02, breathe2Sec: 41, swaySec: 23, sway2Sec: 37, liftSec: 29, swayAmt: 0.8, reactZoom: 0.005,
+  shortZoomShare: 0.45 }; // the Short card breathes less and has no overscan, so the master is never enlarged (≤ ×1.0)
 
 export const SRV2_RENDER_CONFIG = {
   long:  { W: 1920, H: 1080, fps: 30, videoBitsPerSecond: 8_000_000, audioBitsPerSecond: 192_000, maxSec: 360 },
@@ -403,6 +418,7 @@ export function srv2CreateScene(opts) {
     vignette: makeVignette(W, H, kind === 'short' ? 0.5 : 0.55), grain: makeGrain(4, 256, 'grain-' + kind),
     textSide: focus.fx >= 0.5 ? 'left' : 'right',
     stats: { maxUpscale: 0 },
+    fx: srv2NormalizeFx(opts.fx), state: { lvSlow: 0 }, cam: { zoom: 1, mx: 0, my: 0 }, seed: seedOf((avatar.id || '') + '|' + (opts.title || '')),
   };
 }
 // Draws one frame at time t (seconds). level = bass energy 0..1 from the analyser (0 when not reactive).
@@ -418,17 +434,22 @@ function drawLong(ctx, s, t, level, frame) {
   const halo = 0.10 + 0.22 * lv; const hx = tl.xfade / 2;
   let i = tl.shots.findIndex((sh) => t < sh.end); if (i < 0) i = tl.shots.length - 1;
   const cur = tl.shots[i]; const next = tl.shots[i + 1]; const prev = tl.shots[i - 1];
-  const r = shotRect(src, W, H, cur, t, s.focus); s.stats.maxUpscale = Math.max(s.stats.maxUpscale, r.scale);
+  const moving = fxPrepare(s, t, level);
+  const rectOf = (sh) => (moving && s.fx.camera ? cameraShotRect(s, src, W, H, sh, t) : shotRect(src, W, H, sh, t, s.focus));
+  const r = rectOf(cur); s.stats.maxUpscale = Math.max(s.stats.maxUpscale, r.scale); s.lastRect = r;
   drawGradedRect(ctx, src, r, 0, 0, W, H, halo);
   if (prev && t < cur.start + hx) { // finish dissolving in from the previous shot
     ctx.save(); ctx.globalAlpha = 1 - fade(t, cur.start - hx, cur.start + hx);
-    drawGradedRect(ctx, src, shotRect(src, W, H, prev, t, s.focus), 0, 0, W, H, halo); ctx.restore();
+    drawGradedRect(ctx, src, rectOf(prev), 0, 0, W, H, halo); ctx.restore();
   }
   if (next && t > cur.end - hx) {
     ctx.save(); ctx.globalAlpha = fade(t, next.start - hx, next.start + hx);
-    drawGradedRect(ctx, src, shotRect(src, W, H, next, t, s.focus), 0, 0, W, H, halo); ctx.restore();
+    drawGradedRect(ctx, src, rectOf(next), 0, 0, W, H, halo); ctx.restore();
   }
+  if (moving && s.fx.atmosphere) drawAtmosphere(ctx, s, t, (s.focus.fx * src.w - r.x) / r.w * W, (s.focus.fy * src.h - r.y) / r.h * H, null);
+  if (moving && s.fx.rain) drawRain(ctx, s, t, null);
   ctx.drawImage(s.vignette, 0, 0);
+  if (moving && s.fx.film) drawFilm(ctx, s, t);
   drawGrain(ctx, s, W, H, frame, 0.055);
   // title card (0–8 s) and outro card
   const titleA = Math.min(fade(t, 1.2, 2.6), 1 - fade(t, 6.6, tl.titleEnd));
@@ -482,6 +503,113 @@ function drawTitleCard(ctx, s, a, slide) {
   ctx.restore();
 }
 
+// ── D5 motion helpers ──
+// Camera offsets: zoom ≥ 1 and sway as a FRACTION of the free margin around the framing (|m| ≤ 0.8), so the
+// moving frame never reaches an image edge; pure sums of sines, so position and speed are continuous.
+export function srv2Camera(t, seed = 0) {
+  const M = SRV2_MOTION; const ph = (seed % 1000) / 1000 * Math.PI * 2; const TAU = Math.PI * 2;
+  const zoom = 1 + M.breathe * (0.5 - 0.5 * Math.cos(TAU * t / M.breatheSec)) + M.breathe2 * (0.5 - 0.5 * Math.cos(TAU * t / M.breathe2Sec + ph));
+  const mx = M.swayAmt * (0.68 * Math.sin(TAU * t / M.swaySec + ph) + 0.32 * Math.sin(TAU * t / M.sway2Sec + ph * 1.7));
+  const my = M.swayAmt * 0.5 * Math.sin(TAU * t / M.liftSec + ph * 0.6);
+  return { zoom, mx, my };
+}
+// Like srv2FrameRect, but the camera offset is applied inside the free margin, never against an edge.
+// The centre and the margin are measured once at the widest framing (scale sRef ≤ s), so they do not change
+// while the camera breathes: the motion stays a pure sum of sines, and any tighter frame fits inside.
+export function srv2CameraRect(srcW, srcH, W, H, s, cx, cy, mx, my, sRef = s) {
+  const base = Math.max(W / srcW, H / srcH); const k = base * s, k0 = base * Math.min(sRef, s);
+  const w = W / k, h = H / k, w0 = W / k0, h0 = H / k0;
+  let x = clamp(cx * srcW, w0 / 2, srcW - w0 / 2), y = clamp(cy * srcH, h0 / 2, srcH - h0 / 2);
+  x += mx * Math.min(x - w0 / 2, srcW - w0 / 2 - x); y += my * Math.min(y - h0 / 2, srcH - h0 / 2 - y);
+  return { x: x - w / 2, y: y - h / 2, w, h, scale: k };
+}
+// Long shot camera (exported for the tests): framing push-in × overscan × breathing × restrained music zoom.
+export function srv2ShotCameraRect(srcW, srcH, W, H, framing, focus, p, cam, react = 0) {
+  const F = SRV2_FRAMINGS[framing]; const M = SRV2_MOTION;
+  const z = F.z * (1 + SRV2_LONG_TIMING.push * ease(p)) * M.overscan * cam.zoom * (1 + M.reactZoom * react);
+  const fx = 0.5 + (focus.fx - 0.5) * F.pull, fy = 0.5 + (focus.fy + F.dy - 0.5) * F.pull;
+  return srv2CameraRect(srcW, srcH, W, H, z, fx, fy, cam.mx, cam.my, F.z * M.overscan);
+}
+// Short face-card camera (square source window inside the master; never enlarged on the 860 px card).
+export function srv2CardCameraRect(srcW, srcH, focus, p, cam, react = 0) {
+  const M = SRV2_MOTION; const side = Math.min(srcW, srcH);
+  const z = (1 + SRV2_LONG_TIMING.push * ease(p)) * (1 + (cam.zoom - 1) * M.shortZoomShare) * (1 + M.reactZoom * react);
+  const r = srv2CameraRect(srcW, srcH, side, side, z, focus.fx, focus.fy + 0.12, cam.mx, cam.my, 1);
+  return { x: r.x, y: r.y, w: r.w, h: r.h };
+}
+function seedOf(str) { let h = 0; for (const c of String(str || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
+function cameraShotRect(s, src, W, H, shot, t) {
+  const p = clamp((t - shot.start) / Math.max(1, shot.end - shot.start), -0.1, 1.1);
+  return srv2ShotCameraRect(src.w, src.h, W, H, shot.framing, s.focus, p, s.cam, s.fx.reactive ? s.state.lvSlow : 0);
+}
+function fxAssets(s) {
+  if (s.fxa) return s.fxa;
+  const rnd = srv2Rng('bokeh|' + s.seed); const W = s.W, H = s.H; const sprites = [];
+  for (const r of [24, 40, 64, 96, 140]) {
+    const c = mk(r * 2, r * 2); const x = c.getContext('2d'); const g = x.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, 'rgba(255,255,255,0.9)'); g.addColorStop(0.55, 'rgba(255,255,255,0.45)'); g.addColorStop(0.8, 'rgba(255,255,255,0.12)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g; x.fillRect(0, 0, r * 2, r * 2); sprites.push(c);
+  }
+  const n = s.kind === 'short' ? 12 : 16; const bokeh = [];
+  for (let i = 0; i < n; i++) bokeh.push({ x: rnd(), y: s.kind === 'short' ? rnd() : 0.08 + rnd() * 0.84, s: (rnd() * sprites.length) | 0, vx: (rnd() - 0.5) * 14, vy: (rnd() - 0.6) * 5, a: 0.035 + rnd() * 0.075, tw: 5 + rnd() * 9, ph: rnd() * 6.28, depth: 0.4 + rnd() * 1.2 });
+  const streaks = []; for (let i = 0; i < 6; i++) streaks.push({ x: rnd(), y: 0.76 + rnd() * 0.2, w: 0.08 + rnd() * 0.16, a: 0.03 + rnd() * 0.04, sp: 6 + rnd() * 10, ph: rnd() * 6.28 });
+  const sweep = mk(Math.round(W * 0.45), 8); { const x = sweep.getContext('2d'); const g = x.createLinearGradient(0, 0, sweep.width, 0); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, sweep.width, 8); }
+  const depth = mk(W, H); { const x = depth.getContext('2d'); const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, 'rgba(0,0,0,0.32)'); g.addColorStop(0.18, 'rgba(0,0,0,0)'); g.addColorStop(0.78, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.36)'); x.fillStyle = g; x.fillRect(0, 0, W, H); }
+  const rain = mk(256, 256); { const x = rain.getContext('2d'); const rr = srv2Rng('rain|' + s.seed); x.strokeStyle = 'rgba(255,255,255,0.55)'; x.lineWidth = 1; for (let i = 0; i < 70; i++) { const px = rr() * 256, py = rr() * 256, l = 10 + rr() * 22; x.beginPath(); x.moveTo(px, py); x.lineTo(px - l * 0.18, py + l); x.stroke(); } }
+  s.fxa = { sprites, bokeh, streaks, sweep, depth, rain };
+  return s.fxa;
+}
+// Night atmosphere in screen space. (faceX, faceY) = face position on screen; bokeh fade out near it.
+function drawAtmosphere(ctx, s, t, faceX, faceY, region) {
+  const A = fxAssets(s); const { W, H } = s; const R = region || { x: 0, y: 0, w: W, h: H };
+  const lift = s.fx.reactive ? s.state.lvSlow : 0; const cam = s.cam;
+  ctx.save(); ctx.globalCompositeOperation = 'screen';
+  for (const b of A.bokeh) {
+    const sp = A.sprites[b.s]; const size = sp.width * (s.kind === 'short' ? 1.25 : 1);
+    const span = R.w + size * 2, spanY = R.h + size * 2;
+    const x = R.x - size + ((((b.x * span + b.vx * t + cam.mx * 18 * b.depth) % span) + span) % span);
+    const y = R.y - size + ((((b.y * spanY + b.vy * t + cam.my * 10 * b.depth) % spanY) + spanY) % spanY);
+    const d = Math.hypot(x + size / 2 - faceX, y + size / 2 - faceY) / (Math.min(W, H) * 0.32);
+    const away = clamp((d - 0.55) / 0.6, 0, 1);
+    const a = b.a * (0.75 + 0.25 * Math.sin(t * 6.283 / b.tw + b.ph)) * (1 + 0.6 * lift) * away;
+    if (a <= 0.002) continue;
+    ctx.globalAlpha = a; ctx.drawImage(sp, x, y, size, size);
+  }
+  if (!region) { // city-light reflections along the lower edge (Long only)
+    for (const st of A.streaks) {
+      const w = st.w * W * (0.85 + 0.15 * Math.sin(t / st.sp * 6.283 + st.ph)); const x = ((st.x * W + t * st.sp) % (W + w)) - w / 2;
+      ctx.globalAlpha = st.a * (0.7 + 0.3 * Math.sin(t * 0.9 + st.ph)) * (1 + 0.5 * lift);
+      ctx.drawImage(A.sprites[2], x, st.y * H, w, H * 0.012);
+    }
+  }
+  // slow diagonal light sweep, once every ~26 s
+  const ph = ((t + s.seed % 13) % 26) / 26; const sx = R.x - A.sweep.width + ph * (R.w + A.sweep.width * 2);
+  ctx.globalAlpha = 0.045 * Math.sin(ph * Math.PI) * (1 + 0.5 * lift);
+  ctx.translate(sx, R.y); ctx.rotate(-0.21); ctx.drawImage(A.sweep, 0, -R.h * 0.2, A.sweep.width, R.h * 1.5);
+  ctx.restore();
+}
+function drawRain(ctx, s, t, region) {
+  const A = fxAssets(s); const R = region || { x: 0, y: 0, w: s.W, h: s.H };
+  const pat = ctx.createPattern(A.rain, 'repeat'); if (!pat) return;
+  ctx.save(); ctx.beginPath(); ctx.rect(R.x, R.y, R.w, R.h); ctx.clip(); ctx.globalAlpha = 0.06; ctx.globalCompositeOperation = 'screen';
+  ctx.translate(R.x - ((t * 40) % 256), R.y + ((t * 420) % 256) - 256); ctx.fillStyle = pat; ctx.fillRect(0, 0, R.w + 512, R.h + 512); ctx.restore();
+}
+// Film treatment over the picture (below all text): depth falloff, breathing vignette, soft luminance drift.
+function drawFilm(ctx, s, t) {
+  const A = fxAssets(s); const { W, H } = s;
+  ctx.save(); ctx.globalAlpha = 1; ctx.drawImage(A.depth, 0, 0);
+  ctx.globalAlpha = 0.18 + 0.12 * (0.5 + 0.5 * Math.sin(t * 6.283 / 11)); ctx.drawImage(s.vignette, 0, 0);
+  const n = 0.5 * Math.sin(t * 2.1) + 0.3 * Math.sin(t * 5.3 + 1.3) + 0.2 * Math.sin(t * 11.7 + 0.4); // −1..1, smooth
+  ctx.globalAlpha = 0.016 * Math.abs(n); ctx.fillStyle = n > 0 ? '#ffffff' : '#000000'; ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+}
+function fxPrepare(s, t, level) {
+  if (!s.fx.camera && !s.fx.atmosphere && !s.fx.film && !s.fx.reactive && !s.fx.rain) return false;
+  s.state.lvSlow += ((s.fx.reactive ? level : 0) - s.state.lvSlow) * 0.06; // slow, restrained response
+  s.cam = s.fx.camera ? srv2Camera(t, s.seed) : { zoom: 1, mx: 0, my: 0 };
+  return true;
+}
+
 // Short layout (1080x1920). All text sits outside the Shorts safe zones (top 220, bottom 480, right 140).
 export const SRV2_SHORT_LAYOUT = {
   brandY: 262, brandSize: 26, titleY: 330, titleSize: 50, genreY: 372, genreSize: 26,
@@ -492,20 +620,33 @@ function drawShort(ctx, s, t, level, frame) {
   const { W, H, src } = s; const L = SRV2_SHORT_LAYOUT; const lv = s.reactive ? level : 0; const dur = s.timeline.duration;
   ctx.save(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, W, H);
-  // blurred backdrop, slow zoom
+  const moving = fxPrepare(s, t, level); const cam = s.cam;
+  // blurred backdrop, slow zoom (D5: drifts with the camera, more than the card, for depth)
   const bz = 1.08 + 0.04 * (t / Math.max(1, dur));
-  const br = srv2FrameRect(src.blurred.width, src.blurred.height, W, H, bz, s.focus.fx, s.focus.fy + 0.05);
+  const br = moving && s.fx.camera
+    ? srv2CameraRect(src.blurred.width, src.blurred.height, W, H, bz * 1.04 * cam.zoom, s.focus.fx, s.focus.fy + 0.05, cam.mx, cam.my, 1.08 * 1.04)
+    : srv2FrameRect(src.blurred.width, src.blurred.height, W, H, bz, s.focus.fx, s.focus.fy + 0.05);
   ctx.drawImage(src.blurred, br.x, br.y, br.w, br.h, 0, 0, W, H);
   ctx.fillStyle = 'rgba(5,5,5,0.56)'; ctx.fillRect(0, 0, W, H);
+  const C = L.card;
+  if (moving && s.fx.atmosphere) drawAtmosphere(ctx, s, t, C.x + C.size / 2, C.y + C.size * 0.4, { x: 0, y: 0, w: W, h: H });
   // face card: square around the face, push-in 1.00→1.06 over the Short
   const side = Math.min(src.w, src.h); const p = t / Math.max(1, dur); const z = 1 + SRV2_LONG_TIMING.push * ease(p);
-  const sw = side / z; const sx = clamp(s.focus.fx * src.w - sw / 2 + (p - 0.5) * sw * 0.02, 0, src.w - sw);
-  const sy = clamp((s.focus.fy + 0.12) * src.h - sw / 2, 0, src.h - sw);
-  const C = L.card; s.stats.maxUpscale = Math.max(s.stats.maxUpscale, C.size / sw);
+  let sw, sx, sy;
+  if (moving && s.fx.camera) {
+    const q = srv2CardCameraRect(src.w, src.h, s.focus, p, cam, s.fx.reactive ? s.state.lvSlow : 0);
+    sw = q.w; sx = q.x; sy = q.y;
+  } else {
+    sw = side / z; sx = clamp(s.focus.fx * src.w - sw / 2 + (p - 0.5) * sw * 0.02, 0, src.w - sw);
+    sy = clamp((s.focus.fy + 0.12) * src.h - sw / 2, 0, src.h - sw);
+  }
+  s.lastRect = { x: sx, y: sy, w: sw, h: sw }; s.stats.maxUpscale = Math.max(s.stats.maxUpscale, C.size / sw);
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 40; ctx.fillStyle = '#000'; ctx.fillRect(C.x, C.y, C.size, C.size); ctx.restore();
   drawGradedRect(ctx, src, { x: sx, y: sy, w: sw, h: sw }, C.x, C.y, C.size, C.size, 0.10 + 0.22 * lv);
+  if (moving && s.fx.rain) drawRain(ctx, s, t, { x: C.x, y: C.y, w: C.size, h: C.size });
   ctx.strokeStyle = 'rgba(240,240,240,0.10)'; ctx.lineWidth = 2; ctx.strokeRect(C.x + 1, C.y + 1, C.size - 2, C.size - 2);
   ctx.drawImage(s.vignette, 0, 0);
+  if (moving && s.fx.film) drawFilm(ctx, s, t);
   drawGrain(ctx, s, W, H, frame, 0.05);
   // header: wordmark, title, genre
   drawBrand(ctx, s, L.centerX, L.brandY, L.brandSize, 'center', 1);
@@ -680,7 +821,8 @@ export async function srv2RenderVideo(opts) {
     : srv2LongTimeline({ duration, chorusStart: analysis.chorusStart + analysis.vocalOnset, hook: opts.hook || '', seed: (opts.avatar && opts.avatar.id) + '|' + opts.title });
   say('Preparing the black-and-white grade…', 0);
   const prepared = srv2PrepareSource(img, opts.avatar && opts.avatar.crop);
-  const scene = srv2CreateScene({ kind, img, avatar: opts.avatar, title: opts.title, hook: opts.hook, timeline, logo, reactive: opts.reactive, prepared });
+  const fx = srv2NormalizeFx(opts.fx === undefined ? SRV2_FX_DEFAULTS : opts.fx); // production entry: D5 motion on by default
+  const scene = srv2CreateScene({ kind, img, avatar: opts.avatar, title: opts.title, hook: opts.hook, timeline, logo, reactive: opts.reactive, prepared, fx });
 
   const canvas = opts.canvas || mk(cfg.W, cfg.H); canvas.width = cfg.W; canvas.height = cfg.H;
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -738,7 +880,7 @@ export async function srv2RenderVideo(opts) {
     measuredKbps: Math.round((blob.size * 8) / duration / 1000), renderSec: +((performance.now() - started) / 1000).toFixed(1),
     captureMode: vtrack ? 'requestFrame' : 'captureStream(fps)', frames: m, hiddenDuringRender: hidden > 0, fontsLoaded: !!fontsOk, maxSourceUpscale: +scene.stats.maxUpscale.toFixed(2),
     analysis, hooks: timeline.hooks || [], lyricLines: (timeline.lines || []).length,
-    avatarId: opts.avatar && opts.avatar.id, logo: !!logo,
+    avatarId: opts.avatar && opts.avatar.id, logo: !!logo, fx,
     thumb: Object.assign({ width: th.W, height: th.H, type: th.type, bytes: thumbBlob ? thumbBlob.size : 0 }, thumbInfo),
   };
   return { blob, mime, ext: info.ext, stats, thumbBlob };

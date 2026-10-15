@@ -180,7 +180,7 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
     ok('F-3: flag "false", flag read error and flag HTTP error all fail closed with no model call', [offFalse, offErr, off500].every((r) => r.res.code === 403 && r.calls.model === 0));
     ok('F-3: flag ON → the handler works as before (one model call, caption + #SRVStudio)', on.res.code === 200 && on.res.body.ok === true && on.calls.model === 1 && /#SRVStudio/.test(on.res.body.hashtags));
     ok('F-3: SRV Farsi caption handler and the dispatcher are byte-identical to main', top(OPS, 'farsiRegenCaption') === top(BASE_OPS, 'farsiRegenCaption') && lineOf(OPS, /action === 'farsi_regen_caption'/) === lineOf(BASE_OPS, /action === 'farsi_regen_caption'/));
-    const head = execSync('git diff 2aac4af -U0 -- api/ops.js', { cwd: repo }).toString();
+    const head = execSync('git diff 2aac4af 1dc4f7e -U0 -- api/ops.js', { cwd: repo }).toString();
     const hunks = head.split('\n').filter((l) => l.startsWith('@@'));
     ok('F-3: the only api/ops.js change in D4 is inside srvEnglishRegenCaption', hunks.length === 1 && /srvEnglishRegenCaption|async function srvEnglishRegenCaption/.test(hunks[0] + head.split('\n').slice(0, 12).join('\n')) && !/^-[^-]/m.test(head), hunks.join(' | '));
   }
@@ -197,10 +197,10 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
   }
   // ── 8. V2-only scope of the D4 change (measured against the audited D2 commit 2aac4af) ──
   {
-    const diff = execSync('git diff 2aac4af --name-only', { cwd: repo }).toString().trim().split('\n').filter(Boolean);
+    const diff = execSync('git diff 2aac4af 1dc4f7e --name-only', { cwd: repo }).toString().trim().split('\n').filter(Boolean);
     const allowed = ['public/index.html', 'api/ops.js', 'public/srv-studio-v2/srv2-render.mjs', 'tests/srv/studio-v2-preview/render-studio.html', 'tests/srv/test_srv_studio_v2_lifecycle.cjs', 'tests/srv/test_srv_studio_v2_render.mjs', 'tests/srv/test_srv_studio_v2_avatars.mjs', 'tests/srv/test_srv_studio_v2_isolation.mjs'];
     ok('Scope: D4 changes only V2 files, the V2 caption handler, the V2 preview page and V2 tests', diff.every((f) => allowed.includes(f)), diff.join(', '));
-    const hd = execSync('git diff 2aac4af -U0 -- public/index.html', { cwd: repo }).toString();
+    const hd = execSync('git diff 2aac4af 1dc4f7e -U0 -- public/index.html', { cwd: repo }).toString();
     const fns = [...hd.matchAll(/^@@[^@]*@@ (?:async )?function ([A-Za-z0-9_$]+)/gm)].map((m) => m[1]);
     ok('Scope: every index.html hunk sits in SRV English / V2 code', fns.length > 0 && fns.every((f) => /^_srvEnglish|^renderSRVEnglishLifecycleCard$|^srvStudioV2|^_srvEnglishV2/.test(f)), fns.join(','));
     ok('Protected: _srvRenderVideo byte-identical to main', top(H, '_srvRenderVideo') === top(BASE_H, '_srvRenderVideo'));

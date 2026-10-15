@@ -35,7 +35,8 @@ async function shot(page, taskId, file) {
   if (el && el.asElement()) await el.asElement().screenshot({ path: path.join(outDir, file) });
 }
 const pkgOf = (page, id) => page.evaluate((i) => { const p = _srvEnglishV2PkgForTask(_srvEnglishTaskById(i)); return p && p.id; }, id);
-const state = (page, id) => page.evaluate((i) => { const p = _srvEnglishV2PkgForTask(_srvEnglishTaskById(i)); return { stage: _srvEnglishV2GetStage(i), status: _srvEnglishTaskById(i).status, avatar: p.srvAvatar && p.srvAvatar.id, render: p.srvRender && { mime: p.srvRender.mime, w: p.srvRender.width, h: p.srvRender.height, dur: p.srvRender.durationSec, kbps: p.srvRender.measuredKbps, frames: p.srvRender.frames, upscale: p.srvRender.maxSourceUpscale, hooks: p.srvRender.hooks, thumbBytes: p.srvRender.thumb && p.srvRender.thumb.bytes }, publish: p.srvPublish || null }; }, id);
+const saved = async (id) => { const r = await fetch(srv.origin + '/__stub/package?id=' + encodeURIComponent(id)); return r.ok ? r.json() : null; };
+const state = (page, id) => page.evaluate((i) => { const p = _srvEnglishV2PkgForTask(_srvEnglishTaskById(i)); return { stage: _srvEnglishV2GetStage(i), status: _srvEnglishTaskById(i).status, avatar: p.srvAvatar && p.srvAvatar.id, render: p.srvRender && { mime: p.srvRender.mime, w: p.srvRender.width, h: p.srvRender.height, dur: p.srvRender.durationSec, kbps: p.srvRender.measuredKbps, frames: p.srvRender.frames, upscale: p.srvRender.maxSourceUpscale, hooks: p.srvRender.hooks, thumbBytes: p.srvRender.thumb && p.srvRender.thumb.bytes, version: p.srvRender.version, fx: p.srvRender.fx }, publish: p.srvPublish || null }; }, id);
 async function loadAudio(page, pkgId) {
   await page.evaluate(async (id) => { const b = await (await fetch('/__v2/test-audio.mp3')).blob(); _srvAudioData[id] = { file: new File([b], 'neon-nights.mp3', { type: 'audio/mpeg' }), name: 'neon-nights.mp3', sizeMB: (b.size / 1048576).toFixed(1) }; }, pkgId);
 }
@@ -56,6 +57,7 @@ async function buildApprovePublish(page, taskId, label) {
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Approve & Publish/.test(b.textContent) && b.offsetParent).click());
   await page.waitForFunction((i) => _srvEnglishV2GetStage(i) === 'done', { timeout: 60000, polling: 500 }, taskId);
   step(`${label}: publish → done`, await state(page, taskId));
+  { const row = await saved(pkgId); step(`${label}: saved package row`, { id: row && row.id, srvTaskUid: row && row.srvTaskUid, version: row && row.srvRender && row.srvRender.version, fx: row && row.srvRender && row.srvRender.fx, published: !!(row && row.srvPublish), thumb: !!(row && row._srvThumbUrl) }); }
   await shot(page, taskId, `${label}-3-done.png`);
 }
 
