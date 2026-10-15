@@ -1,10 +1,10 @@
 // SRV Studio V2 — example 16:9 thumbnail and 9:16 Short compositions (Checkpoint C preview only).
 // Runs in the browser (preview page) and in Node (@napi-rs/canvas, sample PNGs for the report).
 // These are DESIGN MOCKS for review, not the production renderer (_srvRenderVideo is untouched).
-// The source avatars are 303x252 concept crops: every composition reports the enlargement it needed.
+// Every composition reports the scale it applied to the source (below 1 = downscaled, above 1 = enlarged).
 //
 // Branding: an original "SRV STUDIO" wordmark (no logo file exists yet). Cinematic black-and-white is
-// applied here as a grade (the source images are warm sepia); `tone:'source'` shows them as delivered.
+// applied here as a grade (some sources carry a warm split-tone); `tone:'source'` shows them as delivered.
 
 export const SRV2_BRAND = { word: 'SRV STUDIO', genre: 'Emotional Deep House · Night Drive' };
 const FONTS = { title: "'Playfair Display', Georgia, serif", label: "'Inter', system-ui, sans-serif" };
@@ -51,8 +51,39 @@ export function composeThumbnail(ctx, img, avatar, { title, tone = 'bw', W = 128
   return { upscale: +k.scale.toFixed(2), sourcePx: `${Math.round(k.sw)}×${Math.round(k.sh)}` };
 }
 
-// 9:16 Short — blurred full-bleed backdrop, the landscape portrait as a framed band, lyric + title below.
-export function composeShort(ctx, img, avatar, { title, lyric, tone = 'bw', W = 1080, H = 1920 } = {}) {
+// 9:16 Short — blurred full-bleed backdrop, the portrait as a framed card, lyric + title below.
+// Final masters (≥ 600 px tall) get a square card cut around the face (942 px source → 1080 px, ×1.15);
+// small concept crops keep the full-width landscape band.
+export function composeShort(ctx, img, avatar, opts = {}) {
+  const c = avatar.crop;
+  if (c.h >= 600) return composeShortSquare(ctx, img, avatar, opts);
+  return composeShortBand(ctx, img, avatar, opts);
+}
+function composeShortSquare(ctx, img, avatar, { title, lyric, tone = 'bw', W = 1080, H = 1920 } = {}) {
+  const c = avatar.crop, f = avatar.focus;
+  ctx.save(); ctx.fillStyle = '#070708'; ctx.fillRect(0, 0, W, H);
+  const b = cover(c.w, c.h, W, H, f.fx, f.fy);
+  ctx.filter = (tone === 'source' ? '' : 'grayscale(1) ') + 'blur(30px) brightness(0.42)';
+  ctx.drawImage(img, c.x + b.sx, c.y + b.sy, b.sw, b.sh, -40, -40, W + 80, H + 80); ctx.filter = 'none';
+  const side = c.h, sx = Math.min(c.w - side, Math.max(0, f.fx * c.w - side / 2));
+  const cardY = Math.round(H * 0.15), cardW = W, cardH = W;
+  grade(ctx, tone); ctx.drawImage(img, c.x + sx, c.y, side, side, 0, cardY, cardW, cardH); ctx.filter = 'none';
+  const g = ctx.createLinearGradient(0, cardY + cardH - 160, 0, cardY + cardH); g.addColorStop(0, 'rgba(7,7,8,0)'); g.addColorStop(1, 'rgba(7,7,8,0.92)');
+  ctx.fillStyle = g; ctx.fillRect(0, cardY + cardH - 160, W, 160);
+  ctx.fillStyle = '#ece8df'; ctx.font = `600 ${Math.round(W * 0.034)}px ${FONTS.label}`; ctx.textAlign = 'left';
+  const ww = ctx.measureText(SRV2_BRAND.word).width + SRV2_BRAND.word.length * W * 0.012;
+  spaced(ctx, SRV2_BRAND.word, (W - ww) / 2, H * 0.095, W * 0.012);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#f5f2ea';
+  const ls = Math.round(W * 0.062); ctx.font = `600 italic ${ls}px ${FONTS.title}`;
+  const ll = wrap(ctx, lyric, W * 0.86).slice(0, 3); const ly = cardY + cardH + H * 0.075;
+  ll.forEach((l, i) => ctx.fillText(l, W / 2, ly + i * ls * 1.2));
+  const ty = ly + ll.length * ls * 1.2 + H * 0.05;
+  ctx.fillStyle = 'rgba(236,232,223,0.92)'; ctx.font = `700 ${Math.round(W * 0.05)}px ${FONTS.title}`; ctx.fillText(title, W / 2, ty);
+  ctx.fillStyle = 'rgba(236,232,223,0.6)'; ctx.font = `500 ${Math.round(W * 0.03)}px ${FONTS.label}`; ctx.fillText(SRV2_BRAND.genre, W / 2, ty + H * 0.035);
+  ctx.restore();
+  return { upscale: +(cardW / side).toFixed(2), sourcePx: `${Math.round(side)}×${Math.round(side)}` };
+}
+function composeShortBand(ctx, img, avatar, { title, lyric, tone = 'bw', W = 1080, H = 1920 } = {}) {
   const c = avatar.crop, f = avatar.focus;
   ctx.save(); ctx.fillStyle = '#070708'; ctx.fillRect(0, 0, W, H);
   const b = cover(c.w, c.h, W, H, f.fx, f.fy);

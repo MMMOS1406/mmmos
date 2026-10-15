@@ -49,23 +49,31 @@ td img{width:64px;height:44px;object-fit:cover;border-radius:4px;filter:grayscal
 <body>
 <main>
   <header style="display:flex;flex-direction:column;gap:8px">
-    <div class="eyebrow">SRV Studio V2 · Checkpoint C · local preview</div>
+    <div class="eyebrow">SRV Studio V2 · Checkpoint C2 · local preview</div>
     <h1>Signature Avatar Studio</h1>
-    <p>The CEO-approved 20-image collection as delivered, its quality, the V2 rotation, the avatars assigned to the preview test tasks, and example compositions. Sample data on this computer only; nothing is published.</p>
-    <div class="note"><strong>Not HD masters.</strong> Every image is a 303–304 × 252 px concept crop from a contact sheet, warm sepia toned. The compositions below enlarge them about 3.5× and say so. Nothing here upscales a file or labels it as HD.</div>
+    <p>The CEO's final 20-image collection as delivered, its quality, the V2 rotation, the avatars assigned to the preview test tasks, and example compositions. Sample data on this computer only; nothing is published.</p>
+    <div class="note"><strong>Final masters, 1668–1672 × 941–943 px (16:9).</strong> HD for 1280×720 thumbnails (downscaled). Below full HD: a 1920×1080 frame would enlarge them 1.15×, and the square Short card 1.15×. Every caption states the scale used. Two images are held from rotation (see section 2). The earlier concept crops are archived, never picked, and kept so older packages still resolve.</div>
   </header>
 
   <section id="collection">
-    <div class="eyebrow">1 · Collection</div>
-    <h2>All 20 portraits</h2>
-    <p>Shown as delivered (sepia). The dashed overlay is the registry crop, which removes the sheet number, the next-row strip and the side gutters. Click a portrait to use it in the compositions below.</p>
+    <div class="eyebrow">1 · Final collection</div>
+    <h2>All 20 final portraits</h2>
+    <p>Shown as delivered. Click a portrait to use it in the compositions below.</p>
     <div class="grid" id="grid"></div>
   </section>
 
+  <section id="held">
+    <div class="eyebrow">2 · Held and questionable</div>
+    <h2>Assets that need a decision</h2>
+    <p>Held images are outside the rotation until the CEO decides. Flagged images rotate, but carry a note.</p>
+    <div class="tbl"><table><thead><tr><th>#</th><th>Image</th><th>Status</th><th>Finding</th></tr></thead><tbody id="heldrows"></tbody></table></div>
+    <details style="margin-top:6px"><summary style="cursor:pointer;color:var(--dim)">Archived concept avatars (Checkpoint C, 303×252, never picked again)</summary><div class="grid" id="archived" style="margin-top:10px"></div></details>
+  </section>
+
   <section id="rotation">
-    <div class="eyebrow">2 · Selection and rotation</div>
+    <div class="eyebrow">3 · Selection and rotation</div>
     <h2>Rotation simulator</h2>
-    <p>Runs the real <code>srv2AvatarPick</code> from <code>lib/srvStudioV2Avatars.mjs</code>: eligible avatars only, never the previous avatar, mood-suited first, least recently used first.</p>
+    <p>Runs the real <code>srv2AvatarPick</code> from <code>lib/srvStudioV2Avatars.mjs</code>: final eligible avatars only, never the previous avatar, mood-suited first, then a different pose from the previous avatar, least recently used first.</p>
     <div class="controls">
       <label for="n">Tasks</label><select id="n"><option>10</option><option selected>20</option><option>40</option></select>
       <label for="moods">Moods</label><select id="moods"><option value="mix" selected>Task rotation mix</option><option value="romantic">All Romantic</option><option value="emotional">All Melancholic</option><option value="hopeful">All Hopeful</option></select>
@@ -76,19 +84,19 @@ td img{width:64px;height:44px;object-fit:cover;border-radius:4px;filter:grayscal
   </section>
 
   <section id="tasks">
-    <div class="eyebrow">3 · Assigned to test tasks</div>
+    <div class="eyebrow">4 · Assigned to test tasks</div>
     <h2>Preview tasks and their avatars</h2>
     <p>Read live from the preview's sample database. The avatar is stored on each task's package and survives reloads and regeneration.</p>
     <div class="tbl"><table><thead><tr><th>Task</th><th>Song</th><th>Avatar</th><th>Assigned</th><th>How</th></tr></thead><tbody id="taskrows"><tr><td colspan="5">Loading…</td></tr></tbody></table></div>
   </section>
 
   <section id="compose">
-    <div class="eyebrow">4 · Compositions</div>
+    <div class="eyebrow">5 · Compositions</div>
     <h2>Example 16:9 thumbnail and 9:16 Short</h2>
     <div class="controls">
       <label for="av">Avatar</label><select id="av"></select>
       <label for="song">Song</label><select id="song"></select>
-      <label for="tone">Tone</label><select id="tone"><option value="bw" selected>Cinematic B&amp;W (graded)</option><option value="source">As delivered (sepia)</option></select>
+      <label for="tone">Tone</label><select id="tone"><option value="bw" selected>Cinematic B&amp;W (graded)</option><option value="source">As delivered</option></select>
     </div>
     <div class="compos">
       <div><canvas id="thumb" width="1280" height="720" aria-label="16:9 thumbnail composition"></canvas><div class="cap" id="thumbcap"></div></div>
@@ -98,7 +106,7 @@ td img{width:64px;height:44px;object-fit:cover;border-radius:4px;filter:grayscal
   </section>
 </main>
 <script type="module">
-import { SRV_STUDIO_V2_AVATARS as AV, srv2AvatarPick, srv2AvatarPool } from '/__v2/avatars.mjs';
+import { SRV_STUDIO_V2_AVATARS as AV, SRV_STUDIO_V2_AVATARS_ARCHIVED as ARCH, srv2AvatarPick, srv2AvatarPool, srv2AvatarById, srv2AvatarQualityLabel } from '/__v2/avatars.mjs';
 import { composeThumbnail, composeShort } from '/__v2/compose.mjs';
 const SONGS = [
   ['Passenger Side of You', "I'd go anywhere from the passenger side of you"],
@@ -109,17 +117,24 @@ const SONGS = [
 ];
 const MOOD_LABEL = { romantic: 'Romantic', emotional: 'Melancholic', hopeful: 'Hopeful' };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-let selected = 'srv2-av-08';
+let selected = 'srv2-fm-06';
 function card(a) {
   const W = 205, scale = W / a.native.w, h = Math.round(a.native.h * scale);
-  const box = `left:${a.crop.x * scale}px;top:${a.crop.y * scale}px;width:${a.crop.w * scale}px;height:${a.crop.h * scale}px`;
+  const full = a.crop.x === 0 && a.crop.y === 0 && a.crop.w === a.native.w && a.crop.h === a.native.h;
+  const box = full ? 'display:none' : `left:${a.crop.x * scale}px;top:${a.crop.y * scale}px;width:${a.crop.w * scale}px;height:${a.crop.h * scale}px`;
   return `<div class="card ${a.rotationEligible ? '' : 'off'} ${a.id === selected ? 'sel' : ''}" data-id="${a.id}" tabindex="0" role="button" aria-label="Avatar ${a.number}">
     <div class="thumb" style="height:${h}px"><img src="${a.src}" alt="" style="width:100%"><div style="position:absolute;${box};outline:1px dashed rgba(196,181,253,.9);outline-offset:-1px"></div><span class="num">${String(a.number).padStart(2, '0')}</span></div>
     <div class="meta">
-      <div><strong>${a.native.w}×${a.native.h}</strong> px · crop ${a.crop.w}×${a.crop.h} · ${a.orientation}</div>
-      <div class="row">${a.moods.map((m) => `<span class="chip">${MOOD_LABEL[m]}</span>`).join('')}<span class="chip ${a.rotationEligible ? 'ok' : 'warn'}">${a.rotationEligible ? 'in rotation' : 'held: CEO confirm'}</span><span class="chip bad">concept · not HD</span>${a.quality.detail === 'soft' ? '<span class="chip warn">soft</span>' : ''}</div>
+      ${a.title ? `<div style="font-weight:600">${esc(a.title)}</div>` : ''}
+      <div><strong>${a.native.w}×${a.native.h}</strong> px · ${a.aspect}:1 · ${a.orientation}${full ? '' : ` · crop ${a.crop.w}×${a.crop.h}`}${a.pose ? ' · ' + esc(a.pose) : ''}</div>
+      <div class="row">${a.moods.map((m) => `<span class="chip">${MOOD_LABEL[m]}</span>`).join('')}<span class="chip ${a.rotationEligible ? 'ok' : 'warn'}">${a.archived ? 'archived' : a.rotationEligible ? 'in rotation' : 'held'}</span>${a.archived ? '<span class="chip bad">concept · not HD</span>' : '<span class="chip ok">final master</span><span class="chip warn">below full HD</span>'}${a.quality.detail === 'soft' ? '<span class="chip warn">soft</span>' : ''}</div>
       ${a.flags.map((f) => `<div class="flag">${esc(f)}</div>`).join('')}
     </div></div>`;
+}
+function drawHeld() {
+  const rows = AV.filter((a) => !a.rotationEligible || a.flags.some((f) => /identity|near-duplicate|wardrobe: most/.test(f)));
+  document.getElementById('heldrows').innerHTML = rows.map((a) => `<tr><td>${String(a.number).padStart(2, '0')}</td><td><img src="${a.src}" alt="" style="width:110px;height:auto;border-radius:4px;display:block"><div style="font-size:12px;margin-top:4px">${esc(a.title)}</div></td><td><span class="chip ${a.rotationEligible ? 'ok' : 'warn'}">${a.rotationEligible ? 'in rotation (flagged)' : 'held'}</span></td><td style="font-size:12px">${a.flags.filter((f) => !/^tone:/.test(f)).map(esc).join('<br>')}</td></tr>`).join('');
+  document.getElementById('archived').innerHTML = ARCH.map(card).join('');
 }
 function drawGrid() {
   const g = document.getElementById('grid'); g.innerHTML = AV.map(card).join('');
@@ -131,16 +146,17 @@ function runRotation() {
   const hist = []; const out = [];
   for (let i = 0; i < n; i++) { const mk = mode === 'mix' ? mix[i % mix.length] : mode; const a = srv2AvatarPick({ history: hist, moodKey: mk }); hist.push({ id: a.id, at: new Date(1e12 + i * 1000).toISOString() }); out.push([a, mk]); }
   const repeats = out.filter((x, i) => i && x[0].id === out[i - 1][0].id).length;
+  const samePose = out.filter((x, i) => i && x[0].pose === out[i - 1][0].pose).length;
   const distinct = new Set(out.map((x) => x[0].id)).size;
   document.getElementById('seq').innerHTML = out.map(([a, mk], i) => `<div class="s"><img src="${a.src}" alt=""><div>#${i + 1} · <strong>${String(a.number).padStart(2, '0')}</strong></div><div style="color:var(--dim)">${MOOD_LABEL[mk]}</div></div>`).join('');
-  document.getElementById('runres').textContent = `${n} picks · ${repeats} immediate repeats · ${distinct} of ${srv2AvatarPool().length} eligible avatars used`;
+  document.getElementById('runres').textContent = `${n} picks · ${repeats} immediate repeats · ${samePose} back-to-back same pose · ${distinct} of ${srv2AvatarPool().length} eligible avatars used`;
 }
 async function loadTasks() {
   const tb = document.getElementById('taskrows');
   try {
     const d = await fetch('/__stub/v2-avatars').then((r) => r.json());
-    tb.innerHTML = d.tasks.map((t) => { const a = t.avatarId && AV.find((x) => x.id === t.avatarId);
-      return `<tr><td>#${t.id} · ${esc(t.format)}</td><td>${esc(t.title || '—')}</td><td>${a ? `<img src="${a.src}" alt="Avatar ${a.number}"> <strong>${String(a.number).padStart(2, '0')}</strong>` : '<span style="color:var(--dim)">none yet</span>'}</td><td>${esc((t.assignedAt || '').replace('T', ' ').slice(0, 19))}</td><td>${esc(t.by || '')}${t.inherited ? ' (kept on regenerate)' : ''}</td></tr>`; }).join('') || '<tr><td colspan="5">No SRV English test tasks.</td></tr>';
+    tb.innerHTML = d.tasks.map((t) => { const a = t.avatarId && srv2AvatarById(t.avatarId);
+      return `<tr><td>#${t.id} · ${esc(t.format)}</td><td>${esc(t.title || '—')}</td><td>${a ? `<img src="${a.src}" alt="Avatar ${a.number}"> <strong>${a.archived ? 'concept ' : ''}${String(a.number).padStart(2, '0')}</strong>${a.archived ? ' <span class="chip warn">archived</span>' : ''}` : '<span style="color:var(--dim)">none yet</span>'}</td><td>${esc((t.assignedAt || '').replace('T', ' ').slice(0, 19))}</td><td>${esc(t.by || '')}${t.inherited ? ' (kept on regenerate)' : ''}</td></tr>`; }).join('') || '<tr><td colspan="5">No SRV English test tasks.</td></tr>';
   } catch (e) { tb.innerHTML = '<tr><td colspan="5">Could not read the preview data.</td></tr>'; }
 }
 const imgCache = {};
@@ -153,14 +169,15 @@ async function compose() {
   const im = await img(a.src);
   const t = composeThumbnail(document.getElementById('thumb').getContext('2d'), im, a, { title, tone });
   const s = composeShort(document.getElementById('short').getContext('2d'), im, a, { title, lyric, tone });
-  document.getElementById('thumbcap').textContent = `16:9 · 1280×720 · avatar ${String(a.number).padStart(2, '0')} · source region ${t.sourcePx} px enlarged ×${t.upscale} — concept quality, not HD`;
-  document.getElementById('shortcap').textContent = `9:16 · 1080×1920 · source ${s.sourcePx} px enlarged ×${s.upscale} — concept quality, not HD`;
+  const scl = (k) => k < 1 ? `downscaled ×${k} (HD)` : `enlarged ×${k}`;
+  document.getElementById('thumbcap').textContent = `16:9 · 1280×720 · avatar ${String(a.number).padStart(2, '0')} · source region ${t.sourcePx} px ${scl(t.upscale)} · ${srv2AvatarQualityLabel(a)}`;
+  document.getElementById('shortcap').textContent = `9:16 · 1080×1920 · source ${s.sourcePx} px ${scl(s.upscale)} · ${srv2AvatarQualityLabel(a)}`;
 }
-document.getElementById('av').innerHTML = AV.map((a) => `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>Avatar ${String(a.number).padStart(2, '0')}${a.rotationEligible ? '' : ' (held)'}</option>`).join('');
+document.getElementById('av').innerHTML = AV.map((a) => `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>${String(a.number).padStart(2, '0')} · ${esc(a.title)}${a.rotationEligible ? '' : ' (held)'}</option>`).join('');
 document.getElementById('song').innerHTML = SONGS.map((s, i) => `<option value="${i}">${esc(s[0])}</option>`).join('');
 ['av', 'song', 'tone'].forEach((id) => document.getElementById(id).addEventListener('change', () => { if (id === 'av') { selected = document.getElementById('av').value; drawGrid(); } compose(); }));
 document.getElementById('run').onclick = runRotation;
-drawGrid(); runRotation(); loadTasks(); compose();
+drawGrid(); drawHeld(); runRotation(); loadTasks(); compose();
 </script>
 </body>
 </html>

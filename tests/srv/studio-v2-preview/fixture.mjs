@@ -127,6 +127,9 @@ export function makeStudioFixture(now = Date.now()) {
         const at = new Date(created + 2000 * (i + 1)).toISOString();
         pkg.srvAvatar = { id: a.id, assignedAt: at, by: 'rotation', registry: SRV_STUDIO_V2_AVATAR_REGISTRY_VERSION };
         avatarHistory.push({ id: a.id, at });
+        // Checkpoint C2: #205 keeps an avatar from the archived concept collection, to show that a package
+        // assigned before the final collection still resolves (historical reference intact).
+        if (task.id === 205) pkg.srvAvatar = { id: 'srv2-av-04', assignedAt: at, by: 'rotation', registry: 'srv2-avatars-1' };
       }
       packages.push({ package_id: pkg.id, task_id: task.id, engine: 'SRV English', title: pkg.title, full_package: JSON.stringify(pkg), generated_at: pkg.generatedAt });
     }
