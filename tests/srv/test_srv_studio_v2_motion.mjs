@@ -17,7 +17,7 @@ const show = (ref, f) => execSync(`git show ${ref}:${f}`, { cwd: repo, maxBuffer
 let pass = 0, fail = 0, skip = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); };
 const top = (src, name) => { const m = src.match(new RegExp('\\n(async )?function ' + name + '\\(')); if (!m) throw new Error('missing ' + name); const s = m.index + 1; return src.slice(s, src.indexOf('\n}\n', s) + 2); };
-const D4_COMMIT = '1dc4f7e';
+const D4_COMMIT = '1dc4f7e', D5_COMMIT = 'a84bccd'; // scope is measured on the D5 commit itself; later checkpoints have their own scope checks
 
 // ── 1. Defaults and wiring ──
 ok('Defaults: production = camera, atmosphere, film, music response ON; rain OFF', JSON.stringify(R.SRV2_FX_DEFAULTS) === JSON.stringify({ camera: true, atmosphere: true, film: true, reactive: true, rain: false }));
@@ -165,17 +165,21 @@ else {
 
 // ── 5. Isolation: D5 touches SRV Studio V2 files only ──
 {
-  const files = execSync(`git diff ${D4_COMMIT} --name-only`, { cwd: repo }).toString().trim().split('\n').filter(Boolean);
+  const files = execSync(`git diff ${D4_COMMIT} ${D5_COMMIT} --name-only`, { cwd: repo }).toString().trim().split('\n').filter(Boolean);
   const allowed = ['public/srv-studio-v2/srv2-render.mjs', 'public/index.html', 'tests/srv/studio-v2-preview/render-studio.html', 'tests/srv/studio-v2-preview/headless-render.mjs', 'tests/srv/studio-v2-preview/headless-lifecycle.mjs', 'tests/srv/test_srv_studio_v2_motion.mjs', 'tests/srv/test_srv_studio_v2_render.mjs', 'tests/srv/test_srv_studio_v2_isolation.mjs'];
   ok('Scope: D5 changes only the V2 renderer, V2 Build/Approve lines, the V2 preview and V2 tests', files.every((f) => allowed.includes(f)), files.join(', '));
-  const hd = execSync(`git diff ${D4_COMMIT} -U0 -- public/index.html`, { cwd: repo }).toString();
+  const hd = execSync(`git diff ${D4_COMMIT} ${D5_COMMIT} -U0 -- public/index.html`, { cwd: repo }).toString();
   const fns = [...hd.matchAll(/^@@[^@]*@@ (?:async )?function ([A-Za-z0-9_$]+)/gm)].map((m) => m[1]);
   ok('Scope: every index.html hunk is inside a V2 function', fns.length > 0 && fns.every((f) => /^_srvEnglishV2/.test(f)), fns.join(','));
   const base = show('origin/main', 'public/index.html');
   ok('Protected: _srvRenderVideo, _assignPublishSlot and SRV Farsi build/publish byte-identical to main', ['_srvRenderVideo', '_assignPublishSlot', '_srvFarsiBuildTrigger', '_srvFarsiRunPublish'].every((n) => top(H, n) === top(base, n)));
-  ok('Protected: api/ and lib/ untouched by D5', execSync(`git diff ${D4_COMMIT} --name-only -- api lib`, { cwd: repo }).toString().trim() === '');
+  ok('Protected: api/ and lib/ untouched by D5', execSync(`git diff ${D4_COMMIT} ${D5_COMMIT} --name-only -- api lib`, { cwd: repo }).toString().trim() === '');
 }
 
+{ // D6 (player fix, 11bab1d): preview-only files
+  const d6 = execSync('git diff a84bccd 11bab1d --name-only', { cwd: repo }).toString().trim().split('\n').filter(Boolean);
+  ok('Scope D6: the A/B player fix changed only Render Studio preview files', d6.length > 0 && d6.every((f) => f.startsWith('tests/srv/studio-v2-preview/')), d6.join(', '));
+}
 console.log(out.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed${skip ? `, ${skip} skipped` : ''}`);
 process.exit(fail ? 1 : 0);
