@@ -195,10 +195,10 @@ else {
   ok('Build: a failed package save does not advance to Approve', vb.indexOf("if(ok!==true)") < vb.indexOf("_srvEnglishV2SetStage(taskId,'approve')") && /if\(ok!==true\)\{[^}]*return;\}/.test(vb));
   const vp = top(H, '_srvEnglishV2Publish');
   ok('Publish: metadata from the module (containsSyntheticMedia), upload engine "SRV English", thumbnail engine "SRV Studio"', /R\.srv2YouTubeMetadata\(kind,pkg/.test(vp) && /Object\.assign\(\{videoUrl,engine:'SRV English'\},meta\)/.test(vp) && /engine:'SRV Studio',thumbUrl:pkg\._srvThumbUrl/.test(vp));
-  ok('Publish: refuses without a video, stops on upload failure, records the result', /if\(!videoUrl\)/.test(vp) && /if\(!up\|\|up\.ok===false\|\|!up\.videoId\)\{[^}]*return;\}/.test(vp) && /pkg\.srvPublish=/.test(vp));
+  ok('Publish: refuses without a video, stops on upload failure, records the result', /if\(!videoUrl\)/.test(vp) && /if\(!up\|\|up\.ok===false\|\|!vid\)\{[^}]*return;\}/.test(vp) && /const vid=up&&\(up\.youtubeVideoId\|\|up\.videoId\)/.test(vp) && /pkg\.srvPublish=/.test(vp));
   ok('Card: Build/Approve/Done show the V2 panel only when V2 is on', /if\(_v2On&&\(stage==='build'\|\|stage==='approve'\|\|stage==='done'\)\)stageContent=_srvEnglishV2RenderHtml/.test(H));
-  { const d = execSync('git diff 2aac4af -U0 -- api/', { cwd: repo }).toString(); const h = d.split('\n').filter((l) => l.startsWith('@@'));
-    ok('Server: the renderer needs no server change; since D2 the only api/ change is the D4 flag guard inside srvEnglishRegenCaption', h.every((l) => /srvEnglishRegenCaption/.test(l)) && !/^-[^-]/m.test(d) && !/^\+\+\+ b\/api\/(?!ops\.js)/m.test(d), h.join(' | ')); }
+  { const d = execSync('git diff 2aac4af ff5cc43 -U0 -- api/', { cwd: repo }).toString(); const h = d.split('\n').filter((l) => l.startsWith('@@'));
+    ok('Server: the renderer needs no server change; from D2 to D6 the only api/ change is the D4 flag guard inside srvEnglishRegenCaption (E3 has its own scope check)', h.every((l) => /srvEnglishRegenCaption/.test(l)) && !/^-[^-]/m.test(d) && !/^\+\+\+ b\/api\/(?!ops\.js)/m.test(d), h.join(' | ')); }
   ok('Module file is self-contained (no imports, no network hosts)', !/^\s*import\s/m.test(read('public/srv-studio-v2/srv2-render.mjs')) && !/https?:\/\//.test(read('public/srv-studio-v2/srv2-render.mjs')));
 }
 

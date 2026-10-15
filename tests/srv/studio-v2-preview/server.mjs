@@ -18,6 +18,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { classifyAction } from '../../preservation/stub-server.mjs';
+import { srv2RunPilotUpload } from '../../../lib/srvStudioV2Pilot.mjs';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { makeStudioFixture, sampleGeneratedPackage, sampleCaption, v2SamplePackage } from './fixture.mjs';
@@ -103,7 +104,10 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
     const entry = { n, at: new Date().toISOString(), action, ok: !problems.length, problems, payload: j };
     dryRuns.push(entry);
     if (problems.length) return { ok: false, dryRun: true, error: 'Preview dry run rejected: ' + problems.join('; ') };
-    return action === 'youtube_upload_video' ? { ok: true, dryRun: true, videoId: 'dryrun-' + n } : { ok: true, dryRun: true, videoId: j.videoId };
+    // Same response shape as the real youtube_upload_video (youtubeVideoId, channelId, privacyStatus) — E3.
+    return action === 'youtube_upload_video'
+      ? { ok: true, dryRun: true, youtubeVideoId: 'dryrun-' + n, channelId: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg', channelTitle: 'SRV Studio ', privacyStatus: j.publishAt ? 'private' : (j.privacyStatus || 'private'), uploadedAt: new Date().toISOString() }
+      : { ok: true, dryRun: true, videoId: j.videoId };
   }
 
   const send = (res, code, body, headers = {}) => {
@@ -173,6 +177,19 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       if (action === 'srv_english_regen_caption') return send(res, 200, sampleCaption(json && json.title, json && json.lyrics));
       if (action === 'srv_english_pexels_bg' || action === 'srv_english_build') return send(res, 200, DISABLED('video rendering'));
       if (action === 'youtube_upload_video' || action === 'set_yt_thumbnail') return send(res, 200, dryRun(action, json));
+      if (action === 'srv_studio_v2_pilot_upload') { // E3: the real pilot logic, with this server's settings as the ledger store
+        const host = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(String(req.headers.host || '')) ? 'http://' + req.headers.host : origin;
+        const out = await srv2RunPilotUpload({
+          now: () => Date.now(), flagOn: async () => store.settings.srv_studio_v2_enabled === 'true',
+          getSetting: async (k) => (k in store.settings ? { text: store.settings[k] } : null),
+          casSetting: async (k, oldText, newText) => { await new Promise((r) => setTimeout(r, 5)); const cur = k in store.settings ? store.settings[k] : null; if (cur !== oldText) return false; store.settings[k] = newText; persist(); return true; },
+          engineState: async () => { try { return JSON.parse(store.settings.mmm_finance_v118).engineState['SRV English'] || 'running'; } catch { return 'running'; } },
+          lookupChannel: async () => ({ channel_id: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg' }),
+          upload: async (body) => ({ status: 200, json: dryRun('youtube_upload_video', body) }),
+          newId: () => 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        }, json || {}, { supabaseUrl: host + '/__sb' });
+        return send(res, out.status, out.json);
+      }
       if (/youtube_upload|set_yt_thumbnail|tiktok_|instagram_|publish/.test(action)) return send(res, 200, DISABLED('publishing'));
       const canned = store.fixtureApi[action];
       if (canned !== undefined) return send(res, 200, typeof canned === 'function' ? canned(json, store) : canned);
@@ -206,6 +223,7 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       }
       // Checkpoint D2 — dry-run record, render studio, sample audio, and saving harness renders for ffprobe.
       if (u.pathname === '/__stub/dryrun') return send(res, 200, { count: dryRuns.length, dryRuns });
+      if (u.pathname === '/__stub/pilot') { let c = null, l = null; try { c = JSON.parse(store.settings.srv_studio_v2_pilot || 'null'); } catch {} try { l = JSON.parse(store.settings.srv_studio_v2_pilot_ledger || 'null'); } catch {} return send(res, 200, { config: c, ledger: l }); }
       if (u.pathname === '/studio/render') return send(res, 200, fs.readFileSync(path.join(HERE, 'render-studio.html')), { 'Content-Type': 'text/html; charset=utf-8' });
       { const cm = u.pathname.match(/^\/__v2\/compare\/(long|short)-(A|B)\.mp4$/); if (cm) { const f = path.join(COMPARE_DIR, COMPARE[cm[1] + '-' + cm[2]]); if (!fs.existsSync(f)) return send(res, 404, { error: 'comparison video not rendered on this computer' }); return sendFile(req, res, f, 'video/mp4'); } }
       if (u.pathname === '/__v2/test-audio.mp3') { if (!TEST_AUDIO || !fs.existsSync(TEST_AUDIO)) return send(res, 404, { error: 'no sample MP3 on this computer' }); return sendFile(req, res, TEST_AUDIO, 'audio/mpeg'); }

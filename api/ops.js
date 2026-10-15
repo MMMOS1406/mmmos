@@ -19,6 +19,7 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
+import { srv2RunPilotUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (Checkpoint E3) — two-video private pilot, server-enforced
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -3553,6 +3554,49 @@ async function srvEnglishRegenCaption(req, res) {
     return res.json({ ok: true, ...out });
   } catch (e) {
     return res.json({ ok: false, error: e.message });
+  }
+}
+
+// SRV Studio V2 (order SRV-STUDIO-V2-015) — controlled two-video pilot upload. V2-owned: refuses everything unless
+// the V2 flag is on AND app_settings.srv_studio_v2_pilot authorizes the task (see lib/srvStudioV2Pilot.mjs). The
+// two-upload limit is enforced here with compare-and-set writes to app_settings.srv_studio_v2_pilot_ledger. The
+// actual upload goes through the existing, unchanged youtubeUploadVideo handler with private / no schedule forced.
+async function srvStudioV2PilotSetting(key) {
+  const rows = await sbGet(`app_settings?key=eq.${encodeURIComponent(key)}&select=value`);
+  return Array.isArray(rows) && rows[0] ? { text: rows[0].value == null ? '' : String(rows[0].value) } : null;
+}
+async function srvStudioV2PilotCas(key, oldText, newText) {
+  const headers = { 'Content-Type': 'application/json', 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY, 'Prefer': 'return=representation' };
+  if (oldText === null) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, { method: 'POST', headers, body: JSON.stringify({ key, value: newText, updated_at: new Date().toISOString() }) });
+    if (r.status === 409) return false;
+    if (!r.ok) throw new Error('pilot ledger insert: ' + r.status);
+    return true;
+  }
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${encodeURIComponent(key)}&value=eq.${encodeURIComponent(oldText)}`, { method: 'PATCH', headers, body: JSON.stringify({ value: newText, updated_at: new Date().toISOString() }) });
+  if (!r.ok) throw new Error('pilot ledger update: ' + r.status);
+  const rows = await r.json().catch(() => []);
+  return Array.isArray(rows) && rows.length === 1;
+}
+async function srvStudioV2PilotUpload(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  try {
+    const out = await srv2RunPilotUpload({
+      now: () => Date.now(),
+      flagOn: () => srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY }),
+      getSetting: srvStudioV2PilotSetting,
+      casSetting: srvStudioV2PilotCas,
+      engineState: async () => { const r = await srvStudioV2PilotSetting('mmm_finance_v118'); let st = {}; try { st = JSON.parse((r && r.text) || '{}'); } catch (_) {} return (st.engineState && st.engineState['SRV English']) || 'running'; },
+      lookupChannel: () => _getYoutubeConnectionByTitle('SRV Studio'),
+      upload: (body) => new Promise((resolve) => {
+        const cap = { code: 200, status(c) { this.code = c; return this; }, json(j) { resolve({ status: this.code, json: j }); return this; }, setHeader() {} };
+        youtubeUploadVideo({ method: 'POST', body, query: {}, headers: {} }, cap).catch((e) => resolve({ status: 502, json: { ok: false, error: 'upload_exception', message: e.message } }));
+      }),
+      newId: () => 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    }, req.body || {}, { supabaseUrl: SUPABASE_URL });
+    return res.status(out.status).json(out.json);
+  } catch (e) {
+    return res.status(500).json({ ok: false, pilot: true, error: 'pilot_server_error', message: e.message });
   }
 }
 
@@ -19326,6 +19370,7 @@ export default async function handler(req, res) {
     if (action === 'generate_package')           return await generatePackage(req, res);
     if (action === 'farsi_regen_caption')        return await farsiRegenCaption(req, res); // v15.6.5
     if (action === 'srv_english_regen_caption')  return await srvEnglishRegenCaption(req, res); // SRV Studio V2 (flag-gated client)
+    if (action === 'srv_studio_v2_pilot_upload') return await srvStudioV2PilotUpload(req, res); // SRV Studio V2 pilot (server-enforced, off unless authorized)
     if (action === 'youtube_sync_performance')   return await youtubeSyncPerformance(req, res);
     if (action === 'log_performance_manual')     return await logPerformanceManual(req, res);
     if (action === 'get_performance_summary')    return await getPerformanceSummary(req, res);

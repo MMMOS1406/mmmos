@@ -138,9 +138,12 @@ export function makeStudioFixture(now = Date.now()) {
   state.tasks = state.tasks.filter((x) => x.engine !== 'SRV English').concat(tasks);
   state.srvLifecycleStages = stages;
   state.engineState = { ...(state.engineState || {}), 'SRV English': 'test' };
+  // Checkpoint E3: the two-video pilot authorization, as the release would set it — #203 Long, #204 Short.
+  const uidOf = (id) => { const t = tasks.find((x) => x.id === id); return 'srve_' + t.createdAt + '_' + id; };
+  const pilot = { enabled: true, tasks: { long: uidOf(203), short: uidOf(204) }, maxUploads: 2, expires: new Date(Date.now() + 7 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' };
   return {
     ...base,
-    settings: { ...base.settings, mmm_finance_v118: JSON.stringify(state), srv_studio_v2_enabled: 'true' },
+    settings: { ...base.settings, mmm_finance_v118: JSON.stringify(state), srv_studio_v2_enabled: 'true', srv_studio_v2_pilot: JSON.stringify(pilot) },
     tables: { ...base.tables, packages },
   };
 }
