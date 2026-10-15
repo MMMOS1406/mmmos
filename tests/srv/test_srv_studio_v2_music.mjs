@@ -35,6 +35,7 @@ ok('Songwriting: hook-first, repeated chorus phrase, one-breath lines, cliché l
 ok('Arrangements: LONG full structure and SHORT 30s standalone both defined', /LONG \(full release/.test(sys) && /\[Bridge\]/.test(sys) && /SHORT \(standalone 30 seconds\)/.test(sys));
 const up = M.buildSrvStudioV2UserPrompt({ isLong: false, mode: 'Female — Romantic', avoidText: 'PRIOR TITLES: "Stay Until the Sunrise"' });
 ok('User prompt: carries the format, mood colour and the existing avoid list (anti-repetition kept)', /SHORT \(30-second standalone\)/.test(up) && /Romantic — warm, yearning/.test(up) && /Stay Until the Sunrise/.test(up));
+ok('Checkpoint C: Romantic / Melancholic / Hopeful are emotional variations; the genre never changes', /Emotional variations: each song is Romantic, Melancholic or Hopeful/.test(sys) && /The genre stays Emotional Deep House \/ Night Drive/.test(up) && M.SRV_STUDIO_V2_MOODS.emotional.label === 'Melancholic' && M.SRV_STUDIO_V2_MOODS.happy.label === 'Hopeful' && Object.values(M.SRV_STUDIO_V2_MOODS).every((m) => m.bpm[0] >= 112 && m.bpm[1] <= 126));
 
 // ── 2. System-owned Suno prompts ──
 for (const fmt of ['long', 'short']) {

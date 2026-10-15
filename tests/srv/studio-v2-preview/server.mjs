@@ -15,6 +15,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { classifyAction } from '../../preservation/stub-server.mjs';
+import { fileURLToPath } from 'node:url';
 import { makeStudioFixture, sampleGeneratedPackage, sampleCaption, v2SamplePackage } from './fixture.mjs';
 
 const MIME = {
@@ -23,6 +24,7 @@ const MIME = {
   '.txt': 'text/plain', '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
 };
 const PROD_MARK = /tldcwvtwjypmwynsklsd/;
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DISABLED = (what) => ({ ok: false, error: `Preview: ${what} is disabled in the SRV Studio V2 preview (no real uploads, renders or publishing).` });
 
 // Preview-only task launcher, injected into the served page (never part of the app code). Lists the
@@ -30,7 +32,7 @@ const DISABLED = (what) => ({ ok: false, error: `Preview: ${what} is disabled in
 const LAUNCHER = `<div id="srv2-launcher" style="position:fixed;right:12px;bottom:30px;z-index:2147483646;width:250px;background:#15121f;border:1px solid #7c3aed;border-radius:10px;padding:10px 12px;font:12px/1.45 system-ui,sans-serif;color:#eee;box-shadow:0 6px 24px rgba(0,0,0,.5)">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong style="color:#c4b5fd;font-size:11px;letter-spacing:.06em">SRV STUDIO V2 · TEST TASKS</strong><button onclick="var b=document.getElementById('srv2-l-body');b.hidden=!b.hidden" style="background:none;border:0;color:#aaa;cursor:pointer">▾</button></div>
 <div id="srv2-l-body"><div id="srv2-l-list" style="display:flex;flex-direction:column;gap:5px">Sign in as Mansoor to begin.</div>
-<div style="margin-top:8px;padding-top:6px;border-top:1px solid #333;display:flex;flex-wrap:wrap;gap:8px;font-size:11px"><a href="/?srvStudioV2=off" style="color:#c4b5fd">Legacy view (V2 off)</a><a href="/" style="color:#c4b5fd">V2 view</a><a href="#" onclick="if(confirm('Reset all preview tasks and edits to the original sample data?')){fetch('/__stub/reset').then(function(){try{localStorage.clear()}catch(e){};location.reload()})};return false" style="color:#f87171">Reset sample data</a></div></div></div>
+<div style="margin-top:8px;padding-top:6px;border-top:1px solid #333;display:flex;flex-wrap:wrap;gap:8px;font-size:11px"><a href="/studio/avatars" target="_blank" rel="noopener" style="color:#c4b5fd">Avatar studio</a><a href="/?srvStudioV2=off" style="color:#c4b5fd">Legacy view (V2 off)</a><a href="/" style="color:#c4b5fd">V2 view</a><a href="#" onclick="if(confirm('Reset all preview tasks and edits to the original sample data?')){fetch('/__stub/reset').then(function(){try{localStorage.clear()}catch(e){};location.reload()})};return false" style="color:#f87171">Reset sample data</a></div></div></div>
 <script>(function(){var ids=['201','202','203','204','205'];function draw(){var box=document.getElementById('srv2-l-list');if(!box)return;var ready=typeof D!=='undefined'&&Array.isArray(D.tasks)&&typeof currentUser!=='undefined'&&currentUser&&typeof openExec==='function';if(!ready){return;}var h='';ids.forEach(function(id){var t=D.tasks.find(function(x){return String(x.id)===id&&x.engine==='SRV English';});if(!t)return;var st=typeof _srvEnglishGetStage==='function'?_srvEnglishGetStage(id):'?';var f=t.contentFormat==='long'?'Long':'Short';h+='<button onclick="if(typeof renderTab===\\'function\\')renderTab(\\'tasks\\');openExec(\\''+id+'\\')" style="text-align:left;padding:6px 8px;background:#221c33;border:1px solid #3b2f5c;border-radius:6px;color:#eee;cursor:pointer;font:12px system-ui"><b>#'+id+'</b> · '+f+' · <span style="color:#c4b5fd">'+String(st).toUpperCase()+'</span></button>';});h=h||'No sample tasks found — use Reset sample data.';if(box.__h!==h){box.__h=h;box.innerHTML=h;}}setInterval(draw,1500);})();</script>`;
 
 export async function startPreview({ publicDir, port = 4188, dataFile = null, quiet = true } = {}) {
@@ -125,6 +127,20 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       if (u.pathname === '/__stub/log') return send(res, 200, { productionHits, count: log.length, log: log.slice(-400) });
       if (u.pathname === '/__stub/reset') { store = fresh(); persist(); log.length = 0; return send(res, 200, { ok: true, reset: true }); }
       if (u.pathname === '/__stub/state') return send(res, 200, { settings: Object.keys(store.settings), packages: Object.values(store.packages).map((r) => ({ id: r.package_id, title: r.title, task: r.task_id })) });
+      // Checkpoint C — avatar studio page, the two modules it imports, and the test-task avatar view.
+      if (u.pathname === '/studio/avatars') return send(res, 200, fs.readFileSync(path.join(HERE, 'avatar-studio.html')), { 'Content-Type': 'text/html; charset=utf-8' });
+      if (u.pathname === '/__v2/avatars.mjs') return send(res, 200, fs.readFileSync(path.join(HERE, '../../../lib/srvStudioV2Avatars.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' });
+      if (u.pathname === '/__v2/compose.mjs') return send(res, 200, fs.readFileSync(path.join(HERE, 'srv2-compose.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' });
+      if (u.pathname === '/__stub/v2-avatars') {
+        let st = {}; try { st = JSON.parse(store.settings.mmm_finance_v118 || '{}'); } catch { /* empty */ }
+        const pk = Object.values(store.packages).map((r) => { try { return JSON.parse(r.full_package); } catch { return null; } }).filter(Boolean);
+        const tasks = (st.tasks || []).filter((t) => t.engine === 'SRV English').map((t) => {
+          const mine = pk.filter((p) => p.srvTaskUid && p.srvTaskUid === t.srvUid).sort((a, b) => String(b.generatedAt).localeCompare(String(a.generatedAt)))[0];
+          const av = mine && mine.srvAvatar;
+          return { id: t.id, format: t.contentFormat === 'long' ? 'Long' : 'Short', title: mine && mine.title, avatarId: av && av.id, assignedAt: av && av.assignedAt, by: av && av.by, inherited: !!(av && av.inherited) };
+        });
+        return send(res, 200, { tasks });
+      }
       if (u.pathname === '/__stub/package') { const r = store.packages[u.searchParams.get('id')]; return send(res, r ? 200 : 404, r ? JSON.parse(r.full_package) : { error: 'not found' }); }
       if (u.pathname.startsWith('/__sb/')) return await handleSupabase(req, res, u);
       if (u.pathname.startsWith('/api/')) return await handleApi(req, res, u);

@@ -15965,6 +15965,126 @@ function _srvEnglishV2RefreshQuality(pkgId){
   const tmp=document.createElement('div');tmp.innerHTML=html;
   if(tmp.firstElementChild)el.replaceWith(tmp.firstElementChild);
 }
+// ── Checkpoint C: V2 Signature Avatar registry + selection (same code as lib/srvStudioV2Avatars.mjs) ──
+// <srv-v2-avatars> — this block is copied byte-for-byte into public/index.html (a test enforces it).
+const SRV_STUDIO_V2_AVATARS=[{"id":"srv2-av-01","number":1,"file":"SRV-Avatar-01.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-01.png","sha256":"0830f51a882590c4b16a7c2523335d3152c7ebfb62cfb74028ed77600dbd0b22","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.629,"fy":0.405,"fw":0.38},"moods":["romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1417},"flags":[]},{"id":"srv2-av-02","number":2,"file":"SRV-Avatar-02.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-02.png","sha256":"fc0a9d6202417346bd23bf48deefafc1db3e3e5ca12dab42e5a4fd3858677201","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.579,"fy":0.452,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":932},"flags":[]},{"id":"srv2-av-03","number":3,"file":"SRV-Avatar-03.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-03.png","sha256":"85b5aaab3902d43f4bcaac0dac4e9f3d5349483f4f580a17b035521c91ef0793","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":210},"orientation":"landscape","aspect":1.429,"focus":{"fx":0.394,"fy":0.429,"fw":0.38},"moods":["romantic","emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1264},"flags":[]},{"id":"srv2-av-04","number":4,"file":"SRV-Avatar-04.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-04.png","sha256":"9af84aa7a3331d0bf0d93a70001edd4cbb201b6104d738e3ef43533320bc08be","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.528,"fy":0.357,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"soft","sharpness":490},"flags":["soft: low detail even at native size"]},{"id":"srv2-av-05","number":5,"file":"SRV-Avatar-05.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-05.png","sha256":"b487a252890a8e002d86a8464ec257610f0b96a85417c7c90983d6b69f4f5518","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.612,"fy":0.405,"fw":0.38},"moods":["hopeful","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1447},"flags":["age-appearance: CEO to confirm (reads at the young end of 25-35)"]},{"id":"srv2-av-06","number":6,"file":"SRV-Avatar-06.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-06.png","sha256":"8c77fd88a947dc40a5e01a13feaf72296299abe6a6838f9f201c8281ce5fdc97","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.461,"fy":0.45,"fw":0.38},"moods":["emotional","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"soft","sharpness":554},"flags":["soft: low detail even at native size"]},{"id":"srv2-av-07","number":7,"file":"SRV-Avatar-07.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-07.png","sha256":"05adb1f53d3051b8bc6904d09f45cf799fcf16641ceb8f035ee7c44e63c9722e","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.428,"fy":0.375,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1160},"flags":["age-appearance: CEO to confirm (reads at the young end of 25-35)"]},{"id":"srv2-av-08","number":8,"file":"SRV-Avatar-08.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-08.png","sha256":"e396cbd343274d42a986e6955f3ccde159fd6686ba0234c1f560365b768aac68","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":200},"orientation":"landscape","aspect":1.5,"focus":{"fx":0.56,"fy":0.4,"fw":0.38},"moods":["emotional","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1238},"flags":[]},{"id":"srv2-av-09","number":9,"file":"SRV-Avatar-09.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-09.png","sha256":"632045f0375c343ec2fd9e3759fa10641dd6a7dd0f2007c8c0e5d0074dbbac2b","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.562,"fy":0.425,"fw":0.38},"moods":["hopeful","romantic"],"scene":"car interior, night","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"soft","sharpness":606},"flags":["soft: low detail even at native size"]},{"id":"srv2-av-10","number":10,"file":"SRV-Avatar-10.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-10.png","sha256":"e5c7e565c435bb09cfd775a727c4bd487af14f9ed8864f72170500166037708a","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.713,"fy":0.35,"fw":0.38},"moods":["emotional"],"scene":"car window, night","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"soft","sharpness":606},"flags":["soft: low detail even at native size"]},{"id":"srv2-av-11","number":11,"file":"SRV-Avatar-11.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-11.png","sha256":"6e4f9f13e20a26eef84760fa4c956664690322259e7519b51306e8bb8da86b29","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.546,"fy":0.395,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1663},"flags":[]},{"id":"srv2-av-12","number":12,"file":"SRV-Avatar-12.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-12.png","sha256":"46075f0ff925435ca3dc7a2b4ba60d3f4cd428ed04eafebf5ea57947578d50e7","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.629,"fy":0.421,"fw":0.38},"moods":["hopeful","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1330},"flags":["age-appearance: CEO to confirm (reads at the young end of 25-35)"]},{"id":"srv2-av-13","number":13,"file":"SRV-Avatar-13.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-13.png","sha256":"36bb27255ccd59a5cd6e14956dab272bb241c548f5615769439c5ea3453c7035","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":190},"orientation":"landscape","aspect":1.579,"focus":{"fx":0.46,"fy":0.368,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":948},"flags":["age-appearance: CEO to confirm (reads at the young end of 25-35)"]},{"id":"srv2-av-14","number":14,"file":"SRV-Avatar-14.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-14.png","sha256":"6f8ee88246559a3e3eccaa9c1c955cc55bbc84233b22143b3949a6efa2c3a22a","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.562,"fy":0.342,"fw":0.38},"moods":["romantic","emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1486},"flags":[]},{"id":"srv2-av-15","number":15,"file":"SRV-Avatar-15.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-15.png","sha256":"4485ad1a6fed474b3551fb3210426881026b81d1c1ebf5ff19278ff5be34e6fb","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.629,"fy":0.474,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1231},"flags":[]},{"id":"srv2-av-16","number":16,"file":"SRV-Avatar-16.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-16.png","sha256":"24dadf246429ad45cf221befc55ca745d91971ecdace61e5048a6097f55af356","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.428,"fy":0.35,"fw":0.38},"moods":["emotional","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":844},"flags":[]},{"id":"srv2-av-17","number":17,"file":"SRV-Avatar-17.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-17.png","sha256":"75262f31899666b3ff2e608dfa07a1a69f9ce5c69a7a685adbbcdfeb07c66f73","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.562,"fy":0.28,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"soft","sharpness":391},"flags":["wardrobe: lace/strap top \u2014 CEO to confirm for thumbnails","soft: low detail even at native size"]},{"id":"srv2-av-18","number":18,"file":"SRV-Avatar-18.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-18.png","sha256":"15812774e5e53c6e47d058b85397e0150efed34c915f30246c1f0f37edc20bb3","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":214},"orientation":"landscape","aspect":1.402,"focus":{"fx":0.46,"fy":0.327,"fw":0.38},"moods":["romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1046},"flags":[]},{"id":"srv2-av-19","number":19,"file":"SRV-Avatar-19.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-19.png","sha256":"8b7ba4a13d49f1dd0cab8eb032b352fb9ddb890bd184440bcf31d0bb2c4981be","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.662,"fy":0.327,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":1177},"flags":[]},{"id":"srv2-av-20","number":20,"file":"SRV-Avatar-20.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-20.png","sha256":"be3adf9c52fce2d0917144c764b48c6ca1b6488a8af60ae22f17616a2a97a5c4","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.546,"fy":0.327,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":true,"quality":{"status":"concept-crop","hdReady":false,"detail":"ok","sharpness":987},"flags":["wardrobe: lace/strap top \u2014 CEO to confirm for thumbnails"]}];
+const SRV_STUDIO_V2_AVATAR_REGISTRY_VERSION='srv2-avatars-1';
+function srv2AvatarById(id){for(let i=0;i<SRV_STUDIO_V2_AVATARS.length;i++){if(SRV_STUDIO_V2_AVATARS[i].id===id)return SRV_STUDIO_V2_AVATARS[i];}return null;}
+function srv2AvatarPool(){return SRV_STUDIO_V2_AVATARS.filter(function(a){return a.rotationEligible;});}
+// Assignment history from packages: every package that carries srvAvatar is one assignment.
+function srv2AvatarHistory(pkgs){
+  return (pkgs||[]).filter(function(p){return p&&p.srvAvatar&&p.srvAvatar.id;})
+    .map(function(p){return {id:p.srvAvatar.id,at:String(p.srvAvatar.assignedAt||''),taskUid:p.srvTaskUid||null,pkgId:p.id||null};})
+    .sort(function(a,b){return a.at<b.at?-1:a.at>b.at?1:0;});
+}
+// Picks the next avatar. Rules, in order:
+//  1. only rotation-eligible avatars (all depict the one female artist);
+//  2. never the avatar assigned most recently anywhere (no immediate repetition), nor `excludeId`;
+//  3. prefer avatars suited to the task's mood (romantic / emotional / hopeful) when any remain;
+//  4. least recently used first (never used before any used), ties in registry order.
+// Deterministic: the same history always gives the same pick.
+function srv2AvatarPick(opts){
+  opts=opts||{};
+  const history=opts.history||[];
+  const pool=srv2AvatarPool();
+  if(!pool.length)return null;
+  const lastId=history.length?history[history.length-1].id:null;
+  let cands=pool.filter(function(a){return a.id!==lastId&&a.id!==opts.excludeId;});
+  if(!cands.length)cands=pool.filter(function(a){return a.id!==opts.excludeId;});
+  if(!cands.length)cands=pool;
+  const moodC=opts.moodKey?cands.filter(function(a){return a.moods.indexOf(opts.moodKey)>=0;}):[];
+  if(moodC.length)cands=moodC;
+  const lastAt={};history.forEach(function(h){lastAt[h.id]=h.at;});
+  const order={};SRV_STUDIO_V2_AVATARS.forEach(function(a,i){order[a.id]=i;});
+  cands=cands.slice().sort(function(a,b){
+    const la=lastAt[a.id]||'',lb=lastAt[b.id]||'';
+    if(la!==lb)return la<lb?-1:1;
+    return order[a.id]-order[b.id];
+  });
+  return cands[0];
+}
+// Position of an avatar in the rotation pool, for "Image N of M" labels.
+function srv2AvatarPoolPos(id){const pool=srv2AvatarPool();const i=pool.findIndex(function(a){return a.id===id;});return {n:i+1,of:pool.length};}
+// </srv-v2-avatars>
+// Avatar for a task lives on its package (pkg.srvAvatar) so the existing package save persists it.
+function _srvEnglishV2AvatarHistory(){
+  return srv2AvatarHistory((D.packages||[]).filter(p=>p&&(p.engine==='SRV English'||p.engineName==='SRV English')));
+}
+function _srvEnglishV2StampAvatar(pkg,avatarId,by){
+  pkg.srvAvatar={id:avatarId,assignedAt:new Date().toISOString(),by:by,registry:SRV_STUDIO_V2_AVATAR_REGISTRY_VERSION};
+}
+// Gives a package its avatar: keeps one it already has, inherits the task's previous avatar (a regenerated
+// song keeps the artist image), otherwise picks the next one in the rotation.
+function _srvEnglishV2EnsureAvatar(task,pkg,inherit){
+  if(!pkg)return null;
+  if(pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id))return pkg.srvAvatar;
+  const uid=_srvEnglishTaskUid(task);
+  const prev=inherit&&srv2AvatarById(inherit.id)?inherit:
+    (D.packages||[]).filter(p=>p&&p!==pkg&&uid&&p.srvTaskUid===uid&&p.srvAvatar&&srv2AvatarById(p.srvAvatar.id))
+      .sort((a,b)=>String(b.srvAvatar.assignedAt).localeCompare(String(a.srvAvatar.assignedAt)))[0]?.srvAvatar;
+  if(prev){pkg.srvAvatar=Object.assign({},prev,{inherited:true});return pkg.srvAvatar;}
+  const moodKey=srvStudioV2MoodKeyClient(task&&(task.mood||task.mode));
+  const pick=srv2AvatarPick({history:_srvEnglishV2AvatarHistory(),moodKey});
+  if(!pick)return null;
+  _srvEnglishV2StampAvatar(pkg,pick.id,'rotation');
+  return pkg.srvAvatar;
+}
+function srvStudioV2MoodKeyClient(mode){
+  const m=String(mode||'').toLowerCase();
+  if(m.includes('romantic'))return 'romantic';
+  if(m.includes('happy')||m.includes('hopeful'))return 'hopeful';
+  return 'emotional';
+}
+function _srvEnglishV2AvatarUrl(pkg){
+  const a=pkg&&pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
+  return a?a.src:null;
+}
+async function _srvEnglishV2NextAvatar(taskId,pkgId){
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  const task=_srvEnglishTaskById(taskId);
+  if(!pkg||!task)return;
+  const cur=pkg.srvAvatar&&pkg.srvAvatar.id;
+  const pick=srv2AvatarPick({history:_srvEnglishV2AvatarHistory(),moodKey:srvStudioV2MoodKeyClient(task.mood||task.mode),excludeId:cur});
+  if(!pick)return;
+  _srvEnglishV2StampAvatar(pkg,pick.id,'operator-next');
+  if(typeof saveAppState==='function')saveAppState();
+  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+  if(ok!==true)alert('The new avatar is shown here but was not saved to the database. Check the connection and try again.');
+  _srvEnglishV2Show(taskId);
+}
+async function _srvEnglishV2AssignAvatar(taskId,pkgId){
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  const task=_srvEnglishTaskById(taskId);
+  if(!pkg||!task)return;
+  _srvEnglishV2EnsureAvatar(task,pkg);
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof savePackageToSupabase==='function')await _srvSavePackageQueued(pkg);
+  _srvEnglishV2Show(taskId);
+}
+// Card strip: the task's avatar, its rotation position and its honest quality label.
+function _srvEnglishV2AvatarHtml(task,pkg,taskId,stage){
+  if(!pkg)return '';
+  const a=pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
+  const pkgId=escHTML(String(pkg.id||''));
+  if(!a)return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.15);border-radius:10px">
+      <span style="font-size:11px;color:var(--dim)">No SRV Studio V2 avatar on this package yet (generated before Checkpoint C).</span>
+      <button onclick="_srvEnglishV2AssignAvatar('${taskId}','${pkgId}')" style="padding:7px 12px;background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Assign avatar</button>
+    </div>`;
+  const pos=srv2AvatarPoolPos(a.id);
+  const sc=112/a.crop.w, boxH=Math.round(a.crop.h*sc); // show exactly the registry crop (no sheet number/strip)
+  const canChange=stage==='review'||stage==='build';
+  return `<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px">
+      <div style="flex:0 0 112px;position:relative;width:112px;height:${boxH}px;overflow:hidden;border-radius:6px;background:#000">
+        <img src="${escHTML(a.src)}" alt="SRV Studio avatar ${a.number}" style="position:absolute;left:${-Math.round(a.crop.x*sc)}px;top:${-Math.round(a.crop.y*sc)}px;width:${Math.round(a.native.w*sc)}px;height:auto;max-width:none;filter:grayscale(1) contrast(1.08)">
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;font-family:'JetBrains Mono',monospace">ARTIST IMAGE · AVATAR ${String(a.number).padStart(2,'0')}</div>
+        <div style="font-size:11px;color:var(--text);margin-top:3px">${pos.n?('Image '+pos.n+' of '+pos.of+' in rotation'):'Outside the rotation pool'} · ${escHTML(a.moods.map(m=>({romantic:'Romantic',emotional:'Melancholic',hopeful:'Hopeful'})[m]||m).join(' / '))}${pkg.srvAvatar.inherited?' · kept from the previous package':''}</div>
+        <div style="font-size:10px;color:#f59e0b;margin-top:3px">Concept quality ${a.native.w}×${a.native.h} — not an HD master</div>
+      </div>
+      ${canChange?`<button onclick="_srvEnglishV2NextAvatar('${taskId}','${pkgId}')" style="flex:0 0 auto;padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">↻ Next avatar</button>`:''}
+    </div>`;
+}
 function _srvEnglishV2FieldId(pkgId,key){return 'srv2f_'+pkgId+'_'+key;}
 function _srvEnglishV2SetFieldStatus(pkgId,key,text,col){
   const el=document.getElementById('srv2st_'+pkgId+'_'+key);
@@ -16149,7 +16269,8 @@ async function _srvEnglishV2ApprovePackage(taskId,pkgId){
 // Generates through the existing, unmodified generatePackage(), then binds the new package to this
 // task's srvUid. Refuses when the numeric id is ambiguous, because generatePackage resolves a task by
 // the first matching numeric id across all engines.
-async function _srvEnglishV2GenerateInto(taskId){
+async function _srvEnglishV2GenerateInto(taskId,opts){
+  opts=opts||{};
   const task=_srvEnglishTaskById(taskId);
   if(!task)throw new Error('SRV English task '+taskId+' could not be identified uniquely');
   const first=(D.tasks||[]).find(x=>String(x.id||x.taskId||'')===String(taskId));
@@ -16159,6 +16280,7 @@ async function _srvEnglishV2GenerateInto(taskId){
   await generatePackage(isNaN(numericId)?taskId:numericId);
   const pkg=(D.packages||[]).find(p=>p&&!before.has(String(p.id))&&String(p.taskId||'')===String(taskId)&&p.engine==='SRV English');
   if(!pkg)throw new Error('No package was created');
+  _srvEnglishV2EnsureAvatar(task,pkg,opts.inheritAvatar||null); // Checkpoint C — saved by StampPkg below
   await _srvEnglishV2StampPkg(task,pkg);
   return pkg;
 }
@@ -16186,7 +16308,7 @@ async function _srvEnglishV2RegeneratePackage(taskId,pkgId){
   try{
     if(old)D.packages=D.packages.filter(p=>p!==old);
     _srvEnglishV2SetStage(taskId,'generate');
-    await _srvEnglishV2GenerateInto(taskId);
+    await _srvEnglishV2GenerateInto(taskId,{inheritAvatar:old&&old.srvAvatar});
     _srvEnglishV2SetStage(taskId,'review');
   }catch(e){
     if(old&&!(D.packages||[]).includes(old))D.packages.unshift(old); // keep the previous package rather than leave the task empty
@@ -16473,6 +16595,7 @@ function renderSRVEnglishLifecycleCard(task){
 
   const _v2On=_srvStudioV2On();
   if(_v2On&&stage==='build')stageContent=_srvEnglishV2BuildSummaryHtml(task,pkg,taskId)+stageContent;
+  if(_v2On&&(stage==='review'||stage==='build'||stage==='approve'))stageContent=_srvEnglishV2AvatarHtml(task,pkg,taskId,stage)+stageContent;
   return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="card-title" style="margin-bottom:0;color:var(--text)">🎵 SRV English · New Lifecycle${_v2On?_srvEnglishV2Badges(task):''}</div>
@@ -17692,6 +17815,14 @@ async function _srvEnglishBuildTrigger(pkgId,taskId){
     // SHORT: 1 dedicated scene at position 1 of 5; same contain mode
     const _avatarIdxSet = new Set();
     (function(){
+      // SRV Studio V2 (Checkpoint C): the task's own V2 avatar; the V1 library and its pointer are not touched.
+      if(_srvStudioV2On()){
+        const _v2Url=_srvEnglishV2AvatarUrl(pkg);
+        if(!_v2Url)return;
+        if(isLongTask){_bgUrls.unshift(_v2Url);_avatarIdxSet.add(0);const _mid=Math.floor(_bgUrls.length/2);_bgUrls.splice(_mid,0,_v2Url);_avatarIdxSet.add(_mid);_bgUrls.push(_v2Url);_avatarIdxSet.add(_bgUrls.length-1);}
+        else{const _ip=Math.min(1,_bgUrls.length);_bgUrls.splice(_ip,0,_v2Url);_avatarIdxSet.add(_ip);}
+        return;
+      }
       const _engCfg=(ENGINES_CONFIG||[]).find(function(e){return e.id==='srv_english';});
       const _avLib=_engCfg&&_engCfg.avatarLibrary;
       if(_avLib&&_avLib.avatars&&_avLib.avatars.length){

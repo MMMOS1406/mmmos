@@ -3,6 +3,7 @@
 import { makeFixture } from '../../preservation/fixtures.mjs';
 import { finalizeSrvStudioV2Package } from '../../../lib/srvStudioV2Music.mjs';
 import { V2_SAMPLE_REPLIES } from './v2-samples.mjs';
+import { srv2AvatarPick, SRV_STUDIO_V2_AVATAR_REGISTRY_VERSION } from '../../../lib/srvStudioV2Avatars.mjs';
 
 // Checkpoint B: a V2 package exactly as the real generators return it — the sample model reply run
 // through the real finalizeSrvStudioV2Package() (system-owned Suno prompts, BPM, validation summary).
@@ -103,6 +104,7 @@ export function makeStudioFixture(now = Date.now()) {
   const tasks = [t(201, 'Short', 'generate', 0), t(202, 'Short', 'review', 0), t(203, 'Long', 'review', 1), t(204, 'Short', 'build', 1), t(205, 'Long', 'approve', 2)];
   const stages = { __identityEpoch: created - 60000 };
   const packages = [];
+  const avatarHistory = [];
   tasks.forEach((task, i) => {
     const uid = `srve_${task.createdAt}_${task.id}`;
     task.srvUid = uid;
@@ -118,6 +120,14 @@ export function makeStudioFixture(now = Date.now()) {
         contentFormat: task.contentFormat, engineType: 'suno', generatedAt: new Date(created + 1000 * (i + 1)).toISOString(), checklist: {},
         performance_status: 'generated', isTest: true, srvTaskUid: uid, captionYT: s.captionYouTube, ...s,
       };
+      // Checkpoint C: V2 packages carry their task's avatar, picked by the real rotation (#204 stays pre-V2).
+      if (pkg.srvStudioV2) {
+        const moodKey = /romantic/i.test(task.mood) ? 'romantic' : /happy|hopeful/i.test(task.mood) ? 'hopeful' : 'emotional';
+        const a = srv2AvatarPick({ history: avatarHistory, moodKey });
+        const at = new Date(created + 2000 * (i + 1)).toISOString();
+        pkg.srvAvatar = { id: a.id, assignedAt: at, by: 'rotation', registry: SRV_STUDIO_V2_AVATAR_REGISTRY_VERSION };
+        avatarHistory.push({ id: a.id, at });
+      }
       packages.push({ package_id: pkg.id, task_id: task.id, engine: 'SRV English', title: pkg.title, full_package: JSON.stringify(pkg), generated_at: pkg.generatedAt });
     }
     delete task._previewStage;
