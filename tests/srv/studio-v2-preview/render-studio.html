@@ -48,7 +48,7 @@ I find my way back to you</textarea>
     <div id="status" style="margin-top:10px;color:var(--dim);font-size:12px"></div>
   </div>
   <div>
-    <section class="panel"><h2>ANIMATED PREVIEW (LIVE, NOT RECORDED)</h2>
+    <section class="panel"><h2>ANIMATED PREVIEW (LIVE, NOT RECORDED) · POSTER FRAME UNTIL ▶ IS PRESSED</h2>
       <div class="stage"><canvas id="longC" class="live" width="1920" height="1080"></canvas><canvas id="shortC" class="live" width="1080" height="1920"></canvas></div></section>
     <section class="panel"><h2>RENDERED TEST VIDEO</h2><div class="stage"><video id="out" controls playsinline style="max-height:420px"></video><table id="stats"></table></div></section>
     <section class="panel"><h2>THUMBNAIL (1280×720)</h2><div class="stage"><img id="thumb" alt="" style="width:min(100%,640px);border-radius:8px;background:#000"><table id="tstats"></table></div></section>
@@ -100,6 +100,16 @@ async function showRotation() {
   window.__srv2Rotation = { picks: seen, unique: uniq, adjacentRepeat: adj, held: finals.filter((a) => !a.rotationEligible).map((a) => a.id) };
 }
 
+// ── poster frames (D4, F-4): both panels open on a real graded frame, never black ──
+async function showPoster() {
+  await R.srv2LoadFonts(); const a = av(); const prep = await prepared(a);
+  const L = R.srv2CreateScene({ kind: 'long', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2LongTimeline({ duration: 60, chorusStart: null, hook: '', seed: a.id }) });
+  const S = R.srv2CreateScene({ kind: 'short', img: null, avatar: a, title: $('title').value, prepared: prep, timeline: R.srv2ShortTimeline({ duration: 30, lines: lines() }) });
+  R.srv2DrawFrame($('longC').getContext('2d'), L, 4.2, 0, 126);   // title card fully in
+  R.srv2DrawFrame($('shortC').getContext('2d'), S, 2.0, 0, 60);   // first lyric line in
+  if (!anim) say('Poster frames shown · press ▶ Animate preview to play them with the sample song');
+  window.__srv2Poster = true;
+}
 // ── live animation (no recording) ──
 let anim = null;
 async function animate() {
@@ -124,7 +134,7 @@ async function animate() {
   };
   loop();
 }
-function stopAnim() { if (!anim) return; cancelAnimationFrame(anim.raf); try { anim.src.stop(); } catch (_) {} anim.actx.close(); anim = null; $('stopAnim').disabled = true; }
+function stopAnim() { if (!anim) return; cancelAnimationFrame(anim.raf); try { anim.src.stop(); } catch (_) {} anim.actx.close(); anim = null; $('stopAnim').disabled = true; showPoster(); }
 
 // ── real recorder test ──
 async function renderTest() {
@@ -153,8 +163,8 @@ async function renderTest() {
   $('render').disabled = false;
 }
 $('animate').onclick = animate; $('stopAnim').onclick = stopAnim; $('render').onclick = renderTest;
-for (const id of ['avatar', 'title']) $(id).addEventListener('change', () => { showThumb(); showMeta(); if (id === 'title') showRotation(); });
-showMeta(); await showThumb(); await showRotation(); window.__srv2Ready = true;
+for (const id of ['avatar', 'title']) $(id).addEventListener('change', () => { showThumb(); showMeta(); if (!anim) showPoster(); if (id === 'title') showRotation(); });
+showMeta(); await showThumb(); await showPoster(); await showRotation(); window.__srv2Ready = true;
 if (q.get('auto') === 'render') renderTest();
 </script>
 </body></html>

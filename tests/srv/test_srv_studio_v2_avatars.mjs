@@ -137,7 +137,7 @@ function makeEnv() {
   const v2Line = "  if(_srvStudioV2On())return _srvEnglishV2Build(pkgId,taskId); // SRV Studio V2 cinematic renderer (flag OFF in production)\n";
   ok('Build (D2): V2 returns into _srvEnglishV2Build before any V1 code runs', bt.split('\n')[1] + '\n' === v2Line);
   const vb = top(H, '_srvEnglishV2Build');
-  ok('Build (D2): the V2 render uses the package\'s own V2 avatar (pkg.srvAvatar → registry src)', /const av=pkg\.srvAvatar&&srv2AvatarById\(pkg\.srvAvatar\.id\);/.test(vb) && /avatar:av,imageUrl:av\.src/.test(vb) && !/srvEnglishAvatarIdx|avatarLibrary/.test(vb));
+  ok('Build (D2): the V2 render uses the package\'s own V2 avatar (pkg.srvAvatar → registry src)', /let av=pkg\.srvAvatar&&srv2AvatarById\(pkg\.srvAvatar\.id\);/.test(vb) && /avatar:av,imageUrl:av\.src/.test(vb) && !/srvEnglishAvatarIdx|avatarLibrary/.test(vb));
   ok('Build: with V2 off, _srvEnglishBuildTrigger is byte-identical to main (V1 avatar library + pointer)', bt.replace(v2Line, '') === bt0);
 }
 

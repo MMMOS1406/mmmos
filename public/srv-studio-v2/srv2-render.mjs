@@ -646,12 +646,18 @@ async function readAudio(input) {
   throw new Error('No audio');
 }
 
+export function srv2AvatarProductionReady(a) {
+  return !!a && !a.archived && a.collection === 'final' && !!(a.quality && a.quality.hdReady === true);
+}
+
 // Renders a Long or a Short in real time and returns the video, the thumbnail and measurements.
 // opts: { kind, audio (File|Blob|ArrayBuffer|url), avatar, imageUrl, title, lyrics, shortLyrics, hook,
 //         maxDuration, logoUrl, reactive, onProgress(msg, fraction), canvas (optional, for a live preview) }
 export async function srv2RenderVideo(opts) {
   const kind = opts.kind === 'short' ? 'short' : 'long'; const cfg = SRV2_RENDER_CONFIG[kind];
   const say = (m, f) => { try { opts.onProgress && opts.onProgress(m, f); } catch (_) {} };
+  // D4 (F-1): only final masters may enter production video (archived concept crops are refused here too).
+  if (!srv2AvatarProductionReady(opts.avatar)) throw new Error('Only a final-master avatar can be used for production video (archived or unknown avatar refused)');
   if (typeof MediaRecorder === 'undefined') throw new Error('This browser cannot record video (MediaRecorder missing)');
   const mime = srv2PickMime((m) => MediaRecorder.isTypeSupported(m));
   if (!mime) throw new Error('This browser supports neither MP4 (H.264) nor WebM recording');

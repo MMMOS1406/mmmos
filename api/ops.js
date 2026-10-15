@@ -3531,6 +3531,11 @@ function parseSrvEnglishCaption(raw) {
 }
 async function srvEnglishRegenCaption(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  // SRV Studio V2 (D4, F-3): this V2-owned handler checks the server-side flag itself and fails closed —
+  // with the flag OFF (or unreadable) it returns before any model call, so no Anthropic credit is spent.
+  if (!(await srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY }))) {
+    return res.status(403).json({ ok: false, error: 'srv_studio_v2_off' });
+  }
   const { title, lyrics, isLong } = req.body || {};
   if (!title && !lyrics) return res.json({ ok: false, error: 'title or lyrics required' });
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;

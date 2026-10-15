@@ -153,7 +153,7 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('TEST: card shows V2 + TEST TASK badges', />V2</.test(html) && /TEST TASK/.test(html));
     const pub = top(H, '_srvEnglishRunPublish');
     const pub2 = top(H, '_srvEnglishV2Publish');
-    ok('TEST: V2 publish (D2) adds task-level test on top of engine-wide test; V1 publish returns into it only when V2 is on', /if\(_srvStudioV2On\(\)\)return _srvEnglishV2Publish\(pkgId,taskId\);/.test(pub) && /const test=_getEngineState\('SRV English'\)==='test'\|\|_srvEnglishV2IsTestPublish\(taskId,pkg\);/.test(pub2));
+    ok('TEST: V2 publish (D2) adds task-level test on top of engine-wide test; V1 publish returns into it only when V2 is on', /if\(_srvStudioV2On\(\)\)return _srvEnglishV2Publish\(pkgId,taskId\);/.test(pub) && /const taskTest=_srvEnglishV2IsTestPublish\(taskId,pkg\);\n\s*const test=_getEngineState\('SRV English'\)==='test'\|\|taskTest;/.test(pub2));
   }
 
   // ── 5. Review editor + persistence ──
@@ -267,7 +267,7 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('Server: unformatted reply still usable and #SRVStudio always present', b && b.captionYT === 'Just text #DeepHouse' && b.hashtags === '#DeepHouse #SRVStudio');
     ok('Server: empty reply rejected', parse('  ') === null);
     ok('Server: action dispatched', /action === 'srv_english_regen_caption'\)\s+return await srvEnglishRegenCaption\(req, res\)/.test(OPS));
-    ok('Server: action writes nothing (no Supabase calls inside)', !/sbPost|sbPatch|sbGet|supabase/i.test(top(OPS, 'srvEnglishRegenCaption')));
+    ok('Server: action writes nothing (its only Supabase access is the D4 read-only V2 flag check)', !/sbPost|sbPatch|sbGet/i.test(top(OPS, 'srvEnglishRegenCaption')) && !/supabase/i.test(top(OPS, 'srvEnglishRegenCaption').replace('srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY })', '')) && /srvStudioV2FlagEnabled\(\{ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY \}\)/.test(top(OPS, 'srvEnglishRegenCaption')));
   }
 
   // ── 9. Shared systems untouched ──

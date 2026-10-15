@@ -16286,8 +16286,17 @@ async function _srvEnglishV2Build(pkgId,taskId){
   const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
   if(!task||!pkg){setStatus('⚠ This task or its package could not be identified — build refused.','#ef4444');return;}
   if(!pkg.srvAvatar)_srvEnglishV2EnsureAvatar(task,pkg,null);
-  const av=pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
+  let av=pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
   if(!av){setStatus('⚠ No V2 avatar is assigned to this package.','#ef4444');return;}
+  if(!_srvEnglishV2AvatarProductionReady(av)){
+    const old=av;
+    av=_srvEnglishV2ReplaceArchivedAvatar(task,pkg,old);
+    if(!av){setStatus('⚠ This package uses an archived concept image and no final avatar is available. Build refused.','#ef4444');return;}
+    setStatus('Archived concept image replaced by final avatar #'+av.number+' — saving…','#c9a84c');
+    if(typeof saveAppState==='function')saveAppState();
+    const saved=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    if(saved!==true){setStatus('⚠ The replacement avatar could not be saved. Build stopped — check the connection and try again.','#ef4444');return;}
+  }
   const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
   const used=_srvEnglishV2BuildKeys(task,pkg);
   if(btn){btn.disabled=true;btn.style.opacity='0.6';btn.textContent='⏳ Rendering…';}
@@ -16317,6 +16326,12 @@ async function _srvEnglishV2Build(pkgId,taskId){
     setStatus('Build failed: '+((e&&e.message)||e),'#ef4444');resetBtn();
   }
 }
+// D4 (F-4): the Approve player shows the package's 1280x720 thumbnail until it is played (the video's own
+// first frame is a deliberate fade from black). Playback is unchanged.
+function _srvEnglishV2ApprovePoster(pkg,html){
+  if(!pkg||!pkg._srvThumbUrl)return html;
+  return html.split('<video src="').join('<video poster="'+escHTML(pkg._srvThumbUrl)+'" preload="metadata" src="');
+}
 // Approve under V2: same stage change as _srvEnglishApproveVideo, but keeps the task open so the Publish
 // stage (which starts the upload when it renders) runs at once instead of after the task is reopened.
 function _srvEnglishV2ApproveVideo(pkgId,taskId){
@@ -16337,8 +16352,14 @@ async function _srvEnglishV2Publish(pkgId,taskId){
       if(statusEl){const b=document.createElement('button');b.textContent='← Back to Build';b.style.cssText='display:block;margin:10px auto 0;padding:10px 20px;background:#8b5cf6;border:none;border-radius:8px;color:#fff;font-weight:700;font-size:12px;cursor:pointer;font-family:\'Syne\',sans-serif';b.onclick=function(){_srvEnglishV2SetStage(taskId,'build');_srvEnglishV2Show(taskId);};statusEl.appendChild(b);}
       return;
     }
-    if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
-    const test=_getEngineState('SRV English')==='test'||_srvEnglishV2IsTestPublish(taskId,pkg);
+    // D4 (F-2): TEST is decided BEFORE the shared publish-slot pool is touched. A TEST publish never
+    // reserves a slot (and gives back one this package may hold), so other businesses' schedules are
+    // unaffected; a live publish assigns its slot exactly as before through the unchanged _assignPublishSlot.
+    const taskTest=_srvEnglishV2IsTestPublish(taskId,pkg);
+    const test=_getEngineState('SRV English')==='test'||taskTest;
+    if(taskTest)pkg.isTest=true;
+    if(test)_srvEnglishV2ReleaseSlot(pkg);
+    else if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
     const R=await _srvEnglishV2Renderer();
     const meta=R.srv2YouTubeMetadata(kind,pkg,{test,moodKey:srvStudioV2MoodKeyClient(task.mood||task.mode),publishAt:pkg.publishAt||null});
     say('Uploading '+kind.toUpperCase()+' to YouTube…');
@@ -16363,6 +16384,30 @@ async function _srvEnglishV2Publish(pkgId,taskId){
   }catch(e){
     say('Publish error: '+((e&&e.message)||e),'#ef4444');
   }
+}
+// Gives back any publish slot this package holds in the shared pool (TEST publishes must not keep one).
+// Touches only entries owned by this package id; every other business's reservation is left as it is.
+function _srvEnglishV2ReleaseSlot(pkg){
+  if(!pkg||!pkg.id)return 0;
+  let n=0;
+  if(D._publishSlots&&typeof D._publishSlots==='object'){
+    Object.keys(D._publishSlots).forEach(function(k){if(D._publishSlots[k]===pkg.id){delete D._publishSlots[k];n++;}});
+  }
+  if(pkg.publishAt){pkg.publishAt=null;pkg.publishDay=null;pkg.publishLabel=null;}
+  return n;
+}
+// D4 (F-1): only a final master may enter video production. Archived concept crops (303x252 sheet cuts)
+// are replaced by the next eligible final avatar from the rotation pool (#09, the held alternate, is not
+// in the pool and is never auto-assigned); the replacement and its reason are recorded on the package.
+function _srvEnglishV2AvatarProductionReady(a){
+  return !!a&&!a.archived&&a.collection==='final'&&!!(a.quality&&a.quality.hdReady===true);
+}
+function _srvEnglishV2ReplaceArchivedAvatar(task,pkg,old){
+  const pick=srv2AvatarPick({history:_srvEnglishV2AvatarHistory(),moodKey:srvStudioV2MoodKeyClient(task&&(task.mood||task.mode)),excludeId:old&&old.id});
+  if(!pick||!_srvEnglishV2AvatarProductionReady(pick))return null;
+  _srvEnglishV2StampAvatar(pkg,pick.id,'auto-replace-archived');
+  pkg.srvAvatar.replaced={from:old?old.id:null,reason:old?('archived concept image '+old.native.w+'×'+old.native.h+' is not a final master — not allowed in video production'):'avatar not found in the registry',at:pkg.srvAvatar.assignedAt};
+  return pick;
 }
 // Build / Approve / Done panel: render targets, the cover, measured quality and the exact publish metadata.
 function _srvEnglishV2RenderHtml(task,pkg,taskId,stage){
@@ -16764,7 +16809,7 @@ function renderSRVEnglishLifecycleCard(task){
   }
 
   const _v2On=_srvStudioV2On();
-  if(_v2On&&(stage==='build'||stage==='approve'||stage==='done'))stageContent=_srvEnglishV2RenderHtml(task,pkg,taskId,stage)+(stage==='build'?stageContent.replace('⚡ Build Package — Fetch Background + Render Video',SRV2_BUILD_LABEL):stage==='approve'?stageContent.replace("onclick=\"_srvEnglishApproveVideo('","onclick=\"_srvEnglishV2ApproveVideo('"):stageContent);
+  if(_v2On&&(stage==='build'||stage==='approve'||stage==='done'))stageContent=_srvEnglishV2RenderHtml(task,pkg,taskId,stage)+(stage==='build'?stageContent.replace('⚡ Build Package — Fetch Background + Render Video',SRV2_BUILD_LABEL):stage==='approve'?_srvEnglishV2ApprovePoster(pkg,stageContent.replace("onclick=\"_srvEnglishApproveVideo('","onclick=\"_srvEnglishV2ApproveVideo('")):stageContent);
   if(_v2On&&stage==='build')stageContent=_srvEnglishV2BuildSummaryHtml(task,pkg,taskId)+stageContent;
   if(_v2On&&(stage==='review'||stage==='build'||stage==='approve'))stageContent=_srvEnglishV2AvatarHtml(task,pkg,taskId,stage)+stageContent;
   return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
