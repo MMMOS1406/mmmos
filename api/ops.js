@@ -3484,6 +3484,60 @@ CAPTION:
   }
 }
 
+// SRV Studio V2 (order SRV-STUDIO-V2-002) — English YouTube caption + hashtags rebuilt from an edited
+// title/lyrics in Review. Called only by the SRV Studio V2 Review editor, which is behind the
+// srv_studio_v2_enabled flag (OFF in production). Writes nothing; returns text for the client to save.
+function srvEnglishCaptionPrompt(title, lyrics, isLong) {
+  return `You are writing the YouTube description for SRV Studio, an English music channel (female vocalist).
+
+Song title: ${title || ''}
+Format: ${isLong ? 'full song (long video)' : 'short video (30 seconds)'}
+Lyrics:
+${lyrics || ''}
+
+Write the description from THIS song's actual lyrics:
+- Line 1: one emotional hook line drawn from the lyrics (no question marks, no quotes)
+- Lines 2-3: two short sentences on what the song is about
+- Line 4: a short call to listen or subscribe
+- Last line: 5-8 hashtags, always including #SRVStudio
+English only. No emojis in the hashtags line. No markdown.
+
+Respond in EXACTLY this format and nothing else:
+CAPTION:
+<the description, hashtags on its last line>`;
+}
+function parseSrvEnglishCaption(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const m = text.match(/CAPTION:\s*([\s\S]*)$/i);
+  const caption = (m ? m[1] : text).trim();
+  if (!caption) return null;
+  const tags = (caption.match(/#[A-Za-z0-9_]+/g) || []).filter((t, i, a) => a.indexOf(t) === i);
+  if (!tags.some(t => t.toLowerCase() === '#srvstudio')) tags.push('#SRVStudio');
+  return { captionYT: caption, hashtags: tags.join(' ') };
+}
+async function srvEnglishRegenCaption(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  const { title, lyrics, isLong } = req.body || {};
+  if (!title && !lyrics) return res.json({ ok: false, error: 'title or lyrics required' });
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_API_KEY) return res.json({ ok: false, error: 'no_api_key' });
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: srvEnglishCaptionPrompt(title, lyrics, !!isLong) }] })
+    });
+    const d = await resp.json();
+    const raw = ((d && d.content) || []).map(b => b.text || '').join('');
+    const out = parseSrvEnglishCaption(raw);
+    if (!out) return res.json({ ok: false, error: 'empty_response' });
+    return res.json({ ok: true, ...out });
+  } catch (e) {
+    return res.json({ ok: false, error: e.message });
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // v15.7.0 — CEO DECISION EXECUTION PROTOCOL (CDP)
 // Brain/Engineering layer only. Execution gate is permanently LOCKED until
@@ -19253,6 +19307,7 @@ export default async function handler(req, res) {
     if (action === 'department_metrics')        return await departmentMetrics(req, res); // v16.26.0 — KPI Success Measurement (Decision Success Rate, CEO Load)
     if (action === 'generate_package')           return await generatePackage(req, res);
     if (action === 'farsi_regen_caption')        return await farsiRegenCaption(req, res); // v15.6.5
+    if (action === 'srv_english_regen_caption')  return await srvEnglishRegenCaption(req, res); // SRV Studio V2 (flag-gated client)
     if (action === 'youtube_sync_performance')   return await youtubeSyncPerformance(req, res);
     if (action === 'log_performance_manual')     return await logPerformanceManual(req, res);
     if (action === 'get_performance_summary')    return await getPerformanceSummary(req, res);

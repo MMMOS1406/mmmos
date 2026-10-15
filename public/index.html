@@ -15596,17 +15596,415 @@ function _srvEnglishHasLifecycle(task){
   return !!(cfg&&cfg.lifecycle);
 }
 function _srvEnglishGetStage(taskId){
+  if(_srvStudioV2On())return _srvEnglishV2GetStage(taskId); // SRV Studio V2 (flag OFF in production)
   if(!D.srvLifecycleStages||typeof D.srvLifecycleStages!=='object')return 'generate';
   return D.srvLifecycleStages[String(taskId)]||'generate';
 }
 function _srvEnglishSetStage(taskId,stage){
+  if(_srvStudioV2On())return _srvEnglishV2SetStage(taskId,stage); // SRV Studio V2 (flag OFF in production)
   if(!D.srvLifecycleStages||typeof D.srvLifecycleStages!=='object')D.srvLifecycleStages={};
   D.srvLifecycleStages[String(taskId)]=stage;
   if(typeof saveAppState==='function')saveAppState();
 }
 function _srvEnglishPkgForTask(task){
+  if(_srvStudioV2On())return _srvEnglishV2PkgForTask(task); // SRV Studio V2 (flag OFF in production)
   if(!task)return null;
   return (D.packages||[]).find(p=>String(p.taskId||'')===String(task.taskId||task.id||''))||null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SRV STUDIO V2 — Checkpoint A (lifecycle parity & identity). Order SRV-STUDIO-V2-002.
+// Everything below is reachable only while _srvStudioV2On() is true. The flag is the app_settings
+// row `srv_studio_v2_enabled` (value true); production has no such row, so the flag is OFF and every
+// SRV English function above runs its original code path unchanged. `?srvStudioV2=off` forces it off
+// for side-by-side comparison; nothing in the URL can turn it on.
+//   • Identity: srvUid = 'srve_<createdAt ms>_<id>' (same rule as SRV Farsi P1-A). Stages are keyed by
+//     srvUid with the numeric key still written for back-compat, so turning the flag off again leaves
+//     every task on the stage it reached. Packages bind by srvTaskUid, stamped at generate.
+//   • TEST: task-level (isTest / [manual-test] / "[TEST]" name), in addition to the engine-wide mode.
+//   • Review: title, full lyrics, short lyrics, full + short Suno style prompts are editable and saved
+//     through the serialized package save queue; caption + hashtags regenerate after text edits.
+// ═══════════════════════════════════════════════════════════════════════════════
+const SRV_STUDIO_V2_FLAG_KEY='srv_studio_v2_enabled';
+const _srvStudioV2Flag={state:'unloaded'}; // unloaded | loading | on | off — anything but 'on' is OFF
+function _srvStudioV2ForcedOff(){
+  try{return /[?&]srvStudioV2=off(&|$)/.test(String(location.search||''));}catch(_){return false;}
+}
+function _srvStudioV2On(){
+  return _srvStudioV2Flag.state==='on'&&!_srvStudioV2ForcedOff();
+}
+function _srvStudioV2Rerender(){
+  try{
+    if(typeof activeExec!=='undefined'&&activeExec&&typeof renderExecMode==='function'){
+      const mc=document.getElementById('mainContent');
+      if(mc)mc.innerHTML=renderExecMode(activeExec);
+    }else if(typeof renderTab==='function'&&typeof currentTab!=='undefined'){
+      renderTab(currentTab);
+    }
+  }catch(_){}
+}
+function _srvStudioV2LoadFlag(){
+  if(_srvStudioV2Flag.state!=='unloaded')return;
+  _srvStudioV2Flag.state='loading';
+  fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${SRV_STUDIO_V2_FLAG_KEY}&select=value`,{
+    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}
+  }).then(function(r){return r.ok?r.json():[];}).then(function(rows){
+    const v=Array.isArray(rows)&&rows[0]?rows[0].value:null;
+    const on=(v===true||v==='true'||v==='"true"');
+    _srvStudioV2Flag.state=on?'on':'off';
+    if(on&&!_srvStudioV2ForcedOff()){
+      console.log('[SRV Studio V2] flag ON (app_settings.'+SRV_STUDIO_V2_FLAG_KEY+')');
+      _srvStudioV2Rerender();
+    }
+  }).catch(function(){_srvStudioV2Flag.state='off';});
+}
+_srvStudioV2LoadFlag();
+
+// ── Identity ─────────────────────────────────────────────────────────────────
+function _srvEnglishIsTask(t){return !!t&&t.engine==='SRV English';}
+function _srvEnglishTaskUid(task){
+  if(!_srvEnglishIsTask(task))return null;
+  if(task.srvUid)return task.srvUid;
+  const c=Number(task.createdAt);
+  if(!c||!isFinite(c)||task.id==null)return null;
+  return 'srve_'+c+'_'+task.id;
+}
+// Exactly one SRV English task with this numeric id, or null (never another engine's task, never a guess).
+function _srvEnglishTaskById(taskId){
+  const m=(D.tasks||[]).filter(t=>_srvEnglishIsTask(t)&&String(t.taskId||t.id||'')===String(taskId));
+  if(m.length===1)return m[0];
+  if(m.length>1)console.error('[SRV Studio identity] numeric task id '+taskId+' matches '+m.length+' SRV English tasks — refusing to guess');
+  return null;
+}
+function _srvEnglishTaskByUid(uid){
+  if(!uid)return null;
+  return (D.tasks||[]).find(t=>_srvEnglishTaskUid(t)===uid)||null;
+}
+function _srvEnglishV2TaskForPkg(pkg){
+  if(!pkg)return null;
+  if(pkg.srvTaskUid)return _srvEnglishTaskByUid(pkg.srvTaskUid);
+  return _srvEnglishTaskById(pkg.taskId);
+}
+function _srvEnglishEnsureIdentity(){
+  (D.tasks||[]).forEach(t=>{if(_srvEnglishIsTask(t)&&!t.srvUid){const u=_srvEnglishTaskUid(t);if(u)t.srvUid=u;}});
+}
+function _srvEnglishIsTestTask(t){
+  if(!_srvEnglishIsTask(t))return false;
+  return t.isTest===true||/\[manual-test\]/.test(String(t.assignmentReason||''))||/\[TEST\]/.test(String(t.name||''));
+}
+// Publish runs in TEST (private, "[TEST]" title, no schedule) when the task or its package is a test,
+// on top of the existing engine-wide test mode. It can only ever ADD test protection.
+function _srvEnglishV2IsTestPublish(taskId,pkg){
+  return _srvEnglishIsTestTask(_srvEnglishTaskById(taskId))||!!(pkg&&pkg.isTest===true);
+}
+function _srvEnglishV2StageMap(){
+  if(!D.srvLifecycleStages||typeof D.srvLifecycleStages!=='object')D.srvLifecycleStages={};
+  if(!D.srvLifecycleStages.__identityEpoch)D.srvLifecycleStages.__identityEpoch=Date.now();
+  return D.srvLifecycleStages;
+}
+function _srvEnglishV2GetStage(taskId){
+  const m=_srvEnglishV2StageMap();
+  const task=_srvEnglishTaskById(taskId);
+  const uid=_srvEnglishTaskUid(task);
+  if(uid&&m[uid])return m[uid];
+  if(task&&uid&&Number(task.createdAt)>=Number(m.__identityEpoch))return 'generate'; // new-era task: the numeric key is not its own
+  return m[String(taskId)]||'generate';
+}
+function _srvEnglishV2SetStage(taskId,stage){
+  const m=_srvEnglishV2StageMap();
+  const task=_srvEnglishTaskById(taskId);
+  const uid=_srvEnglishTaskUid(task);
+  if(uid){m[uid]=stage;if(!task.srvUid)task.srvUid=uid;}
+  m[String(taskId)]=stage; // back-compat: the flag-OFF code path reads this key
+  if(typeof saveAppState==='function')saveAppState();
+}
+// srvTaskUid match first. A legacy package (no srvTaskUid) binds only when unambiguous: SRV English,
+// same numeric id, exactly one SRV English task holds that id, and generated no earlier than the task
+// was created — task ids are recycled, and a package can never predate its task.
+function _srvEnglishV2PkgForTask(task){
+  if(!_srvEnglishIsTask(task))return null;
+  const uid=_srvEnglishTaskUid(task);
+  const pkgs=(D.packages||[]).filter(p=>p&&(p.engine==='SRV English'||p.engineName==='SRV English'));
+  const latest=arr=>arr.slice().sort((a,b)=>String(b.generatedAt||'').localeCompare(String(a.generatedAt||'')))[0]||null;
+  if(uid){
+    const byUid=pkgs.filter(p=>p.srvTaskUid===uid);
+    if(byUid.length)return latest(byUid);
+  }
+  const created=Number(task.createdAt);
+  if(!uid||!created)return null;
+  if(_srvEnglishTaskById(task.taskId||task.id)!==task)return null;
+  const legacy=pkgs.filter(p=>!p.srvTaskUid&&String(p.taskId||'')===String(task.taskId||task.id||'')
+    &&Date.parse(p.generatedAt||'')>=created);
+  return latest(legacy);
+}
+function _srvEnglishV2StampPkg(task,pkg){
+  const uid=_srvEnglishTaskUid(task);
+  if(uid)pkg.srvTaskUid=uid;
+  if(_srvEnglishIsTestTask(task))pkg.isTest=true;
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof savePackageToSupabase==='function')return _srvSavePackageQueued(pkg);
+  return Promise.resolve(false);
+}
+
+// ── Review: editable fields ──────────────────────────────────────────────────
+const SRV_STUDIO_V2_EDIT_FIELDS=[
+  {key:'title',label:'SONG TITLE',input:true,max:100},
+  {key:'lyrics',label:'FULL LYRICS',rows:12},
+  {key:'shortLyrics',label:'SHORT LYRICS',rows:6},
+  {key:'sunoPrompt',label:'SUNO STYLE PROMPT — FULL SONG',rows:4},
+  {key:'shortSunoPrompt',label:'SUNO STYLE PROMPT — SHORT',rows:3},
+];
+// Which saved fields the Build stage will actually use for this task (mirrors the Build stage exactly).
+function _srvEnglishV2BuildKeys(task,pkg){
+  const isLong=!!(task&&(task.contentType==='Long'||task.contentFormat==='long'));
+  const p=pkg||{};
+  return {
+    isLong,
+    lyrics:isLong?(p.lyrics?'lyrics':'shortLyrics'):(p.shortLyrics?'shortLyrics':'lyrics'),
+    sunoPrompt:isLong?(p.sunoPrompt?'sunoPrompt':'shortSunoPrompt'):(p.shortSunoPrompt?'shortSunoPrompt':'sunoPrompt'),
+  };
+}
+function _srvEnglishV2FieldId(pkgId,key){return 'srv2f_'+pkgId+'_'+key;}
+function _srvEnglishV2SetFieldStatus(pkgId,key,text,col){
+  const el=document.getElementById('srv2st_'+pkgId+'_'+key);
+  if(el){el.textContent=text;el.style.color=col||'var(--dim)';}
+}
+function _srvEnglishV2OnInput(pkgId,key){
+  const el=document.getElementById(_srvEnglishV2FieldId(pkgId,key));
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!el||!pkg)return;
+  const cnt=document.getElementById('srv2cnt_'+pkgId+'_'+key);
+  if(cnt)cnt.textContent=String(el.value.length)+' chars';
+  const dirty=String(el.value)!==String(pkg[key]||'');
+  _srvEnglishV2SetFieldStatus(pkgId,key,dirty?'● Unsaved changes':'✓ Saved',dirty?'#f59e0b':'#22c55e');
+}
+// Saves one field. Resolves true only after the database write succeeded.
+async function _srvEnglishV2SaveField(pkgId,key,opts){
+  opts=opts||{};
+  const def=SRV_STUDIO_V2_EDIT_FIELDS.find(f=>f.key===key);
+  const el=document.getElementById(_srvEnglishV2FieldId(pkgId,key));
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!def||!el)return false;
+  if(!pkg){_srvEnglishV2SetFieldStatus(pkgId,key,'⚠ Package not found — reload the page','#ef4444');return false;}
+  let val=String(el.value);
+  if(key==='title'){
+    val=val.replace(/\s+/g,' ').trim();
+    if(!val){_srvEnglishV2SetFieldStatus(pkgId,key,'⚠ The title cannot be empty','#ef4444');return false;}
+    if(val.length>def.max){_srvEnglishV2SetFieldStatus(pkgId,key,'⚠ YouTube titles are limited to '+def.max+' characters','#ef4444');return false;}
+    el.value=val;
+  }
+  const changed=val!==String(pkg[key]||'');
+  if(!changed&&!opts.force){_srvEnglishV2SetFieldStatus(pkgId,key,'✓ Saved','#22c55e');return true;}
+  const prevVal=pkg[key], prevEdits=pkg._srvV2Edits;
+  pkg[key]=val;
+  const now=new Date().toISOString();
+  pkg._srvV2Edits=Object.assign({},pkg._srvV2Edits||{},{[key]:now});
+  if(typeof saveAppState==='function')saveAppState();
+  _srvEnglishV2SetFieldStatus(pkgId,key,'Saving…','#c9a84c');
+  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+  if(ok!==true){
+    // Put the package back to what the database holds, so the box stays "unsaved" and Approve can't
+    // treat a failed edit as saved. The typed text stays in the box for the next Save.
+    if(pkg[key]===val){pkg[key]=prevVal;pkg._srvV2Edits=prevEdits;if(typeof saveAppState==='function')saveAppState();}
+    _srvEnglishV2SetFieldStatus(pkgId,key,'⚠ Not saved to the database — check the connection and press Save again','#ef4444');
+    return false;
+  }
+  _srvEnglishV2SetFieldStatus(pkgId,key,'✓ Saved','#22c55e');
+  if(changed&&(key==='title'||key==='lyrics'||key==='shortLyrics')&&!opts.skipCaption)_srvEnglishV2RegenCaption(pkg);
+  return true;
+}
+// Saves every field whose box differs from the saved package. Resolves true when nothing is left unsaved.
+async function _srvEnglishV2SaveAll(pkgId){
+  let allOk=true, textChanged=false;
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  for(const f of SRV_STUDIO_V2_EDIT_FIELDS){
+    const el=document.getElementById(_srvEnglishV2FieldId(pkgId,f.key));
+    if(!el||!pkg)continue;
+    const cur=f.key==='title'?String(el.value).replace(/\s+/g,' ').trim():String(el.value);
+    if(cur===String(pkg[f.key]||''))continue;
+    if(f.key==='title'||f.key==='lyrics'||f.key==='shortLyrics')textChanged=true;
+    const ok=await _srvEnglishV2SaveField(pkgId,f.key,{skipCaption:true});
+    if(!ok)allOk=false;
+  }
+  if(allOk&&textChanged&&pkg)_srvEnglishV2RegenCaption(pkg); // one caption refresh for the whole batch
+  return allOk;
+}
+const _srvEnglishV2CapSeq={};
+async function _srvEnglishV2RegenCaption(pkg){
+  const pkgId=String(pkg.id||'');
+  const seq=(_srvEnglishV2CapSeq[pkgId]||0)+1;_srvEnglishV2CapSeq[pkgId]=seq;
+  const st=document.getElementById('srv2capst_'+pkgId);
+  if(st){st.textContent='Updating caption and hashtags…';st.style.color='#c9a84c';}
+  const task=_srvEnglishV2TaskForPkg(pkg);
+  const isLong=!!(task&&(task.contentType==='Long'||task.contentFormat==='long'));
+  const lyrics=isLong?(pkg.lyrics||pkg.shortLyrics||''):(pkg.shortLyrics||pkg.lyrics||'');
+  try{
+    const r=await fetch('/api/ops?action=srv_english_regen_caption',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title:pkg.title||'',lyrics,isLong}),
+    });
+    const d=await r.json().catch(function(){return{};});
+    if(seq!==_srvEnglishV2CapSeq[pkgId])return; // a newer edit started its own refresh
+    if(!d.ok||!d.captionYT)throw new Error(d.error||'no caption returned');
+    pkg.captionYT=d.captionYT;
+    pkg.captionYouTube=d.captionYT;
+    if(d.hashtags)pkg.hashtags=d.hashtags;
+    if(typeof saveAppState==='function')saveAppState();
+    const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    const capEl=document.getElementById('srv2cap_'+pkgId);if(capEl)capEl.textContent=pkg.captionYT;
+    const tagEl=document.getElementById('srv2tags_'+pkgId);if(tagEl)tagEl.textContent=pkg.hashtags||'';
+    if(st){st.textContent=ok===true?'✓ Caption and hashtags updated from the edited song':'⚠ Caption updated here but not saved to the database';st.style.color=ok===true?'#22c55e':'#ef4444';}
+  }catch(e){
+    if(seq!==_srvEnglishV2CapSeq[pkgId])return;
+    if(st){st.textContent='⚠ Caption not updated ('+e.message+') — the previous caption is kept';st.style.color='#ef4444';}
+  }
+}
+function _srvEnglishV2Badges(task){
+  const b=[];
+  b.push('<span style="font-size:9px;font-weight:800;color:#8b5cf6;font-family:\'JetBrains Mono\',monospace;letter-spacing:1px;padding:2px 7px;background:rgba(139,92,246,0.14);border-radius:5px">V2</span>');
+  if(_srvEnglishIsTestTask(task))b.push('<span style="font-size:9px;font-weight:800;color:#f59e0b;font-family:\'JetBrains Mono\',monospace;letter-spacing:1px;padding:2px 7px;background:rgba(245,158,11,0.14);border-radius:5px">TEST TASK</span>');
+  return '<span style="display:inline-flex;gap:6px;margin-left:8px;vertical-align:middle">'+b.join('')+'</span>';
+}
+function _srvEnglishV2ReviewHtml(task,pkg,taskId,pkgId){
+  if(!pkg)return '<div style="color:var(--dim);font-size:12px;padding:10px">Package not yet generated — go back to Generate.</div>'
+    +`<button onclick="_srvEnglishSetStage('${taskId}','generate');renderTab(typeof currentTab!=='undefined'?currentTab:'tasks')" style="margin-top:10px;width:100%;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.10);border-radius:8px;color:var(--dim);font-size:11px;cursor:pointer;font-family:'Syne',sans-serif">← Back to Generate</button>`;
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  const usedKeys=[used.lyrics,used.sunoPrompt,'title'];
+  const fieldHtml=SRV_STUDIO_V2_EDIT_FIELDS.map(function(f){
+    const fid=_srvEnglishV2FieldId(pkgId,f.key);
+    const val=String(pkg[f.key]||'');
+    const safe=escHTML(val).replace(/"/g,'&quot;');
+    const usedBadge=usedKeys.includes(f.key)?'<span style="margin-left:8px;font-size:9px;font-weight:800;color:#22c55e;letter-spacing:1px;padding:1px 6px;background:rgba(34,197,94,0.12);border-radius:4px">USED IN BUILD</span>':'';
+    const box=f.input
+      ?`<input type="text" id="${fid}" value="${safe}" maxlength="${f.max+20}" oninput="_srvEnglishV2OnInput('${pkgId}','${f.key}')" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:6px;color:var(--text);padding:9px 10px;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;box-sizing:border-box">`
+      :`<textarea id="${fid}" rows="${f.rows}" oninput="_srvEnglishV2OnInput('${pkgId}','${f.key}')" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:6px;color:var(--text);padding:9px 10px;font-size:12px;font-family:'JetBrains Mono',monospace;box-sizing:border-box;resize:vertical;line-height:1.6">${safe}</textarea>`;
+    return `<div class="pkg-section">
+      <div class="pkg-label"><span>${f.label}${usedBadge}</span><span id="srv2cnt_${pkgId}_${f.key}" style="font-size:9px;color:var(--dim);font-family:'JetBrains Mono',monospace">${val.length} chars</span></div>
+      ${box}
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="copy-btn" id="srv2c_${pkgId}_${f.key}" onclick="copyField('${fid}','srv2c_${pkgId}_${f.key}')" style="padding:8px 14px">Copy</button>
+        <button class="copy-btn" id="srv2s_${pkgId}_${f.key}" onclick="_srvEnglishV2SaveField('${pkgId}','${f.key}')" style="padding:8px 14px;background:rgba(34,197,94,0.10);border-color:rgba(34,197,94,0.30);color:#22c55e">✓ Save</button>
+        <span id="srv2st_${pkgId}_${f.key}" style="font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace">${val?'✓ Saved':'Empty'}</span>
+      </div>
+    </div>`;
+  }).join('');
+  const cap=pkg.captionYT||pkg.captionYouTube||'';
+  const edited=pkg._srvV2Edits?Object.keys(pkg._srvV2Edits):[];
+  return `${_srvEnglishPackageQualityHtml(pkg)}
+    <div style="padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.22);border-radius:8px;font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:12px">
+      Edit any field, then press <strong style="color:var(--text)">Save</strong>. Saved edits are stored in the database and survive a reload.
+      Editing the title or lyrics refreshes the YouTube caption and hashtags. This is a <strong style="color:var(--text)">${used.isLong?'Long':'Short'}</strong> task: fields marked <span style="color:#22c55e;font-weight:700">USED IN BUILD</span> are the ones the video and Suno step will use.
+      ${edited.length?'<div style="margin-top:4px">Edited so far: '+edited.map(k=>escHTML(k)).join(', ')+'</div>':''}
+    </div>
+    ${fieldHtml}
+    <div class="pkg-section">
+      <div class="pkg-label"><span>CAPTION — YOUTUBE (auto)</span></div>
+      <div class="pkg-content" id="srv2cap_${pkgId}" style="white-space:pre-wrap">${escHTML(cap)}</div>
+      <div id="srv2capst_${pkgId}" style="font-size:10px;color:var(--dim);margin-top:4px;font-family:'JetBrains Mono',monospace"></div>
+    </div>
+    <div class="pkg-section">
+      <div class="pkg-label"><span>HASHTAGS (auto)</span></div>
+      <div class="pkg-content" id="srv2tags_${pkgId}">${escHTML(pkg.hashtags||'')}</div>
+    </div>
+    <div id="srv2approve_st_${pkgId}" style="font-size:11px;margin-top:10px;font-family:'JetBrains Mono',monospace"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+      <button onclick="_srvEnglishV2ApprovePackage('${taskId}','${pkgId}')" style="width:100%;padding:13px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.40);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Save &amp; Approve Package → Build</button>
+      <button onclick="_srvEnglishV2RegeneratePackage('${taskId}','${pkgId}')" style="width:100%;padding:12px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.30);border-radius:10px;color:#c9a84c;font-weight:700;font-size:12px;cursor:pointer;font-family:'Syne',sans-serif">↻ Regenerate Package</button>
+      <button onclick="_srvEnglishV2CancelTask('${taskId}')" style="width:100%;padding:10px;background:transparent;border:1px solid rgba(239,68,68,0.20);border-radius:10px;color:rgba(239,68,68,0.7);font-weight:600;font-size:11px;cursor:pointer;font-family:'Syne',sans-serif">✕ Cancel Task</button>
+    </div>`;
+}
+// Build stage header under V2: shows exactly the saved content the build will use.
+function _srvEnglishV2BuildSummaryHtml(task,pkg,taskId){
+  if(!pkg)return '';
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  const box=(label,text)=>`<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:5px;font-family:'JetBrains Mono',monospace">${label}</div><div style="padding:9px 11px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;white-space:pre-wrap;max-height:180px;overflow-y:auto;line-height:1.55">${escHTML(text||'—')}</div></div>`;
+  return `<div style="margin-bottom:16px;padding:12px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.22);border-radius:10px">
+      <div style="font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">THIS BUILD WILL USE (${used.isLong?'LONG':'SHORT'})</div>
+      ${box('TITLE',pkg.title||'')}
+      ${box(used.lyrics==='lyrics'?'FULL LYRICS':'SHORT LYRICS',pkg[used.lyrics]||'')}
+      ${box(used.sunoPrompt==='sunoPrompt'?'SUNO STYLE PROMPT — FULL SONG':'SUNO STYLE PROMPT — SHORT',pkg[used.sunoPrompt]||'')}
+      <div style="font-size:10px;color:var(--dim)">To change any of this, go back to Review, edit and save.</div>
+    </div>`;
+}
+
+// ── V2 stage actions ─────────────────────────────────────────────────────────
+// Re-render and keep the task open (the flag-OFF actions return to the task list).
+function _srvEnglishV2Show(taskId){
+  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+  if(typeof openExec==='function'&&_srvEnglishTaskById(taskId))openExec(String(taskId));
+}
+async function _srvEnglishV2ApprovePackage(taskId,pkgId){
+  const st=document.getElementById('srv2approve_st_'+pkgId);
+  const say=function(t,c){if(st){st.textContent=t;st.style.color=c;}};
+  say('Saving edits…','#c9a84c');
+  const ok=await _srvEnglishV2SaveAll(pkgId);
+  if(!ok){say('⚠ Some edits could not be saved. Fix the fields marked in red and approve again.','#ef4444');return;}
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!pkg||!String(pkg.title||'').trim()){say('⚠ The package needs a title before it can be approved.','#ef4444');return;}
+  _srvEnglishV2SetStage(taskId,'build');
+  _srvEnglishV2Show(taskId);
+}
+// Generates through the existing, unmodified generatePackage(), then binds the new package to this
+// task's srvUid. Refuses when the numeric id is ambiguous, because generatePackage resolves a task by
+// the first matching numeric id across all engines.
+async function _srvEnglishV2GenerateInto(taskId){
+  const task=_srvEnglishTaskById(taskId);
+  if(!task)throw new Error('SRV English task '+taskId+' could not be identified uniquely');
+  const first=(D.tasks||[]).find(x=>String(x.id||x.taskId||'')===String(taskId));
+  if(first!==task)throw new Error('Task id '+taskId+' is shared with another engine\'s task — generation refused to avoid writing to the wrong task');
+  const before=new Set((D.packages||[]).map(p=>String(p&&p.id)));
+  const numericId=Number(taskId);
+  await generatePackage(isNaN(numericId)?taskId:numericId);
+  const pkg=(D.packages||[]).find(p=>p&&!before.has(String(p.id))&&String(p.taskId||'')===String(taskId)&&p.engine==='SRV English');
+  if(!pkg)throw new Error('No package was created');
+  await _srvEnglishV2StampPkg(task,pkg);
+  return pkg;
+}
+async function _srvEnglishV2Generate(taskId){
+  const genBtn=document.querySelector(`button[onclick="vaGeneratePackage('${taskId}')"]`);
+  if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
+  try{
+    await _srvEnglishV2GenerateInto(taskId);
+    _srvEnglishV2SetStage(taskId,'review');
+    _srvEnglishV2Show(taskId);
+  }catch(e){
+    if(genBtn){genBtn.disabled=false;genBtn.textContent='✦ Generate Package';genBtn.style.opacity='1';}
+    console.error('[SRV Studio V2] generate error:',e);
+    alert('Generation failed: '+e.message);
+  }
+}
+async function _srvEnglishV2RegeneratePackage(taskId,pkgId){
+  if(!confirm('Regenerate package? Your edits to the current package will be replaced by a new package.'))return;
+  const statusDiv=document.createElement('div');
+  statusDiv.id='srv-regen-status';
+  statusDiv.style.cssText='position:fixed;bottom:20px;right:20px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.4);border-radius:10px;padding:12px 16px;font-size:12px;color:#c9a84c;font-family:\'JetBrains Mono\',monospace;z-index:9999';
+  statusDiv.textContent='⏳ Regenerating package…';
+  document.body.appendChild(statusDiv);
+  const old=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId))||null;
+  try{
+    if(old)D.packages=D.packages.filter(p=>p!==old);
+    _srvEnglishV2SetStage(taskId,'generate');
+    await _srvEnglishV2GenerateInto(taskId);
+    _srvEnglishV2SetStage(taskId,'review');
+  }catch(e){
+    if(old&&!(D.packages||[]).includes(old))D.packages.unshift(old); // keep the previous package rather than leave the task empty
+    _srvEnglishV2SetStage(taskId,old?'review':'generate');
+    alert('Regeneration failed: '+e.message+(old?' — the previous package was kept.':''));
+  }finally{
+    statusDiv.remove();
+  }
+  _srvEnglishV2Show(taskId);
+}
+function _srvEnglishV2CancelTask(taskId){
+  if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
+  const t=_srvEnglishTaskById(taskId);
+  if(t){t.status='done';t.cancelledAt=Date.now();}
+  const m=_srvEnglishV2StageMap();
+  delete m[String(taskId)];
+  const u=_srvEnglishTaskUid(t);if(u)delete m[u];
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof closeExec==='function')closeExec();
+  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
 
 // Stage display metadata
@@ -15633,45 +16031,11 @@ function _srvLifecycleProgressBar(currentStage){
   '</div>';
 }
 
-// ── Lifecycle-aware task card ─────────────────────────────────────────────────
-function renderSRVEnglishLifecycleCard(task){
-  const pkg=_srvEnglishPkgForTask(task);
-  const stage=_srvEnglishGetStage(task.taskId||task.id);
-  const taskId=String(task.taskId||task.id||'');
-  const pkgId=pkg?String(pkg.id||''):'';
-  const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
-  const mood=task.mode||task.mood||pkg?.mood||'Emotional';
-
-  let stageContent='';
-
-  // ── GENERATE ──────────────────────────────────────────────────────────────
-  if(stage==='generate'){
-    stageContent=`
-      <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Mode: <strong style="color:var(--text)">${escHTML(mood)}</strong></div>
-        <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
-        <button onclick="vaGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
-          ✦ Generate Package
-        </button>
-      </div>`;
-  }
-
-  // ── REVIEW ────────────────────────────────────────────────────────────────
-  else if(stage==='review'){
-    const fields=pkg?[
-      {label:'TITLE',val:pkg.title||pkg.name||''},
-      {label:'LYRICS',val:pkg.lyrics||''},
-      {label:'SUNO PROMPT',val:pkg.sunoPrompt||''},
-      {label:'CAPTION — YOUTUBE',val:pkg.captionYT||pkg.captionYouTube||''},
-      {label:'HASHTAGS',val:pkg.hashtags||''},
-    ]:[];
-    const fieldHtml=fields.filter(f=>f.val).map((f,fi)=>{
-      const fid=`slf_${pkgId}_${fi}`,bid=`slb_${pkgId}_${fi}`;
-      return `<div class="pkg-section"><div class="pkg-label"><span>${f.label}</span><button class="copy-btn" id="${bid}" onclick="copyField('${fid}','${bid}')">Copy</button></div><div class="pkg-content" id="${fid}">${escHTML(f.val)}</div></div>`;
-    }).join('');
-    // ── Package quality scoring (client-side heuristics) ──────────────────
-    let qualityHtml='';
-    if(pkg){
+// Package quality score panel for the SRV English Review stage (shared by the original Review view and
+// the SRV Studio V2 editable Review; moved here unchanged so both show the same score).
+function _srvEnglishPackageQualityHtml(pkg){
+  if(!pkg)return '';
+  let qualityHtml='';
       const _t=(pkg.title||pkg.name||'').toLowerCase();
       const _l=(pkg.lyrics||pkg.shortLyrics||'').toLowerCase();
       const _p=(pkg.sunoPrompt||pkg.shortSunoPrompt||'').toLowerCase();
@@ -15768,7 +16132,52 @@ function renderSRVEnglishLifecycleCard(task){
         ${_kissBanner}
         ${_signalHtml}
       </div>`;
-    }
+  return qualityHtml;
+}
+// ── Lifecycle-aware task card ─────────────────────────────────────────────────
+function renderSRVEnglishLifecycleCard(task){
+  if(_srvStudioV2On())_srvEnglishEnsureIdentity(); // SRV Studio V2
+  const pkg=_srvEnglishPkgForTask(task);
+  const stage=_srvEnglishGetStage(task.taskId||task.id);
+  const taskId=String(task.taskId||task.id||'');
+  const pkgId=pkg?String(pkg.id||''):'';
+  const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
+  const mood=task.mode||task.mood||pkg?.mood||'Emotional';
+
+  let stageContent='';
+
+  // ── GENERATE ──────────────────────────────────────────────────────────────
+  if(stage==='generate'){
+    stageContent=`
+      <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Mode: <strong style="color:var(--text)">${escHTML(mood)}</strong></div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
+        <button onclick="vaGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
+          ✦ Generate Package
+        </button>
+      </div>`;
+  }
+
+  // ── REVIEW (SRV Studio V2: editable, persisted) ───────────────────────────
+  else if(stage==='review'&&_srvStudioV2On()){
+    stageContent=_srvEnglishV2ReviewHtml(task,pkg,taskId,pkgId);
+  }
+
+  // ── REVIEW ────────────────────────────────────────────────────────────────
+  else if(stage==='review'){
+    const fields=pkg?[
+      {label:'TITLE',val:pkg.title||pkg.name||''},
+      {label:'LYRICS',val:pkg.lyrics||''},
+      {label:'SUNO PROMPT',val:pkg.sunoPrompt||''},
+      {label:'CAPTION — YOUTUBE',val:pkg.captionYT||pkg.captionYouTube||''},
+      {label:'HASHTAGS',val:pkg.hashtags||''},
+    ]:[];
+    const fieldHtml=fields.filter(f=>f.val).map((f,fi)=>{
+      const fid=`slf_${pkgId}_${fi}`,bid=`slb_${pkgId}_${fi}`;
+      return `<div class="pkg-section"><div class="pkg-label"><span>${f.label}</span><button class="copy-btn" id="${bid}" onclick="copyField('${fid}','${bid}')">Copy</button></div><div class="pkg-content" id="${fid}">${escHTML(f.val)}</div></div>`;
+    }).join('');
+    // ── Package quality scoring (client-side heuristics) ──────────────────
+    const qualityHtml=_srvEnglishPackageQualityHtml(pkg);
     stageContent=`
       ${qualityHtml}
       ${fieldHtml||'<div style="color:var(--dim);font-size:12px;padding:10px">Package not yet generated — go back to Generate.</div>'}
@@ -15860,9 +16269,11 @@ function renderSRVEnglishLifecycleCard(task){
       </div>`;
   }
 
+  const _v2On=_srvStudioV2On();
+  if(_v2On&&stage==='build')stageContent=_srvEnglishV2BuildSummaryHtml(task,pkg,taskId)+stageContent;
   return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="card-title" style="margin-bottom:0;color:var(--text)">🎵 SRV English · New Lifecycle</div>
+      <div class="card-title" style="margin-bottom:0;color:var(--text)">🎵 SRV English · New Lifecycle${_v2On?_srvEnglishV2Badges(task):''}</div>
       <span style="font-size:10px;font-weight:800;color:${stageCol};font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;padding:3px 8px;background:${stageCol}18;border-radius:5px">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
     </div>
     ${_srvLifecycleProgressBar(stage)}
@@ -17044,7 +17455,7 @@ async function _srvEnglishBuildTrigger(pkgId,taskId){
   const setStatus=function(msg,col){if(statusEl){statusEl.textContent=msg;if(col)statusEl.style.color=col;}};
   try{
     const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);})||{};
-    const task=(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);});
+    const task=_srvStudioV2On()?_srvEnglishTaskById(taskId):(D.tasks||[]).find(function(t){return String(t.id||'')===String(taskId);}); // V2: identity-safe lookup
     const isLongTask=!!(task&&task.isLong); // true → render LONG+SHORT; false → SHORT only
 
     // ── Clear old render artifacts so Approve always shows fresh video ────────
@@ -17234,7 +17645,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
     const pkgChannel='SRV English';
     const _buildEngineState=_getEngineState(pkgChannel);
-    const _inTestMode=_buildEngineState==='test';
+    const _inTestMode=_buildEngineState==='test'||(_srvStudioV2On()&&_srvEnglishV2IsTestPublish(taskId,pkg)); // V2: task-level TEST
     const _srvPublishAt=_inTestMode?null:(pkg.publishAt||null);
     const pkgTitle=_inTestMode?'[TEST] '+(pkg.title||'SRV English'):(pkg.title||'SRV English');
 
@@ -17256,7 +17667,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     }
 
     // For Short tasks: only upload SHORT; for Long tasks: upload both
-    const _pubTask=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
+    const _pubTask=_srvStudioV2On()?_srvEnglishTaskById(taskId):(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);}); // V2: identity-safe lookup
     const _isLongPub=!!(_pubTask&&_pubTask.isLong);
     const [longUp,shortUp]=await Promise.all([
       _isLongPub?doUpload(longUrl,'LONG'):Promise.resolve(null),
@@ -17272,7 +17683,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     if(allOk){
       // Mark task done
       _srvEnglishSetStage(taskId,'done');
-      const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
+      const task=_srvStudioV2On()?_srvEnglishTaskById(taskId):(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId)); // V2: identity-safe lookup
       if(task)task.status='done';
       if(typeof saveAppState==='function')saveAppState();
       if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
@@ -17291,6 +17702,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
 // ── vaGeneratePackage — Generate button handler for SRV English lifecycle ─────
 // Calls existing generatePackage() then auto-advances stage to 'review'
 async function vaGeneratePackage(taskId){
+  if(_srvStudioV2On())return _srvEnglishV2Generate(taskId); // SRV Studio V2 (flag OFF in production)
   const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
   if(!task){console.warn('[vaGeneratePackage] task not found:',taskId);return;}
   // Show a generating spinner in the card
