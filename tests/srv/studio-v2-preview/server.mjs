@@ -178,6 +178,7 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       if (action === 'srv_english_pexels_bg' || action === 'srv_english_build') return send(res, 200, DISABLED('video rendering'));
       if (action === 'youtube_upload_video' || action === 'set_yt_thumbnail') return send(res, 200, dryRun(action, json));
       if (action === 'srv_studio_v2_pilot_upload') { // E3: the real pilot logic, with this server's settings as the ledger store
+        if (!json || json.ceo_session_token !== 'preview.session') return send(res, 401, { ok: false, pilot: true, error: 'ceo_session_required' }); // E4, as in production
         const host = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(String(req.headers.host || '')) ? 'http://' + req.headers.host : origin;
         const out = await srv2RunPilotUpload({
           now: () => Date.now(), flagOn: async () => store.settings.srv_studio_v2_enabled === 'true',

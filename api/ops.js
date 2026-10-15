@@ -3580,6 +3580,9 @@ async function srvStudioV2PilotCas(key, oldText, newText) {
 }
 async function srvStudioV2PilotUpload(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  // E4: only a signed-in CEO session may trigger a pilot upload (unauthenticated callers are refused before any
+  // pilot state is read, so a tampered authorization or ledger cannot be used from outside).
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, pilot: true, error: 'ceo_session_required' });
   try {
     const out = await srv2RunPilotUpload({
       now: () => Date.now(),

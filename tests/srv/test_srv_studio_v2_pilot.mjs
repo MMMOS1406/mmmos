@@ -140,13 +140,22 @@ function env(o = {}) {
     const sbGet = async (p) => { const u = new URL('http://x/' + p); const key = decodeURIComponent((u.searchParams.get('key') || '').replace(/^eq\./, '')); return key in table ? [{ value: table[key] }] : []; };
     const youtubeUploadVideo = async (req, res) => { ups.push(req.body); await sleep(15); return res.status(200).json({ ok: true, youtubeVideoId: 'yt' + ups.length, channelId: CH, channelTitle: 'SRV Studio ', privacyStatus: req.body.publishAt ? 'private' : req.body.privacyStatus, uploadedAt: new Date().toISOString() }); };
     const lib = await import('../../lib/srvStudioV2Pilot.mjs');
-    const handler = new Function('srv2RunPilotUpload', 'srvStudioV2FlagEnabled', 'sbGet', 'fetch', '_getYoutubeConnectionByTitle', 'youtubeUploadVideo', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY', src + '\nreturn srvStudioV2PilotUpload;')(
-      lib.srv2RunPilotUpload, async () => true, sbGet, fetchMock, async (t) => (t === 'SRV Studio' ? { channel_id: CH } : null), youtubeUploadVideo, SB, 'svc');
-    const call = async (b) => { const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(x) { this.body = x; return this; } }; await handler({ method: 'POST', body: b }, res); return res; };
+    let settingReads = 0; const sbGetCounted = async (p) => { settingReads++; return sbGet(p); };
+    const requireCeoSession = async (req) => ((req.method === 'POST' ? req.body : req.query) || {}).ceo_session_token === 'valid-ceo-session';
+    const handler = new Function('srv2RunPilotUpload', 'srvStudioV2FlagEnabled', 'sbGet', 'fetch', '_getYoutubeConnectionByTitle', 'youtubeUploadVideo', 'requireCeoSession', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY', src + '\nreturn srvStudioV2PilotUpload;')(
+      lib.srv2RunPilotUpload, async () => true, sbGetCounted, fetchMock, async (t) => (t === 'SRV Studio' ? { channel_id: CH } : null), youtubeUploadVideo, requireCeoSession, SB, 'svc');
+    const callAs = async (b, token) => { const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(x) { this.body = x; return this; } }; await handler({ method: 'POST', body: token === undefined ? b : { ...b, ceo_session_token: token } }, res); return res; };
+    const call = (b) => callAs(b, 'valid-ceo-session');
+    const anon = await callAs(body(LONG, 'long')); const forged = await callAs(body(LONG, 'long'), 'forged.token');
+    ok('E4 Handler: no CEO session or a forged token → 401 ceo_session_required, before any pilot state is read; nothing uploaded', anon.code === 401 && anon.body.error === 'ceo_session_required' && forged.code === 401 && settingReads === 0 && ups.length === 0 && !(P.SRV2_PILOT_LEDGER_KEY in table));
     const all = await Promise.all([body(LONG, 'long'), body(LONG, 'long'), body(SHORT, 'short'), body(SHORT, 'short'), body(LONG, 'long'), body(OTHER, 'long')].map(call));
     const L = JSON.parse(table[P.SRV2_PILOT_LEDGER_KEY]);
     ok('Handler: real ops.js code under 6 concurrent requests → exactly 2 uploads (Long + Short), ledger stored in app_settings', ups.length === 2 && all.filter((r) => r.code === 200).length === 2 && L.entries.filter((x) => x.status === 'uploaded').length === 2, all.map((r) => r.code + ':' + (r.body.error || 'ok')).join(' '));
     ok('Handler: the existing upload handler receives private / publishAt null / AI disclosure', ups.every((b) => b.privacyStatus === 'private' && b.publishAt === null && b.containsSyntheticMedia === true && b.engine === 'SRV English'));
+    const tampered = JSON.parse(table[P.SRV2_PILOT_LEDGER_KEY]); table[P.SRV2_PILOT_LEDGER_KEY] = JSON.stringify({ rev: 0, entries: [] }); // what an anon write could do today
+    const afterReset = await callAs(body(LONG, 'long')); const ups0 = ups.length;
+    ok('E4 Handler: even after a ledger reset, an unauthenticated caller still cannot upload (401)', afterReset.code === 401 && ups.length === ups0);
+    table[P.SRV2_PILOT_LEDGER_KEY] = JSON.stringify(tampered);
     const get = await call(body(SHORT, 'short')); const getRes = { code: 0, body: null, status(c) { this.code = c; return this; }, json(x) { this.body = x; return this; } }; await handler({ method: 'GET', body: {} }, getRes);
     ok('Handler: a fourth request is refused; GET is refused', get.code === 409 && getRes.code === 405);
   }
@@ -170,11 +179,12 @@ function env(o = {}) {
         document: { getElementById: () => null, querySelector: () => null, createElement: () => ({ style: {}, remove() {} }), body: { appendChild() {} } },
         D: { tasks: [], packages: [], srvLifecycleStages: {}, engineState: { 'SRV English': 'test' }, _publishSlots: { '2099-01-01T12:00:00.000Z': 'pkg_farsi_1' } },
         ENGINES_CONFIG: [{ id: 'srv_english', lifecycle: { requireApprove: true } }], SUPABASE_URL: SB, SUPABASE_KEY: 'k', SB_PACKAGES_BACKUP_KEY: 'b',
-        saveAppState() {}, renderTab() {}, openExec() {}, closeExec() {}, currentTab: 'tasks', activeExec: null, escHTML: (s) => String(s == null ? '' : s), _srvAudioData: {} };
+        saveAppState() {}, renderTab() {}, openExec() {}, closeExec() {}, currentTab: 'tasks', activeExec: null, escHTML: (s) => String(s == null ? '' : s), _srvAudioData: {},
+        sessionStorage: { getItem: (k) => (k === 'mmm_ceo_session' ? JSON.stringify({ token: 'ceo.tok', expires_at: '2099-01-01' }) : null) } };
       vm.createContext(ctx);
       vm.runInContext(["const _PUBLISH_SLOT_DAYS=['Thursday','Friday','Saturday','Sunday','Monday'];", lineOf(H, /^const _PUBLISH_SLOT_TIMES = /), lineOf(H, /^const _DAY_NAMES = /),
         top(H, '_nextPublishSlotCandidates'), top(H, '_assignPublishSlot'), top(H, '_getEngineState'), top(H, 'savePackageToSupabase'), slice(H, 'const _farsiPkgSaveQueues={};', '// Write all packages as a backup'),
-        top(H, 'writePackagesBackup'), top(H, 'fetchPackagesFromTable'), slice(H, '// ── Lifecycle helpers', '// ── Stage transition actions')].join('\n'), ctx);
+        top(H, 'writePackagesBackup'), top(H, 'fetchPackagesFromTable'), top(H, '_ceoGetSessionToken'), top(H, '_ceoAuthedFetch'), slice(H, '// ── Lifecycle helpers', '// ── Stage transition actions')].join('\n'), ctx);
       vm.runInContext("_srvStudioV2Flag.state='on';", ctx); ctx.__R = RM; vm.runInContext('_srv2RenderModP=Promise.resolve(__R);', ctx);
       return { ctx, calls };
     }
@@ -187,6 +197,7 @@ function env(o = {}) {
       const slots0 = JSON.stringify(E.ctx.D._publishSlots);
       await vm.runInContext("_srvEnglishV2Publish('pkg_l','137')", E.ctx); await vm.runInContext("_srvEnglishV2Publish('pkg_s','131')", E.ctx); await vm.runInContext("_srvEnglishV2Publish('pkg_o','133')", E.ctx);
       const [cl, cs] = E.calls.pilot;
+      ok('E4 Client: pilot requests carry the CEO session token (through _ceoAuthedFetch)', E.calls.pilot.length === 2 && E.calls.pilot.every((b) => b.ceo_session_token === 'ceo.tok') && E.calls.yt.every((b) => !('ceo_session_token' in b)));
       ok('Client: the two authorized tasks go to the pilot action with their normal titles (no [TEST])', E.calls.pilot.length === 2 && cl.title === 'Leave the Engine Running | Emotional Deep House | Night Drive | SRV Studio' && cs.title === "Don't Let Me Go Tonight | Night Drive Deep House | SRV Studio #Shorts" && cl.taskUid === 'srve_1791661440767_137' && cl.kind === 'long' && cs.kind === 'short');
       ok('Client: the unlisted task still publishes as TEST ([TEST] title, private, no schedule) through the normal action', E.calls.yt.length === 1 && /^\[TEST\] Other Song/.test(E.calls.yt[0].title) && E.calls.yt[0].privacyStatus === 'private' && E.calls.yt[0].publishAt === null);
       ok('Client: pilot packages stay isTest, take zero publishing slots, record the YouTube id/time/channel', pl.isTest === true && ps.isTest === true && JSON.stringify(E.ctx.D._publishSlots) === slots0 && pl.srvPilot.youtubeVideoId === 'ytp1' && pl.srvPilot.channelId === CH && pl.srvPilot.uploadedAt && pl.srvPublish.pilot === true && pl._srvYtLongId === 'ytp1' && ps._srvYtShortId === 'ytp2');
@@ -212,7 +223,7 @@ function env(o = {}) {
     const minus = d.split('\n').filter((l) => /^-[^-]/.test(l));
     ok('Scope (server): E3 only adds to api/ops.js — the pilot import, three V2 pilot functions and one dispatcher line', minus.length === 0 && (d.match(/^\+\s*if \(action === /gm) || []).length === 1 && /srv_studio_v2_pilot_upload/.test(d));
     const files = execSync('git diff ff5cc43 --name-only', { cwd: repo }).toString().trim().split('\n').filter(Boolean);
-    const allowed = ['api/ops.js', 'lib/srvStudioV2Pilot.mjs', 'public/index.html', 'tests/srv/studio-v2-preview/server.mjs', 'tests/srv/studio-v2-preview/fixture.mjs', 'tests/srv/test_srv_studio_v2_pilot.mjs', 'tests/srv/test_srv_studio_v2_isolation.mjs', 'tests/srv/test_srv_studio_v2_render.mjs', 'tests/srv/test_srv_studio_v2_lifecycle.cjs', 'tests/srv/studio-v2-preview/headless-pilot.mjs'];
+    const allowed = ['api/ops.js', 'lib/srvStudioV2Pilot.mjs', 'docs/srv-studio-v2/e4-app-settings-v2-write-lock.sql', 'tests/srv/test_srv_studio_v2_e4_security.mjs', 'public/index.html', 'tests/srv/studio-v2-preview/server.mjs', 'tests/srv/studio-v2-preview/fixture.mjs', 'tests/srv/test_srv_studio_v2_pilot.mjs', 'tests/srv/test_srv_studio_v2_isolation.mjs', 'tests/srv/test_srv_studio_v2_render.mjs', 'tests/srv/test_srv_studio_v2_lifecycle.cjs', 'tests/srv/studio-v2-preview/headless-pilot.mjs'];
     ok('Scope: E3 changes only V2 files, the V2 pilot server action, the preview and V2 tests', files.every((f) => allowed.includes(f)), files.join(', '));
   }
   console.log(out.join('\n'));

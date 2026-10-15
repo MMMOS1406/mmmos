@@ -16373,7 +16373,7 @@ async function _srvEnglishV2Publish(pkgId,taskId){
       pkg.isTest=true;_srvEnglishV2ReleaseSlot(pkg);
       meta=R.srv2YouTubeMetadata(kind,pkg,{test:false,moodKey,publishAt:null});meta.publishAt=null;meta.privacyStatus='private';meta.containsSyntheticMedia=true;
       say('Uploading the '+kind.toUpperCase()+' pilot video to SRV Studio (private, not scheduled)…');
-      r=await fetch('/api/ops?action=srv_studio_v2_pilot_upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskUid:pilot.uid,kind,pkgId:pkg.id,videoUrl,title:meta.title,description:meta.description,tags:meta.tags})});
+      r=await _ceoAuthedFetch('/api/ops?action=srv_studio_v2_pilot_upload',{taskUid:pilot.uid,kind,pkgId:pkg.id,videoUrl,title:meta.title,description:meta.description,tags:meta.tags}); // E4: CEO session required
       up=await r.json().catch(function(){return {};});
       if(!up||up.ok!==true){
         pkg.srvPilotAttempt={at:new Date().toISOString(),error:(up&&up.error)||('HTTP '+r.status),detail:(up&&up.detail)||null,entryId:(up&&up.entryId)||null};
@@ -16422,7 +16422,7 @@ async function _srvEnglishV2PilotFor(task){
   }catch(_){return null;}
 }
 function _srvEnglishV2PilotReason(code){
-  const m={srv_studio_v2_off:'SRV Studio V2 is switched off on the server',pilot_not_configured:'no pilot is authorized',pilot_disabled:'the pilot authorization is disabled',pilot_expired:'the pilot authorization has expired',
+  const m={ceo_session_required:'pilot uploads need a signed-in CEO session — sign in again as Mansoor',srv_studio_v2_off:'SRV Studio V2 is switched off on the server',pilot_not_configured:'no pilot is authorized',pilot_disabled:'the pilot authorization is disabled',pilot_expired:'the pilot authorization has expired',
     task_not_allowlisted:'this task is not one of the two pilot tasks',format_mismatch:'the task format does not match its pilot authorization',task_already_uploaded_or_in_progress:'this task already has a pilot upload (or one in progress)',
     pilot_limit_reached:'the two pilot uploads have already been used',engine_not_in_test:'the SRV English engine is not in TEST mode',wrong_channel:'the YouTube connection is not the SRV Studio channel',
     pilot_busy_try_again:'another pilot upload was being recorded — try again',uploaded_but_unverified_channel_or_privacy:'YouTube accepted the video but its channel or privacy could not be verified — check YouTube Studio before anything else',
