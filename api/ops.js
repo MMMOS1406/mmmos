@@ -18,6 +18,7 @@ import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validati
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
+import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -2128,6 +2129,9 @@ async function generatePackage(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'POST only' });
   const { engineId, mode, existingMemory, contentFormat } = req.body || {};
   if (!engineId || !mode) return res.status(400).json({ success: false, error: 'engineId and mode required' });
+  // SRV Studio V2: honoured only when the client asks AND the flag row is on (fails closed).
+  const _srvV2 = engineId === 'srv_english' && (req.body || {}).srvStudioV2 === true &&
+    await srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY });
   const isLong = contentFormat === 'long'; // v13.69.12 — long-form flag (8 min)
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -2876,6 +2880,10 @@ CRITICAL: Start your response with <package> IMMEDIATELY. Do NOT write any pream
 {"title":"emoji + Persian title + emoji","titleFinglish":"Latin/Finglish TRANSLITERATION of the title above (pronunciation, not meaning) — NOT an English translation, e.g. Persian دلتنگ توام → Finglish \"Deltang-e To'am\". Apostrophe for a glottal stop where natural, hyphenate compound words for readability, no emoji.","shortTitle":"emoji + short Persian title","concept":"one sentence (English) — MUST answer: what does [Person] FEEL toward [Person] RIGHT NOW? — BANNED even with person as grammatical subject: 'A man returns to the bench where...' / 'She sits in the empty hall where...' / 'He stands at the vendor corner where...' — Memory-Through-Setting patterns use place/object as the organizing frame and are BANNED — RIGHT: 'A man who still loves her but cannot bring himself to call' / 'She knows he's still waiting but doesn't know how to go back' — the concept must be about a FEELING, not a location or object a person is near","mood":"${mood}","emotionalSubMode":"the texture chosen from the SUB-MODE list above","hook":"the ONE memorable emotional hook phrase (Persian) — visual, specific, singable, NO location word as the anchor, carries SRV romantic identity — the hook is about a PERSON, a FEELING, or a RELATIONAL MOMENT, never a place name","sunoPrompt":"identity-rich English Suno prompt per the SUNO PROMPT QUALITY rules above — must include cinematic-modern-Persian-pop anchor + vocal direction + atmospheric texture + cinematic build + production quality + 3:00-3:20","lyrics":"full Persian lyrics using EXACT section tags: [Intro] [Verse 1] [Verse 2] [Chorus] [Music Break] [Verse 3] [Final Chorus] [Outro]. Instrumental sections ([Intro] [Music Break] [Outro]) get NO lyrics — just the tag. Sung sections follow the structure rules. Conversational rhythm. ONE central romantic image (human/relational object — NOT a location) running through all sections. [Outro] tag MUST appear as the final section to control Suno song length.","captionYT":"Persian YouTube caption with hook question + CTA + hashtags","captionTikTok":"one line Persian TikTok caption with hashtags","captionIG":"Persian Instagram dot-spacer format with hashtags","hashtags":"mix Persian and English hashtags","thumbnailText":"Persian title + emoji","centralImage":"single central visual human/relational object (1-3 words English — e.g. wedding ring, empty chair, late-night window, her scarf, rain on glass, worn photograph, jacket on the hook, half-finished tea — NEVER a location word like bridge, café, rooftop, street)","location":"generic unnamed backdrop only (1-3 words English — e.g. unnamed apartment, unnamed street, unnamed night, unnamed space — NEVER a named landmark, bridge, station, or specific city place that could become the song title)","hookStructure":"hook pattern type (e.g. object-as-memory, sensory-recall, address-to-person, reunion-longing, romantic-question, late-night-thought, heartbreak-beauty, first-meeting, romantic-distance)","emotionalScenario":"specific romantic emotional situation between TWO PEOPLE (e.g. waiting for someone who may not return, reunion after long distance, first meeting in a crowd, heartbreak of a last goodbye, longing from another city, the moment love is almost confessed, romantic tension across a room)"}
 </package>`;
     } // end isLong (long song branch)
+  } else if (_srvV2) {
+    // SRV Studio V2 — one prompt for Long and Short (lib/srvStudioV2Music.mjs); the original SRV English
+    // prompts below stay untouched for flag-OFF requests.
+    prompt = buildSrvStudioV2UserPrompt({ isLong, mode, avoidText: avoidList });
   } else if (engineId === 'srv_english') {
     // ─────────────────────────────────────────────────────────────────────────
     // SRV ENGLISH — v13.69.45: SEPARATE SHORT vs LONG generators
@@ -3327,6 +3335,7 @@ Kelly's energy is the energy of telling your smartest friend something cool — 
         } : {}),
         // v14.6.4 — stop_sequences: clean stop right after closing tag, prevents runaway generation
         ...(engineId === 'srv_farsi' ? { stop_sequences: ['</package>'] } : {}),
+        ...(_srvV2 ? { system: SRV_STUDIO_V2_SYSTEM } : {}),
         messages: [{ role: 'user', content: prompt }],
       }),
       signal: controller.signal,
@@ -3411,6 +3420,10 @@ Kelly's energy is the energy of telling your smartest friend something cool — 
     pkg.mode = mode;
     pkg.engineId = engineId;
     pkg.generatedAt = Date.now();
+    if (_srvV2 && pkg) {
+      const _recentTitles = Array.isArray(existingMemory) ? existingMemory.filter(e => e && e.type === 'title').map(e => e.value).filter(Boolean) : [];
+      pkg = finalizeSrvStudioV2Package(pkg, { isLong, mode, recentTitles: _recentTitles }).pkg;
+    }
     return res.json({ success: true, package: pkg });
   } catch(e) {
     if (e.name === 'AbortError') return res.json({ success: false, error: 'Generation timed out after 58 seconds — try again or shorten the prompt' });

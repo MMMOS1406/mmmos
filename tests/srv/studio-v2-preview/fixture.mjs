@@ -1,6 +1,15 @@
 // SRV Studio V2 preview — SAMPLE DATA ONLY. Every task, package and lyric here is invented for the
 // CEO's interactive test of Checkpoint A. Nothing is read from, copied from or derived from production.
 import { makeFixture } from '../../preservation/fixtures.mjs';
+import { finalizeSrvStudioV2Package } from '../../../lib/srvStudioV2Music.mjs';
+import { V2_SAMPLE_REPLIES } from './v2-samples.mjs';
+
+// Checkpoint B: a V2 package exactly as the real generators return it — the sample model reply run
+// through the real finalizeSrvStudioV2Package() (system-owned Suno prompts, BPM, validation summary).
+export function v2SamplePackage(n, { isLong, mode, recentTitles = [] }) {
+  const raw = n < V2_SAMPLE_REPLIES.length ? V2_SAMPLE_REPLIES[n] : { ...sampleGeneratedPackage(n - V2_SAMPLE_REPLIES.length + 4), styleNotes: 'warm pads, rolling bassline, soft vocal-chop echoes', bpm: 120 };
+  return finalizeSrvStudioV2Package(raw, { isLong, mode, recentTitles }).pkg;
+}
 
 const SAMPLES = [
   {
@@ -98,8 +107,12 @@ export function makeStudioFixture(now = Date.now()) {
     const uid = `srve_${task.createdAt}_${task.id}`;
     task.srvUid = uid;
     if (task._previewStage !== 'generate') {
+      task.status = 'generating'; // what the real generatePackage() leaves behind (the Checkpoint A header bug)
       stages[uid] = task._previewStage; stages[String(task.id)] = task._previewStage;
-      const s = sampleGeneratedPackage(i - 1);
+      // #202 Short, #203 Long, #205 Long carry V2 packages; #204 keeps a pre-V2 package so the
+      // "generated before the V2 music direction" note can be seen.
+      const v2Idx = { 202: 0, 203: 1, 205: 3 }[task.id];
+      const s = v2Idx != null ? v2SamplePackage(v2Idx, { isLong: task.contentFormat === 'long', mode: task.mood }) : sampleGeneratedPackage(i - 1);
       const pkg = {
         id: `pkg_preview_${task.id}`, taskId: task.id, engine: 'SRV English', mood: task.mood, platform: 'All', contentType: task.contentType,
         contentFormat: task.contentFormat, engineType: 'suno', generatedAt: new Date(created + 1000 * (i + 1)).toISOString(), checklist: {},

@@ -5,6 +5,8 @@
 // NextWave V2 Production Hardening Phase 2 — deterministic financial-math fact packets
 // ("the LLM writes the story, the system owns the math"). See lib/nextwaveV2FactPacket.mjs.
 import { generateFactPackets, factPacketToPromptBlock } from '../lib/nextwaveV2FactPacket.mjs';
+// SRV Studio V2 (Checkpoint B) — V2 music direction, used only when the srv_studio_v2_enabled flag is on.
+import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, parseSrvStudioV2Reply, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs';
 
 // SRV FARSI IDENTITY LAYER v1 — 2026-06-08
 // Mirrors the live api/ops.js inline prompt for the same engine. Kept in sync so any
@@ -933,6 +935,13 @@ export default async function handler(req, res) {
 
   const avoidList = buildAvoidList(recentPackages, engine);
 
+  // SRV Studio V2: the client asks for V2 only while its flag is on, and the server re-checks the same
+  // flag row before honouring it (fails closed). Anything else falls through to the original path.
+  if (engine === 'SRV English' && req.body.srvStudioV2 === true &&
+      await srvStudioV2FlagEnabled({ supabaseUrl: process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co', supabaseKey: process.env.SUPABASE_SERVICE_KEY })) {
+    return srvStudioV2Generate(req, res, { apiKey, mood, contentFormat, taskName, avoidList, recentPackages });
+  }
+
   // NextWave Phase 2 — the system generates and computes every authoritative number BEFORE the
   // LLM writes a word; the fact packet(s) below are what the prompt's "THE SYSTEM OWNS THE MATH"
   // section refers to. Not used for any other engine.
@@ -1072,6 +1081,34 @@ Return valid JSON only. No markdown. No backticks. No extra text.`;
 
   } catch (err) {
     console.error('[v11.7] Server error:', err.message);
+    return res.status(500).json({ error: 'Server error', detail: err.message });
+  }
+}
+
+// SRV Studio V2 generation for the Tasks lifecycle path (/api/generate). Same model call shape as the
+// original path; the prompt, Suno prompts and validation come from lib/srvStudioV2Music.mjs.
+async function srvStudioV2Generate(req, res, { apiKey, mood, contentFormat, taskName, avoidList, recentPackages }) {
+  const isLong = contentFormat === 'long';
+  const recentTitles = (Array.isArray(recentPackages) ? recentPackages : []).map(p => p && p.title).filter(Boolean);
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5', max_tokens: 4000, system: SRV_STUDIO_V2_SYSTEM,
+        messages: [{ role: 'user', content: buildSrvStudioV2UserPrompt({ isLong, mode: mood, avoidText: avoidList, taskName }) }],
+      }),
+    });
+    if (!response.ok) {
+      const err = await response.text();
+      return res.status(502).json({ error: 'Claude API error', detail: err });
+    }
+    const data = await response.json();
+    const raw = parseSrvStudioV2Reply((data.content || []).map(b => b.text || '').join(''));
+    if (!raw) return res.status(502).json({ error: 'JSON parse failed' });
+    const { pkg } = finalizeSrvStudioV2Package(raw, { isLong, mode: mood, recentTitles });
+    return res.status(200).json({ success: true, engineType: 'suno', package: pkg });
+  } catch (err) {
     return res.status(500).json({ error: 'Server error', detail: err.message });
   }
 }

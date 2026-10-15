@@ -15,7 +15,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { classifyAction } from '../../preservation/stub-server.mjs';
-import { makeStudioFixture, sampleGeneratedPackage, sampleCaption } from './fixture.mjs';
+import { makeStudioFixture, sampleGeneratedPackage, sampleCaption, v2SamplePackage } from './fixture.mjs';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json',
@@ -34,7 +34,7 @@ const LAUNCHER = `<div id="srv2-launcher" style="position:fixed;right:12px;botto
 <script>(function(){var ids=['201','202','203','204','205'];function draw(){var box=document.getElementById('srv2-l-list');if(!box)return;var ready=typeof D!=='undefined'&&Array.isArray(D.tasks)&&typeof currentUser!=='undefined'&&currentUser&&typeof openExec==='function';if(!ready){return;}var h='';ids.forEach(function(id){var t=D.tasks.find(function(x){return String(x.id)===id&&x.engine==='SRV English';});if(!t)return;var st=typeof _srvEnglishGetStage==='function'?_srvEnglishGetStage(id):'?';var f=t.contentFormat==='long'?'Long':'Short';h+='<button onclick="if(typeof renderTab===\\'function\\')renderTab(\\'tasks\\');openExec(\\''+id+'\\')" style="text-align:left;padding:6px 8px;background:#221c33;border:1px solid #3b2f5c;border-radius:6px;color:#eee;cursor:pointer;font:12px system-ui"><b>#'+id+'</b> · '+f+' · <span style="color:#c4b5fd">'+String(st).toUpperCase()+'</span></button>';});h=h||'No sample tasks found — use Reset sample data.';if(box.__h!==h){box.__h=h;box.innerHTML=h;}}setInterval(draw,1500);})();</script>`;
 
 export async function startPreview({ publicDir, port = 4188, dataFile = null, quiet = true } = {}) {
-  const fresh = () => { const f = makeStudioFixture(); return { settings: { ...f.settings }, packages: Object.fromEntries(f.tables.packages.map((r) => [r.package_id, r])), genCount: 4 /* samples 0-3 are the seeded packages */, fixtureApi: f.api }; };
+  const fresh = () => { const f = makeStudioFixture(); return { settings: { ...f.settings }, packages: Object.fromEntries(f.tables.packages.map((r) => [r.package_id, r])), genCount: 4 /* samples 0-3 are the seeded packages */, v2GenCount: 4 /* V2 replies 0-3 seed #202/#203/#205 */, fixtureApi: f.api }; };
   let store = fresh();
   if (dataFile && fs.existsSync(dataFile)) {
     try { const saved = JSON.parse(fs.readFileSync(dataFile, 'utf8')); store = { ...fresh(), ...saved, fixtureApi: fresh().fixtureApi }; } catch { /* corrupt → fresh */ }
@@ -93,6 +93,13 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
     record(req, u, { kind: 'api', cls: classifyAction(action) });
     if (u.pathname === '/api/generate') {
       if (!json || json.engine !== 'SRV English') return send(res, 200, { success: false, error: 'Preview: only SRV English generation is simulated here' });
+      // With the V2 flag on the client sends srvStudioV2:true (as the real /api/generate expects); the preview
+      // then answers like the real V2 path: next sample reply → real finalizeSrvStudioV2Package().
+      if (json.srvStudioV2 === true) {
+        const recentTitles = (json.recentPackages || []).map((p) => p && p.title).filter(Boolean);
+        const pkg = v2SamplePackage(store.v2GenCount++, { isLong: json.contentFormat === 'long', mode: json.mood, recentTitles }); persist();
+        return send(res, 200, { success: true, engineType: 'suno', package: pkg });
+      }
       const pkg = sampleGeneratedPackage(store.genCount++); persist();
       return send(res, 200, { success: true, engineType: 'suno', package: pkg });
     }

@@ -15341,7 +15341,7 @@ function renderExecMode(taskId){
           <div class="exec-field"><div class="exec-field-label">MODE</div><div class="exec-field-val">${t.mode||t.mood||'—'}</div></div>
           <div class="exec-field"><div class="exec-field-label">TYPE</div><div class="exec-field-val">${t.contentType||'—'}</div></div>
           <div class="exec-field"><div class="exec-field-label">DAY</div><div class="exec-field-val">${t.day||'—'}</div></div>
-          <div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>
+          ${_srvStudioV2On()?_srvEnglishV2StatusField(t):`<div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>`}
         </div>
       </div>
       ${renderSRVEnglishLifecycleCard(t)}
@@ -15764,6 +15764,207 @@ function _srvEnglishV2BuildKeys(task,pkg){
     sunoPrompt:isLong?(p.sunoPrompt?'sunoPrompt':'shortSunoPrompt'):(p.shortSunoPrompt?'shortSunoPrompt':'sunoPrompt'),
   };
 }
+// ── Checkpoint B: V2 quality validator (same code as lib/srvStudioV2Music.mjs, enforced by a test) ──
+// <srv-v2-validator> — this block is copied byte-for-byte into public/index.html (a test enforces it).
+const SRV_STUDIO_V2_ARTIST_NAMES=['Taylor Swift','Olivia Rodrigo','Gracie Abrams','Sabrina Carpenter','Billie Eilish','Lana Del Rey','Dua Lipa','Ellie Goulding','Adele','Rihanna','Beyonce','Beyoncé','Ariana Grande','Selena Gomez','Lorde','Halsey','Zara Larsson','Jess Glynne','Kygo','Lane 8','RÜFÜS','Rufus Du Sol','Disclosure','Calvin Harris','Avicii','Odesza','Bob Moses','Fred again','Fisher','Chris Lake','Tinlicker','Yotto','Le Youth','Gorgon City','MK','Duke Dumont','Purple Disco Machine','The Weeknd','Drake','Ed Sheeran','Coldplay'];
+const SRV2_MALE_RX=/\b(male|men|man|boy|boys|guy|guys|baritone|tenor|duet|duets|duo|feat|featuring|rapper|rap verse|choir of men|bass singer)\b/i;
+const SRV2_CHILD_RX=/\b(child|childlike|childish|kid|kids|teen|teens|teenage|teenager|girlish|schoolgirl|little girl|young girl|baby voice|nursery)\b/i;
+const SRV2_LYRIC_AGE_RX=/\b(school|schoolgirl|homework|recess|my mom says|curfew|sixteen|fifteen|fourteen|teen|teenage)\b/i;
+const SRV2_DUET_TAG_RX=/^\s*[\[(]\s*(male|man|him|he|guy|boy|both|duet|together|all|feat[^\])]*)\s*[\])]/im;
+const SRV2_IMITATE_RX=/\b(in the style of|sounds like|similar to|inspired by|cover of|reminiscent of)\b/i;
+const SRV2_CLICHES=["i can't live without you","you're my everything","tears rolling down","my heart is broken","love is blind","set my soul on fire","dancing in the dark","lost in your eyes","you complete me","meant to be","forever and always","heart of gold"];
+const SRV2_TITLE_FORBIDDEN_RX=/\b(deep house|night drive|emotional|remix|feat|featuring|srv|song|lyrics?|official|edit|version)\b/i;
+const SRV2_GENERIC_TITLES=['love','night','drive','tonight','forever','you','us','home','stay','dreams','alone','heart','midnight','feelings','emotions'];
+const SRV2_HOUSE_ELEMENTS=['four-on-the-floor','four on the floor','sub bass','bassline','pads','arpeggio','sidechain','house kick','groove','synth'];
+const SRV2_NIGHT_IMAGERY=['night','midnight','2am','3am','headlights','highway','road','drive','driving','passenger','dashboard','streetlight','street lights','city lights','neon','moon','window down','windows down','freeway','exit','tail lights','taillights','radio','miles','engine','rearview','lane','dark'];
+const SRV2_ENGLISH_STOP=new Set(['the','and','you','i','me','my','your','we','to','a','in','of','it','on','is','im',"i'm",'dont',"don't",'all','so','be','that','this','but','for','with','just','when','if','all','are','what','like','love','know','can','do','its',"it's",'was','were','our','us','no','not','at','still','where','back','now','one','up','out','go','let','into','from','am','been','have','had','say','said','tell','why','how','every','never','again']);
+
+function srv2Words(s){return String(s||'').toLowerCase().replace(/[^a-z0-9'\s]/g,' ').split(/\s+/).filter(Boolean);}
+function srv2SungLines(text){return String(text||'').split('\n').map(function(l){return l.trim();}).filter(function(l){return l&&!/^\[.*\]$/.test(l)&&!/^\(.*\)$/.test(l);});}
+function srv2Jaccard(a,b){const A=new Set(srv2Words(a)),B=new Set(srv2Words(b));if(!A.size||!B.size)return 0;let n=0;A.forEach(function(w){if(B.has(w))n++;});return n/(A.size+B.size-n);}
+function srv2Contain(part,whole){const A=srv2Words(part),B=new Set(srv2Words(whole));if(!A.length)return 0;return A.filter(function(w){return B.has(w);}).length/A.length;}
+function srv2Sections(text){const out=[];String(text||'').split('\n').forEach(function(l){const m=l.trim().match(/^\[([^\]]+)\]$/);if(m)out.push(m[1].toLowerCase());});return out;}
+function srv2HasArtist(text){const t=String(text||'').toLowerCase();return SRV_STUDIO_V2_ARTIST_NAMES.filter(function(n){return new RegExp('(^|[^a-z])'+n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'([^a-z]|$)').test(t);});}
+
+// Deterministic checks for one SRV Studio V2 package. It judges the TEXT (lyrics, prompts, title) the
+// operator and Suno receive. It cannot hear or guarantee the gender of an actual generated voice.
+function srv2ValidatePackage(pkg,opts){
+  opts=opts||{};
+  const isLong=!!opts.isLong;
+  const p=pkg||{};
+  const lyr=isLong?String(p.lyrics||''):String(p.shortLyrics||'');
+  const prompt=isLong?String(p.sunoPrompt||''):String(p.shortSunoPrompt||'');
+  const bothPrompts=String(p.sunoPrompt||'')+' \n '+String(p.shortSunoPrompt||'');
+  const allLyrics=String(p.lyrics||'')+'\n'+String(p.shortLyrics||'');
+  const checks=[];
+  const add=function(id,label,status,detail,hard){checks.push({id:id,label:label,status:status,detail:detail||'',hard:!!hard});};
+
+  // 1. Female-only vocal direction (text only)
+  const maleHit=(bothPrompts.match(SRV2_MALE_RX)||[])[0];
+  const childHit=(bothPrompts.match(SRV2_CHILD_RX)||[])[0];
+  const duetTag=SRV2_DUET_TAG_RX.test(allLyrics);
+  const femaleNamed=/\bfemale\b/i.test(prompt);
+  const vocalField=p.vocal==null||String(p.vocal).toLowerCase()==='female';
+  if(maleHit||childHit||duetTag||!vocalField)add('female','Female-only vocal direction','fail',maleHit?'Suno prompt mentions "'+maleHit+'"':childHit?'Suno prompt has childlike/teen direction "'+childHit+'"':duetTag?'Lyrics contain a duet or male part label':'Package vocal field is "'+p.vocal+'"',true);
+  else if(!femaleNamed)add('female','Female-only vocal direction','fail','Suno prompt does not ask for a female vocal',true);
+  else add('female','Female-only vocal direction','pass','Prompt asks for a female lead; no male, duet or childlike direction found');
+  const ageHit=(allLyrics.match(SRV2_LYRIC_AGE_RX)||[])[0];
+  add('adult','Adult perspective in lyrics',ageHit?'warn':'pass',ageHit?'Lyrics mention "'+ageHit+'" — check the song does not read as teenage':'No school/teen age markers in the lyrics');
+
+  // 2. English-language lyrics
+  const letters=(lyr.match(/\p{L}/gu)||[]).length;
+  const latin=(lyr.match(/[A-Za-z]/g)||[]).length;
+  const words=srv2Words(lyr);
+  const stopShare=words.length?words.filter(function(w){return SRV2_ENGLISH_STOP.has(w);}).length/words.length:0;
+  if(!letters)add('english','English-language lyrics','fail','No lyrics',true);
+  else if(latin/letters<0.98)add('english','English-language lyrics','fail',Math.round((1-latin/letters)*100)+'% of letters are not Latin script',true);
+  else if(stopShare<0.2)add('english','English-language lyrics','warn','Few common English words ('+Math.round(stopShare*100)+'%) — check the language');
+  else add('english','English-language lyrics','pass','Latin script, '+Math.round(stopShare*100)+'% common English words');
+
+  // 3. No artist imitation
+  const artists=srv2HasArtist(bothPrompts+'\n'+allLyrics+'\n'+(p.title||''));
+  const imitate=SRV2_IMITATE_RX.test(bothPrompts);
+  if(artists.length||imitate)add('original','No artist imitation','fail',artists.length?'Mentions '+artists.join(', '):'Prompt asks to imitate another artist',true);
+  else add('original','No artist imitation','pass','No artist names or imitation phrasing');
+
+  // 4. Emotional Deep House compatibility
+  const bpmMatch=prompt.match(/\b(\d{2,3})\s*bpm\b/i);
+  const bpm=bpmMatch?Number(bpmMatch[1]):null;
+  const houseEls=SRV2_HOUSE_ELEMENTS.filter(function(e){return prompt.toLowerCase().includes(e);}).length;
+  if(!/deep house/i.test(prompt))add('deephouse','Emotional Deep House compatibility','fail','Suno prompt does not name deep house',true);
+  else if(!bpm||bpm<112||bpm>126)add('deephouse','Emotional Deep House compatibility','fail',bpm?bpm+' BPM is outside the deep house range (112-126)':'No BPM in the Suno prompt',true);
+  else if(houseEls<2)add('deephouse','Emotional Deep House compatibility','warn','Only '+houseEls+' house production element named');
+  else add('deephouse','Emotional Deep House compatibility','pass','Deep house, '+bpm+' BPM, '+houseEls+' house elements');
+
+  // 5. Night Drive atmosphere
+  const imagery=SRV2_NIGHT_IMAGERY.filter(function(w){return new RegExp('\\b'+w+'\\b','i').test(allLyrics);});
+  if(!/night drive/i.test(prompt))add('nightdrive','Night Drive atmosphere','fail','Suno prompt does not name night drive');
+  else if(!imagery.length)add('nightdrive','Night Drive atmosphere','warn','Prompt sets night drive, but the lyrics carry no night or motion image');
+  else add('nightdrive','Night Drive atmosphere','pass','Prompt sets night drive; lyrics use '+imagery.slice(0,4).join(', '));
+
+  // 6. Title originality
+  const title=String(p.title||'').trim();
+  const tw=srv2Words(title);
+  const recent=(opts.recentTitles||[]).filter(Boolean);
+  const exact=recent.find(function(r){return srv2Words(r).join(' ')===tw.join(' ');});
+  const close=recent.map(function(r){return{r:r,j:srv2Jaccard(r,title)};}).filter(function(x){return x.j>=0.6;}).sort(function(a,b){return b.j-a.j;})[0];
+  if(!title)add('title','Title originality','fail','No title',true);
+  else if(SRV2_TITLE_FORBIDDEN_RX.test(title))add('title','Title originality','fail','Title contains a genre/label word ("'+(title.match(SRV2_TITLE_FORBIDDEN_RX)||[])[0]+'")');
+  else if(exact)add('title','Title originality','fail','Same title as an earlier song: "'+exact+'"');
+  else if(close)add('title','Title originality','warn','Very close to an earlier title: "'+close.r+'"');
+  else if(tw.length===1&&SRV2_GENERIC_TITLES.includes(tw[0]))add('title','Title originality','warn','One-word generic title');
+  else if(tw.length<2||tw.length>6)add('title','Title originality','warn',tw.length+' words (2-6 recommended)');
+  else add('title','Title originality','pass',tw.length+' words, not used before'+(recent.length?' (checked against '+recent.length+' earlier titles)':''));
+
+  // 7. Hook and chorus quality
+  const sung=srv2SungLines(lyr);
+  const hook=String(p.hook||'').trim()||sung[0]||'';
+  const hookWords=srv2Words(hook).length;
+  const firstLines=sung.slice(0,2).join(' ');
+  const hookOpens=!!hook&&srv2Contain(hook,firstLines)>=0.7;
+  const lines=String(lyr).split('\n');
+  let chorusText='';let inChorus=false;
+  lines.forEach(function(l){const m=l.trim().match(/^\[([^\]]+)\]$/);if(m){inChorus=/chorus/i.test(m[1])&&!/pre/i.test(m[1]);return;}if(inChorus)chorusText+=' '+l;});
+  const hookLead=srv2Words(hook).slice(0,3).join(' ');
+  const hookInChorus=isLong?(!!chorusText&&(srv2Contain(hook,chorusText)>=0.6||(hookLead.split(' ').length===3&&srv2Words(chorusText).join(' ').includes(hookLead)))):true;
+  const cliches=SRV2_CLICHES.filter(function(c){return allLyrics.toLowerCase().includes(c);});
+  const longLines=sung.filter(function(l){return srv2Words(l).length>12;}).length;
+  const distinct=new Set(sung.map(function(l){return l.toLowerCase();})).size;
+  const distinctShare=sung.length?distinct/sung.length:0;
+  const hookIssues=[];
+  if(!hook)hookIssues.push('no hook');
+  if(hookWords>14)hookIssues.push('hook is '+hookWords+' words');
+  if(!hookOpens)hookIssues.push('the song does not open with the hook');
+  if(!hookInChorus)hookIssues.push('the chorus does not carry the hook');
+  if(cliches.length)hookIssues.push('cliché: '+cliches.join(', '));
+  if(longLines)hookIssues.push(longLines+' line(s) over 12 words');
+  if(distinctShare<(isLong?0.45:0.5))hookIssues.push('too repetitive ('+Math.round(distinctShare*100)+'% distinct lines)');
+  if(!hook||hookIssues.length>=3)add('hook','Hook and chorus quality','fail',hookIssues.join('; '));
+  else if(hookIssues.length)add('hook','Hook and chorus quality','warn',hookIssues.join('; '));
+  else add('hook','Hook and chorus quality','pass','Opens with a '+hookWords+'-word hook'+(isLong?' that the chorus repeats':'')+'; singable lines; no clichés');
+
+  // 8. Long / Short format
+  const fmtIssues=[];
+  if(isLong){
+    const sec=srv2Sections(p.lyrics);
+    const choruses=sec.filter(function(s){return /chorus/.test(s)&&!/pre/.test(s);}).length;
+    if(!sec.some(function(s){return /verse 1|verse$/.test(s);}))fmtIssues.push('no [Verse 1]');
+    if(!sec.some(function(s){return /verse 2/.test(s);}))fmtIssues.push('no [Verse 2]');
+    if(choruses<2)fmtIssues.push(choruses+' chorus section(s), needs 2+');
+    if(!sec.some(function(s){return /bridge/.test(s);}))fmtIssues.push('no [Bridge]');
+    const n=srv2SungLines(p.lyrics).length;
+    if(n<18||n>40)fmtIssues.push(n+' sung lines (18-40 expected)');
+    if(!/3:\d\d/.test(String(p.sunoPrompt||'')))fmtIssues.push('Suno prompt has no 3-minute runtime');
+  }else{
+    const n=srv2SungLines(p.shortLyrics).length;
+    if(n<4||n>8)fmtIssues.push(n+' short lines (4-8 expected)');
+    if(/\[[^\]]+\]/.test(String(p.shortLyrics||'')))fmtIssues.push('short lyrics contain section labels');
+    if(!/0:30/.test(String(p.shortSunoPrompt||'')))fmtIssues.push('short Suno prompt has no 0:30 runtime');
+    if(!/0:00/.test(String(p.shortSunoPrompt||'')))fmtIssues.push('short Suno prompt does not start the vocal at 0:00');
+  }
+  if(fmtIssues.length>=2)add('format',isLong?'Long arrangement':'Short (30s) arrangement','fail',fmtIssues.join('; '),true);
+  else if(fmtIssues.length)add('format',isLong?'Long arrangement':'Short (30s) arrangement','warn',fmtIssues.join('; '));
+  else add('format',isLong?'Long arrangement':'Short (30s) arrangement','pass',isLong?'Verses, 2+ choruses, bridge, 3-minute runtime':'4-8 unlabelled lines, 0:30 runtime, vocal at 0:00');
+
+  const weights={female:2,english:1.5,original:1,deephouse:1.5,nightdrive:1,title:1,hook:1.5,format:1,adult:0.5};
+  let total=0,got=0;
+  checks.forEach(function(c){const w=weights[c.id]||1;total+=w;got+=c.status==='pass'?w:c.status==='warn'?w*0.5:0;});
+  const hardFail=checks.some(function(c){return c.hard&&c.status==='fail';});
+  const raw=total?Math.round(got/total*100)/10:0;
+  const score=hardFail?Math.min(raw,4):raw;
+  const label=hardFail?'Fails SRV Studio direction':score>=9?'Excellent':score>=8?'Good':score>=7?'Review carefully':'Recommend regenerate';
+  return {version:'srv2-validator-1',score:score,label:label,hardFail:hardFail,checks:checks};
+}
+// </srv-v2-validator>
+// The STATUS shown in the task header follows the lifecycle stage. task.status is not used for this:
+// the shared generatePackage() sets it to 'generating' and SRV English never moves it again until Done,
+// which made the header read GENERATING while the task sat in Review or Build. task.status itself is
+// left untouched (other systems read it).
+const SRV_STUDIO_V2_STATUS_LABELS={generate:'NOT STARTED',review:'IN REVIEW',build:'IN BUILD',approve:'AWAITING APPROVAL',publish:'PUBLISHING',done:'PUBLISHED'};
+function _srvEnglishV2StatusLabel(t){
+  if(!t)return {label:'—',color:'#c9a84c'};
+  if(t.cancelledAt)return {label:'CANCELLED',color:'#ef4444'};
+  const stage=_srvEnglishV2GetStage(t.taskId||t.id);
+  if(String(t.status||'')==='done'&&stage!=='done')return {label:'CLOSED',color:'#22c55e'};
+  return {label:SRV_STUDIO_V2_STATUS_LABELS[stage]||String(stage).toUpperCase(),color:SRV_STAGE_COLORS[stage]||'#c9a84c'};
+}
+function _srvEnglishV2StatusField(t){
+  const s=_srvEnglishV2StatusLabel(t);
+  return `<div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${s.color}">${escHTML(s.label)}</div></div>`;
+}
+function _srvEnglishV2RecentTitles(pkg){
+  return (D.packages||[]).filter(p=>p&&p!==pkg&&(p.engine==='SRV English'||p.engineName==='SRV English')&&p.title).map(p=>p.title);
+}
+// V2 Review quality panel: the deterministic SRV Studio V2 checks on the CURRENT saved fields.
+function _srvEnglishV2QualityHtml(task,pkg){
+  if(!pkg)return '';
+  const isLong=!!(task&&(task.contentType==='Long'||task.contentFormat==='long'));
+  const v=srv2ValidatePackage(pkg,{isLong,recentTitles:_srvEnglishV2RecentTitles(pkg)});
+  const col=v.hardFail?'#ef4444':v.score>=9?'#22c55e':v.score>=8?'#4ade80':v.score>=7?'#f59e0b':'#ef4444';
+  const icon={pass:'✓',warn:'!',fail:'✕'}, ic={pass:'#22c55e',warn:'#f59e0b',fail:'#ef4444'};
+  const rows=v.checks.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px">
+      <span style="flex:0 0 16px;font-weight:900;color:${ic[c.status]};font-family:'JetBrains Mono',monospace">${icon[c.status]}</span>
+      <span style="flex:1;min-width:0"><span style="font-size:11px;font-weight:700;color:var(--text)">${escHTML(c.label)}</span><br><span style="font-size:10px;color:var(--dim)">${escHTML(c.detail)}</span></span>
+    </div>`).join('');
+  const meta=pkg.srvStudioV2?`<div style="font-size:9px;color:var(--dim);margin-top:6px;font-family:'JetBrains Mono',monospace">Generated with ${escHTML(pkg.srvStudioV2.version||'V2')}${pkg.bpm?' · '+escHTML(String(pkg.bpm))+' BPM':''}</div>`:`<div style="font-size:9px;color:var(--dim);margin-top:6px">This package was generated before the V2 music direction — Regenerate for a V2 song.</div>`;
+  return `<div id="srv2q_${escHTML(String(pkg.id||''))}" style="margin-bottom:16px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid ${v.hardFail?'rgba(239,68,68,0.40)':'rgba(255,255,255,0.08)'};border-radius:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;font-family:'JetBrains Mono',monospace">SRV STUDIO V2 QUALITY · ${isLong?'LONG':'SHORT'}</div>
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px;font-weight:900;color:${col};font-family:'JetBrains Mono',monospace">${v.score.toFixed(1)}/10</span><span style="font-size:9px;color:${col};font-weight:700">${escHTML(v.label)}</span></div>
+    </div>
+    ${rows}
+    <div style="font-size:9px;color:var(--dim);margin-top:6px;line-height:1.5">These checks read the lyrics and Suno prompt text. They cannot hear the generated voice — listen to the Suno result before approving.</div>
+    ${meta}
+  </div>`;
+}
+function _srvEnglishV2RefreshQuality(pkgId){
+  const el=document.getElementById('srv2q_'+pkgId);
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!el||!pkg)return;
+  const html=_srvEnglishV2QualityHtml(_srvEnglishV2TaskForPkg(pkg),pkg);
+  const tmp=document.createElement('div');tmp.innerHTML=html;
+  if(tmp.firstElementChild)el.replaceWith(tmp.firstElementChild);
+}
 function _srvEnglishV2FieldId(pkgId,key){return 'srv2f_'+pkgId+'_'+key;}
 function _srvEnglishV2SetFieldStatus(pkgId,key,text,col){
   const el=document.getElementById('srv2st_'+pkgId+'_'+key);
@@ -15810,6 +16011,7 @@ async function _srvEnglishV2SaveField(pkgId,key,opts){
     return false;
   }
   _srvEnglishV2SetFieldStatus(pkgId,key,'✓ Saved','#22c55e');
+  _srvEnglishV2RefreshQuality(pkgId);
   if(changed&&(key==='title'||key==='lyrics'||key==='shortLyrics')&&!opts.skipCaption)_srvEnglishV2RegenCaption(pkg);
   return true;
 }
@@ -15890,7 +16092,7 @@ function _srvEnglishV2ReviewHtml(task,pkg,taskId,pkgId){
   }).join('');
   const cap=pkg.captionYT||pkg.captionYouTube||'';
   const edited=pkg._srvV2Edits?Object.keys(pkg._srvV2Edits):[];
-  return `${_srvEnglishPackageQualityHtml(pkg)}
+  return `${_srvEnglishV2QualityHtml(task,pkg)}
     <div style="padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.22);border-radius:8px;font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:12px">
       Edit any field, then press <strong style="color:var(--text)">Save</strong>. Saved edits are stored in the database and survive a reload.
       Editing the title or lyrics refreshes the YouTube caption and hashtags. This is a <strong style="color:var(--text)">${used.isLong?'Long':'Short'}</strong> task: fields marked <span style="color:#22c55e;font-weight:700">USED IN BUILD</span> are the ones the video and Suno step will use.
@@ -22596,7 +22798,8 @@ async function generatePackage(taskId){
     const res=await fetch(API_URL,{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engine:t.engine,mood:t.mood,platform:t.platform,
-        contentType:t.contentType,contentFormat:t.contentFormat||(t.contentType==='Long'?'long':'short'),taskName:t.name,recentPackages})
+        contentType:t.contentType,contentFormat:t.contentFormat||(t.contentType==='Long'?'long':'short'),taskName:t.name,recentPackages,
+        ...(t.engine==='SRV English'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: request V2 music direction only while the flag is on
     });
     const data=await res.json();
     console.log('[MMM] Claude response received | success:',data.success,'| engineType:',data.engineType);
@@ -26037,7 +26240,7 @@ async function startGeneration(){
     const response=await fetch('/api/ops?action=generate_package',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({engineId:fEngine.id,mode:fMode,existingMemory,contentFormat:_fContentFormat})
+      body:JSON.stringify({engineId:fEngine.id,mode:fMode,existingMemory,contentFormat:_fContentFormat,...(fEngine.id==='srv_english'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: flag-gated
     });
     statusEl.textContent='Processing response...';
     const data=await response.json();

@@ -110,8 +110,7 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx } = E;
     ctx.D.tasks = [task(5)]; ctx.D.packages = [pkgOf('p1', 5)]; vm.runInContext("_srvEnglishSetStage('5','review')", ctx);
     const v2 = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
-    const q = vm.runInContext('_srvEnglishPackageQualityHtml(D.packages[0])', ctx);
-    ok('V2 Review keeps the same Package Quality score panel', q.length > 100 && v2.includes(q) && /PACKAGE QUALITY/.test(v2));
+    ok('V2 Review shows the SRV Studio V2 quality panel (Checkpoint B) instead of the V1 pop scorer', /SRV STUDIO V2 QUALITY · SHORT/.test(v2) && !/Kiss Fixation|Commercial Potential/.test(v2));
   }
 
   // ── 3. Identity (srvUid) ──
@@ -276,8 +275,14 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     let same = false; try { same = top(OPS, fn) === top(baseOps, fn); } catch (e) { same = false; }
     ok('Shared unchanged (ops.js): ' + fn, same);
   }
-  for (const fn of ['savePackageToSupabase', '_srvSavePackageQueued', 'fetchPackagesFromTable', 'renderSRVFarsiLifecycleCard', '_farsisaveEdit', '_srvFarsiSetStage', '_srvRenderVideo', 'generatePackage', 'saveAppState', 'loadAppState']) {
+  for (const fn of ['savePackageToSupabase', '_srvSavePackageQueued', 'fetchPackagesFromTable', 'renderSRVFarsiLifecycleCard', '_farsisaveEdit', '_srvFarsiSetStage', '_srvRenderVideo', 'saveAppState', 'loadAppState']) {
     ok('Shared unchanged (index.html): ' + fn, top(H, fn) === top(base, fn));
+  }
+  {
+    // Checkpoint B adds one flag-gated request field to generatePackage(); everything else is unchanged.
+    const g = top(H, 'generatePackage');
+    const restored = g.replace(",taskName:t.name,recentPackages,\n        ...(t.engine==='SRV English'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: request V2 music direction only while the flag is on", ',taskName:t.name,recentPackages})');
+    ok('Shared (index.html): generatePackage unchanged apart from the flag-gated srvStudioV2 request field', restored === top(base, 'generatePackage'));
   }
 
   console.log(out.join('\n'));
