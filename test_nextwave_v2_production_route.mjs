@@ -149,6 +149,14 @@ const OPS_A2_ALLOWED_REMOVED_LINES = new Set([
   "    // stale frame for most of the runtime. Real content in this renderer is continuously animated (camera",
   "    // tween, caption changes) every frame, so any freeze run this long in the ACTUAL encoded file — as opposed",
   "    // to the abstract draw() function compile_qc already checked pre-render — can only be an encoding defect.",
+  // Task 125 recovery dead-end fix (2026-10-16, found while actually running the PR #47 recovery flow in
+  // production) — the chunk and finish handlers' status gates both excluded 'needs_review', but finish's own
+  // pre-concat gate SETS exactly that status when it finds a bad chunk. Net effect: the moment a build was
+  // correctly flagged chunk_invalid, neither handler would touch it again — the governed recovery button
+  // (nextwaveV2RouteRecoverChunks) failed every time with build_not_renderable: needs_review. These 2 exact
+  // pre-existing lines are replaced to also accept needs_review; nothing else in either gate changed.
+  "    if (state.status !== 'planned' && state.status !== 'rendered' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });",
+  "    if (state.status !== 'planned' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_finishable: ${state.status}` });",
 ]);
 // Reconciliation closeout (2026-10-03) — this test's comparison point was `BASELINE` (fa34eb0, the
 // commit immediately before NextWave existed in this file at all). That stopped being the right
@@ -1212,6 +1220,41 @@ await t('the new decode-validation call sites are exactly the chunk handler and 
   assert.equal((ops.match(/countDecodedFrames/g) || []).length, 2, 'expected exactly 2 call sites: the chunk handler\'s own fresh-render check, and finish\'s pre-concat validation loop');
   const html = fs.readFileSync('./public/index.html', 'utf8');
   assert.equal((html.match(/countDecodedFrames/g) || []).length, 0, 'this is a server-side-only check — no client code should reference it directly');
+});
+console.log('\n[24] task 125 recovery dead-end fix (2026-10-16) — needs_review is re-enterable by both handlers, but ONLY when real chunks already exist');
+// 2026-10-16, second correction: the first version of this fix admitted ANY needs_review build, which broke
+// a real, pre-existing e2e test — a Brain/compile_qc-blocked script (route.mjs lines ~103/106/132) also lands
+// in status 'needs_review' but WITHOUT ever setting state.chunks (that only happens at the 'planned' return,
+// after every pre-render block point). Such a build has nothing to recover and must stay refused. The actual
+// fix gates needs_review on state.chunks being populated — these tests exercise the real source text's
+// behavior (both the const.../if... lines, extracted verbatim) against both shapes of needs_review build.
+const extractGateFn = (body, recoverableVar, errKey) => {
+  const constMatch = body.match(new RegExp(`const ${recoverableVar} = [^\\n]*;`));
+  const ifMatch = body.match(new RegExp(`if \\(state\\.status[^\\n]*${errKey}[^\\n]*\\);`));
+  assert.ok(constMatch, `${recoverableVar} definition not found`); assert.ok(ifMatch, `${errKey} gate line not found`);
+  const ifLine = ifMatch[0].replace(/return res\.status\(409\)\.json\([^;]*\);/, 'return true;');
+  // eslint-disable-next-line no-new-func
+  return new Function('state', `${constMatch[0]}\n${ifLine}\nreturn false;`); // true = refused (409), false = allowed through
+};
+await t('ops.js: chunk handler refuses a needs_review build with no chunks yet (Brain/compile_qc blocked it pre-render), but allows one whose chunks array is populated (finish\'s pre-concat gate flagged a real bad chunk)', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const chunkIdx = ops.indexOf('async function nextwaveV2RouteChunk'); const chunkEnd = ops.indexOf('\n// FINISH', chunkIdx);
+  const gateFn = extractGateFn(ops.slice(chunkIdx, chunkEnd), 'chunkRecoverable', 'build_not_renderable');
+  assert.equal(gateFn({ status: 'needs_review' }), true, 'needs_review with chunks undefined (never reached render) must still be refused');
+  assert.equal(gateFn({ status: 'needs_review', chunks: [] }), true, 'needs_review with an empty chunks array must still be refused');
+  assert.equal(gateFn({ status: 'needs_review', chunks: [{ index: 0 }] }), false, 'needs_review WITH real chunks (the task 125 recovery case) must be allowed through');
+  ['planned', 'rendered', 'ready_for_review'].forEach((status) => assert.equal(gateFn({ status }), false, `pre-existing allowed status ${status} must remain allowed`));
+  ['blocked', 'generating', 'starting', ''].forEach((status) => assert.equal(gateFn({ status }), true, `non-recoverable status ${JSON.stringify(status)} must still be refused`));
+});
+await t('ops.js: finish handler applies the identical chunks-populated discriminator for needs_review re-entry (a recovered build can re-finalize; a never-rendered one cannot)', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const finishIdx = ops.indexOf('async function nextwaveV2RouteFinish'); const finishEnd = ops.indexOf('\nasync function nextwaveV2CompositeLongSegmentRender');
+  const gateFn = extractGateFn(ops.slice(finishIdx, finishEnd), 'finishRecoverable', 'build_not_finishable');
+  assert.equal(gateFn({ status: 'needs_review' }), true, 'needs_review with chunks undefined must still be refused');
+  assert.equal(gateFn({ status: 'needs_review', chunks: [] }), true, 'needs_review with an empty chunks array must still be refused');
+  assert.equal(gateFn({ status: 'needs_review', chunks: [{ index: 0 }] }), false, 'needs_review WITH real chunks must be allowed through (second re-finalize pass after chunk recovery)');
+  ['planned', 'ready_for_review'].forEach((status) => assert.equal(gateFn({ status }), false, `pre-existing allowed status ${status} must remain allowed`));
+  ['blocked', 'generating', 'starting', ''].forEach((status) => assert.equal(gateFn({ status }), true, `non-recoverable status ${JSON.stringify(status)} must still be refused`));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

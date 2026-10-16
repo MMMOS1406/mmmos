@@ -17578,7 +17578,14 @@ async function nextwaveV2RouteChunk(req, res) {
     // touching any other chunk or the script/storyboard — see the chunk integrity gate below for how a bad
     // chunk gets confirmed in the first place (task 125: chunk 2 silently corrupted during the original
     // Vercel render, reproduced to be undetectable by any pre-existing check, including PR #35's).
-    if (state.status !== 'planned' && state.status !== 'rendered' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });
+    // 'needs_review' is also accepted, but ONLY when real chunks already exist (state.chunks populated) —
+    // that is the exact, narrow condition the finish handler's own pre-concat gate (below) leaves a build in
+    // when it finds a bad chunk, and is what the recovery button this gate exists to serve needs to re-render.
+    // A needs_review build that never reached render (Brain/QC blocked it before line "out.chunks = chunkPlan"
+    // in route.mjs ever ran — state.chunks is empty/undefined) has nothing to recover and must stay refused;
+    // found and corrected during task 125 recovery after this first version wrongly admitted BOTH cases.
+    const chunkRecoverable = state.status === 'needs_review' && Array.isArray(state.chunks) && state.chunks.length > 0;
+    if (state.status !== 'planned' && state.status !== 'rendered' && state.status !== 'ready_for_review' && !chunkRecoverable) return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });
     const ch = (state.chunks || [])[i]; if (!ch) return res.status(400).json({ ok: false, error: 'chunk_out_of_range' });
     const rel = `${nwv2rBase(id)}/chunk_${String(i).padStart(3, '0')}.mp4`;
     if (!force) {
@@ -17620,7 +17627,13 @@ async function nextwaveV2RouteFinish(req, res) {
   const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-final-${randomBytes(6).toString('hex')}`);
   try {
     const state = await nwv2rGetState(id); if (!state) return res.status(404).json({ ok: false, error: 'build_not_found' });
-    if (state.status !== 'planned' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_finishable: ${state.status}` });
+    // 'needs_review' is accepted alongside planned/ready_for_review, but ONLY when state.chunks is already
+    // populated: that's what distinguishes a build this pre-concat gate itself stopped (real chunks exist,
+    // one was bad, re-finalize must be able to re-enter after it's fixed) from a build the Brain/compile_qc
+    // gate in route.mjs stopped before any chunk was ever planned — that one has nothing to finalize and must
+    // stay refused; found and corrected during task 125 recovery after this first version wrongly admitted both.
+    const finishRecoverable = state.status === 'needs_review' && Array.isArray(state.chunks) && state.chunks.length > 0;
+    if (state.status !== 'planned' && state.status !== 'ready_for_review' && !finishRecoverable) return res.status(409).json({ ok: false, error: `build_not_finishable: ${state.status}` });
     const L = await nwv2rLib(); await mkdir(dir, { recursive: true });
     const chunkPaths = []; for (const ch of state.chunks) { const p = join(dir, `c${String(ch.index).padStart(3, '0')}.mp4`); await smDownloadToFile(nwv2rPublic(`${nwv2rBase(id)}/chunk_${String(ch.index).padStart(3, '0')}.mp4`), p); chunkPaths.push(p); }
     // PRE-CONCAT CHUNK INTEGRITY GATE (2026-10-16) — validate every locally-staged chunk BEFORE handing it to
