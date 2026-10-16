@@ -602,7 +602,10 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('Shared unchanged (ops.js): ' + fn, same);
   }
   for (const fn of ['savePackageToSupabase', '_srvSavePackageQueued', 'fetchPackagesFromTable', 'renderSRVFarsiLifecycleCard', '_farsisaveEdit', '_srvFarsiSetStage', '_srvRenderVideo', 'saveAppState', 'loadAppState']) {
-    ok('Shared unchanged (index.html): ' + fn, top(H, fn) === top(base, fn));
+    // 2026-10-16 platform fix (tests/platform/test_packages_backup.mjs): the per-save full packages backup was removed
+    // from savePackageToSupabase; that exact change is the only one allowed in a shared function.
+    const unBackup = (src) => (fn === 'savePackageToSupabase' ? src.replace("      // 2026-10-16 — the per-save full backup (every package as one app_settings value, ~8.6 MB) is no longer written\n      // here: it exceeds the browser role's 3 s statement timeout, has failed on every save since 2026-05-23 and added\n      // seconds to every package save in every business. The packages table written above is the record.\n", "      // Also write packages backup to app_settings for redundancy\n      await writePackagesBackup();\n") : src);
+    ok('Shared unchanged (index.html): ' + fn, unBackup(top(H, fn)) === top(base, fn));
   }
   {
     // Checkpoint B adds one flag-gated request field to generatePackage(); everything else is unchanged.
