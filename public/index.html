@@ -16066,6 +16066,31 @@ async function nextwaveV2RouteRefinalize(pkg){
     return{ok:false,reason:'network_error',detail:e.message};
   }
 }
+// GOVERNED CHUNK RECOVERY (2026-10-16, task 125 chunk-corruption investigation) -- the pre-concat chunk
+// integrity gate in nextwave_v2_route_finish can flag specific chunk indices as 'chunk_invalid' (silently
+// corrupted at render time -- proven on task 125's chunk 2: valid upload, plausible size, but decode stops
+// partway through). This re-renders ONLY the flagged chunk(s) via the chunk endpoint's `force:true` (skips
+// the normal cached-chunk reuse check, which only verifies file existence/size -- the exact gap that let a
+// corrupted chunk get silently reused by every retry since the original Oct-7 render), then re-finalizes
+// from the now-corrected full chunk set. No script/storyboard regeneration, no healthy chunk touched.
+async function nextwaveV2RouteRecoverChunks(pkg){
+  const buildId=pkg&&pkg.nextwaveV2Route&&pkg.nextwaveV2Route.buildId;
+  const ex=pkg&&pkg.nextwaveV2Route&&pkg.nextwaveV2Route.exception;
+  const badIndices=((ex&&ex.reasons)||[]).filter(function(r){return r.kind==='chunk_invalid';}).map(function(r){return r.chunk;});
+  if(!buildId){alert('No build id on this package — cannot recover chunks.');return{ok:false,reason:'missing_build_id'};}
+  if(!badIndices.length){alert('No chunk_invalid entries found on this build — nothing to recover.');return{ok:false,reason:'no_bad_chunks'};}
+  try{
+    for(const idx of badIndices){
+      const cr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_chunk',{build_id:buildId,index:idx,force:true});
+      const c=await cr.json();
+      if(!c.ok){alert('Chunk '+idx+' re-render failed: '+(c.error||('HTTP '+cr.status)));return{ok:false,reason:'chunk_rerender_failed',index:idx,detail:c.error};}
+    }
+    return await nextwaveV2RouteRefinalize(pkg);
+  }catch(e){
+    alert('Chunk recovery network error: '+e.message);
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
 function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
   const rs=pkg?pkg.renderStatus:'';const r=(pkg&&pkg.nextwaveV2Route)||{};
   const box=function(color,inner){return '<div style="padding:16px;background:rgba('+color+',0.08);border:1px solid rgba('+color+',0.4);border-radius:12px;margin-bottom:12px">'+inner+'</div>';};
@@ -16090,6 +16115,14 @@ function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
   }else if(rs==='v2_needs_review'||rs==='v2_blocked'){
     const blocked=rs==='v2_blocked';const ex=r.exception||{};
     h+=box(blocked?'239,68,68':'245,158,11','<div style="font-size:14px;font-weight:800;color:'+(blocked?'#ef4444':'#f59e0b')+';margin-bottom:8px">'+(blocked?'🛑 BLOCKED — factual/safety failure':'⚠️ NEEDS REVIEW — stopped before any render')+'</div><div style="font-size:11px;color:var(--text);line-height:1.6;font-family:\'JetBrains Mono\',monospace">'+((ex.reasons||[]).map(function(x){return escHTML(String(x.kind||'')+(x.scene?(' · '+x.scene):''));}).join('<br>')||'see build state')+'</div><div style="font-size:11px;color:var(--dim);margin-top:8px">Routed to '+escHTML(String(ex.owner||'VA Production / Product QC').replace(/_/g,' '))+'. No narration, asset or render spend occurred'+(r.vendor&&r.vendor.elevenlabs_chars?' (narration had already run)':'')+'. The system never guesses: edit the script (Review stage) or resolve with Product QC, then rebuild.</div>');
+    // CHUNK RECOVERY (2026-10-16) — a 'chunk_invalid' reason means the chunks themselves (not the
+    // script/storyboard) have a confirmed-bad render at specific indices; the normal "Re-run V2 route"
+    // button below would re-run the Brain/narration from scratch for no reason (the script is fine) and
+    // would NOT even re-render the bad chunk (the cache-reuse check that let it go unnoticed in the first
+    // place is still keyed on file existence, not validity) -- this targets exactly the flagged index/indices.
+    const chunkInvalidIdx=((ex.reasons||[]).filter(function(x){return x.kind==='chunk_invalid';}).map(function(x){return x.chunk;}));
+    if(!blocked&&chunkInvalidIdx.length) h+=box('245,158,11','<div style="font-size:12px;color:var(--text);line-height:1.6"><b>Chunk'+(chunkInvalidIdx.length>1?'s':'')+' '+escHTML(chunkInvalidIdx.join(', '))+'</b> rendered successfully (uploaded, plausible size) but failed decode-progression validation before concatenation -- a silently corrupted chunk, not a script/storyboard problem. Re-render just '+(chunkInvalidIdx.length>1?'these chunks':'this chunk')+', then re-finalize from the full (now-corrected) chunk set.</div>');
+    if(!blocked&&chunkInvalidIdx.length) h+='<button style="'+st.btnGreen+'" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||\'\')===String(\''+pkgId+'\');});if(!p){alert(\'Package not found\');return;}const b=event.target;b.disabled=true;b.textContent=\'⏳ Recovering chunk(s)…\';const x=await nextwaveV2RouteRecoverChunks(p);b.disabled=false;b.textContent=\'🔧 Regenerate flagged chunk(s) & re-finalize\';if(typeof renderTab===\'function\')renderTab(currentTab);})()">🔧 Regenerate flagged chunk(s) & re-finalize</button>';
     h+='<button style="'+st.btnBlue+'" onclick="_nextWaveSetStage(\''+taskId+'\',\'review\');if(typeof renderTab===\'function\')renderTab(currentTab)">← Back to Review (edit script)</button>';
     h+='<button style="'+st.btnGreen+'" onclick="'+build.replace(/"/g,'&quot;')+'">↻ Re-run V2 route</button>';
   }else if(rs==='v2_building'){
