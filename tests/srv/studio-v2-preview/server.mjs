@@ -132,6 +132,9 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       if (table === 'packages') {
         let rows = Object.values(store.packages).sort((a, b) => String(b.generated_at).localeCompare(String(a.generated_at)));
         const eng = (u.searchParams.get('engine') || '').replace(/^eq\./, ''); if (eng) rows = rows.filter((r) => r.engine === eng);
+        // SRV-STUDIO-V2-022: the V2 read-back (package_id=eq.) and title-uniqueness lookup (title=eq.)
+        const pid = u.searchParams.get('package_id'); if (pid) rows = rows.filter((r) => r.package_id === pid.replace(/^eq\./, ''));
+        const ttl = u.searchParams.get('title'); if (ttl) rows = rows.filter((r) => r.title === ttl.replace(/^eq\./, ''));
         return send(res, 200, rows.slice(0, Number(u.searchParams.get('limit')) || 200));
       }
       return send(res, 200, []);

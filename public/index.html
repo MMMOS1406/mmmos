@@ -16200,10 +16200,145 @@ function _srvEnglishV2OnInput(pkgId,key){
   if(!el||!pkg)return;
   const cnt=document.getElementById('srv2cnt_'+pkgId+'_'+key);
   if(cnt)cnt.textContent=String(el.value.length)+' chars';
-  const dirty=String(el.value)!==String(pkg[key]||'');
-  _srvEnglishV2SetFieldStatus(pkgId,key,dirty?'● Unsaved changes':'✓ Saved',dirty?'#f59e0b':'#22c55e');
+  const dirty=_srvEnglishV2Norm(key,el.value)!==String(pkg[key]||'');
+  const failed=(_srvEnglishV2Unsaved[pkgId]||{})[key];
+  _srvEnglishV2SetFieldStatus(pkgId,key,dirty?(failed?'⚠ Not saved — '+failed.msg:'● Unsaved changes'):'✓ Saved',dirty?(failed?'#ef4444':'#f59e0b'):'#22c55e');
+  if(!dirty&&failed)delete _srvEnglishV2Unsaved[pkgId][key];
+  _srvEnglishV2CaptionUi(pkgId); // "up to date" is never shown while a box differs from what is saved
 }
-// Saves one field. Resolves true only after the database write succeeded.
+// ── SRV-STUDIO-V2-022: verified persistence ──────────────────────────────────
+// A V2 save is successful only when the row was written AND read back from the database with the same values.
+// A failed save is never hidden: the typed text stays in its box, the field is listed as not saved, and Approve,
+// Build and Publish refuse until it is saved. The package in memory keeps what the database holds, so every
+// preview and payload is built from saved content only.
+const _srvEnglishV2Unsaved={}; // pkgId -> { key: { value, msg, at } }
+function _srvEnglishV2Norm(key,v){
+  v=String(v==null?'':v);
+  return key==='title'?v.replace(/\s+/g,' ').trim():key==='captionYT'?v.replace(/[ \t]+$/gm,'').trim():v;
+}
+const SRV_STUDIO_V2_FIELD_LABEL={title:'SONG TITLE',lyrics:'FULL LYRICS',shortLyrics:'SHORT LYRICS',sunoPrompt:'SUNO STYLE PROMPT — FULL SONG',shortSunoPrompt:'SUNO STYLE PROMPT — SHORT',captionYT:'YOUTUBE CAPTION'};
+// Keys whose box (if on screen) differs from the saved package, plus keys whose last save failed.
+function _srvEnglishV2DirtyKeys(pkgId){
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!pkg)return [];
+  const task=_srvEnglishV2TaskForPkg(pkg);
+  const out=[];
+  _srvEnglishV2FieldsFor(task,pkg).concat([SRV_STUDIO_V2_CAPTION_FIELD]).forEach(function(f){
+    const el=document.getElementById(_srvEnglishV2FieldId(pkgId,f.key));
+    if(el&&typeof el.value==='string'&&_srvEnglishV2Norm(f.key,el.value)!==String(pkg[f.key]||''))out.push(f.key);
+  });
+  Object.keys(_srvEnglishV2Unsaved[pkgId]||{}).forEach(function(k){if(!out.includes(k))out.push(k);});
+  return out;
+}
+// Reads the saved row back. { ok, title, pkg } — pkg is the parsed full_package as stored.
+async function _srvEnglishV2ReadBack(pkgId){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/packages?package_id=eq.${encodeURIComponent(String(pkgId))}&select=title,full_package`,{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+    if(!r.ok)return {ok:false,error:'HTTP '+r.status};
+    const rows=await r.json();
+    if(!Array.isArray(rows)||rows.length!==1)return {ok:false,error:'row not found'};
+    let p=null;try{p=JSON.parse(rows[0].full_package||'null');}catch(_){p=null;}
+    if(!p||typeof p!=='object')return {ok:false,error:'unreadable package'};
+    return {ok:true,title:rows[0].title,pkg:p};
+  }catch(e){return {ok:false,error:(e&&e.message)||String(e)};}
+}
+// The other SRV English package that already holds this title (MMMOS keeps titles unique per engine), or null.
+async function _srvEnglishV2TitleConflict(pkg){
+  const title=String(pkg.title||'');
+  if(!title)return null;
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/packages?engine=eq.${encodeURIComponent(pkg.engine||'SRV English')}&title=eq.${encodeURIComponent(title)}&select=package_id,task_id,full_package`,{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+    if(!r.ok)return null;
+    const rows=(await r.json())||[];
+    const o=rows.find(x=>String(x.package_id)!==String(pkg.id));
+    if(!o)return null;
+    let op=null;try{op=JSON.parse(o.full_package||'null');}catch(_){op=null;}
+    return {pkgId:String(o.package_id),taskId:o.task_id,pkg:op};
+  }catch(_){return null;}
+}
+const _srvEnglishV2Same=(a,b)=>JSON.stringify(a===undefined?null:a)===JSON.stringify(b===undefined?null:b);
+// Writes the package and verifies the listed keys came back unchanged. Resolves { ok, reason, conflict?, keys? }.
+async function _srvEnglishV2Persist(pkg,keys){
+  keys=keys||[];
+  if(keys.includes('title')){
+    const c=await _srvEnglishV2TitleConflict(pkg);
+    if(c)return {ok:false,reason:'duplicate_title',conflict:c};
+  }
+  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+  if(ok!==true){
+    const c=keys.includes('title')?await _srvEnglishV2TitleConflict(pkg):null;
+    return c?{ok:false,reason:'duplicate_title',conflict:c}:{ok:false,reason:'save_failed'};
+  }
+  const rb=await _srvEnglishV2ReadBack(pkg.id);
+  if(!rb.ok)return {ok:false,reason:'readback_failed',detail:rb.error};
+  const bad=keys.filter(k=>!_srvEnglishV2Same(rb.pkg[k],pkg[k]));
+  if(String(rb.title||'')!==String(pkg.title||'')&&!bad.includes('title'))bad.push('title');
+  return bad.length?{ok:false,reason:'readback_mismatch',keys:bad}:{ok:true};
+}
+function _srvEnglishV2ConflictMovable(c){
+  // A title can be released only from a draft that was cancelled (or whose task no longer exists) and was never
+  // uploaded anywhere.
+  const op=c&&c.pkg;if(!op||op.engine!=='SRV English')return false;
+  if(op.srvPublish||op.srvPilot||op._srvYtShortId||op._srvYtLongId||op.youtubeVideoId||op.youtube_video_id)return false;
+  const t=op.srvTaskUid?_srvEnglishTaskByUid(op.srvTaskUid):_srvEnglishTaskById(op.taskId);
+  return !t||!!(t.cancelledAt&&t.status==='done');
+}
+function _srvEnglishV2FailMsg(res){
+  if(res.reason==='duplicate_title'){
+    const c=res.conflict;const t=c.pkg&&(c.pkg.srvTaskUid?_srvEnglishTaskByUid(c.pkg.srvTaskUid):_srvEnglishTaskById(c.taskId));
+    return 'another SRV English package already uses this title (task #'+String(c.taskId||'?')+(t&&t.cancelledAt?', cancelled':'')+', package '+c.pkgId+'). Titles must be unique in MMMOS.';
+  }
+  if(res.reason==='readback_mismatch')return 'the database returned different values for '+res.keys.map(k=>SRV_STUDIO_V2_FIELD_LABEL[k]||k).join(', ')+'.';
+  if(res.reason==='readback_failed')return 'the save could not be verified ('+String(res.detail||'')+').';
+  return 'the database refused the write. Check the connection and press Save again.';
+}
+// Frees a title held by a cancelled, never-published SRV English draft (renamed, nothing else changed), then
+// retries saving this package's title. Only offered when _srvEnglishV2ConflictMovable is true.
+async function _srvEnglishV2ReleaseTitle(pkgId,otherPkgId){
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  const el=document.getElementById(_srvEnglishV2FieldId(pkgId,'title'));
+  if(!pkg||!el)return false;
+  const want=_srvEnglishV2Norm('title',el.value);
+  const c=await _srvEnglishV2TitleConflict(Object.assign({},pkg,{title:want}));
+  if(!c||c.pkgId!==String(otherPkgId)||!_srvEnglishV2ConflictMovable(c)){_srvEnglishV2SetFieldStatus(pkgId,'title','⚠ That title can no longer be released here — reload the page','#ef4444');return false;}
+  const other=(D.packages||[]).find(p=>String(p.id||'')===c.pkgId)||c.pkg;
+  const prev=other.title;
+  other.title=String(want).slice(0,80)+' · retired draft '+c.pkgId.slice(-6);
+  other._srvV2RetiredTitle={from:prev,at:new Date().toISOString(),forPackage:String(pkgId)};
+  const r=await _srvEnglishV2Persist(other,['title','_srvV2RetiredTitle']);
+  if(!r.ok){other.title=prev;delete other._srvV2RetiredTitle;_srvEnglishV2SetFieldStatus(pkgId,'title','⚠ The old draft could not be renamed — '+_srvEnglishV2FailMsg(r),'#ef4444');return false;}
+  return _srvEnglishV2SaveField(pkgId,'title');
+}
+// What an approval covers: the song (title + this format's lyrics), this format's Suno prompt and the caption.
+function _srvEnglishV2ApprovalOf(task,pkg){
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  return {src:_srvEnglishV2MetaSrc(task,pkg),prompt:_srvEnglishV2Hash(String(pkg[used.sunoPrompt]||'')),caption:_srvEnglishV2Hash(String(pkg.captionYT||pkg.captionYouTube||'')),title:String(pkg.title||'')};
+}
+function _srvEnglishV2ApprovalMatches(task,pkg){
+  const a=pkg&&pkg._srvV2Approved;if(!a)return false;
+  const n=_srvEnglishV2ApprovalOf(task,pkg);
+  return a.src===n.src&&a.prompt===n.prompt&&a.caption===n.caption&&a.title===n.title;
+}
+// Revalidates against the database (Approve and Publish): nothing unsaved, the stored row equals this screen's
+// package for every publishing field, the stored caption is fresh, and (opts.approved) the stored content is
+// still exactly what was approved. Resolves { ok, msg }.
+async function _srvEnglishV2VerifySaved(task,pkg,opts){
+  opts=opts||{};
+  const L=k=>SRV_STUDIO_V2_FIELD_LABEL[k]||k;
+  const dirty=_srvEnglishV2DirtyKeys(pkg.id);
+  if(dirty.length)return {ok:false,msg:'not saved: '+dirty.map(L).join(', ')+'.'};
+  const rb=await _srvEnglishV2ReadBack(pkg.id);
+  if(!rb.ok)return {ok:false,msg:'the saved package could not be read back ('+rb.error+').'};
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  const keys=['title',used.lyrics,used.sunoPrompt,'captionYT','_srvV2Meta'].concat(opts.approved?['_srvV2Approved']:[]);
+  const bad=keys.filter(k=>!_srvEnglishV2Same(rb.pkg[k],pkg[k]));
+  if(String(rb.title||'')!==String(pkg.title||'')&&!bad.includes('title'))bad.push('title');
+  if(bad.length)return {ok:false,msg:'the database holds different values for '+bad.map(L).join(', ')+' than this screen. Reload the page and check them.'};
+  if(!_srvEnglishV2CaptionState(task,rb.pkg).fresh)return {ok:false,msg:'the saved caption is out of date with the saved title or lyrics.'};
+  if(opts.approved&&rb.pkg._srvV2Approved&&!_srvEnglishV2ApprovalMatches(task,rb.pkg))return {ok:false,msg:'the saved title, lyrics, Suno prompt or caption changed after approval. Go back to Review and approve again.'};
+  return {ok:true};
+}
+// Saves one field. Resolves true only after the write was committed and read back with the same values.
 const SRV_STUDIO_V2_CAPTION_FIELD={key:'captionYT',label:'YOUTUBE CAPTION',rows:6,max:4000};
 async function _srvEnglishV2SaveField(pkgId,key,opts){
   opts=opts||{};
@@ -16241,15 +16376,23 @@ async function _srvEnglishV2SaveField(pkgId,key,opts){
   }
   if(typeof saveAppState==='function')saveAppState();
   _srvEnglishV2SetFieldStatus(pkgId,key,'Saving…','#c9a84c');
-  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
-  if(ok!==true){
-    // Put the package back to what the database holds, so the box stays "unsaved" and Approve can't
-    // treat a failed edit as saved. The typed text stays in the box for the next Save.
+  const act=document.getElementById('srv2fa_'+pkgId+'_'+key);if(act)act.innerHTML='';
+  const res=await _srvEnglishV2Persist(pkg,key==='captionYT'?[key,'captionYouTube','_srvV2Meta','_srvV2Edits']:[key,'_srvV2Edits']);
+  if(!res.ok){
+    // The package keeps what the database holds (every preview and payload is built from saved content); the
+    // typed text stays in the box and the field is recorded as NOT saved, which blocks Approve, Build and Publish.
     if(pkg[key]===val){pkg[key]=prevVal;pkg._srvV2Edits=prevEdits;if(key==='captionYT'){pkg.captionYouTube=prevYouTube;pkg._srvV2Meta=prevMeta;}if(typeof saveAppState==='function')saveAppState();}
-    _srvEnglishV2SetFieldStatus(pkgId,key,'⚠ Not saved to the database — check the connection and press Save again','#ef4444');
+    const msg=_srvEnglishV2FailMsg(res);
+    (_srvEnglishV2Unsaved[pkgId]=_srvEnglishV2Unsaved[pkgId]||{})[key]={value:val,msg,at:new Date().toISOString()};
+    _srvEnglishV2SetFieldStatus(pkgId,key,'⚠ Not saved — '+msg,'#ef4444');
+    if(act&&res.reason==='duplicate_title'&&_srvEnglishV2ConflictMovable(res.conflict)){
+      act.innerHTML=`<div style="margin-top:6px;font-size:11px;color:var(--dim);line-height:1.5">The other package is a cancelled draft that was never uploaded. You can give this title to the current song: the old draft is renamed (“… · retired draft”), nothing else changes.</div><button onclick="_srvEnglishV2ReleaseTitle('${escHTML(String(pkgId))}','${escHTML(res.conflict.pkgId)}')" style="margin-top:6px;padding:7px 12px;background:transparent;border:1px solid #c9a84c;border-radius:7px;color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Use this title — retire the cancelled draft's copy</button>`;
+    }
+    _srvEnglishV2CaptionUi(pkgId);
     return false;
   }
-  _srvEnglishV2SetFieldStatus(pkgId,key,key==='captionYT'&&val?'✓ Saved — your caption will be used as written':'✓ Saved','#22c55e');
+  if(_srvEnglishV2Unsaved[pkgId])delete _srvEnglishV2Unsaved[pkgId][key];
+  _srvEnglishV2SetFieldStatus(pkgId,key,key==='captionYT'&&val?'✓ Saved and verified — your caption will be used as written':'✓ Saved and verified','#22c55e');
   _srvEnglishV2RefreshQuality(pkgId);
   const used=_srvEnglishV2BuildKeys(task,pkg);
   const songChanged=changed&&(key==='title'||key===used.lyrics);
@@ -16315,7 +16458,7 @@ async function _srvEnglishV2RegenCaption(pkg){
     pkg._srvV2Meta=meta;
     if(d.hashtags)pkg.hashtags=d.hashtags;
     if(typeof saveAppState==='function')saveAppState();
-    const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    const ok=(await _srvEnglishV2Persist(pkg,['captionYT','captionYouTube','_srvV2Meta'])).ok;
     const capEl=document.getElementById(_srvEnglishV2FieldId(pkgId,'captionYT'));
     if(capEl&&!manual){capEl.value=pkg.captionYT;_srvEnglishV2SetFieldStatus(pkgId,'captionYT','✓ Saved','#22c55e');}
     const legacyCap=document.getElementById('srv2cap_'+pkgId);if(legacyCap&&!manual)legacyCap.textContent=pkg.captionYT;
@@ -16338,7 +16481,9 @@ function _srvEnglishV2CaptionUi(pkgId){
   const sug=pkg._srvV2Meta&&pkg._srvV2Meta.suggest;
   const btn=(fn,label,col)=>`<button onclick="${fn}('${escHTML(String(pkgId))}')" style="padding:7px 12px;background:transparent;border:1px solid ${col};border-radius:7px;color:${col};font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">${label}</button>`;
   let line,col,acts=[];
-  if(s.fresh&&s.manual){line='✓ Your edited caption · matches the latest title and lyrics';col='#22c55e';}
+  const dirty=_srvEnglishV2DirtyKeys(pkgId);
+  if(dirty.length){line='⚠ Not up to date — '+escHTML(dirty.map(k=>SRV_STUDIO_V2_FIELD_LABEL[k]||k).join(', '))+' '+(dirty.length>1?'are':'is')+' not saved. The caption and WHAT WILL PUBLISH still use the last saved title “'+escHTML(String(pkg.title||''))+'”. Save, or nothing can be approved or published.';col='#ef4444';}
+  else if(s.fresh&&s.manual){line='✓ Your edited caption · matches the latest title and lyrics';col='#22c55e';}
   else if(s.fresh){line='✓ Up to date with the latest saved title and lyrics';col='#22c55e';}
   else if(s.reason==='manual_outdated'){line='⚠ You edited this caption before the title or lyrics changed. It will not be replaced automatically — keep it or use a new one.';col='#f59e0b';acts=[btn('_srvEnglishV2KeepManualCaption','Keep my caption','#22c55e'),sug?btn('_srvEnglishV2UseSuggestedCaption','Use the new caption','#c9a84c'):btn('_srvEnglishV2RegenCaptionNow','Generate a new caption to compare','#c9a84c')];}
   else{line='⚠ Out of date with the latest title or lyrics — it will be refreshed before Build; it cannot be published as is.';col='#ef4444';acts=[btn('_srvEnglishV2RegenCaptionNow','↻ Refresh caption now','#c9a84c')];}
@@ -16357,7 +16502,7 @@ async function _srvEnglishV2KeepManualCaption(pkgId){
   const prev=pkg._srvV2Meta;
   const meta=Object.assign({},prev,{manual:Object.assign({},prev.manual,{captionYT:{at:new Date().toISOString(),src:_srvEnglishV2MetaSrc(_srvEnglishV2TaskForPkg(pkg),pkg)}})});
   delete meta.suggest;pkg._srvV2Meta=meta;
-  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+  const ok=(await _srvEnglishV2Persist(pkg,['_srvV2Meta'])).ok;
   if(ok!==true){pkg._srvV2Meta=prev;_srvEnglishV2SetFieldStatus(pkgId,'captionYT','⚠ Not saved to the database — try again','#ef4444');}
   _srvEnglishV2CaptionUi(pkgId);
   return ok===true;
@@ -16372,7 +16517,7 @@ async function _srvEnglishV2UseSuggestedCaption(pkgId){
   const meta=Object.assign({},pkg._srvV2Meta);const manual=Object.assign({},meta.manual||{});delete manual.captionYT;
   meta.manual=manual;meta.src=sug.src;meta.at=new Date().toISOString();delete meta.suggest;
   pkg.captionYT=sug.captionYT;pkg.captionYouTube=sug.captionYT;pkg._srvV2Meta=meta;
-  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+  const ok=(await _srvEnglishV2Persist(pkg,['captionYT','captionYouTube','_srvV2Meta'])).ok;
   if(ok!==true){pkg.captionYT=prev.c;pkg.captionYouTube=prev.y;pkg._srvV2Meta=prev.m;_srvEnglishV2SetFieldStatus(pkgId,'captionYT','⚠ Not saved to the database — try again','#ef4444');}
   else{const el=document.getElementById(_srvEnglishV2FieldId(pkgId,'captionYT'));if(el)el.value=pkg.captionYT;_srvEnglishV2SetFieldStatus(pkgId,'captionYT','✓ Saved','#22c55e');}
   _srvEnglishV2CaptionUi(pkgId);
@@ -16390,7 +16535,8 @@ async function _srvEnglishV2FillPreview(pkgId){
     const kind=_srvEnglishV2TaskIsLong(task)?'long':'short';
     const m=R.srv2YouTubeMetadata(kind,pkg,{test:false,moodKey:srvStudioV2MoodKeyClient(task.mood||task.mode),publishAt:null});
     const s=_srvEnglishV2CaptionState(task,pkg);
-    el.textContent=(s.fresh?'':'⚠ NOT READY TO PUBLISH — the caption is out of date.\n\n')+'Title: '+m.title+'\nTags: '+m.tags.join(', ')+'\n\nDescription:\n'+m.description;
+    const dirty=_srvEnglishV2DirtyKeys(pkgId);
+    el.textContent=(dirty.length?'⚠ NOT READY TO PUBLISH — not saved: '+dirty.map(k=>SRV_STUDIO_V2_FIELD_LABEL[k]||k).join(', ')+'. This preview shows the last SAVED values, which differ from what is on screen.\n\n':'')+(s.fresh?'':'⚠ NOT READY TO PUBLISH — the caption is out of date.\n\n')+'Title: '+m.title+'\nTags: '+m.tags.join(', ')+'\n\nDescription:\n'+m.description;
   }catch(e){el.textContent='Preview unavailable: '+((e&&e.message)||e);}
 }
 // Shown when the opposite format's field was edited or holds the only text: copies it into this format's box
@@ -16444,6 +16590,7 @@ function _srvEnglishV2ReviewHtml(task,pkg,taskId,pkgId){
         <button class="copy-btn" id="srv2s_${pkgId}_${f.key}" onclick="_srvEnglishV2SaveField('${pkgId}','${f.key}')" style="padding:8px 14px;background:rgba(34,197,94,0.10);border-color:rgba(34,197,94,0.30);color:#22c55e">✓ Save</button>
         <span id="srv2st_${pkgId}_${f.key}" style="font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace">${val?'✓ Saved':'Empty'}</span>
       </div>
+      <div id="srv2fa_${pkgId}_${f.key}"></div>
       ${f.key==='captionYT'?`<div id="srv2capst_${pkgId}" style="font-size:10px;color:var(--dim);margin-top:6px;font-family:'JetBrains Mono',monospace"></div><div id="srv2capact_${pkgId}" style="margin-top:6px"></div>`:''}
     </div>`;
   }).join('');
@@ -16527,6 +16674,10 @@ async function _srvEnglishV2Build(pkgId,taskId){
   const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
   const used=_srvEnglishV2BuildKeys(task,pkg);
   if(!String(pkg[used.lyrics]||'').trim()){setStatus('⚠ This '+(used.isLong?'Long':'Short')+' task has no '+(used.isLong?'full':'Short')+' lyrics saved. Go back to Review — build refused.','#ef4444');return;}
+  // SRV-STUDIO-V2-022 — build only what was saved and approved.
+  const unsaved=Object.keys(_srvEnglishV2Unsaved[pkgId]||{});
+  if(unsaved.length){setStatus('⚠ Not saved: '+unsaved.map(k=>SRV_STUDIO_V2_FIELD_LABEL[k]||k).join(', ')+'. Go back to Review — build refused.','#ef4444');return;}
+  if(pkg._srvV2Approved?!_srvEnglishV2ApprovalMatches(task,pkg):!_srvEnglishV2CaptionState(task,pkg).fresh){setStatus('⚠ The package changed after approval (or its caption is out of date). Go back to Review and approve again — build refused.','#ef4444');return;}
   if(btn){btn.disabled=true;btn.style.opacity='0.6';btn.textContent='⏳ Rendering…';}
   try{
     setStatus('Loading the SRV Studio V2 renderer…','#c9a84c');
@@ -16545,7 +16696,7 @@ async function _srvEnglishV2Build(pkgId,taskId){
     if(out.thumbBlob)thumbUrl=await _srvUploadToStorage(pkgId,new File([out.thumbBlob],'srv2_thumb.jpg',{type:'image/jpeg'}),'thumb');
     if(kind==='long')pkg._srvLongVideoUrl=vUrl;else pkg._srvShortVideoUrl=vUrl;
     pkg._srvThumbUrl=thumbUrl;
-    pkg.srvRender=Object.assign({},out.stats,{builtAt:new Date().toISOString(),videoUrl:vUrl,thumbUrl,lyricsField:used.lyrics});
+    pkg.srvRender=Object.assign({},out.stats,{builtAt:new Date().toISOString(),videoUrl:vUrl,thumbUrl,lyricsField:used.lyrics,approvedSrc:pkg._srvV2Approved?pkg._srvV2Approved.src:null,title:pkg.title||''});
     if(typeof saveAppState==='function')saveAppState();
     const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
     if(ok!==true){setStatus('⚠ The video was rendered and uploaded, but the package could not be saved. Check the connection and build again.','#ef4444');resetBtn();return;}
@@ -16583,9 +16734,15 @@ async function _srvEnglishV2Publish(pkgId,taskId){
     }
     // SRV-STUDIO-V2-021 — never publish a caption derived from an older title or lyrics. Checked before any slot,
     // pilot claim or upload, for the pilot and the ordinary path alike.
+    // SRV-STUDIO-V2-022 — revalidate against the database: the payload below is built only from content that is
+    // saved, read back identical, fresh, and (when approved under this version) exactly what was approved and built.
+    say('Verifying the saved package before publishing…','#c9a84c');
+    const ver=await _srvEnglishV2VerifySaved(task,pkg,{approved:true});
+    const builtFrom=pkg.srvRender&&pkg.srvRender.approvedSrc;
+    const buildOk=!pkg._srvV2Approved||(builtFrom&&builtFrom===pkg._srvV2Approved.src);
     const capState=_srvEnglishV2CaptionState(task,pkg);
-    if(!capState.fresh){
-      say('⚠ The YouTube caption is out of date with the latest saved title or lyrics — publish refused. Go back to Review to refresh or confirm it.','#ef4444');
+    if(!ver.ok||!buildOk||!capState.fresh){
+      say('⚠ Publish refused — '+(!ver.ok?ver.msg:!buildOk?'the video was built before the latest approval. Go back to Build and build again.':'the YouTube caption is out of date with the latest saved title or lyrics. Go back to Review to refresh or confirm it.'),'#ef4444');
       if(statusEl){const b=document.createElement('button');b.textContent='← Back to Review';b.style.cssText='display:block;margin:10px auto 0;padding:10px 20px;background:#8b5cf6;border:none;border-radius:8px;color:#fff;font-weight:700;font-size:12px;cursor:pointer;font-family:\'Syne\',sans-serif';b.onclick=function(){_srvEnglishV2SetStage(taskId,'review');_srvEnglishV2Show(taskId);};statusEl.appendChild(b);}
       return;
     }
@@ -16782,6 +16939,14 @@ async function _srvEnglishV2ApprovePackage(taskId,pkgId){
       :'⚠ The caption could not be refreshed from the latest title and lyrics. Press “↻ Refresh caption now”, then approve again.','#ef4444');
     return;
   }
+  // SRV-STUDIO-V2-022 — revalidate against the database, then record exactly what was approved.
+  say('Verifying the saved package…','#c9a84c');
+  const v=await _srvEnglishV2VerifySaved(task,pkg);
+  if(!v.ok){say('⚠ Not approved — '+v.msg,'#ef4444');return;}
+  const prevApproved=pkg._srvV2Approved;
+  pkg._srvV2Approved=Object.assign(_srvEnglishV2ApprovalOf(task,pkg),{at:new Date().toISOString(),kind:used.isLong?'long':'short'});
+  const ap=await _srvEnglishV2Persist(pkg,['_srvV2Approved']);
+  if(!ap.ok){pkg._srvV2Approved=prevApproved;say('⚠ Not approved — the approval could not be saved ('+_srvEnglishV2FailMsg(ap)+')','#ef4444');return;}
   _srvEnglishV2SetStage(taskId,'build');
   _srvEnglishV2Show(taskId);
 }

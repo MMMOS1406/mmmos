@@ -13,7 +13,7 @@ function slice(src, start, end) { const s = src.indexOf(start); if (s < 0) throw
 function top(src, name) { const m = src.match(new RegExp('\\n(async )?function ' + name + '\\(')); if (!m) throw new Error('missing ' + name); const s = m.index + 1; return src.slice(s, src.indexOf('\n}\n', s) + 2); }
 
 // ── sandbox ───────────────────────────────────────────────────────────────────
-function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, src = H } = {}) {
+function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, readbackLie = false, src = H } = {}) {
   const els = {};
   const el = (id, value = '') => (els[id] = { id, value, textContent: '', style: {}, disabled: false });
   const calls = { upserts: [], caption: [], generate: 0, renders: 0, alerts: [] };
@@ -25,7 +25,14 @@ function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, sr
     if (u.includes('/rest/v1/packages?on_conflict')) {
       const row = JSON.parse(opt.body); calls.upserts.push(row);
       if (!saveOk) return { ok: false, status: 500, text: async () => 'boom', json: async () => ({}) };
+      // production has UNIQUE (engine, title) on packages
+      if (Object.values(table).some((r) => r.package_id !== row.package_id && r.engine === row.engine && r.title === row.title)) return { ok: false, status: 409, text: async () => '{"code":"23505","message":"duplicate key value violates unique constraint \\"packages_engine_title_unique\\""}', json: async () => ({}) };
       table[row.package_id] = row; return json(null);
+    }
+    if (u.includes('/rest/v1/packages?package_id=eq.') || u.includes('/rest/v1/packages?engine=eq.')) {
+      const q = new URL(u).searchParams;
+      if (u.includes('/rest/v1/packages?package_id=eq.')) { calls.readbacks = (calls.readbacks || 0) + 1; const r = table[q.get('package_id').slice(3)]; return json(r && !readbackLie ? [{ title: r.title, full_package: r.full_package }] : r ? [{ title: r.title + ' (stale)', full_package: r.full_package }] : []); }
+      if (u.includes('/rest/v1/packages?engine=eq.')) { const e = q.get('engine').slice(3), t = q.get('title').slice(3); return json(Object.values(table).filter((r) => r.engine === e && r.title === t).map((r) => ({ package_id: r.package_id, task_id: r.task_id, full_package: r.full_package }))); }
     }
     if (u.includes('/rest/v1/packages?order=')) return json(Object.values(table).sort((a, b) => String(b.generated_at).localeCompare(String(a.generated_at))));
     if (u.includes('/rest/v1/app_settings')) return json(null);
@@ -62,7 +69,9 @@ function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, sr
     const t = ctx.D.tasks.find((x) => String(x.id || x.taskId || '') === String(taskId));
     ctx.D.packages.unshift({ id: 'pkg_gen_' + calls.generate, taskId, engine: t.engine, generatedAt: new Date().toISOString(), title: 'Generated ' + calls.generate, lyrics: 'L', shortLyrics: 'S', sunoPrompt: 'P', shortSunoPrompt: 'SP' });
   };
-  return { ctx, els, el, calls, table, settle: () => new Promise((r) => setTimeout(r, 20)) };
+  // seed(p): the package already exists in the database (as every production package does), without counting an upsert
+  const seed = (p) => { table[p.id] = { package_id: p.id, task_id: p.taskId, engine: p.engine, title: p.title, full_package: JSON.stringify(p) }; };
+  return { ctx, els, el, calls, table, seed, settle: () => new Promise((r) => setTimeout(r, 20)) };
 }
 
 const T0 = Date.UTC(2026, 9, 1);
@@ -216,7 +225,7 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     vm.runInContext("_srvEnglishSetStage('5','review')", ctx);
     ['title', 'shortLyrics', 'shortSunoPrompt'].forEach((k) => { el('srv2f_p1_' + k, p[k]); el('srv2st_p1_' + k); }); el('srv2approve_st_p1'); el('srv2capst_p1');
     els.srv2f_p1_shortLyrics.value = 'changed';
-    ok('Failure: database error → Save resolves false with a visible message', (await vm.runInContext("_srvEnglishV2SaveField('p1','shortLyrics')", ctx)) === false && /Not saved to the database/.test(els.srv2st_p1_shortLyrics.textContent));
+    ok('Failure: database error → Save resolves false with a visible message', (await vm.runInContext("_srvEnglishV2SaveField('p1','shortLyrics')", ctx)) === false && /Not saved — the database refused the write/.test(els.srv2st_p1_shortLyrics.textContent));
     ok('Failure: package keeps the last saved value; typed text stays in the box', p.shortLyrics === 'short lyric' && els.srv2f_p1_shortLyrics.value === 'changed');
     await vm.runInContext("_srvEnglishV2ApprovePackage('5','p1')", ctx);
     ok('Failure: Approve does not advance while an edit is unsaved', vm.runInContext("_srvEnglishGetStage('5')", ctx) === 'review' && /could not be saved/.test(els.srv2approve_st_p1.textContent));
@@ -380,6 +389,94 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('021 Build hook: kept while in the lyrics, re-derived from the edited lyrics, and a Short uses Short lyrics', keep === 'Hold on tonight' && swap === 'New line after the edit' && shortH === 'Short first line');
     ok('021 Build passes the format hook, not the raw package hook', /hook:_srvEnglishV2HookFor\(R,task,pkg\)/.test(top(H, '_srvEnglishV2Build')));
     ok('021 Review preview and Publish build metadata with the same function', /R\.srv2YouTubeMetadata\(kind,pkg/.test(top(H, '_srvEnglishV2FillPreview')) && /R\.srv2YouTubeMetadata\(kind,pkg/.test(top(H, '_srvEnglishV2Publish')));
+  }
+
+  // ── 11. SRV-STUDIO-V2-022: verified saves, unique titles, one authoritative title, revalidation ──
+  const pubEl = (E, id) => { const st = E.el('srv-lc-publish-status-' + id); st.appendChild = () => {}; return st; };
+  {
+    // Exact production reproduction (read-only copy of the live rows, 2026-10-16): #131 was cancelled at 01:24 UTC
+    // and its package holds "The part you left behind"; the CEO then works in #133, whose package is titled
+    // "Your Hand Found Mine", and retitles it — production returned 409 (packages_engine_title_unique).
+    const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx, els, calls } = E;
+    const t131 = task(131, { status: 'done', cancelledAt: Date.UTC(2026, 9, 16, 1, 24, 22) }), t133 = task(133);
+    const old = pkgOf('pkg_1792112629901', 131, { title: 'The part you left behind', shortLyrics: 'Touch my hand first', captionYT: 'I need to feel you choose me' });
+    const cur = pkgOf('pkg_1792116542283', 133, { title: 'Your Hand Found Mine', shortLyrics: 'The part you left behind\nStill reaches out for you\nI gave you all of me\nThen you changed your mind', captionYT: 'The part you left behind still reaches out for you' });
+    ctx.D.tasks = [t131, t133]; ctx.D.packages = [cur, old]; E.seed(old);
+    cur._srvV2Meta = { src: vm.runInContext('_srvEnglishV2MetaSrc(D.tasks[1],D.packages[0])', ctx), at: '2026-10-16T02:12:09.491Z' }; E.seed(cur);
+    const P = cur.id; const f = (k, v) => { E.el('srv2f_' + P + '_' + k, v); E.el('srv2st_' + P + '_' + k); E.el('srv2fa_' + P + '_' + k); };
+    f('title', cur.title); f('shortLyrics', cur.shortLyrics); f('shortSunoPrompt', cur.shortSunoPrompt); f('captionYT', cur.captionYT);
+    ['srv2capst_', 'srv2capact_', 'srv2approve_st_', 'srv2prev_'].forEach((x) => E.el(x + P));
+    vm.runInContext("_srvEnglishSetStage('133','review')", ctx);
+    els['srv2f_' + P + '_title'].value = 'The part you left behind';
+    const r = await vm.runInContext(`_srvEnglishV2SaveField('${P}','title')`, ctx); await E.settle();
+    ok('022 reproduction: the title save fails and says exactly why (duplicate title held by cancelled task #131)', r === false && /another SRV English package already uses this title \(task #131, cancelled, package pkg_1792112629901\)/.test(els['srv2st_' + P + '_title'].textContent));
+    ok('022 reproduction: nothing was written for the failed title (no 409 round-trip needed — checked first)', !calls.upserts.some((u) => u.package_id === P && u.title === 'The part you left behind'));
+    ok('022 failed save is not silent: the typed title stays in the box and is listed as NOT saved; the package keeps the saved title', els['srv2f_' + P + '_title'].value === 'The part you left behind' && cur.title === 'Your Hand Found Mine' && JSON.stringify(vm.runInContext(`_srvEnglishV2DirtyKeys('${P}')`, ctx)) === '["title"]');
+    ok('022 "Up to date" is never shown while the title is unsaved; the screen names the saved title the payload still uses', /Not up to date — SONG TITLE is not saved/.test(els['srv2capact_' + P].innerHTML) && /Your Hand Found Mine/.test(els['srv2capact_' + P].innerHTML) && !/Up to date with/.test(els['srv2capact_' + P].innerHTML));
+    await vm.runInContext(`_srvEnglishV2ApprovePackage('133','${P}')`, ctx); await E.settle();
+    ok('022 failed save blocks Approve', vm.runInContext("_srvEnglishGetStage('133')", ctx) === 'review' && /could not be saved/.test(els['srv2approve_st_' + P].textContent));
+    vm.runInContext("_srvEnglishSetStage('133','build')", ctx); E.el('srv-lc-build-status-' + P); ctx._srvAudioData = { [P]: { file: {} } };
+    vm.runInContext(`_srvEnglishV2Build('${P}','133')`, ctx); await E.settle();
+    ok('022 failed save blocks Build', /Not saved: SONG TITLE/.test(els['srv-lc-build-status-' + P].textContent));
+    cur._srvShortVideoUrl = 'https://stub.invalid/storage/v1/object/public/srv-assets/' + P + '/short.webm';
+    const st = pubEl(E, P); const nUp = calls.upserts.length;
+    await vm.runInContext(`_srvEnglishV2Publish('${P}','133')`, ctx); await E.settle();
+    ok('022 failed save blocks Publish (before any slot, pilot claim or upload)', /Publish refused — not saved: SONG TITLE/.test(st.textContent) && calls.upserts.length === nUp);
+    vm.runInContext("_srvEnglishSetStage('133','review')", ctx);
+    ok('022 the cancelled, never-uploaded draft can release the title — the action is offered', /_srvEnglishV2ReleaseTitle\('pkg_1792116542283','pkg_1792112629901'\)/.test(els['srv2fa_' + P + '_title'].innerHTML));
+    const rel = await vm.runInContext(`_srvEnglishV2ReleaseTitle('${P}','pkg_1792112629901')`, ctx); await E.settle();
+    const oldRow = JSON.parse(E.table['pkg_1792112629901'].full_package);
+    ok('022 release: the old draft is renamed (and only that), recorded as retired; its lyrics and caption are untouched', rel === true && /^The part you left behind · retired draft 629901$/.test(E.table['pkg_1792112629901'].title) && oldRow._srvV2RetiredTitle.from === 'The part you left behind' && oldRow.shortLyrics === 'Touch my hand first' && oldRow.captionYT === 'I need to feel you choose me');
+    ok('022 release: the new title is saved AND read back from the database', cur.title === 'The part you left behind' && E.table[P].title === 'The part you left behind' && JSON.parse(E.table[P].full_package).title === 'The part you left behind' && /Saved and verified/.test(els['srv2st_' + P + '_title'].textContent));
+    ok('022 the caption is regenerated from the authoritative title + Short lyrics', calls.caption[calls.caption.length - 1].title === 'The part you left behind' && calls.caption[calls.caption.length - 1].lyrics === cur.shortLyrics && vm.runInContext('_srvEnglishV2CaptionState(D.tasks[1],D.packages[0]).fresh', ctx) === true);
+    await vm.runInContext(`_srvEnglishV2ApprovePackage('133','${P}')`, ctx); await E.settle();
+    ok('022 Approve revalidates against the database and records what was approved', vm.runInContext("_srvEnglishGetStage('133')", ctx) === 'build' && cur._srvV2Approved && cur._srvV2Approved.title === 'The part you left behind' && JSON.parse(E.table[P].full_package)._srvV2Approved.src === cur._srvV2Approved.src);
+    const m = R.srv2YouTubeMetadata('short', cur, { test: false, moodKey: 'romantic' });
+    ok('022 final payload: YouTube title, description, caption and tags all carry "The part you left behind"; branding and #Shorts kept', m.title === 'The part you left behind | Night Drive Deep House | SRV Studio #Shorts' && m.description.startsWith('The part you left behind — ') && m.description.includes('Caption for The part you left behind') && m.tags.includes('The part you left behind') && m.tags.includes('shorts') && !/Your Hand Found Mine/.test(JSON.stringify(m)));
+    // Publish revalidation: the video must be built from the approved content, and the database must still match.
+    vm.runInContext("_srvEnglishSetStage('133','approve')", ctx);
+    const st2 = pubEl(E, P);
+    await vm.runInContext(`_srvEnglishV2Publish('${P}','133')`, ctx); await E.settle();
+    ok('022 Publish refuses a video built before the latest approval', /built before the latest approval/.test(st2.textContent));
+    cur.srvRender = { approvedSrc: cur._srvV2Approved.src };
+    const row = E.table[P]; const saved = row.title; row.title = 'Something Else';
+    await vm.runInContext(`_srvEnglishV2Publish('${P}','133')`, ctx); await E.settle();
+    ok('022 Publish refuses when the database differs from this screen (title column)', /database holds different values for SONG TITLE/.test(st2.textContent));
+    row.title = saved;
+    ['title', 'shortLyrics', 'shortSunoPrompt', 'captionYT'].forEach((k) => delete els['srv2f_' + P + '_' + k]); // Approve stage: no Review boxes on screen
+    cur.captionYT = 'changed after approval'; cur.captionYouTube = cur.captionYT; E.seed(cur);
+    await vm.runInContext(`_srvEnglishV2Publish('${P}','133')`, ctx); await E.settle();
+    ok('022 Publish refuses content changed after approval', /changed after approval/.test(st2.textContent));
+  }
+  {
+    // A title held by a live or published package is never released.
+    const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx, els } = E;
+    const other = pkgOf('p_other', 9, { title: 'Taken Title', srvPublish: { videoId: 'abc' } });
+    ctx.D.tasks = [task(5), task(9)]; const p = pkgOf('p1', 5); ctx.D.packages = [p, other]; E.seed(other); E.seed(p); fieldEls(E, p, SHORT_KEYS); E.el('srv2fa_p1_title');
+    els.srv2f_p1_title.value = 'Taken Title';
+    ok('022 duplicate with a published package: refused, explained, and no release offered', (await vm.runInContext("_srvEnglishV2SaveField('p1','title')", ctx)) === false && /already uses this title \(task #9, package p_other\)/.test(els.srv2st_p1_title.textContent) && !els.srv2fa_p1_title.innerHTML);
+  }
+  {
+    // Read-back verification: a write the database does not return identically is NOT a successful save.
+    const E = makeEnv({ flag: 'true', readbackLie: true }); await E.settle(); const { ctx, els } = E;
+    ctx.D.tasks = [task(5)]; const p = pkgOf('p1', 5); ctx.D.packages = [p]; fieldEls(E, p, SHORT_KEYS);
+    els.srv2f_p1_title.value = 'Verified Or Not';
+    ok('022 read-back mismatch → Save fails, says which field, and keeps the field unsaved', (await vm.runInContext("_srvEnglishV2SaveField('p1','title')", ctx)) === false && /database returned different values for SONG TITLE/.test(els.srv2st_p1_title.textContent) && vm.runInContext("_srvEnglishV2DirtyKeys('p1')", ctx).includes('title'));
+  }
+  {
+    // Lyrics save + read-back; Long workflow approve records a Long approval.
+    const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx, els, calls } = E;
+    ctx.D.tasks = [task(5, { contentType: 'Long', isLong: true })]; const p = pkgOf('p1', 5); ctx.D.packages = [p]; E.seed(p); fieldEls(E, p, LONG_KEYS);
+    els.srv2f_p1_lyrics.value = '[Chorus]\nnew long chorus\nline two';
+    const rb0 = calls.readbacks || 0;
+    ok('022 lyrics Save is verified by reading the row back', (await vm.runInContext("_srvEnglishV2SaveField('p1','lyrics')", ctx)) === true && (calls.readbacks || 0) > rb0 && JSON.parse(E.table.p1.full_package).lyrics === '[Chorus]\nnew long chorus\nline two' && /Saved and verified/.test(els.srv2st_p1_lyrics.textContent));
+    await E.settle();
+    await vm.runInContext("_srvEnglishV2ApprovePackage('5','p1')", ctx); await E.settle();
+    ok('022 Long workflow: Approve verifies and records a Long approval built on the full lyrics', vm.runInContext("_srvEnglishGetStage('5')", ctx) === 'build' && p._srvV2Approved.kind === 'long' && p._srvV2Approved.src === vm.runInContext('_srvEnglishV2MetaSrc(D.tasks[0],D.packages[0])', ctx));
+    p.sunoPrompt = 'edited behind the screen'; E.seed(p);
+    E.el('srv-lc-build-status-p1'); ctx._srvAudioData = { p1: { file: {} } };
+    vm.runInContext("_srvEnglishV2Build('p1','5')", ctx); await E.settle();
+    ok('022 Build refuses content changed after approval', /changed after approval/.test(els['srv-lc-build-status-p1'].textContent));
   }
 
   // ── 9. Shared systems untouched ──
