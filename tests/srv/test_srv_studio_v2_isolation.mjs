@@ -13,7 +13,8 @@ import * as A from '../../lib/srvStudioV2Avatars.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html'), OPS = read('api/ops.js');
-const base = (f) => execSync(`git show origin/main:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+// db766dd = main before SRV Studio V2 shipped (PR #40): the protected baseline these checks diff against.
+const base = (f) => execSync(`git show db766dd6ed3c561bdb5ea3577ab4e1bf68c98912:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
 const n017 = (s) => s.replace(/_publishFetch\('/g, "fetch('"); // SRV-STUDIO-V2-017: the only allowed change to shared publish functions is fetch( → _publishFetch(
 const BASE_H = base('public/index.html'), BASE_OPS = base('api/ops.js');
 let pass = 0, fail = 0; const out = [];

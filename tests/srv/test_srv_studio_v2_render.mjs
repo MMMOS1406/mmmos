@@ -13,7 +13,8 @@ import * as A from '../../lib/srvStudioV2Avatars.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html');
-const BASE_H = execSync('git show origin/main:public/index.html', { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+// db766dd = main before SRV Studio V2 shipped (PR #40): the protected baseline these checks diff against.
+const BASE_H = execSync('git show db766dd6ed3c561bdb5ea3577ab4e1bf68c98912:public/index.html', { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
 const n017 = (s) => s.replace(/_publishFetch\('/g, "fetch('"); // SRV-STUDIO-V2-017: the only allowed change to shared publish functions is fetch( → _publishFetch(
 let pass = 0, fail = 0, skip = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); };
@@ -189,7 +190,7 @@ else {
   ok('Protected: SRV Farsi build/publish and shared helpers byte-identical to main', farsi.every((n) => n017(top(H, n)) === top(BASE_H, n)), farsi.filter((n) => n017(top(H, n)) !== top(BASE_H, n)).join());
   const imports = H.match(/import\(\s*SRV2_RENDER_MODULE\s*\)/g) || [];
   ok('Lazy load: the module is imported in exactly one place, by dynamic import(), never by a <script> tag', imports.length === 1 && !/<script[^>]+srv2-render/.test(H) && /const SRV2_RENDER_MODULE='\/srv-studio-v2\/srv2-render\.mjs';/.test(H));
-  ok('Lazy load: only V2 functions reach the loader', (H.match(/await _srvEnglishV2Renderer\(\)/g) || []).length === 3 && [ '_srvEnglishV2Build', '_srvEnglishV2Publish', '_srvEnglishV2FillMeta' ].every((n) => /_srvEnglishV2Renderer\(\)/.test(top(H, n))));
+  ok('Lazy load: only V2 functions reach the loader', (H.match(/await _srvEnglishV2Renderer\(\)/g) || []).length === 4 && [ '_srvEnglishV2Build', '_srvEnglishV2Publish', '_srvEnglishV2FillMeta', '_srvEnglishV2FillPreview' ].every((n) => /_srvEnglishV2Renderer\(\)/.test(top(H, n))));
   const vb = top(H, '_srvEnglishV2Build');
   ok('Build: uses the saved package fields (title, lyrics per format) and records render stats', /title:pkg\.title\|\|''/.test(vb) && /lyrics:pkg\[used\.lyrics\]/.test(vb) && /pkg\.srvRender=Object\.assign\(\{\},out\.stats/.test(vb) && /_srvSavePackageQueued\(pkg\)/.test(vb));
   ok('Build: uploads video + 1280x720 thumbnail through the existing storage helper, then moves to Approve', /_srvUploadToStorage\(pkgId,new File\(\[out\.blob\]/.test(vb) && /'thumb'\)/.test(vb) && /_srvEnglishV2SetStage\(taskId,'approve'\)/.test(vb));

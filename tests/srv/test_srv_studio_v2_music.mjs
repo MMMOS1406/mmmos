@@ -11,7 +11,8 @@ import * as M from '../../lib/srvStudioV2Music.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html'), OPS = read('api/ops.js'), GEN = read('api/generate.js'), LIB = read('lib/srvStudioV2Music.mjs');
-const base = (f) => execSync(`git show origin/main:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+// db766dd = main before SRV Studio V2 shipped (PR #40): the protected baseline these checks diff against.
+const base = (f) => execSync(`git show db766dd6ed3c561bdb5ea3577ab4e1bf68c98912:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
 let pass = 0, fail = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); };
 const top = (src, name) => { const m = src.match(new RegExp('\\n(async )?function ' + name + '\\(')); if (!m) throw new Error('missing ' + name); const s = m.index + 1; return src.slice(s, src.indexOf('\n}\n', s) + 2); };

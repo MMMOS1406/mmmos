@@ -13,7 +13,8 @@ import * as A from '../../lib/srvStudioV2Avatars.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const H = read('public/index.html'), LIB = read('lib/srvStudioV2Avatars.mjs');
-const base = (f) => execSync(`git show origin/main:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
+// db766dd = main before SRV Studio V2 shipped (PR #40): the protected baseline these checks diff against.
+const base = (f) => execSync(`git show db766dd6ed3c561bdb5ea3577ab4e1bf68c98912:${f}`, { cwd: repo, maxBuffer: 64 << 20 }).toString('utf8');
 const BASE_H = base('public/index.html');
 let pass = 0, fail = 0; const out = [];
 const ok = (n, c, x) => { c ? pass++ : fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); };
@@ -143,7 +144,7 @@ function makeEnv() {
 
 // ── 5. Protected avatar systems unchanged ──
 {
-  const diffFiles = execSync('git diff --name-only origin/main -- public/assets/avatars public/assets/srv-farsi-avatars', { cwd: repo }).toString().trim();
+  const diffFiles = execSync('git diff --name-only db766dd6ed3c561bdb5ea3577ab4e1bf68c98912 -- public/assets/avatars public/assets/srv-farsi-avatars', { cwd: repo }).toString().trim();
   ok('V1 SRV English avatars (public/assets/avatars) and SRV Farsi avatar files unchanged vs main', diffFiles === '');
   const cfg = (s) => s.slice(s.indexOf('{id:"srv_english"'), s.indexOf('{id:"nextwave"'));
   ok('V1 avatarLibrary config (ENGINES_CONFIG.srv_english) unchanged', cfg(H) === cfg(BASE_H));
