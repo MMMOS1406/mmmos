@@ -32,6 +32,8 @@ function makeEnv({ saveOk = true, engineState = {} } = {}) {
     const u = String(url);
     if (u.includes('/rest/v1/app_settings?key=eq.srv_studio_v2_enabled')) return json([{ value: true }]);
     if (u.includes('/rest/v1/packages?on_conflict')) { const row = JSON.parse(opt.body); calls.upserts.push(row); return saveOk ? json(null) : json({}, false); }
+    // SRV-STUDIO-V2-022 read-back: the package row exists in the database and equals the sandbox's saved package
+    if (u.includes('/rest/v1/packages?package_id=eq.')) { const id = decodeURIComponent(u.split('package_id=eq.')[1].split('&')[0]); const p = (ctx.D.packages || []).find((x) => String(x.id) === id); return json(p ? [{ title: p.title, full_package: JSON.stringify(p) }] : []); }
     if (u.includes('/rest/v1/')) return json([]);
     if (u.includes('action=youtube_upload_video')) { const b = JSON.parse(opt.body); calls.yt.push(b); return json({ ok: true, videoId: 'yt' + (++vid) }); }
     if (u.includes('action=set_yt_thumbnail')) { calls.thumbs.push(JSON.parse(opt.body)); return json({ ok: true }); }

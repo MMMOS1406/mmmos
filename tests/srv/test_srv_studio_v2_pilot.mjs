@@ -171,6 +171,8 @@ function env(o = {}) {
         if (u.includes('app_settings?key=eq.srv_studio_v2_enabled')) return json([{ value: 'true' }]);
         if (u.includes('app_settings?key=eq.srv_studio_v2_pilot')) return json(pilotCfg ? [{ value: pilotCfg }] : []);
         if (u.includes('/rest/v1/packages?on_conflict')) { calls.upserts.push(JSON.parse(opt.body)); return json(null); }
+        // SRV-STUDIO-V2-022 read-back: the package row exists in the database and equals the sandbox's saved package
+        if (u.includes('/rest/v1/packages?package_id=eq.')) { const id = decodeURIComponent(u.split('package_id=eq.')[1].split('&')[0]); const p = (ctx.D.packages || []).find((x) => String(x.id) === id); return json(p ? [{ title: p.title, full_package: JSON.stringify(p) }] : []); }
         if (u.includes('/rest/v1/')) return json([]);
         if (u.includes('action=srv_studio_v2_pilot_upload')) { const b = JSON.parse(opt.body); calls.pilot.push(b); return opts.pilotRefuse ? json({ ok: false, pilot: true, error: 'pilot_limit_reached' }, false, 409) : json({ ok: true, pilot: true, youtubeVideoId: 'ytp' + (++vid), videoId: 'ytp' + vid, channelId: CH, privacyStatus: 'private', uploadedAt: '2026-10-16T12:00:00Z', entryId: 'pl_x' }); }
         if (u.includes('action=youtube_upload_video')) { calls.yt.push(JSON.parse(opt.body)); return json({ ok: true, youtubeVideoId: 'yt' + (++vid), channelId: CH, privacyStatus: 'private', uploadedAt: '2026-10-16T12:00:00Z' }); }
