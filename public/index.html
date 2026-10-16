@@ -3013,7 +3013,7 @@ async function ytForceUploadLatest(){
     tags = [];
   }
   try{
-    const r = await fetch('/api/ops?action=youtube_upload_video', {
+    const r = await _publishFetch('/api/ops?action=youtube_upload_video', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -3442,7 +3442,7 @@ async function ytShowTopPerformers(){
 // Without this, the auto-upload will silently fail with "Insufficient Permission".
 async function ytCheckUploadScope(){
   try{
-    const r = await fetch('/api/ops?action=youtube_check_scope');
+    const r = await _publishFetch('/api/ops?action=youtube_check_scope');
     const d = await r.json();
     if(!d.ok){
       alert('Scope check failed: ' + (d.error || d.message || 'unknown'));
@@ -4101,6 +4101,32 @@ async function _ceoAuthedFetch(url, bodyObj){
   const body=Object.assign({}, bodyObj||{}, token?{ceo_session_token:token}:{});
   return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
+// SRV-STUDIO-V2-017 — VA (operator) session, issued by the server after action=operator_login once the CEO
+// has set a VA PIN. Like the CEO token it is only a claim: the server re-verifies it on every publishing call.
+function _operatorGetSessionToken(){
+  try{ const raw=sessionStorage.getItem('mmm_operator_session'); if(!raw)return null; const obj=JSON.parse(raw); if(!obj||!obj.token)return null; if(obj.expires_at&&Date.parse(obj.expires_at)<Date.now())return null; return obj.token; }catch{ return null; }
+}
+function _operatorSetSessionToken(token,expiresAt){
+  try{ sessionStorage.setItem('mmm_operator_session', JSON.stringify({token,expires_at:expiresAt})); }catch{}
+}
+function _operatorClearSessionToken(){
+  try{ sessionStorage.removeItem('mmm_operator_session'); }catch{}
+}
+// Every publishing call (YouTube upload/thumbnail, TikTok, SMM mark-published) goes through here and carries
+// whichever session this browser holds — the CEO's, else the VA's.
+async function _publishAuthedFetch(url, bodyObj){
+  const ceo=_ceoGetSessionToken();
+  const op=ceo?null:_operatorGetSessionToken();
+  const body=Object.assign({}, bodyObj||{}, ceo?{ceo_session_token:ceo}:(op?{operator_session_token:op}:{}));
+  return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+}
+// Drop-in for fetch(url, init) at the existing publishing call sites: same arguments, same JSON body, plus
+// the session. A bodyless call (the scope check) becomes a POST with only the session.
+function _publishFetch(url, init){
+  let bodyObj={};
+  try{ if(init&&typeof init.body==='string')bodyObj=JSON.parse(init.body)||{}; }catch(e){ bodyObj={}; }
+  return _publishAuthedFetch(url, bodyObj);
+}
 async function tryLogin(){
   const pin=document.getElementById('pinInput').value;
   if(!selectedUser)return;
@@ -4134,6 +4160,32 @@ async function tryLogin(){
       el.style.display='block';
     }
     return;
+  }
+  // SRV-STUDIO-V2-017 — the VA signs in on the server once the CEO has set a VA PIN (System → Integrations →
+  // Publishing sign-in); the session it returns is what lets the VA publish. Only a definite refusal (wrong
+  // PIN, lockout) stops here. Anything else — no VA PIN set yet (operator_not_configured), an older server,
+  // a network error — falls through to the legacy browser PIN check below. That grants the screens only:
+  // once the CEO requires sign-in, the server refuses publishing calls that carry no VA session.
+  if(selectedUser&&selectedUser.id==='va'){
+    let j=null;
+    try{
+      const r=await fetch('/api/ops?action=operator_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+      j=await r.json().catch(function(){return null;});
+    }catch(e){ j=null; }
+    if(j&&j.ok===true&&j.operator_session_token){
+      _operatorSetSessionToken(j.operator_session_token, j.expires_at);
+      document.getElementById('pinInput').value='';
+      await _activateUser(selectedUser);
+      return;
+    }
+    if(j&&(j.error==='invalid_credentials'||j.error==='temporarily_locked')){
+      const el=document.getElementById('pinErr');
+      el.textContent = j.error==='temporarily_locked' ? ('Too many attempts. Try again in '+(j.retry_after_seconds||900)+'s.') : 'Incorrect PIN.';
+      el.style.display='block';
+      document.getElementById('pinInput').value='';
+      document.getElementById('pinInput').focus();
+      return;
+    }
   }
   if(selectedUser&&selectedUser.pin===pin){
     console.log('[v14.9.0] Login — activating user and loading state...');
@@ -4170,6 +4222,7 @@ function logout(){
   activeExec=null;
   try{ sessionStorage.removeItem('mmm_session_user'); }catch(e){} // v14.9.0 — clear session on explicit logout
   try{ _ceoClearSessionToken(); }catch(e){} // v16.30.0 — clear CEO session on explicit logout
+  try{ _operatorClearSessionToken(); }catch(e){} // SRV-STUDIO-V2-017 — and the VA's operator session
 }
 
 // ── v14.9.0 GLOBAL APP REFRESH MANAGER ───────────────────────────────────────
@@ -11662,7 +11715,7 @@ async function _smmExecMarkPublished(){
   if(!_smmExecActiveTaskId||_smmExecState.publishing)return;
   _smmExecState.publishing=true;_smmExecRerenderIfMounted();
   try{
-    const r=await fetch('/api/ops?action=sm_va_task_mark_published',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
+    const r=await _publishFetch('/api/ops?action=sm_va_task_mark_published',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
     const j=await r.json().catch(function(){return{};});
     if(!r.ok||!j.ok)throw new Error(j.error||('request failed ('+r.status+')'));
   }catch(e){alert('Publish failed: '+e.message);}
@@ -13759,7 +13812,7 @@ async function autoStartYoutubeUpload(pkg){
   };
   const ytCategory = ENGINE_TO_CATEGORY[engine] || '22';
   try{
-    const r = await fetch('/api/ops?action=youtube_upload_video', {
+    const r = await _publishFetch('/api/ops?action=youtube_upload_video', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -15341,7 +15394,7 @@ function renderExecMode(taskId){
           <div class="exec-field"><div class="exec-field-label">MODE</div><div class="exec-field-val">${t.mode||t.mood||'—'}</div></div>
           <div class="exec-field"><div class="exec-field-label">TYPE</div><div class="exec-field-val">${t.contentType||'—'}</div></div>
           <div class="exec-field"><div class="exec-field-label">DAY</div><div class="exec-field-val">${t.day||'—'}</div></div>
-          <div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>
+          ${_srvStudioV2On()?_srvEnglishV2StatusField(t):`<div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>`}
         </div>
       </div>
       ${renderSRVEnglishLifecycleCard(t)}
@@ -15596,17 +15649,1002 @@ function _srvEnglishHasLifecycle(task){
   return !!(cfg&&cfg.lifecycle);
 }
 function _srvEnglishGetStage(taskId){
+  if(_srvStudioV2On())return _srvEnglishV2GetStage(taskId); // SRV Studio V2 (flag OFF in production)
   if(!D.srvLifecycleStages||typeof D.srvLifecycleStages!=='object')return 'generate';
   return D.srvLifecycleStages[String(taskId)]||'generate';
 }
 function _srvEnglishSetStage(taskId,stage){
+  if(_srvStudioV2On())return _srvEnglishV2SetStage(taskId,stage); // SRV Studio V2 (flag OFF in production)
   if(!D.srvLifecycleStages||typeof D.srvLifecycleStages!=='object')D.srvLifecycleStages={};
   D.srvLifecycleStages[String(taskId)]=stage;
   if(typeof saveAppState==='function')saveAppState();
 }
 function _srvEnglishPkgForTask(task){
+  if(_srvStudioV2On())return _srvEnglishV2PkgForTask(task); // SRV Studio V2 (flag OFF in production)
   if(!task)return null;
   return (D.packages||[]).find(p=>String(p.taskId||'')===String(task.taskId||task.id||''))||null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SRV STUDIO V2 — Checkpoint A (lifecycle parity & identity). Order SRV-STUDIO-V2-002.
+// Everything below is reachable only while _srvStudioV2On() is true. The flag is the app_settings
+// row `srv_studio_v2_enabled` (value true); production has no such row, so the flag is OFF and every
+// SRV English function above runs its original code path unchanged. `?srvStudioV2=off` forces it off
+// for side-by-side comparison; nothing in the URL can turn it on.
+//   • Identity: srvUid = 'srve_<createdAt ms>_<id>' (same rule as SRV Farsi P1-A). Stages are keyed by
+//     srvUid with the numeric key still written for back-compat, so turning the flag off again leaves
+//     every task on the stage it reached. Packages bind by srvTaskUid, stamped at generate.
+//   • TEST: task-level (isTest / [manual-test] / "[TEST]" name), in addition to the engine-wide mode.
+//   • Review: title, full lyrics, short lyrics, full + short Suno style prompts are editable and saved
+//     through the serialized package save queue; caption + hashtags regenerate after text edits.
+// ═══════════════════════════════════════════════════════════════════════════════
+const SRV_STUDIO_V2_FLAG_KEY='srv_studio_v2_enabled';
+const _srvStudioV2Flag={state:'unloaded'}; // unloaded | loading | on | off — anything but 'on' is OFF
+function _srvStudioV2ForcedOff(){
+  try{return /[?&]srvStudioV2=off(&|$)/.test(String(location.search||''));}catch(_){return false;}
+}
+function _srvStudioV2On(){
+  return _srvStudioV2Flag.state==='on'&&!_srvStudioV2ForcedOff();
+}
+function _srvStudioV2Rerender(){
+  try{
+    if(typeof activeExec!=='undefined'&&activeExec&&typeof renderExecMode==='function'){
+      const mc=document.getElementById('mainContent');
+      if(mc)mc.innerHTML=renderExecMode(activeExec);
+    }else if(typeof renderTab==='function'&&typeof currentTab!=='undefined'){
+      renderTab(currentTab);
+    }
+  }catch(_){}
+}
+function _srvStudioV2LoadFlag(){
+  if(_srvStudioV2Flag.state!=='unloaded')return;
+  _srvStudioV2Flag.state='loading';
+  fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${SRV_STUDIO_V2_FLAG_KEY}&select=value`,{
+    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}
+  }).then(function(r){return r.ok?r.json():[];}).then(function(rows){
+    const v=Array.isArray(rows)&&rows[0]?rows[0].value:null;
+    const on=(v===true||v==='true'||v==='"true"');
+    _srvStudioV2Flag.state=on?'on':'off';
+    if(on&&!_srvStudioV2ForcedOff()){
+      console.log('[SRV Studio V2] flag ON (app_settings.'+SRV_STUDIO_V2_FLAG_KEY+')');
+      _srvStudioV2Rerender();
+    }
+  }).catch(function(){_srvStudioV2Flag.state='off';});
+}
+_srvStudioV2LoadFlag();
+
+// ── Identity ─────────────────────────────────────────────────────────────────
+function _srvEnglishIsTask(t){return !!t&&t.engine==='SRV English';}
+function _srvEnglishTaskUid(task){
+  if(!_srvEnglishIsTask(task))return null;
+  if(task.srvUid)return task.srvUid;
+  const c=Number(task.createdAt);
+  if(!c||!isFinite(c)||task.id==null)return null;
+  return 'srve_'+c+'_'+task.id;
+}
+// Exactly one SRV English task with this numeric id, or null (never another engine's task, never a guess).
+function _srvEnglishTaskById(taskId){
+  const m=(D.tasks||[]).filter(t=>_srvEnglishIsTask(t)&&String(t.taskId||t.id||'')===String(taskId));
+  if(m.length===1)return m[0];
+  if(m.length>1)console.error('[SRV Studio identity] numeric task id '+taskId+' matches '+m.length+' SRV English tasks — refusing to guess');
+  return null;
+}
+function _srvEnglishTaskByUid(uid){
+  if(!uid)return null;
+  return (D.tasks||[]).find(t=>_srvEnglishTaskUid(t)===uid)||null;
+}
+function _srvEnglishV2TaskForPkg(pkg){
+  if(!pkg)return null;
+  if(pkg.srvTaskUid)return _srvEnglishTaskByUid(pkg.srvTaskUid);
+  return _srvEnglishTaskById(pkg.taskId);
+}
+function _srvEnglishEnsureIdentity(){
+  (D.tasks||[]).forEach(t=>{if(_srvEnglishIsTask(t)&&!t.srvUid){const u=_srvEnglishTaskUid(t);if(u)t.srvUid=u;}});
+}
+function _srvEnglishIsTestTask(t){
+  if(!_srvEnglishIsTask(t))return false;
+  return t.isTest===true||/\[manual-test\]/.test(String(t.assignmentReason||''))||/\[TEST\]/.test(String(t.name||''));
+}
+// Publish runs in TEST (private, "[TEST]" title, no schedule) when the task or its package is a test,
+// on top of the existing engine-wide test mode. It can only ever ADD test protection.
+function _srvEnglishV2IsTestPublish(taskId,pkg){
+  return _srvEnglishIsTestTask(_srvEnglishTaskById(taskId))||!!(pkg&&pkg.isTest===true);
+}
+function _srvEnglishV2StageMap(){
+  if(!D.srvLifecycleStages||typeof D.srvLifecycleStages!=='object')D.srvLifecycleStages={};
+  if(!D.srvLifecycleStages.__identityEpoch)D.srvLifecycleStages.__identityEpoch=Date.now();
+  return D.srvLifecycleStages;
+}
+function _srvEnglishV2GetStage(taskId){
+  const m=_srvEnglishV2StageMap();
+  const task=_srvEnglishTaskById(taskId);
+  const uid=_srvEnglishTaskUid(task);
+  if(uid&&m[uid])return m[uid];
+  if(task&&uid&&Number(task.createdAt)>=Number(m.__identityEpoch))return 'generate'; // new-era task: the numeric key is not its own
+  return m[String(taskId)]||'generate';
+}
+function _srvEnglishV2SetStage(taskId,stage){
+  const m=_srvEnglishV2StageMap();
+  const task=_srvEnglishTaskById(taskId);
+  const uid=_srvEnglishTaskUid(task);
+  if(uid){m[uid]=stage;if(!task.srvUid)task.srvUid=uid;}
+  m[String(taskId)]=stage; // back-compat: the flag-OFF code path reads this key
+  if(typeof saveAppState==='function')saveAppState();
+}
+// srvTaskUid match first. A legacy package (no srvTaskUid) binds only when unambiguous: SRV English,
+// same numeric id, exactly one SRV English task holds that id, and generated no earlier than the task
+// was created — task ids are recycled, and a package can never predate its task.
+function _srvEnglishV2PkgForTask(task){
+  if(!_srvEnglishIsTask(task))return null;
+  const uid=_srvEnglishTaskUid(task);
+  const pkgs=(D.packages||[]).filter(p=>p&&(p.engine==='SRV English'||p.engineName==='SRV English'));
+  const latest=arr=>arr.slice().sort((a,b)=>String(b.generatedAt||'').localeCompare(String(a.generatedAt||'')))[0]||null;
+  if(uid){
+    const byUid=pkgs.filter(p=>p.srvTaskUid===uid);
+    if(byUid.length)return latest(byUid);
+  }
+  const created=Number(task.createdAt);
+  if(!uid||!created)return null;
+  if(_srvEnglishTaskById(task.taskId||task.id)!==task)return null;
+  const legacy=pkgs.filter(p=>!p.srvTaskUid&&String(p.taskId||'')===String(task.taskId||task.id||'')
+    &&Date.parse(p.generatedAt||'')>=created);
+  return latest(legacy);
+}
+function _srvEnglishV2StampPkg(task,pkg){
+  const uid=_srvEnglishTaskUid(task);
+  if(uid)pkg.srvTaskUid=uid;
+  if(_srvEnglishIsTestTask(task))pkg.isTest=true;
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof savePackageToSupabase==='function')return _srvSavePackageQueued(pkg);
+  return Promise.resolve(false);
+}
+
+// ── Review: editable fields ──────────────────────────────────────────────────
+const SRV_STUDIO_V2_EDIT_FIELDS=[
+  {key:'title',label:'SONG TITLE',input:true,max:100},
+  {key:'lyrics',label:'FULL LYRICS',rows:12},
+  {key:'shortLyrics',label:'SHORT LYRICS',rows:6},
+  {key:'sunoPrompt',label:'SUNO STYLE PROMPT — FULL SONG',rows:4},
+  {key:'shortSunoPrompt',label:'SUNO STYLE PROMPT — SHORT',rows:3},
+];
+// Which saved fields the Build stage will actually use for this task (mirrors the Build stage exactly).
+function _srvEnglishV2BuildKeys(task,pkg){
+  const isLong=!!(task&&(task.contentType==='Long'||task.contentFormat==='long'));
+  const p=pkg||{};
+  return {
+    isLong,
+    lyrics:isLong?(p.lyrics?'lyrics':'shortLyrics'):(p.shortLyrics?'shortLyrics':'lyrics'),
+    sunoPrompt:isLong?(p.sunoPrompt?'sunoPrompt':'shortSunoPrompt'):(p.shortSunoPrompt?'shortSunoPrompt':'sunoPrompt'),
+  };
+}
+// ── Checkpoint B: V2 quality validator (same code as lib/srvStudioV2Music.mjs, enforced by a test) ──
+// <srv-v2-validator> — this block is copied byte-for-byte into public/index.html (a test enforces it).
+const SRV_STUDIO_V2_ARTIST_NAMES=['Taylor Swift','Olivia Rodrigo','Gracie Abrams','Sabrina Carpenter','Billie Eilish','Lana Del Rey','Dua Lipa','Ellie Goulding','Adele','Rihanna','Beyonce','Beyoncé','Ariana Grande','Selena Gomez','Lorde','Halsey','Zara Larsson','Jess Glynne','Kygo','Lane 8','RÜFÜS','Rufus Du Sol','Disclosure','Calvin Harris','Avicii','Odesza','Bob Moses','Fred again','Fisher','Chris Lake','Tinlicker','Yotto','Le Youth','Gorgon City','MK','Duke Dumont','Purple Disco Machine','The Weeknd','Drake','Ed Sheeran','Coldplay'];
+const SRV2_MALE_RX=/\b(male|men|man|boy|boys|guy|guys|baritone|tenor|duet|duets|duo|feat|featuring|rapper|rap verse|choir of men|bass singer)\b/i;
+const SRV2_CHILD_RX=/\b(child|childlike|childish|kid|kids|teen|teens|teenage|teenager|girlish|schoolgirl|little girl|young girl|baby voice|nursery)\b/i;
+const SRV2_LYRIC_AGE_RX=/\b(school|schoolgirl|homework|recess|my mom says|curfew|sixteen|fifteen|fourteen|teen|teenage)\b/i;
+const SRV2_DUET_TAG_RX=/^\s*[\[(]\s*(male|man|him|he|guy|boy|both|duet|together|all|feat[^\])]*)\s*[\])]/im;
+const SRV2_IMITATE_RX=/\b(in the style of|sounds like|similar to|inspired by|cover of|reminiscent of)\b/i;
+const SRV2_CLICHES=["i can't live without you","you're my everything","tears rolling down","my heart is broken","love is blind","set my soul on fire","dancing in the dark","lost in your eyes","you complete me","meant to be","forever and always","heart of gold"];
+const SRV2_TITLE_FORBIDDEN_RX=/\b(deep house|night drive|emotional|remix|feat|featuring|srv|song|lyrics?|official|edit|version)\b/i;
+const SRV2_GENERIC_TITLES=['love','night','drive','tonight','forever','you','us','home','stay','dreams','alone','heart','midnight','feelings','emotions'];
+const SRV2_HOUSE_ELEMENTS=['four-on-the-floor','four on the floor','sub bass','bassline','pads','arpeggio','sidechain','house kick','groove','synth'];
+const SRV2_NIGHT_IMAGERY=['night','midnight','2am','3am','headlights','highway','road','drive','driving','passenger','dashboard','streetlight','street lights','city lights','neon','moon','window down','windows down','freeway','exit','tail lights','taillights','radio','miles','engine','rearview','lane','dark'];
+const SRV2_ENGLISH_STOP=new Set(['the','and','you','i','me','my','your','we','to','a','in','of','it','on','is','im',"i'm",'dont',"don't",'all','so','be','that','this','but','for','with','just','when','if','all','are','what','like','love','know','can','do','its',"it's",'was','were','our','us','no','not','at','still','where','back','now','one','up','out','go','let','into','from','am','been','have','had','say','said','tell','why','how','every','never','again']);
+
+function srv2Words(s){return String(s||'').toLowerCase().replace(/[^a-z0-9'\s]/g,' ').split(/\s+/).filter(Boolean);}
+function srv2SungLines(text){return String(text||'').split('\n').map(function(l){return l.trim();}).filter(function(l){return l&&!/^\[.*\]$/.test(l)&&!/^\(.*\)$/.test(l);});}
+function srv2Jaccard(a,b){const A=new Set(srv2Words(a)),B=new Set(srv2Words(b));if(!A.size||!B.size)return 0;let n=0;A.forEach(function(w){if(B.has(w))n++;});return n/(A.size+B.size-n);}
+function srv2Contain(part,whole){const A=srv2Words(part),B=new Set(srv2Words(whole));if(!A.length)return 0;return A.filter(function(w){return B.has(w);}).length/A.length;}
+function srv2Sections(text){const out=[];String(text||'').split('\n').forEach(function(l){const m=l.trim().match(/^\[([^\]]+)\]$/);if(m)out.push(m[1].toLowerCase());});return out;}
+function srv2HasArtist(text){const t=String(text||'').toLowerCase();return SRV_STUDIO_V2_ARTIST_NAMES.filter(function(n){return new RegExp('(^|[^a-z])'+n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'([^a-z]|$)').test(t);});}
+
+// Deterministic checks for one SRV Studio V2 package. It judges the TEXT (lyrics, prompts, title) the
+// operator and Suno receive. It cannot hear or guarantee the gender of an actual generated voice.
+function srv2ValidatePackage(pkg,opts){
+  opts=opts||{};
+  const isLong=!!opts.isLong;
+  const p=pkg||{};
+  const lyr=isLong?String(p.lyrics||''):String(p.shortLyrics||'');
+  const prompt=isLong?String(p.sunoPrompt||''):String(p.shortSunoPrompt||'');
+  const bothPrompts=String(p.sunoPrompt||'')+' \n '+String(p.shortSunoPrompt||'');
+  const allLyrics=String(p.lyrics||'')+'\n'+String(p.shortLyrics||'');
+  const checks=[];
+  const add=function(id,label,status,detail,hard){checks.push({id:id,label:label,status:status,detail:detail||'',hard:!!hard});};
+
+  // 1. Female-only vocal direction (text only)
+  const maleHit=(bothPrompts.match(SRV2_MALE_RX)||[])[0];
+  const childHit=(bothPrompts.match(SRV2_CHILD_RX)||[])[0];
+  const duetTag=SRV2_DUET_TAG_RX.test(allLyrics);
+  const femaleNamed=/\bfemale\b/i.test(prompt);
+  const vocalField=p.vocal==null||String(p.vocal).toLowerCase()==='female';
+  if(maleHit||childHit||duetTag||!vocalField)add('female','Female-only vocal direction','fail',maleHit?'Suno prompt mentions "'+maleHit+'"':childHit?'Suno prompt has childlike/teen direction "'+childHit+'"':duetTag?'Lyrics contain a duet or male part label':'Package vocal field is "'+p.vocal+'"',true);
+  else if(!femaleNamed)add('female','Female-only vocal direction','fail','Suno prompt does not ask for a female vocal',true);
+  else add('female','Female-only vocal direction','pass','Prompt asks for a female lead; no male, duet or childlike direction found');
+  const ageHit=(allLyrics.match(SRV2_LYRIC_AGE_RX)||[])[0];
+  add('adult','Adult perspective in lyrics',ageHit?'warn':'pass',ageHit?'Lyrics mention "'+ageHit+'" — check the song does not read as teenage':'No school/teen age markers in the lyrics');
+
+  // 2. English-language lyrics
+  const letters=(lyr.match(/\p{L}/gu)||[]).length;
+  const latin=(lyr.match(/[A-Za-z]/g)||[]).length;
+  const words=srv2Words(lyr);
+  const stopShare=words.length?words.filter(function(w){return SRV2_ENGLISH_STOP.has(w);}).length/words.length:0;
+  if(!letters)add('english','English-language lyrics','fail','No lyrics',true);
+  else if(latin/letters<0.98)add('english','English-language lyrics','fail',Math.round((1-latin/letters)*100)+'% of letters are not Latin script',true);
+  else if(stopShare<0.2)add('english','English-language lyrics','warn','Few common English words ('+Math.round(stopShare*100)+'%) — check the language');
+  else add('english','English-language lyrics','pass','Latin script, '+Math.round(stopShare*100)+'% common English words');
+
+  // 3. No artist imitation
+  const artists=srv2HasArtist(bothPrompts+'\n'+allLyrics+'\n'+(p.title||''));
+  const imitate=SRV2_IMITATE_RX.test(bothPrompts);
+  if(artists.length||imitate)add('original','No artist imitation','fail',artists.length?'Mentions '+artists.join(', '):'Prompt asks to imitate another artist',true);
+  else add('original','No artist imitation','pass','No artist names or imitation phrasing');
+
+  // 4. Emotional Deep House compatibility
+  const bpmMatch=prompt.match(/\b(\d{2,3})\s*bpm\b/i);
+  const bpm=bpmMatch?Number(bpmMatch[1]):null;
+  const houseEls=SRV2_HOUSE_ELEMENTS.filter(function(e){return prompt.toLowerCase().includes(e);}).length;
+  if(!/deep house/i.test(prompt))add('deephouse','Emotional Deep House compatibility','fail','Suno prompt does not name deep house',true);
+  else if(!bpm||bpm<112||bpm>126)add('deephouse','Emotional Deep House compatibility','fail',bpm?bpm+' BPM is outside the deep house range (112-126)':'No BPM in the Suno prompt',true);
+  else if(houseEls<2)add('deephouse','Emotional Deep House compatibility','warn','Only '+houseEls+' house production element named');
+  else add('deephouse','Emotional Deep House compatibility','pass','Deep house, '+bpm+' BPM, '+houseEls+' house elements');
+
+  // 5. Night Drive atmosphere
+  const imagery=SRV2_NIGHT_IMAGERY.filter(function(w){return new RegExp('\\b'+w+'\\b','i').test(allLyrics);});
+  if(!/night drive/i.test(prompt))add('nightdrive','Night Drive atmosphere','fail','Suno prompt does not name night drive');
+  else if(!imagery.length)add('nightdrive','Night Drive atmosphere','warn','Prompt sets night drive, but the lyrics carry no night or motion image');
+  else add('nightdrive','Night Drive atmosphere','pass','Prompt sets night drive; lyrics use '+imagery.slice(0,4).join(', '));
+
+  // 6. Title originality
+  const title=String(p.title||'').trim();
+  const tw=srv2Words(title);
+  const recent=(opts.recentTitles||[]).filter(Boolean);
+  const exact=recent.find(function(r){return srv2Words(r).join(' ')===tw.join(' ');});
+  const close=recent.map(function(r){return{r:r,j:srv2Jaccard(r,title)};}).filter(function(x){return x.j>=0.6;}).sort(function(a,b){return b.j-a.j;})[0];
+  if(!title)add('title','Title originality','fail','No title',true);
+  else if(SRV2_TITLE_FORBIDDEN_RX.test(title))add('title','Title originality','fail','Title contains a genre/label word ("'+(title.match(SRV2_TITLE_FORBIDDEN_RX)||[])[0]+'")');
+  else if(exact)add('title','Title originality','fail','Same title as an earlier song: "'+exact+'"');
+  else if(close)add('title','Title originality','warn','Very close to an earlier title: "'+close.r+'"');
+  else if(tw.length===1&&SRV2_GENERIC_TITLES.includes(tw[0]))add('title','Title originality','warn','One-word generic title');
+  else if(tw.length<2||tw.length>6)add('title','Title originality','warn',tw.length+' words (2-6 recommended)');
+  else add('title','Title originality','pass',tw.length+' words, not used before'+(recent.length?' (checked against '+recent.length+' earlier titles)':''));
+
+  // 7. Hook and chorus quality
+  const sung=srv2SungLines(lyr);
+  const hook=String(p.hook||'').trim()||sung[0]||'';
+  const hookWords=srv2Words(hook).length;
+  const firstLines=sung.slice(0,2).join(' ');
+  const hookOpens=!!hook&&srv2Contain(hook,firstLines)>=0.7;
+  const lines=String(lyr).split('\n');
+  let chorusText='';let inChorus=false;
+  lines.forEach(function(l){const m=l.trim().match(/^\[([^\]]+)\]$/);if(m){inChorus=/chorus/i.test(m[1])&&!/pre/i.test(m[1]);return;}if(inChorus)chorusText+=' '+l;});
+  const hookLead=srv2Words(hook).slice(0,3).join(' ');
+  const hookInChorus=isLong?(!!chorusText&&(srv2Contain(hook,chorusText)>=0.6||(hookLead.split(' ').length===3&&srv2Words(chorusText).join(' ').includes(hookLead)))):true;
+  const cliches=SRV2_CLICHES.filter(function(c){return allLyrics.toLowerCase().includes(c);});
+  const longLines=sung.filter(function(l){return srv2Words(l).length>12;}).length;
+  const distinct=new Set(sung.map(function(l){return l.toLowerCase();})).size;
+  const distinctShare=sung.length?distinct/sung.length:0;
+  const hookIssues=[];
+  if(!hook)hookIssues.push('no hook');
+  if(hookWords>14)hookIssues.push('hook is '+hookWords+' words');
+  if(!hookOpens)hookIssues.push('the song does not open with the hook');
+  if(!hookInChorus)hookIssues.push('the chorus does not carry the hook');
+  if(cliches.length)hookIssues.push('cliché: '+cliches.join(', '));
+  if(longLines)hookIssues.push(longLines+' line(s) over 12 words');
+  if(distinctShare<(isLong?0.45:0.5))hookIssues.push('too repetitive ('+Math.round(distinctShare*100)+'% distinct lines)');
+  if(!hook||hookIssues.length>=3)add('hook','Hook and chorus quality','fail',hookIssues.join('; '));
+  else if(hookIssues.length)add('hook','Hook and chorus quality','warn',hookIssues.join('; '));
+  else add('hook','Hook and chorus quality','pass','Opens with a '+hookWords+'-word hook'+(isLong?' that the chorus repeats':'')+'; singable lines; no clichés');
+
+  // 8. Long / Short format
+  const fmtIssues=[];
+  if(isLong){
+    const sec=srv2Sections(p.lyrics);
+    const choruses=sec.filter(function(s){return /chorus/.test(s)&&!/pre/.test(s);}).length;
+    if(!sec.some(function(s){return /verse 1|verse$/.test(s);}))fmtIssues.push('no [Verse 1]');
+    if(!sec.some(function(s){return /verse 2/.test(s);}))fmtIssues.push('no [Verse 2]');
+    if(choruses<2)fmtIssues.push(choruses+' chorus section(s), needs 2+');
+    if(!sec.some(function(s){return /bridge/.test(s);}))fmtIssues.push('no [Bridge]');
+    const n=srv2SungLines(p.lyrics).length;
+    if(n<18||n>40)fmtIssues.push(n+' sung lines (18-40 expected)');
+    if(!/3:\d\d/.test(String(p.sunoPrompt||'')))fmtIssues.push('Suno prompt has no 3-minute runtime');
+  }else{
+    const n=srv2SungLines(p.shortLyrics).length;
+    if(n<4||n>8)fmtIssues.push(n+' short lines (4-8 expected)');
+    if(/\[[^\]]+\]/.test(String(p.shortLyrics||'')))fmtIssues.push('short lyrics contain section labels');
+    if(!/0:30/.test(String(p.shortSunoPrompt||'')))fmtIssues.push('short Suno prompt has no 0:30 runtime');
+    if(!/0:00/.test(String(p.shortSunoPrompt||'')))fmtIssues.push('short Suno prompt does not start the vocal at 0:00');
+  }
+  if(fmtIssues.length>=2)add('format',isLong?'Long arrangement':'Short (30s) arrangement','fail',fmtIssues.join('; '),true);
+  else if(fmtIssues.length)add('format',isLong?'Long arrangement':'Short (30s) arrangement','warn',fmtIssues.join('; '));
+  else add('format',isLong?'Long arrangement':'Short (30s) arrangement','pass',isLong?'Verses, 2+ choruses, bridge, 3-minute runtime':'4-8 unlabelled lines, 0:30 runtime, vocal at 0:00');
+
+  const weights={female:2,english:1.5,original:1,deephouse:1.5,nightdrive:1,title:1,hook:1.5,format:1,adult:0.5};
+  let total=0,got=0;
+  checks.forEach(function(c){const w=weights[c.id]||1;total+=w;got+=c.status==='pass'?w:c.status==='warn'?w*0.5:0;});
+  const hardFail=checks.some(function(c){return c.hard&&c.status==='fail';});
+  const raw=total?Math.round(got/total*100)/10:0;
+  const score=hardFail?Math.min(raw,4):raw;
+  const label=hardFail?'Fails SRV Studio direction':score>=9?'Excellent':score>=8?'Good':score>=7?'Review carefully':'Recommend regenerate';
+  return {version:'srv2-validator-1',score:score,label:label,hardFail:hardFail,checks:checks};
+}
+// </srv-v2-validator>
+// The STATUS shown in the task header follows the lifecycle stage. task.status is not used for this:
+// the shared generatePackage() sets it to 'generating' and SRV English never moves it again until Done,
+// which made the header read GENERATING while the task sat in Review or Build. task.status itself is
+// left untouched (other systems read it).
+const SRV_STUDIO_V2_STATUS_LABELS={generate:'NOT STARTED',review:'IN REVIEW',build:'IN BUILD',approve:'AWAITING APPROVAL',publish:'PUBLISHING',done:'PUBLISHED'};
+function _srvEnglishV2StatusLabel(t){
+  if(!t)return {label:'—',color:'#c9a84c'};
+  if(t.cancelledAt)return {label:'CANCELLED',color:'#ef4444'};
+  const stage=_srvEnglishV2GetStage(t.taskId||t.id);
+  if(String(t.status||'')==='done'&&stage!=='done')return {label:'CLOSED',color:'#22c55e'};
+  return {label:SRV_STUDIO_V2_STATUS_LABELS[stage]||String(stage).toUpperCase(),color:SRV_STAGE_COLORS[stage]||'#c9a84c'};
+}
+function _srvEnglishV2StatusField(t){
+  const s=_srvEnglishV2StatusLabel(t);
+  return `<div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${s.color}">${escHTML(s.label)}</div></div>`;
+}
+function _srvEnglishV2RecentTitles(pkg){
+  return (D.packages||[]).filter(p=>p&&p!==pkg&&(p.engine==='SRV English'||p.engineName==='SRV English')&&p.title).map(p=>p.title);
+}
+// V2 Review quality panel: the deterministic SRV Studio V2 checks on the CURRENT saved fields.
+function _srvEnglishV2QualityHtml(task,pkg){
+  if(!pkg)return '';
+  const isLong=!!(task&&(task.contentType==='Long'||task.contentFormat==='long'));
+  const v=srv2ValidatePackage(pkg,{isLong,recentTitles:_srvEnglishV2RecentTitles(pkg)});
+  const col=v.hardFail?'#ef4444':v.score>=9?'#22c55e':v.score>=8?'#4ade80':v.score>=7?'#f59e0b':'#ef4444';
+  const icon={pass:'✓',warn:'!',fail:'✕'}, ic={pass:'#22c55e',warn:'#f59e0b',fail:'#ef4444'};
+  const rows=v.checks.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px">
+      <span style="flex:0 0 16px;font-weight:900;color:${ic[c.status]};font-family:'JetBrains Mono',monospace">${icon[c.status]}</span>
+      <span style="flex:1;min-width:0"><span style="font-size:11px;font-weight:700;color:var(--text)">${escHTML(c.label)}</span><br><span style="font-size:10px;color:var(--dim)">${escHTML(c.detail)}</span></span>
+    </div>`).join('');
+  const meta=pkg.srvStudioV2?`<div style="font-size:9px;color:var(--dim);margin-top:6px;font-family:'JetBrains Mono',monospace">Generated with ${escHTML(pkg.srvStudioV2.version||'V2')}${pkg.bpm?' · '+escHTML(String(pkg.bpm))+' BPM':''}</div>`:`<div style="font-size:9px;color:var(--dim);margin-top:6px">This package was generated before the V2 music direction — Regenerate for a V2 song.</div>`;
+  return `<div id="srv2q_${escHTML(String(pkg.id||''))}" style="margin-bottom:16px;padding:14px;background:rgba(255,255,255,0.03);border:1px solid ${v.hardFail?'rgba(239,68,68,0.40)':'rgba(255,255,255,0.08)'};border-radius:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;font-family:'JetBrains Mono',monospace">SRV STUDIO V2 QUALITY · ${isLong?'LONG':'SHORT'}</div>
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px;font-weight:900;color:${col};font-family:'JetBrains Mono',monospace">${v.score.toFixed(1)}/10</span><span style="font-size:9px;color:${col};font-weight:700">${escHTML(v.label)}</span></div>
+    </div>
+    ${rows}
+    <div style="font-size:9px;color:var(--dim);margin-top:6px;line-height:1.5">These checks read the lyrics and Suno prompt text. They cannot hear the generated voice — listen to the Suno result before approving.</div>
+    ${meta}
+  </div>`;
+}
+function _srvEnglishV2RefreshQuality(pkgId){
+  const el=document.getElementById('srv2q_'+pkgId);
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!el||!pkg)return;
+  const html=_srvEnglishV2QualityHtml(_srvEnglishV2TaskForPkg(pkg),pkg);
+  const tmp=document.createElement('div');tmp.innerHTML=html;
+  if(tmp.firstElementChild)el.replaceWith(tmp.firstElementChild);
+}
+// ── Checkpoint C: V2 Signature Avatar registry + selection (same code as lib/srvStudioV2Avatars.mjs) ──
+// <srv-v2-avatars> — this block is copied byte-for-byte into public/index.html (a test enforces it).
+const SRV_STUDIO_V2_AVATARS=[{"id":"srv2-fm-01","number":1,"collection":"final","title":"Cinematic Over-the-Shoulder City Portrait","file":"srv-studio-v2-01-cinematic-over-the-shoulder-city-portrait.png","originalFile":"Cinematic Over-the-Shoulder City Portrait.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-01-cinematic-over-the-shoulder-city-portrait.png","sha256":"403719512c057af546fc032674a334af493c600aaf9658f9af3d216023f667eb","native":{"w":1669,"h":942},"crop":{"x":0,"y":0,"w":1669,"h":942},"orientation":"landscape","aspect":1.772,"focus":{"fx":0.551,"fy":0.361,"fw":0.17},"moods":["romantic"],"pose":"over-shoulder","scene":"waterfront skyline, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":126,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":[]},{"id":"srv2-fm-02","number":2,"collection":"final","title":"Glamorous Black-and-White Night Portrait","file":"srv-studio-v2-02-glamorous-black-and-white-night-portrait.png","originalFile":"Glamorous Black-and-White Night Portrait.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-02-glamorous-black-and-white-night-portrait.png","sha256":"5121f3e838c37dcd22154d24336ee8aa3e30dc0542b090e2de33afdb0b894a23","native":{"w":1668,"h":943},"crop":{"x":0,"y":0,"w":1668,"h":943},"orientation":"landscape","aspect":1.769,"focus":{"fx":0.576,"fy":0.35,"fw":0.17},"moods":["romantic"],"pose":"over-shoulder","scene":"waterfront skyline, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":152,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)"]},{"id":"srv2-fm-03","number":3,"collection":"final","title":"Glamorous Nighttime City Muse","file":"srv-studio-v2-03-glamorous-nighttime-city-muse.png","originalFile":"Glamorous Nighttime City Muse.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-03-glamorous-nighttime-city-muse.png","sha256":"7993cc2c6a18dbef384bf779311f0f2c90745be65e2e44bf987cea547ca5fa4c","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.557,"fy":0.287,"fw":0.17},"moods":["hopeful","romantic"],"pose":"head-back","scene":"waterfront skyline, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":179,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)"]},{"id":"srv2-fm-04","number":4,"collection":"final","title":"Glamorous Noir by the Waterfront","file":"srv-studio-v2-04-glamorous-noir-by-the-waterfront.png","originalFile":"Glamorous Noir by the Waterfront.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-04-glamorous-noir-by-the-waterfront.png","sha256":"03d2500781943794ad3d54f186d9d41151952a430f9a9f69c83f996e9045e831","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.455,"fy":0.34,"fw":0.17},"moods":["romantic"],"pose":"direct-tilt","scene":"waterfront skyline, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":121,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":[]},{"id":"srv2-fm-05","number":5,"collection":"final","title":"Melancholy Waterside City Lights","file":"srv-studio-v2-05-melancholy-waterside-city-lights.png","originalFile":"Melancholy Waterside City Lights.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-05-melancholy-waterside-city-lights.png","sha256":"0595dcdcaf13bd840cdfee17e43c1c514ae9d32d44f16bbc967416c838104b57","native":{"w":1669,"h":942},"crop":{"x":0,"y":0,"w":1669,"h":942},"orientation":"landscape","aspect":1.772,"focus":{"fx":0.551,"fy":0.34,"fw":0.17},"moods":["emotional"],"pose":"chin-on-hand","scene":"waterfront railing, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":446,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":[]},{"id":"srv2-fm-06","number":6,"collection":"final","title":"Midnight Drive in Monochrome","file":"srv-studio-v2-06-midnight-drive-in-monochrome.png","originalFile":"Midnight Drive in Monochrome.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-06-midnight-drive-in-monochrome.png","sha256":"d612b6e7ba737ffed8584032dae134636493e786c7cd621368ca0a983df79448","native":{"w":1669,"h":942},"crop":{"x":0,"y":0,"w":1669,"h":942},"orientation":"landscape","aspect":1.772,"focus":{"fx":0.455,"fy":0.318,"fw":0.17},"moods":["emotional","hopeful"],"pose":"driving","scene":"driving at night (Night Drive)","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":53,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":[]},{"id":"srv2-fm-07","number":7,"collection":"final","title":"Monochrome City Lights Glamour Portrait","file":"srv-studio-v2-07-monochrome-city-lights-glamour-portrait.png","originalFile":"Monochrome City Lights Glamour Portrait.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-07-monochrome-city-lights-glamour-portrait.png","sha256":"d4c05ccf26587aae06a47c59c332ea2c767630de176774fe783a2e24cc3a0616","native":{"w":1669,"h":942},"crop":{"x":0,"y":0,"w":1669,"h":942},"orientation":"landscape","aspect":1.772,"focus":{"fx":0.491,"fy":0.308,"fw":0.17},"moods":["romantic"],"pose":"direct-tilt","scene":"waterfront skyline, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":207,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":[]},{"id":"srv2-fm-08","number":8,"collection":"final","title":"Monochrome Nighttime Glamour Portrait","file":"srv-studio-v2-08-monochrome-nighttime-glamour-portrait.png","originalFile":"Monochrome Nighttime Glamour Portrait.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-08-monochrome-nighttime-glamour-portrait.png","sha256":"068d05f209d121057589699f5e66b83f627054a77232919f1236f4ac40b4cbf9","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.503,"fy":0.276,"fw":0.17},"moods":["hopeful","romantic"],"pose":"head-back","scene":"waterfront skyline, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":222,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)"]},{"id":"srv2-fm-09","number":9,"collection":"final","title":"Monochrome Waterfront Glamour","file":"srv-studio-v2-09-monochrome-waterfront-glamour.png","originalFile":"Monochrome Waterfront Glamour.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-09-monochrome-waterfront-glamour.png","sha256":"03730277e2c98a1ec60c53a3881d101a12196b3bb9670919575eef1829322e0d","native":{"w":1669,"h":942},"crop":{"x":0,"y":0,"w":1669,"h":942},"orientation":"landscape","aspect":1.772,"focus":{"fx":0.575,"fy":0.318,"fw":0.17},"moods":["emotional"],"pose":"chin-on-hand","scene":"waterfront railing, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":false,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":441,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["near-duplicate of #15 Noir Waterfront Reverie (same pose, outfit, railing and skyline; dHash 11/64) \u2014 kept as an alternate to #15 (CEO decision 2026-10-15)","wardrobe: lace lingerie-style top visible (non-explicit)"]},{"id":"srv2-fm-10","number":10,"collection":"final","title":"Moonlit Waterfront Reverie (1)","file":"srv-studio-v2-10-moonlit-waterfront-reverie-1.png","originalFile":"Moonlit Waterfront Reverie (1).png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-10-moonlit-waterfront-reverie-1.png","sha256":"5175f8e7bedbda68cf077a03797f31f37f0859812f0c0088d35c6caa65d3ac9d","native":{"w":1669,"h":942},"crop":{"x":0,"y":0,"w":1669,"h":942},"orientation":"landscape","aspect":1.772,"focus":{"fx":0.539,"fy":0.318,"fw":0.17},"moods":["emotional"],"pose":"chin-on-hand","scene":"waterfront promenade bench, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":459,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)"]},{"id":"srv2-fm-11","number":11,"collection":"final","title":"Moonlit Waterfront Reverie","file":"srv-studio-v2-11-moonlit-waterfront-reverie.png","originalFile":"Moonlit Waterfront Reverie.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-11-moonlit-waterfront-reverie.png","sha256":"4ec3ae90760ae001cf40d120d6339ea071f913e6b24e2e24dceb0d13a4d76c08","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.575,"fy":0.414,"fw":0.17},"moods":["emotional","romantic"],"pose":"self-embrace","scene":"waterfront lounge, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":281,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":[]},{"id":"srv2-fm-12","number":12,"collection":"final","title":"Nocturnal Monochrome Glamour Portrait","file":"srv-studio-v2-12-nocturnal-monochrome-glamour-portrait.png","originalFile":"Nocturnal Monochrome Glamour Portrait.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-12-nocturnal-monochrome-glamour-portrait.png","sha256":"8f8594d9a79e2188b2827e6de4038cb0f0a0d5fe5cb0ba5b822f872ba87ee02e","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.455,"fy":0.308,"fw":0.17},"moods":["romantic"],"pose":"over-shoulder","scene":"waterfront skyline, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":291,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":[]},{"id":"srv2-fm-13","number":13,"collection":"final","title":"Noir Bokeh Portrait at Night","file":"srv-studio-v2-13-noir-bokeh-portrait-at-night.png","originalFile":"Noir Bokeh Portrait at Night.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-13-noir-bokeh-portrait-at-night.png","sha256":"c22a1e6f58f69fc2ded54098b9faed9cfb83f16feaefcc91662fa458d4b83211","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.455,"fy":0.456,"fw":0.17},"moods":["romantic","hopeful"],"pose":"direct-tilt","scene":"car door, city bokeh, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":75,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["identity: confirmed by the CEO as the same artist (2026-10-15)"]},{"id":"srv2-fm-14","number":14,"collection":"final","title":"Noir Glamour in a City Car","file":"srv-studio-v2-14-noir-glamour-in-a-city-car.png","originalFile":"Noir Glamour in a City Car.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-14-noir-glamour-in-a-city-car.png","sha256":"91ca672a457371bb18ee8736b88007bd7e1d9566a465bdcc14cdf4bb3a4a47e8","native":{"w":1672,"h":941},"crop":{"x":0,"y":0,"w":1672,"h":941},"orientation":"landscape","aspect":1.777,"focus":{"fx":0.496,"fy":0.351,"fw":0.17},"moods":["emotional"],"pose":"car-window","scene":"back seat of a car, city skyline (Night Drive)","formats":["long","short"],"tone":"warm-toned black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":475,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["tone: warm split-tone (10% of pixels tinted); graded to neutral B&W in compositions","wardrobe: lace lingerie-style top (most revealing of the set) \u2014 approved by the CEO for rotation and thumbnails (2026-10-15)"]},{"id":"srv2-fm-15","number":15,"collection":"final","title":"Noir Waterfront Reverie","file":"srv-studio-v2-15-noir-waterfront-reverie.png","originalFile":"Noir Waterfront Reverie.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-15-noir-waterfront-reverie.png","sha256":"eac1dbb22be248b434c90bcf268c0ff185a4e5326c78499a640a10bf5c86429b","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.575,"fy":0.329,"fw":0.17},"moods":["emotional"],"pose":"chin-on-hand","scene":"waterfront railing, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":409,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)"]},{"id":"srv2-fm-16","number":16,"collection":"final","title":"Rain-Kissed Noir Car Ride","file":"srv-studio-v2-16-rain-kissed-noir-car-ride.png","originalFile":"Rain-Kissed Noir Car Ride.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-16-rain-kissed-noir-car-ride.png","sha256":"c9d5265211ffb8580eadb0421204a9e2b85249bfbd6bef3bf7bb906eadbc0597","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.419,"fy":0.265,"fw":0.17},"moods":["hopeful","emotional"],"pose":"head-back","scene":"car window in rain (Night Drive)","formats":["long","short"],"tone":"warm-toned black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":495,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["tone: warm split-tone (19% of pixels tinted); graded to neutral B&W in compositions"]},{"id":"srv2-fm-17","number":17,"collection":"final","title":"Rainy Night Overlook","file":"srv-studio-v2-17-rainy-night-overlook.png","originalFile":"Rainy Night Overlook.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-17-rainy-night-overlook.png","sha256":"7f90a96a1dc867c24d56cf2f839be087c1c4ecbab2dbe08293984014d1c130fa","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.413,"fy":0.276,"fw":0.17},"moods":["emotional","hopeful"],"pose":"skyline-overlook","scene":"rainy balcony overlook, skyline","formats":["long","short"],"tone":"warm-toned black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":395,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)","tone: warm split-tone (20% of pixels tinted); graded to neutral B&W in compositions"]},{"id":"srv2-fm-18","number":18,"collection":"final","title":"Rainy Noir Portrait by City Lights","file":"srv-studio-v2-18-rainy-noir-portrait-by-city-lights.png","originalFile":"Rainy Noir Portrait by City Lights.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-18-rainy-noir-portrait-by-city-lights.png","sha256":"afb8abf53ea88e01a1ac202992de63d68891dbfbb9af11b4db8e5ab9462dd04a","native":{"w":1670,"h":941},"crop":{"x":0,"y":0,"w":1670,"h":941},"orientation":"landscape","aspect":1.775,"focus":{"fx":0.473,"fy":0.308,"fw":0.17},"moods":["romantic"],"pose":"over-shoulder","scene":"car window, rainy road (Night Drive)","formats":["long","short"],"tone":"warm-toned black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":384,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)","tone: warm split-tone (11% of pixels tinted); graded to neutral B&W in compositions"]},{"id":"srv2-fm-19","number":19,"collection":"final","title":"Rainy Noir Street Portrait","file":"srv-studio-v2-19-rainy-noir-street-portrait.png","originalFile":"Rainy Noir Street Portrait.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-19-rainy-noir-street-portrait.png","sha256":"15dea0bb1f59a9523ac7b014d56292c89115458cff4edd4107dab329a0d3ca58","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.497,"fy":0.297,"fw":0.17},"moods":["emotional"],"pose":"self-embrace","scene":"rainy street steps, night","formats":["long","short"],"tone":"warm-toned black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":359,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)","tone: warm split-tone (15% of pixels tinted); graded to neutral B&W in compositions"]},{"id":"srv2-fm-20","number":20,"collection":"final","title":"Sultry Monochrome City Lights Portrait","file":"srv-studio-v2-20-sultry-monochrome-city-lights-portrait.png","originalFile":"Sultry Monochrome City Lights Portrait.png","src":"/assets/srv-studio-v2/avatars/final/srv-studio-v2-20-sultry-monochrome-city-lights-portrait.png","sha256":"dea445d8c819b8a817e77522fbdbed8940ce75af4a901887275fda2ea9048d17","native":{"w":1670,"h":942},"crop":{"x":0,"y":0,"w":1670,"h":942},"orientation":"landscape","aspect":1.773,"focus":{"fx":0.587,"fy":0.308,"fw":0.17},"moods":["romantic"],"pose":"chin-on-hand","scene":"waterfront lounge, night","formats":["long","short"],"tone":"black-and-white","rotationEligible":true,"quality":{"status":"final-master","hdReady":true,"fullHD":false,"detail":"ok","sharpness":116,"scale":{"thumbnail1280x720":0.77,"long1920x1080":1.15,"shortSquareCard1080":1.15}},"flags":["wardrobe: lace lingerie-style top visible (non-explicit)"]}];
+const SRV_STUDIO_V2_AVATARS_ARCHIVED=[{"id":"srv2-av-01","number":1,"file":"SRV-Avatar-01.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-01.png","sha256":"0830f51a882590c4b16a7c2523335d3152c7ebfb62cfb74028ed77600dbd0b22","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.629,"fy":0.405,"fw":0.38},"moods":["romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1417},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-02","number":2,"file":"SRV-Avatar-02.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-02.png","sha256":"fc0a9d6202417346bd23bf48deefafc1db3e3e5ca12dab42e5a4fd3858677201","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.579,"fy":0.452,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":932},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-03","number":3,"file":"SRV-Avatar-03.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-03.png","sha256":"85b5aaab3902d43f4bcaac0dac4e9f3d5349483f4f580a17b035521c91ef0793","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":210},"orientation":"landscape","aspect":1.429,"focus":{"fx":0.394,"fy":0.429,"fw":0.38},"moods":["romantic","emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1264},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-04","number":4,"file":"SRV-Avatar-04.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-04.png","sha256":"9af84aa7a3331d0bf0d93a70001edd4cbb201b6104d738e3ef43533320bc08be","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.528,"fy":0.357,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"soft","sharpness":490},"flags":["soft: low detail even at native size","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-05","number":5,"file":"SRV-Avatar-05.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-05.png","sha256":"b487a252890a8e002d86a8464ec257610f0b96a85417c7c90983d6b69f4f5518","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":210},"orientation":"landscape","aspect":1.424,"focus":{"fx":0.612,"fy":0.405,"fw":0.38},"moods":["hopeful","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1447},"flags":["age-appearance: confirmed clearly adult by the CEO (2026-10-14)","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-06","number":6,"file":"SRV-Avatar-06.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-06.png","sha256":"8c77fd88a947dc40a5e01a13feaf72296299abe6a6838f9f201c8281ce5fdc97","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.461,"fy":0.45,"fw":0.38},"moods":["emotional","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"soft","sharpness":554},"flags":["soft: low detail even at native size","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-07","number":7,"file":"SRV-Avatar-07.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-07.png","sha256":"05adb1f53d3051b8bc6904d09f45cf799fcf16641ceb8f035ee7c44e63c9722e","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.428,"fy":0.375,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1160},"flags":["age-appearance: confirmed clearly adult by the CEO (2026-10-14)","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-08","number":8,"file":"SRV-Avatar-08.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-08.png","sha256":"e396cbd343274d42a986e6955f3ccde159fd6686ba0234c1f560365b768aac68","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":200},"orientation":"landscape","aspect":1.5,"focus":{"fx":0.56,"fy":0.4,"fw":0.38},"moods":["emotional","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1238},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-09","number":9,"file":"SRV-Avatar-09.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-09.png","sha256":"632045f0375c343ec2fd9e3759fa10641dd6a7dd0f2007c8c0e5d0074dbbac2b","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.562,"fy":0.425,"fw":0.38},"moods":["hopeful","romantic"],"scene":"car interior, night","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"soft","sharpness":606},"flags":["soft: low detail even at native size","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-10","number":10,"file":"SRV-Avatar-10.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-10.png","sha256":"e5c7e565c435bb09cfd775a727c4bd487af14f9ed8864f72170500166037708a","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":200},"orientation":"landscape","aspect":1.495,"focus":{"fx":0.713,"fy":0.35,"fw":0.38},"moods":["emotional"],"scene":"car window, night","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"soft","sharpness":606},"flags":["soft: low detail even at native size","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-11","number":11,"file":"SRV-Avatar-11.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-11.png","sha256":"6e4f9f13e20a26eef84760fa4c956664690322259e7519b51306e8bb8da86b29","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.546,"fy":0.395,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1663},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-12","number":12,"file":"SRV-Avatar-12.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-12.png","sha256":"46075f0ff925435ca3dc7a2b4ba60d3f4cd428ed04eafebf5ea57947578d50e7","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.629,"fy":0.421,"fw":0.38},"moods":["hopeful","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1330},"flags":["age-appearance: confirmed clearly adult by the CEO (2026-10-14)","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-13","number":13,"file":"SRV-Avatar-13.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-13.png","sha256":"36bb27255ccd59a5cd6e14956dab272bb241c548f5615769439c5ea3453c7035","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":190},"orientation":"landscape","aspect":1.579,"focus":{"fx":0.46,"fy":0.368,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":948},"flags":["age-appearance: confirmed clearly adult by the CEO (2026-10-14)","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-14","number":14,"file":"SRV-Avatar-14.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-14.png","sha256":"6f8ee88246559a3e3eccaa9c1c955cc55bbc84233b22143b3949a6efa2c3a22a","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.562,"fy":0.342,"fw":0.38},"moods":["romantic","emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1486},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-15","number":15,"file":"SRV-Avatar-15.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-15.png","sha256":"4485ad1a6fed474b3551fb3210426881026b81d1c1ebf5ff19278ff5be34e6fb","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":190},"orientation":"landscape","aspect":1.574,"focus":{"fx":0.629,"fy":0.474,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1231},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-16","number":16,"file":"SRV-Avatar-16.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-16.png","sha256":"24dadf246429ad45cf221befc55ca745d91971ecdace61e5048a6097f55af356","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.428,"fy":0.35,"fw":0.38},"moods":["emotional","romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":844},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-17","number":17,"file":"SRV-Avatar-17.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-17.png","sha256":"75262f31899666b3ff2e608dfa07a1a69f9ce5c69a7a685adbbcdfeb07c66f73","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.562,"fy":0.28,"fw":0.38},"moods":["emotional"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"soft","sharpness":391},"flags":["wardrobe: lace/strap top \u2014 CEO to confirm for thumbnails","soft: low detail even at native size","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-18","number":18,"file":"SRV-Avatar-18.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-18.png","sha256":"15812774e5e53c6e47d058b85397e0150efed34c915f30246c1f0f37edc20bb3","native":{"w":304,"h":252},"crop":{"x":2,"y":0,"w":300,"h":214},"orientation":"landscape","aspect":1.402,"focus":{"fx":0.46,"fy":0.327,"fw":0.38},"moods":["romantic"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1046},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-19","number":19,"file":"SRV-Avatar-19.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-19.png","sha256":"8b7ba4a13d49f1dd0cab8eb032b352fb9ddb890bd184440bcf31d0bb2c4981be","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.662,"fy":0.327,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":1177},"flags":["archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true},{"id":"srv2-av-20","number":20,"file":"SRV-Avatar-20.png","src":"/assets/srv-studio-v2/avatars/concept/SRV-Avatar-20.png","sha256":"be3adf9c52fce2d0917144c764b48c6ca1b6488a8af60ae22f17616a2a97a5c4","native":{"w":303,"h":252},"crop":{"x":2,"y":0,"w":299,"h":214},"orientation":"landscape","aspect":1.397,"focus":{"fx":0.546,"fy":0.327,"fw":0.38},"moods":["romantic","hopeful"],"scene":"night city bokeh","formats":["long","short"],"tone":"warm sepia monochrome","rotationEligible":false,"quality":{"status":"archived-concept","hdReady":false,"detail":"ok","sharpness":987},"flags":["wardrobe: lace/strap top \u2014 CEO to confirm for thumbnails","archived 2026-10-15: superseded by the final collection (Checkpoint C2); kept so earlier packages still resolve"],"collection":"concept","archived":true}];
+const SRV_STUDIO_V2_AVATAR_REGISTRY_VERSION='srv2-avatars-2';
+function srv2AvatarById(id){
+  const all=SRV_STUDIO_V2_AVATARS.concat(SRV_STUDIO_V2_AVATARS_ARCHIVED);
+  for(let i=0;i<all.length;i++){if(all[i].id===id)return all[i];}
+  return null;
+}
+function srv2AvatarPool(){return SRV_STUDIO_V2_AVATARS.filter(function(a){return a.rotationEligible&&!a.archived;});}
+// Assignment history from packages: every package that carries srvAvatar is one assignment.
+function srv2AvatarHistory(pkgs){
+  return (pkgs||[]).filter(function(p){return p&&p.srvAvatar&&p.srvAvatar.id;})
+    .map(function(p){return {id:p.srvAvatar.id,at:String(p.srvAvatar.assignedAt||''),taskUid:p.srvTaskUid||null,pkgId:p.id||null};})
+    .sort(function(a,b){return a.at<b.at?-1:a.at>b.at?1:0;});
+}
+// Picks the next avatar. Rules, in order:
+//  1. only rotation-eligible FINAL avatars (all depict the one female artist; archived concepts never);
+//  2. never the avatar assigned most recently anywhere (no immediate repetition), nor `excludeId`;
+//  3. prefer avatars suited to the task's mood (romantic / emotional / hopeful) when any remain;
+//  4. within those, prefer a different pose group from the previous avatar (visual variety);
+//  5. least recently used first (never used before any used), ties in registry order.
+// Deterministic: the same history always gives the same pick.
+function srv2AvatarPick(opts){
+  opts=opts||{};
+  const history=opts.history||[];
+  const pool=srv2AvatarPool();
+  if(!pool.length)return null;
+  const lastId=history.length?history[history.length-1].id:null;
+  const last=lastId?srv2AvatarById(lastId):null;
+  let cands=pool.filter(function(a){return a.id!==lastId&&a.id!==opts.excludeId;});
+  if(!cands.length)cands=pool.filter(function(a){return a.id!==opts.excludeId;});
+  if(!cands.length)cands=pool;
+  const moodC=opts.moodKey?cands.filter(function(a){return a.moods.indexOf(opts.moodKey)>=0;}):[];
+  if(moodC.length)cands=moodC;
+  if(last&&last.pose){const poseC=cands.filter(function(a){return a.pose!==last.pose;});if(poseC.length)cands=poseC;}
+  const lastAt={};history.forEach(function(h){lastAt[h.id]=h.at;});
+  const order={};SRV_STUDIO_V2_AVATARS.forEach(function(a,i){order[a.id]=i;});
+  cands=cands.slice().sort(function(a,b){
+    const la=lastAt[a.id]||'',lb=lastAt[b.id]||'';
+    if(la!==lb)return la<lb?-1:1;
+    return order[a.id]-order[b.id];
+  });
+  return cands[0];
+}
+// Position of an avatar in the rotation pool, for "Image N of M" labels (0 = not in rotation).
+function srv2AvatarPoolPos(id){const pool=srv2AvatarPool();const i=pool.findIndex(function(a){return a.id===id;});return {n:i+1,of:pool.length};}
+// Short human label for an avatar's quality (used on the task card and in the preview).
+function srv2AvatarQualityLabel(a){
+  if(!a)return '';
+  if(a.archived)return 'Archived concept image '+a.native.w+'×'+a.native.h+' — not in rotation';
+  if(a.quality.status==='final-master')return 'Final master '+a.native.w+'×'+a.native.h+' — HD for thumbnails, below full HD';
+  return a.quality.status+' '+a.native.w+'×'+a.native.h;
+}
+// </srv-v2-avatars>
+// Avatar for a task lives on its package (pkg.srvAvatar) so the existing package save persists it.
+function _srvEnglishV2AvatarHistory(){
+  return srv2AvatarHistory((D.packages||[]).filter(p=>p&&(p.engine==='SRV English'||p.engineName==='SRV English')));
+}
+function _srvEnglishV2StampAvatar(pkg,avatarId,by){
+  pkg.srvAvatar={id:avatarId,assignedAt:new Date().toISOString(),by:by,registry:SRV_STUDIO_V2_AVATAR_REGISTRY_VERSION};
+}
+// Gives a package its avatar: keeps one it already has, inherits the task's previous avatar (a regenerated
+// song keeps the artist image), otherwise picks the next one in the rotation.
+function _srvEnglishV2EnsureAvatar(task,pkg,inherit){
+  if(!pkg)return null;
+  if(pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id))return pkg.srvAvatar;
+  const uid=_srvEnglishTaskUid(task);
+  const prev=inherit&&srv2AvatarById(inherit.id)?inherit:
+    (D.packages||[]).filter(p=>p&&p!==pkg&&uid&&p.srvTaskUid===uid&&p.srvAvatar&&srv2AvatarById(p.srvAvatar.id))
+      .sort((a,b)=>String(b.srvAvatar.assignedAt).localeCompare(String(a.srvAvatar.assignedAt)))[0]?.srvAvatar;
+  if(prev){pkg.srvAvatar=Object.assign({},prev,{inherited:true});return pkg.srvAvatar;}
+  const moodKey=srvStudioV2MoodKeyClient(task&&(task.mood||task.mode));
+  const pick=srv2AvatarPick({history:_srvEnglishV2AvatarHistory(),moodKey});
+  if(!pick)return null;
+  _srvEnglishV2StampAvatar(pkg,pick.id,'rotation');
+  return pkg.srvAvatar;
+}
+function srvStudioV2MoodKeyClient(mode){
+  const m=String(mode||'').toLowerCase();
+  if(m.includes('romantic'))return 'romantic';
+  if(m.includes('happy')||m.includes('hopeful'))return 'hopeful';
+  return 'emotional';
+}
+function _srvEnglishV2AvatarUrl(pkg){
+  const a=pkg&&pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
+  return a?a.src:null;
+}
+async function _srvEnglishV2NextAvatar(taskId,pkgId){
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  const task=_srvEnglishTaskById(taskId);
+  if(!pkg||!task)return;
+  const cur=pkg.srvAvatar&&pkg.srvAvatar.id;
+  const pick=srv2AvatarPick({history:_srvEnglishV2AvatarHistory(),moodKey:srvStudioV2MoodKeyClient(task.mood||task.mode),excludeId:cur});
+  if(!pick)return;
+  _srvEnglishV2StampAvatar(pkg,pick.id,'operator-next');
+  if(typeof saveAppState==='function')saveAppState();
+  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+  if(ok!==true)alert('The new avatar is shown here but was not saved to the database. Check the connection and try again.');
+  _srvEnglishV2Show(taskId);
+}
+async function _srvEnglishV2AssignAvatar(taskId,pkgId){
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  const task=_srvEnglishTaskById(taskId);
+  if(!pkg||!task)return;
+  _srvEnglishV2EnsureAvatar(task,pkg);
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof savePackageToSupabase==='function')await _srvSavePackageQueued(pkg);
+  _srvEnglishV2Show(taskId);
+}
+// Card strip: the task's avatar, its rotation position and its honest quality label.
+function _srvEnglishV2AvatarHtml(task,pkg,taskId,stage){
+  if(!pkg)return '';
+  const a=pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
+  const pkgId=escHTML(String(pkg.id||''));
+  if(!a)return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.15);border-radius:10px">
+      <span style="font-size:11px;color:var(--dim)">No SRV Studio V2 avatar on this package yet (generated before Checkpoint C).</span>
+      <button onclick="_srvEnglishV2AssignAvatar('${taskId}','${pkgId}')" style="padding:7px 12px;background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Assign avatar</button>
+    </div>`;
+  const pos=srv2AvatarPoolPos(a.id);
+  const sc=112/a.crop.w, boxH=Math.round(a.crop.h*sc); // show exactly the registry crop (no sheet number/strip)
+  const canChange=stage==='review'||stage==='build';
+  return `<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px">
+      <div style="flex:0 0 112px;position:relative;width:112px;height:${boxH}px;overflow:hidden;border-radius:6px;background:#000">
+        <img src="${escHTML(a.src)}" alt="SRV Studio avatar ${a.number}" style="position:absolute;left:${-Math.round(a.crop.x*sc)}px;top:${-Math.round(a.crop.y*sc)}px;width:${Math.round(a.native.w*sc)}px;height:auto;max-width:none;filter:grayscale(1) contrast(1.08)">
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;font-family:'JetBrains Mono',monospace">ARTIST IMAGE · ${a.archived?'ARCHIVED CONCEPT':'AVATAR'} ${String(a.number).padStart(2,'0')}${a.title?' · '+escHTML(a.title):''}</div>
+        <div style="font-size:11px;color:var(--text);margin-top:3px">${pos.n?('Image '+pos.n+' of '+pos.of+' in rotation'):(a.archived?(canChange?'Earlier concept image — Next avatar moves this task to the final collection':'Earlier concept image (archived)'):'Held — outside the rotation pool')} · ${escHTML(a.moods.map(m=>({romantic:'Romantic',emotional:'Melancholic',hopeful:'Hopeful'})[m]||m).join(' / '))}${pkg.srvAvatar.inherited?' · kept from the previous package':''}</div>
+        <div style="font-size:10px;color:${a.archived?'#f59e0b':'var(--dim)'};margin-top:3px">${escHTML(srv2AvatarQualityLabel(a))}</div>
+      </div>
+      ${canChange?`<button onclick="_srvEnglishV2NextAvatar('${taskId}','${pkgId}')" style="flex:0 0 auto;padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">↻ Next avatar</button>`:''}
+    </div>`;
+}
+function _srvEnglishV2FieldId(pkgId,key){return 'srv2f_'+pkgId+'_'+key;}
+function _srvEnglishV2SetFieldStatus(pkgId,key,text,col){
+  const el=document.getElementById('srv2st_'+pkgId+'_'+key);
+  if(el){el.textContent=text;el.style.color=col||'var(--dim)';}
+}
+function _srvEnglishV2OnInput(pkgId,key){
+  const el=document.getElementById(_srvEnglishV2FieldId(pkgId,key));
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!el||!pkg)return;
+  const cnt=document.getElementById('srv2cnt_'+pkgId+'_'+key);
+  if(cnt)cnt.textContent=String(el.value.length)+' chars';
+  const dirty=String(el.value)!==String(pkg[key]||'');
+  _srvEnglishV2SetFieldStatus(pkgId,key,dirty?'● Unsaved changes':'✓ Saved',dirty?'#f59e0b':'#22c55e');
+}
+// Saves one field. Resolves true only after the database write succeeded.
+async function _srvEnglishV2SaveField(pkgId,key,opts){
+  opts=opts||{};
+  const def=SRV_STUDIO_V2_EDIT_FIELDS.find(f=>f.key===key);
+  const el=document.getElementById(_srvEnglishV2FieldId(pkgId,key));
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!def||!el)return false;
+  if(!pkg){_srvEnglishV2SetFieldStatus(pkgId,key,'⚠ Package not found — reload the page','#ef4444');return false;}
+  let val=String(el.value);
+  if(key==='title'){
+    val=val.replace(/\s+/g,' ').trim();
+    if(!val){_srvEnglishV2SetFieldStatus(pkgId,key,'⚠ The title cannot be empty','#ef4444');return false;}
+    if(val.length>def.max){_srvEnglishV2SetFieldStatus(pkgId,key,'⚠ YouTube titles are limited to '+def.max+' characters','#ef4444');return false;}
+    el.value=val;
+  }
+  const changed=val!==String(pkg[key]||'');
+  if(!changed&&!opts.force){_srvEnglishV2SetFieldStatus(pkgId,key,'✓ Saved','#22c55e');return true;}
+  const prevVal=pkg[key], prevEdits=pkg._srvV2Edits;
+  pkg[key]=val;
+  const now=new Date().toISOString();
+  pkg._srvV2Edits=Object.assign({},pkg._srvV2Edits||{},{[key]:now});
+  if(typeof saveAppState==='function')saveAppState();
+  _srvEnglishV2SetFieldStatus(pkgId,key,'Saving…','#c9a84c');
+  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+  if(ok!==true){
+    // Put the package back to what the database holds, so the box stays "unsaved" and Approve can't
+    // treat a failed edit as saved. The typed text stays in the box for the next Save.
+    if(pkg[key]===val){pkg[key]=prevVal;pkg._srvV2Edits=prevEdits;if(typeof saveAppState==='function')saveAppState();}
+    _srvEnglishV2SetFieldStatus(pkgId,key,'⚠ Not saved to the database — check the connection and press Save again','#ef4444');
+    return false;
+  }
+  _srvEnglishV2SetFieldStatus(pkgId,key,'✓ Saved','#22c55e');
+  _srvEnglishV2RefreshQuality(pkgId);
+  if(changed&&(key==='title'||key==='lyrics'||key==='shortLyrics')&&!opts.skipCaption)_srvEnglishV2RegenCaption(pkg);
+  return true;
+}
+// Saves every field whose box differs from the saved package. Resolves true when nothing is left unsaved.
+async function _srvEnglishV2SaveAll(pkgId){
+  let allOk=true, textChanged=false;
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  for(const f of SRV_STUDIO_V2_EDIT_FIELDS){
+    const el=document.getElementById(_srvEnglishV2FieldId(pkgId,f.key));
+    if(!el||!pkg)continue;
+    const cur=f.key==='title'?String(el.value).replace(/\s+/g,' ').trim():String(el.value);
+    if(cur===String(pkg[f.key]||''))continue;
+    if(f.key==='title'||f.key==='lyrics'||f.key==='shortLyrics')textChanged=true;
+    const ok=await _srvEnglishV2SaveField(pkgId,f.key,{skipCaption:true});
+    if(!ok)allOk=false;
+  }
+  if(allOk&&textChanged&&pkg)_srvEnglishV2RegenCaption(pkg); // one caption refresh for the whole batch
+  return allOk;
+}
+const _srvEnglishV2CapSeq={};
+async function _srvEnglishV2RegenCaption(pkg){
+  const pkgId=String(pkg.id||'');
+  const seq=(_srvEnglishV2CapSeq[pkgId]||0)+1;_srvEnglishV2CapSeq[pkgId]=seq;
+  const st=document.getElementById('srv2capst_'+pkgId);
+  if(st){st.textContent='Updating caption and hashtags…';st.style.color='#c9a84c';}
+  const task=_srvEnglishV2TaskForPkg(pkg);
+  const isLong=!!(task&&(task.contentType==='Long'||task.contentFormat==='long'));
+  const lyrics=isLong?(pkg.lyrics||pkg.shortLyrics||''):(pkg.shortLyrics||pkg.lyrics||'');
+  try{
+    const r=await fetch('/api/ops?action=srv_english_regen_caption',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title:pkg.title||'',lyrics,isLong}),
+    });
+    const d=await r.json().catch(function(){return{};});
+    if(seq!==_srvEnglishV2CapSeq[pkgId])return; // a newer edit started its own refresh
+    if(!d.ok||!d.captionYT)throw new Error(d.error||'no caption returned');
+    pkg.captionYT=d.captionYT;
+    pkg.captionYouTube=d.captionYT;
+    if(d.hashtags)pkg.hashtags=d.hashtags;
+    if(typeof saveAppState==='function')saveAppState();
+    const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    const capEl=document.getElementById('srv2cap_'+pkgId);if(capEl)capEl.textContent=pkg.captionYT;
+    const tagEl=document.getElementById('srv2tags_'+pkgId);if(tagEl)tagEl.textContent=pkg.hashtags||'';
+    if(st){st.textContent=ok===true?'✓ Caption and hashtags updated from the edited song':'⚠ Caption updated here but not saved to the database';st.style.color=ok===true?'#22c55e':'#ef4444';}
+  }catch(e){
+    if(seq!==_srvEnglishV2CapSeq[pkgId])return;
+    if(st){st.textContent='⚠ Caption not updated ('+e.message+') — the previous caption is kept';st.style.color='#ef4444';}
+  }
+}
+function _srvEnglishV2Badges(task){
+  const b=[];
+  b.push('<span style="font-size:9px;font-weight:800;color:#8b5cf6;font-family:\'JetBrains Mono\',monospace;letter-spacing:1px;padding:2px 7px;background:rgba(139,92,246,0.14);border-radius:5px">V2</span>');
+  if(_srvEnglishIsTestTask(task))b.push('<span style="font-size:9px;font-weight:800;color:#f59e0b;font-family:\'JetBrains Mono\',monospace;letter-spacing:1px;padding:2px 7px;background:rgba(245,158,11,0.14);border-radius:5px">TEST TASK</span>');
+  return '<span style="display:inline-flex;gap:6px;margin-left:8px;vertical-align:middle">'+b.join('')+'</span>';
+}
+function _srvEnglishV2ReviewHtml(task,pkg,taskId,pkgId){
+  if(!pkg)return '<div style="color:var(--dim);font-size:12px;padding:10px">Package not yet generated — go back to Generate.</div>'
+    +`<button onclick="_srvEnglishSetStage('${taskId}','generate');renderTab(typeof currentTab!=='undefined'?currentTab:'tasks')" style="margin-top:10px;width:100%;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.10);border-radius:8px;color:var(--dim);font-size:11px;cursor:pointer;font-family:'Syne',sans-serif">← Back to Generate</button>`;
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  const usedKeys=[used.lyrics,used.sunoPrompt,'title'];
+  const fieldHtml=SRV_STUDIO_V2_EDIT_FIELDS.map(function(f){
+    const fid=_srvEnglishV2FieldId(pkgId,f.key);
+    const val=String(pkg[f.key]||'');
+    const safe=escHTML(val).replace(/"/g,'&quot;');
+    const usedBadge=usedKeys.includes(f.key)?'<span style="margin-left:8px;font-size:9px;font-weight:800;color:#22c55e;letter-spacing:1px;padding:1px 6px;background:rgba(34,197,94,0.12);border-radius:4px">USED IN BUILD</span>':'';
+    const box=f.input
+      ?`<input type="text" id="${fid}" value="${safe}" maxlength="${f.max+20}" oninput="_srvEnglishV2OnInput('${pkgId}','${f.key}')" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:6px;color:var(--text);padding:9px 10px;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;box-sizing:border-box">`
+      :`<textarea id="${fid}" rows="${f.rows}" oninput="_srvEnglishV2OnInput('${pkgId}','${f.key}')" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:6px;color:var(--text);padding:9px 10px;font-size:12px;font-family:'JetBrains Mono',monospace;box-sizing:border-box;resize:vertical;line-height:1.6">${safe}</textarea>`;
+    return `<div class="pkg-section">
+      <div class="pkg-label"><span>${f.label}${usedBadge}</span><span id="srv2cnt_${pkgId}_${f.key}" style="font-size:9px;color:var(--dim);font-family:'JetBrains Mono',monospace">${val.length} chars</span></div>
+      ${box}
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="copy-btn" id="srv2c_${pkgId}_${f.key}" onclick="copyField('${fid}','srv2c_${pkgId}_${f.key}')" style="padding:8px 14px">Copy</button>
+        <button class="copy-btn" id="srv2s_${pkgId}_${f.key}" onclick="_srvEnglishV2SaveField('${pkgId}','${f.key}')" style="padding:8px 14px;background:rgba(34,197,94,0.10);border-color:rgba(34,197,94,0.30);color:#22c55e">✓ Save</button>
+        <span id="srv2st_${pkgId}_${f.key}" style="font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace">${val?'✓ Saved':'Empty'}</span>
+      </div>
+    </div>`;
+  }).join('');
+  const cap=pkg.captionYT||pkg.captionYouTube||'';
+  const edited=pkg._srvV2Edits?Object.keys(pkg._srvV2Edits):[];
+  return `${_srvEnglishV2QualityHtml(task,pkg)}
+    <div style="padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.22);border-radius:8px;font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:12px">
+      Edit any field, then press <strong style="color:var(--text)">Save</strong>. Saved edits are stored in the database and survive a reload.
+      Editing the title or lyrics refreshes the YouTube caption and hashtags. This is a <strong style="color:var(--text)">${used.isLong?'Long':'Short'}</strong> task: fields marked <span style="color:#22c55e;font-weight:700">USED IN BUILD</span> are the ones the video and Suno step will use.
+      ${edited.length?'<div style="margin-top:4px">Edited so far: '+edited.map(k=>escHTML(k)).join(', ')+'</div>':''}
+    </div>
+    ${fieldHtml}
+    <div class="pkg-section">
+      <div class="pkg-label"><span>CAPTION — YOUTUBE (auto)</span></div>
+      <div class="pkg-content" id="srv2cap_${pkgId}" style="white-space:pre-wrap">${escHTML(cap)}</div>
+      <div id="srv2capst_${pkgId}" style="font-size:10px;color:var(--dim);margin-top:4px;font-family:'JetBrains Mono',monospace"></div>
+    </div>
+    <div class="pkg-section">
+      <div class="pkg-label"><span>HASHTAGS (auto)</span></div>
+      <div class="pkg-content" id="srv2tags_${pkgId}">${escHTML(pkg.hashtags||'')}</div>
+    </div>
+    <div id="srv2approve_st_${pkgId}" style="font-size:11px;margin-top:10px;font-family:'JetBrains Mono',monospace"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+      <button onclick="_srvEnglishV2ApprovePackage('${taskId}','${pkgId}')" style="width:100%;padding:13px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.40);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Save &amp; Approve Package → Build</button>
+      <button onclick="_srvEnglishV2RegeneratePackage('${taskId}','${pkgId}')" style="width:100%;padding:12px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.30);border-radius:10px;color:#c9a84c;font-weight:700;font-size:12px;cursor:pointer;font-family:'Syne',sans-serif">↻ Regenerate Package</button>
+      <button onclick="_srvEnglishV2CancelTask('${taskId}')" style="width:100%;padding:10px;background:transparent;border:1px solid rgba(239,68,68,0.20);border-radius:10px;color:rgba(239,68,68,0.7);font-weight:600;font-size:11px;cursor:pointer;font-family:'Syne',sans-serif">✕ Cancel Task</button>
+    </div>`;
+}
+// Build stage header under V2: shows exactly the saved content the build will use.
+function _srvEnglishV2BuildSummaryHtml(task,pkg,taskId){
+  if(!pkg)return '';
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  const box=(label,text)=>`<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:5px;font-family:'JetBrains Mono',monospace">${label}</div><div style="padding:9px 11px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;white-space:pre-wrap;max-height:180px;overflow-y:auto;line-height:1.55">${escHTML(text||'—')}</div></div>`;
+  return `<div style="margin-bottom:16px;padding:12px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.22);border-radius:10px">
+      <div style="font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">THIS BUILD WILL USE (${used.isLong?'LONG':'SHORT'})</div>
+      ${box('TITLE',pkg.title||'')}
+      ${box(used.lyrics==='lyrics'?'FULL LYRICS':'SHORT LYRICS',pkg[used.lyrics]||'')}
+      ${box(used.sunoPrompt==='sunoPrompt'?'SUNO STYLE PROMPT — FULL SONG':'SUNO STYLE PROMPT — SHORT',pkg[used.sunoPrompt]||'')}
+      <div style="font-size:10px;color:var(--dim)">To change any of this, go back to Review, edit and save.</div>
+    </div>`;
+}
+
+// ── SRV Studio V2 — cinematic render and publish (Checkpoint D2) ─────────────
+// The renderer is /srv-studio-v2/srv2-render.mjs, loaded with import() only from these V2 functions.
+// V2 never calls the shared _srvRenderVideo; SRV Farsi and the flag-OFF SRV English path are unchanged.
+const SRV2_RENDER_MODULE='/srv-studio-v2/srv2-render.mjs';
+let _srv2RenderModP=null;
+function _srvEnglishV2Renderer(){
+  if(!_srv2RenderModP)_srv2RenderModP=import(SRV2_RENDER_MODULE).catch(function(e){_srv2RenderModP=null;throw e;});
+  return _srv2RenderModP;
+}
+function _srvEnglishV2IsLong(task,pkg){return !!(task&&task.isLong)||_srvEnglishV2BuildKeys(task,pkg).isLong;}
+const SRV2_BUILD_LABEL='⚡ Build Package — Render Cinematic Video';
+async function _srvEnglishV2Build(pkgId,taskId){
+  const btn=document.getElementById('srv-lc-build-btn-'+pkgId);
+  const statusEl=document.getElementById('srv-lc-build-status-'+pkgId);
+  const setStatus=function(msg,col){if(statusEl){statusEl.textContent=msg;if(col)statusEl.style.color=col;}};
+  const resetBtn=function(){if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent=SRV2_BUILD_LABEL;}};
+  const audio=_srvAudioData[pkgId];
+  if(!audio){setStatus('⚠ Upload MP3 first (Step 2).','#ef4444');return;}
+  const task=_srvEnglishTaskById(taskId);
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(!task||!pkg){setStatus('⚠ This task or its package could not be identified — build refused.','#ef4444');return;}
+  if(!pkg.srvAvatar)_srvEnglishV2EnsureAvatar(task,pkg,null);
+  let av=pkg.srvAvatar&&srv2AvatarById(pkg.srvAvatar.id);
+  if(!av){setStatus('⚠ No V2 avatar is assigned to this package.','#ef4444');return;}
+  if(!_srvEnglishV2AvatarProductionReady(av)){
+    const old=av;
+    av=_srvEnglishV2ReplaceArchivedAvatar(task,pkg,old);
+    if(!av){setStatus('⚠ This package uses an archived concept image and no final avatar is available. Build refused.','#ef4444');return;}
+    setStatus('Archived concept image replaced by final avatar #'+av.number+' — saving…','#c9a84c');
+    if(typeof saveAppState==='function')saveAppState();
+    const saved=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    if(saved!==true){setStatus('⚠ The replacement avatar could not be saved. Build stopped — check the connection and try again.','#ef4444');return;}
+  }
+  const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+  const used=_srvEnglishV2BuildKeys(task,pkg);
+  if(btn){btn.disabled=true;btn.style.opacity='0.6';btn.textContent='⏳ Rendering…';}
+  try{
+    setStatus('Loading the SRV Studio V2 renderer…','#c9a84c');
+    const R=await _srvEnglishV2Renderer();
+    pkg._srvShortVideoUrl=null;pkg._srvLongVideoUrl=null;pkg._srvThumbUrl=null;pkg.srvRender=null;
+    if(typeof saveAppState==='function')saveAppState();
+    const out=await R.srv2RenderVideo({
+      kind,audio:audio.file,avatar:av,imageUrl:av.src,title:pkg.title||'',
+      lyrics:pkg[used.lyrics]||'',shortLyrics:pkg[used.lyrics]||'',hook:R.srv2HookLine(pkg),
+      fx:R.SRV2_FX_DEFAULTS, // D5 production defaults: camera, atmosphere, film, music response on; rain off
+      onProgress:function(m){setStatus(m,'#8b5cf6');},
+    });
+    setStatus('Uploading '+kind.toUpperCase()+' video ('+(out.blob.size/1048576).toFixed(1)+' MB)…','#8b5cf6');
+    const vUrl=await _srvUploadToStorage(pkgId,new File([out.blob],'srv2_'+kind+'.'+out.ext,{type:out.blob.type}),kind);
+    let thumbUrl=null;
+    if(out.thumbBlob)thumbUrl=await _srvUploadToStorage(pkgId,new File([out.thumbBlob],'srv2_thumb.jpg',{type:'image/jpeg'}),'thumb');
+    if(kind==='long')pkg._srvLongVideoUrl=vUrl;else pkg._srvShortVideoUrl=vUrl;
+    pkg._srvThumbUrl=thumbUrl;
+    pkg.srvRender=Object.assign({},out.stats,{builtAt:new Date().toISOString(),videoUrl:vUrl,thumbUrl,lyricsField:used.lyrics});
+    if(typeof saveAppState==='function')saveAppState();
+    const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    if(ok!==true){setStatus('⚠ The video was rendered and uploaded, but the package could not be saved. Check the connection and build again.','#ef4444');resetBtn();return;}
+    _srvEnglishV2SetStage(taskId,'approve');
+    _srvEnglishV2Show(taskId);
+  }catch(e){
+    setStatus('Build failed: '+((e&&e.message)||e),'#ef4444');resetBtn();
+  }
+}
+// D4 (F-4): the Approve player shows the package's 1280x720 thumbnail until it is played (the video's own
+// first frame is a deliberate fade from black). Playback is unchanged.
+function _srvEnglishV2ApprovePoster(pkg,html){
+  if(!pkg||!pkg._srvThumbUrl)return html;
+  return html.split('<video src="').join('<video poster="'+escHTML(pkg._srvThumbUrl)+'" preload="metadata" src="');
+}
+// Approve under V2: same stage change as _srvEnglishApproveVideo, but keeps the task open so the Publish
+// stage (which starts the upload when it renders) runs at once instead of after the task is reopened.
+function _srvEnglishV2ApproveVideo(pkgId,taskId){
+  _srvEnglishV2SetStage(taskId,'publish');
+  _srvEnglishV2Show(taskId);
+}
+async function _srvEnglishV2Publish(pkgId,taskId){
+  const statusEl=document.getElementById('srv-lc-publish-status-'+pkgId);
+  const say=function(t,c){if(statusEl){statusEl.textContent=t;if(c)statusEl.style.color=c;}};
+  try{
+    const task=_srvEnglishTaskById(taskId);
+    const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+    if(!task||!pkg){say('⚠ This task or its package could not be identified — publish refused.','#ef4444');return;}
+    const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+    const videoUrl=kind==='long'?pkg._srvLongVideoUrl:pkg._srvShortVideoUrl;
+    if(!videoUrl){
+      say('⚠ No video for this package. Go back to Build.','#fbbf24');
+      if(statusEl){const b=document.createElement('button');b.textContent='← Back to Build';b.style.cssText='display:block;margin:10px auto 0;padding:10px 20px;background:#8b5cf6;border:none;border-radius:8px;color:#fff;font-weight:700;font-size:12px;cursor:pointer;font-family:\'Syne\',sans-serif';b.onclick=function(){_srvEnglishV2SetStage(taskId,'build');_srvEnglishV2Show(taskId);};statusEl.appendChild(b);}
+      return;
+    }
+    // D4 (F-2): TEST is decided BEFORE the shared publish-slot pool is touched. A TEST publish never
+    // reserves a slot (and gives back one this package may hold), so other businesses' schedules are
+    // unaffected; a live publish assigns its slot exactly as before through the unchanged _assignPublishSlot.
+    const taskTest=_srvEnglishV2IsTestPublish(taskId,pkg);
+    const test=_getEngineState('SRV English')==='test'||taskTest;
+    if(taskTest)pkg.isTest=true;
+    if(test)_srvEnglishV2ReleaseSlot(pkg);
+    else if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
+    const R=await _srvEnglishV2Renderer();
+    const moodKey=srvStudioV2MoodKeyClient(task.mood||task.mode);
+    // E3: a CEO-authorized pilot task (app_settings.srv_studio_v2_pilot) uploads with its normal title through the
+    // server-enforced pilot action — private, never scheduled, no slot, still isTest. Any refusal stops here; there
+    // is no fallback to an ordinary upload.
+    const pilot=await _srvEnglishV2PilotFor(task);
+    let meta,r,up;
+    if(pilot){
+      if(pilot.kind!==kind){say('⚠ This task is authorized for the '+pilot.kind.toUpperCase()+' pilot but is a '+kind.toUpperCase()+' task — publish refused.','#ef4444');return;}
+      pkg.isTest=true;_srvEnglishV2ReleaseSlot(pkg);
+      meta=R.srv2YouTubeMetadata(kind,pkg,{test:false,moodKey,publishAt:null});meta.publishAt=null;meta.privacyStatus='private';meta.containsSyntheticMedia=true;
+      say('Uploading the '+kind.toUpperCase()+' pilot video to SRV Studio (private, not scheduled)…');
+      r=await _ceoAuthedFetch('/api/ops?action=srv_studio_v2_pilot_upload',{taskUid:pilot.uid,kind,pkgId:pkg.id,videoUrl,title:meta.title,description:meta.description,tags:meta.tags}); // E4: CEO session required
+      up=await r.json().catch(function(){return {};});
+      if(!up||up.ok!==true){
+        pkg.srvPilotAttempt={at:new Date().toISOString(),error:(up&&up.error)||('HTTP '+r.status),detail:(up&&up.detail)||null,entryId:(up&&up.entryId)||null};
+        if(typeof savePackageToSupabase==='function')await _srvSavePackageQueued(pkg);
+        say('Pilot upload refused — '+_srvEnglishV2PilotReason((up&&up.error)||('HTTP '+r.status))+((up&&up.detail)?' ('+up.detail+')':''),'#ef4444');return;
+      }
+    }else{
+      meta=R.srv2YouTubeMetadata(kind,pkg,{test,moodKey,publishAt:pkg.publishAt||null});
+      say('Uploading '+kind.toUpperCase()+' to YouTube…');
+      r=await _publishFetch('/api/ops?action=youtube_upload_video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({videoUrl,engine:'SRV English'},meta))});
+      up=await r.json().catch(function(){return {};});
+    }
+    // youtube_upload_video answers with youtubeVideoId (videoId only in older/dry-run responses)
+    const vid=up&&(up.youtubeVideoId||up.videoId);
+    if(!up||up.ok===false||!vid){say('Upload failed — '+((up&&(up.error||up.message||up.hint))||('HTTP '+r.status)),'#ef4444');return;}
+    if(kind==='long')pkg._srvYtLongId=vid;else pkg._srvYtShortId=vid;
+    if(pilot)pkg.srvPilot={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
+    let thumb=null;
+    if(pkg._srvThumbUrl){
+      say('Setting the thumbnail…');
+      // set_yt_thumbnail looks the channel up by the engine name, so V2 passes the channel title.
+      const tr=await _publishFetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({videoId:vid,engine:'SRV Studio',thumbUrl:pkg._srvThumbUrl})});
+      thumb=await tr.json().catch(function(){return {ok:false,error:'HTTP '+tr.status};});
+    }
+    pkg.srvPublish={kind,at:new Date().toISOString(),test,pilot:!!pilot,videoId:vid,channelId:up.channelId||null,uploadedAt:up.uploadedAt||null,dryRun:!!up.dryRun,title:meta.title,privacyStatus:meta.privacyStatus,publishAt:meta.publishAt,containsSyntheticMedia:meta.containsSyntheticMedia,thumbnail:thumb?(thumb.ok?'set':'failed: '+(thumb.error||'unknown')):'none'};
+    if(typeof saveAppState==='function')saveAppState();
+    if(typeof savePackageToSupabase==='function')await _srvSavePackageQueued(pkg);
+    _srvEnglishV2SetStage(taskId,'done');
+    task.status='done';
+    if(typeof saveAppState==='function')saveAppState();
+    _srvEnglishV2Show(taskId);
+  }catch(e){
+    say('Publish error: '+((e&&e.message)||e),'#ef4444');
+  }
+}
+// E3 — pilot authorization for this task, read fresh from app_settings.srv_studio_v2_pilot (the server re-checks
+// everything; this only picks the path). Returns {uid, kind, expires} or null.
+async function _srvEnglishV2PilotFor(task){
+  try{
+    const uid=_srvEnglishTaskUid(task);if(!uid)return null;
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.srv_studio_v2_pilot&select=value`,{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+    const rows=r.ok?await r.json():[];const c=rows&&rows[0]&&rows[0].value?JSON.parse(rows[0].value):null;
+    if(!c||c.enabled!==true||!(Date.parse(c.expires)>Date.now())||!c.tasks)return null;
+    const kind=c.tasks.long===uid?'long':c.tasks.short===uid?'short':null;
+    return kind?{uid,kind,expires:c.expires}:null;
+  }catch(_){return null;}
+}
+function _srvEnglishV2PilotReason(code){
+  const m={ceo_session_required:'pilot uploads need a signed-in CEO session — sign in again as Mansoor',srv_studio_v2_off:'SRV Studio V2 is switched off on the server',pilot_not_configured:'no pilot is authorized',pilot_disabled:'the pilot authorization is disabled',pilot_expired:'the pilot authorization has expired',
+    task_not_allowlisted:'this task is not one of the two pilot tasks',format_mismatch:'the task format does not match its pilot authorization',task_already_uploaded_or_in_progress:'this task already has a pilot upload (or one in progress)',
+    pilot_limit_reached:'the two pilot uploads have already been used',engine_not_in_test:'the SRV English engine is not in TEST mode',wrong_channel:'the YouTube connection is not the SRV Studio channel',
+    pilot_busy_try_again:'another pilot upload was being recorded — try again',uploaded_but_unverified_channel_or_privacy:'YouTube accepted the video but its channel or privacy could not be verified — check YouTube Studio before anything else',
+    upload_failed:'the upload to YouTube failed',bad_title:'the title is not valid for YouTube',missing_ai_disclosure:'the description is missing the AI disclosure',video_not_from_this_package:'the video file does not belong to this package'};
+  return m[code]||code;
+}
+// Gives back any publish slot this package holds in the shared pool (TEST publishes must not keep one).
+// Touches only entries owned by this package id; every other business's reservation is left as it is.
+function _srvEnglishV2ReleaseSlot(pkg){
+  if(!pkg||!pkg.id)return 0;
+  let n=0;
+  if(D._publishSlots&&typeof D._publishSlots==='object'){
+    Object.keys(D._publishSlots).forEach(function(k){if(D._publishSlots[k]===pkg.id){delete D._publishSlots[k];n++;}});
+  }
+  if(pkg.publishAt){pkg.publishAt=null;pkg.publishDay=null;pkg.publishLabel=null;}
+  return n;
+}
+// D4 (F-1): only a final master may enter video production. Archived concept crops (303x252 sheet cuts)
+// are replaced by the next eligible final avatar from the rotation pool (#09, the held alternate, is not
+// in the pool and is never auto-assigned); the replacement and its reason are recorded on the package.
+function _srvEnglishV2AvatarProductionReady(a){
+  return !!a&&!a.archived&&a.collection==='final'&&!!(a.quality&&a.quality.hdReady===true);
+}
+function _srvEnglishV2ReplaceArchivedAvatar(task,pkg,old){
+  const pick=srv2AvatarPick({history:_srvEnglishV2AvatarHistory(),moodKey:srvStudioV2MoodKeyClient(task&&(task.mood||task.mode)),excludeId:old&&old.id});
+  if(!pick||!_srvEnglishV2AvatarProductionReady(pick))return null;
+  _srvEnglishV2StampAvatar(pkg,pick.id,'auto-replace-archived');
+  pkg.srvAvatar.replaced={from:old?old.id:null,reason:old?('archived concept image '+old.native.w+'×'+old.native.h+' is not a final master — not allowed in video production'):'avatar not found in the registry',at:pkg.srvAvatar.assignedAt};
+  return pick;
+}
+// Build / Approve / Done panel: render targets, the cover, measured quality and the exact publish metadata.
+function _srvEnglishV2RenderHtml(task,pkg,taskId,stage){
+  if(!pkg)return '';
+  const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+  const r=pkg.srvRender||null;
+  const lab=function(t){return `<div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin:0 0 6px;font-family:'JetBrains Mono',monospace">${t}</div>`;};
+  const row=function(k,v,c){return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)"><span style="color:var(--dim)">${k}</span><span style="color:${c||'var(--text)'};text-align:right">${v}</span></div>`;};
+  const box=function(inner){return `<div style="margin-bottom:16px;padding:12px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.22);border-radius:10px;font-size:11px;font-family:'JetBrains Mono',monospace">${inner}</div>`;};
+  const target=kind==='long'?'1920×1080 · 30 fps · 8 Mbps':'1080×1920 · 30 fps · 6 Mbps · up to 30 s';
+  if(stage==='build'){
+    return box(lab('V2 CINEMATIC RENDER — '+kind.toUpperCase())+
+      row('Output',target)+row('Codec','H.264 MP4 (VP9 WebM if the browser has no H.264)')+
+      row('Visuals','assigned avatar · black-and-white grade')+row('Motion','cinematic camera · night atmosphere · film texture · music response')+row('Thumbnail','1280×720 from the same avatar')+
+      `<div style="margin-top:8px;color:var(--dim);font-family:inherit">Renders in real time (as long as the song). Keep this tab open and in front until it finishes.</div>`);
+  }
+  if(stage==='done'){
+    const p=pkg.srvPublish;
+    if(!p)return '';
+    return box(lab('V2 PUBLISH RECORD')+row('Video',escHTML(String(p.videoId))+(p.dryRun?' (dry run)':''))+row('Title',escHTML(p.title))+
+      row('Privacy',escHTML(p.privacyStatus+(p.publishAt?' · scheduled '+p.publishAt:'')))+row('AI disclosure',p.containsSyntheticMedia?'containsSyntheticMedia: true':'—')+
+      row('Thumbnail',escHTML(p.thumbnail),/^failed/.test(p.thumbnail)?'#fbbf24':null)+row('Mode',p.pilot?'PILOT (private, normal title)':(p.test?'TEST':'LIVE'),p.pilot?'#a78bfa':(p.test?'#fbbf24':'#22c55e'))+
+      (p.pilot&&pkg.srvPilot?row('Pilot record',escHTML((pkg.srvPilot.channelId||'')+' · '+(pkg.srvPilot.uploadedAt||'')+' · entry '+(pkg.srvPilot.entryId||''))):''));
+  }
+  // approve
+  if(!r)return box(lab('V2 RENDER')+'<div style="color:#fbbf24">No V2 render is recorded for this package. Rebuild to render it.</div>');
+  const f=r.frames||{};
+  const mb=(r.sizeBytes/1048576).toFixed(1);
+  const cover=pkg._srvThumbUrl?`<div style="margin-bottom:10px">${lab('THUMBNAIL (1280×720)')}<img src="${escHTML(pkg._srvThumbUrl)}" alt="thumbnail" style="width:100%;border-radius:8px;display:block;background:#000"></div>`:'';
+  setTimeout(function(){_srvEnglishV2FillMeta(taskId,pkg.id);},0);
+  return box(cover+lab('RENDER QUALITY')+
+    row('Resolution',r.width+'×'+r.height+' · '+r.fps+' fps')+
+    row('Codec',escHTML(r.videoCodec+' / '+r.audioCodec+' · '+r.container.toUpperCase()))+
+    row('Bitrate',Math.round(r.videoBitsPerSecondTarget/1e6)+' Mbps target · '+(r.measuredKbps/1000).toFixed(1)+' Mbps measured')+
+    row('Duration',r.durationSec+' s (song '+r.audioDurationSec+' s)')+
+    row('File',mb+' MB')+
+    row('Frames',(f.drawn||0)+' / '+(f.expected||0)+' · '+(f.droppedPct||0)+'% dropped',f.warn?'#ef4444':'#22c55e')+
+    (r.hiddenDuringRender?row('Warning','the tab was hidden during the render','#fbbf24'):'')+
+    (r.fx?row('Motion',Object.keys(r.fx).filter(function(k){return r.fx[k];}).join(' · ')||'static (D4)'):'')+
+    row('Source enlargement','×'+r.maxSourceUpscale+(r.maxSourceUpscale>1?' (final masters are below full HD)':''),r.maxSourceUpscale>1.2?'#fbbf24':null)+
+    `<div style="margin-top:12px">${lab('PUBLISH METADATA (DRY RUN — WHAT APPROVE WILL SEND)')}<div id="srv2meta_${escHTML(String(pkg.id))}" style="white-space:pre-wrap;color:var(--text);max-height:220px;overflow-y:auto;line-height:1.5">Loading…</div></div>`);
+}
+async function _srvEnglishV2FillMeta(taskId,pkgId){
+  const el=document.getElementById('srv2meta_'+pkgId);
+  if(!el)return;
+  try{
+    const task=_srvEnglishTaskById(taskId);
+    const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+    const R=await _srvEnglishV2Renderer();
+    const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
+    const pilot=await _srvEnglishV2PilotFor(task);
+    const test=!pilot&&(_getEngineState('SRV English')==='test'||_srvEnglishV2IsTestPublish(taskId,pkg));
+    const m=R.srv2YouTubeMetadata(kind,pkg,{test,moodKey:srvStudioV2MoodKeyClient(task&&(task.mood||task.mode)),publishAt:pilot?null:(pkg&&pkg.publishAt||null)});
+    if(pilot)m.publishAt=null;
+    el.textContent=(pilot?'PILOT UPLOAD ('+pilot.kind.toUpperCase()+', authorized until '+pilot.expires+') — normal title, private, not scheduled\n':'')+'Title ('+m.title.length+'/100): '+m.title+'\nPrivacy: '+m.privacyStatus+(m.publishAt?' · publishAt '+m.publishAt:' · no schedule')+(test?' · TEST':'')+
+      '\nCategory: '+m.categoryId+' (Music) · madeForKids: false · containsSyntheticMedia: true\nThumbnail: '+(pkg&&pkg._srvThumbUrl?'set after upload (channel "SRV Studio")':'none')+
+      '\nTags: '+m.tags.join(', ')+'\n\nDescription:\n'+m.description;
+  }catch(e){el.textContent='Metadata preview unavailable: '+((e&&e.message)||e);}
+}
+
+// ── V2 stage actions ─────────────────────────────────────────────────────────
+// Re-render and keep the task open (the flag-OFF actions return to the task list).
+function _srvEnglishV2Show(taskId){
+  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+  if(typeof openExec==='function'&&_srvEnglishTaskById(taskId))openExec(String(taskId));
+}
+async function _srvEnglishV2ApprovePackage(taskId,pkgId){
+  const st=document.getElementById('srv2approve_st_'+pkgId);
+  const say=function(t,c){if(st){st.textContent=t;st.style.color=c;}};
+  say('Saving edits…','#c9a84c');
+  const ok=await _srvEnglishV2SaveAll(pkgId);
+  if(!ok){say('⚠ Some edits could not be saved. Fix the fields marked in red and approve again.','#ef4444');return;}
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!pkg||!String(pkg.title||'').trim()){say('⚠ The package needs a title before it can be approved.','#ef4444');return;}
+  _srvEnglishV2SetStage(taskId,'build');
+  _srvEnglishV2Show(taskId);
+}
+// Generates through the existing, unmodified generatePackage(), then binds the new package to this
+// task's srvUid. Refuses when the numeric id is ambiguous, because generatePackage resolves a task by
+// the first matching numeric id across all engines.
+async function _srvEnglishV2GenerateInto(taskId,opts){
+  opts=opts||{};
+  const task=_srvEnglishTaskById(taskId);
+  if(!task)throw new Error('SRV English task '+taskId+' could not be identified uniquely');
+  const first=(D.tasks||[]).find(x=>String(x.id||x.taskId||'')===String(taskId));
+  if(first!==task)throw new Error('Task id '+taskId+' is shared with another engine\'s task — generation refused to avoid writing to the wrong task');
+  const before=new Set((D.packages||[]).map(p=>String(p&&p.id)));
+  const numericId=Number(taskId);
+  await generatePackage(isNaN(numericId)?taskId:numericId);
+  const pkg=(D.packages||[]).find(p=>p&&!before.has(String(p.id))&&String(p.taskId||'')===String(taskId)&&p.engine==='SRV English');
+  if(!pkg)throw new Error('No package was created');
+  _srvEnglishV2EnsureAvatar(task,pkg,opts.inheritAvatar||null); // Checkpoint C — saved by StampPkg below
+  await _srvEnglishV2StampPkg(task,pkg);
+  return pkg;
+}
+async function _srvEnglishV2Generate(taskId){
+  const genBtn=document.querySelector(`button[onclick="vaGeneratePackage('${taskId}')"]`);
+  if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
+  try{
+    await _srvEnglishV2GenerateInto(taskId);
+    _srvEnglishV2SetStage(taskId,'review');
+    _srvEnglishV2Show(taskId);
+  }catch(e){
+    if(genBtn){genBtn.disabled=false;genBtn.textContent='✦ Generate Package';genBtn.style.opacity='1';}
+    console.error('[SRV Studio V2] generate error:',e);
+    alert('Generation failed: '+e.message);
+  }
+}
+async function _srvEnglishV2RegeneratePackage(taskId,pkgId){
+  if(!confirm('Regenerate package? Your edits to the current package will be replaced by a new package.'))return;
+  const statusDiv=document.createElement('div');
+  statusDiv.id='srv-regen-status';
+  statusDiv.style.cssText='position:fixed;bottom:20px;right:20px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.4);border-radius:10px;padding:12px 16px;font-size:12px;color:#c9a84c;font-family:\'JetBrains Mono\',monospace;z-index:9999';
+  statusDiv.textContent='⏳ Regenerating package…';
+  document.body.appendChild(statusDiv);
+  const old=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId))||null;
+  try{
+    if(old)D.packages=D.packages.filter(p=>p!==old);
+    _srvEnglishV2SetStage(taskId,'generate');
+    await _srvEnglishV2GenerateInto(taskId,{inheritAvatar:old&&old.srvAvatar});
+    _srvEnglishV2SetStage(taskId,'review');
+  }catch(e){
+    if(old&&!(D.packages||[]).includes(old))D.packages.unshift(old); // keep the previous package rather than leave the task empty
+    _srvEnglishV2SetStage(taskId,old?'review':'generate');
+    alert('Regeneration failed: '+e.message+(old?' — the previous package was kept.':''));
+  }finally{
+    statusDiv.remove();
+  }
+  _srvEnglishV2Show(taskId);
+}
+function _srvEnglishV2CancelTask(taskId){
+  if(!confirm('Cancel this task? It will be marked as done and removed from active tasks.'))return;
+  const t=_srvEnglishTaskById(taskId);
+  if(t){t.status='done';t.cancelledAt=Date.now();}
+  const m=_srvEnglishV2StageMap();
+  delete m[String(taskId)];
+  const u=_srvEnglishTaskUid(t);if(u)delete m[u];
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof closeExec==='function')closeExec();
+  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
 
 // Stage display metadata
@@ -15633,45 +16671,11 @@ function _srvLifecycleProgressBar(currentStage){
   '</div>';
 }
 
-// ── Lifecycle-aware task card ─────────────────────────────────────────────────
-function renderSRVEnglishLifecycleCard(task){
-  const pkg=_srvEnglishPkgForTask(task);
-  const stage=_srvEnglishGetStage(task.taskId||task.id);
-  const taskId=String(task.taskId||task.id||'');
-  const pkgId=pkg?String(pkg.id||''):'';
-  const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
-  const mood=task.mode||task.mood||pkg?.mood||'Emotional';
-
-  let stageContent='';
-
-  // ── GENERATE ──────────────────────────────────────────────────────────────
-  if(stage==='generate'){
-    stageContent=`
-      <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Mode: <strong style="color:var(--text)">${escHTML(mood)}</strong></div>
-        <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
-        <button onclick="vaGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
-          ✦ Generate Package
-        </button>
-      </div>`;
-  }
-
-  // ── REVIEW ────────────────────────────────────────────────────────────────
-  else if(stage==='review'){
-    const fields=pkg?[
-      {label:'TITLE',val:pkg.title||pkg.name||''},
-      {label:'LYRICS',val:pkg.lyrics||''},
-      {label:'SUNO PROMPT',val:pkg.sunoPrompt||''},
-      {label:'CAPTION — YOUTUBE',val:pkg.captionYT||pkg.captionYouTube||''},
-      {label:'HASHTAGS',val:pkg.hashtags||''},
-    ]:[];
-    const fieldHtml=fields.filter(f=>f.val).map((f,fi)=>{
-      const fid=`slf_${pkgId}_${fi}`,bid=`slb_${pkgId}_${fi}`;
-      return `<div class="pkg-section"><div class="pkg-label"><span>${f.label}</span><button class="copy-btn" id="${bid}" onclick="copyField('${fid}','${bid}')">Copy</button></div><div class="pkg-content" id="${fid}">${escHTML(f.val)}</div></div>`;
-    }).join('');
-    // ── Package quality scoring (client-side heuristics) ──────────────────
-    let qualityHtml='';
-    if(pkg){
+// Package quality score panel for the SRV English Review stage (shared by the original Review view and
+// the SRV Studio V2 editable Review; moved here unchanged so both show the same score).
+function _srvEnglishPackageQualityHtml(pkg){
+  if(!pkg)return '';
+  let qualityHtml='';
       const _t=(pkg.title||pkg.name||'').toLowerCase();
       const _l=(pkg.lyrics||pkg.shortLyrics||'').toLowerCase();
       const _p=(pkg.sunoPrompt||pkg.shortSunoPrompt||'').toLowerCase();
@@ -15768,7 +16772,52 @@ function renderSRVEnglishLifecycleCard(task){
         ${_kissBanner}
         ${_signalHtml}
       </div>`;
-    }
+  return qualityHtml;
+}
+// ── Lifecycle-aware task card ─────────────────────────────────────────────────
+function renderSRVEnglishLifecycleCard(task){
+  if(_srvStudioV2On())_srvEnglishEnsureIdentity(); // SRV Studio V2
+  const pkg=_srvEnglishPkgForTask(task);
+  const stage=_srvEnglishGetStage(task.taskId||task.id);
+  const taskId=String(task.taskId||task.id||'');
+  const pkgId=pkg?String(pkg.id||''):'';
+  const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
+  const mood=task.mode||task.mood||pkg?.mood||'Emotional';
+
+  let stageContent='';
+
+  // ── GENERATE ──────────────────────────────────────────────────────────────
+  if(stage==='generate'){
+    stageContent=`
+      <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Mode: <strong style="color:var(--text)">${escHTML(mood)}</strong></div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
+        <button onclick="vaGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
+          ✦ Generate Package
+        </button>
+      </div>`;
+  }
+
+  // ── REVIEW (SRV Studio V2: editable, persisted) ───────────────────────────
+  else if(stage==='review'&&_srvStudioV2On()){
+    stageContent=_srvEnglishV2ReviewHtml(task,pkg,taskId,pkgId);
+  }
+
+  // ── REVIEW ────────────────────────────────────────────────────────────────
+  else if(stage==='review'){
+    const fields=pkg?[
+      {label:'TITLE',val:pkg.title||pkg.name||''},
+      {label:'LYRICS',val:pkg.lyrics||''},
+      {label:'SUNO PROMPT',val:pkg.sunoPrompt||''},
+      {label:'CAPTION — YOUTUBE',val:pkg.captionYT||pkg.captionYouTube||''},
+      {label:'HASHTAGS',val:pkg.hashtags||''},
+    ]:[];
+    const fieldHtml=fields.filter(f=>f.val).map((f,fi)=>{
+      const fid=`slf_${pkgId}_${fi}`,bid=`slb_${pkgId}_${fi}`;
+      return `<div class="pkg-section"><div class="pkg-label"><span>${f.label}</span><button class="copy-btn" id="${bid}" onclick="copyField('${fid}','${bid}')">Copy</button></div><div class="pkg-content" id="${fid}">${escHTML(f.val)}</div></div>`;
+    }).join('');
+    // ── Package quality scoring (client-side heuristics) ──────────────────
+    const qualityHtml=_srvEnglishPackageQualityHtml(pkg);
     stageContent=`
       ${qualityHtml}
       ${fieldHtml||'<div style="color:var(--dim);font-size:12px;padding:10px">Package not yet generated — go back to Generate.</div>'}
@@ -15860,9 +16909,13 @@ function renderSRVEnglishLifecycleCard(task){
       </div>`;
   }
 
+  const _v2On=_srvStudioV2On();
+  if(_v2On&&(stage==='build'||stage==='approve'||stage==='done'))stageContent=_srvEnglishV2RenderHtml(task,pkg,taskId,stage)+(stage==='build'?stageContent.replace('⚡ Build Package — Fetch Background + Render Video',SRV2_BUILD_LABEL):stage==='approve'?_srvEnglishV2ApprovePoster(pkg,stageContent.replace("onclick=\"_srvEnglishApproveVideo('","onclick=\"_srvEnglishV2ApproveVideo('")):stageContent);
+  if(_v2On&&stage==='build')stageContent=_srvEnglishV2BuildSummaryHtml(task,pkg,taskId)+stageContent;
+  if(_v2On&&(stage==='review'||stage==='build'||stage==='approve'))stageContent=_srvEnglishV2AvatarHtml(task,pkg,taskId,stage)+stageContent;
   return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="card-title" style="margin-bottom:0;color:var(--text)">🎵 SRV English · New Lifecycle</div>
+      <div class="card-title" style="margin-bottom:0;color:var(--text)">🎵 SRV English · New Lifecycle${_v2On?_srvEnglishV2Badges(task):''}</div>
       <span style="font-size:10px;font-weight:800;color:${stageCol};font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;padding:3px 8px;background:${stageCol}18;border-radius:5px">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
     </div>
     ${_srvLifecycleProgressBar(stage)}
@@ -17033,6 +18086,7 @@ function _srvEnglishCancelTask(taskId){
 // ── Build trigger — canvas renderer path (no Shotstack) ──────────────────────
 // Flow: Pexels image → canvas render SHORT → upload → canvas render LONG → upload → Approve
 async function _srvEnglishBuildTrigger(pkgId,taskId){
+  if(_srvStudioV2On())return _srvEnglishV2Build(pkgId,taskId); // SRV Studio V2 cinematic renderer (flag OFF in production)
   const btn=document.getElementById('srv-lc-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-lc-build-status-'+pkgId);
   const audio=_srvAudioData[pkgId];
@@ -17213,6 +18267,7 @@ async function _srvEnglishPollRender(pkgId,taskId){
 
 // ── Publish runner (reuses existing YouTube upload from srvBuildPackage) ──────
 async function _srvEnglishRunPublish(pkgId,taskId){
+  if(_srvStudioV2On())return _srvEnglishV2Publish(pkgId,taskId); // SRV Studio V2 publish (flag OFF in production)
   const statusEl=document.getElementById('srv-lc-publish-status-'+pkgId);
   try{
     const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId))||{};
@@ -17241,7 +18296,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
     async function doUpload(videoUrl,label){
       if(!videoUrl)return null;
       if(statusEl)statusEl.textContent=`Uploading ${label} to YouTube…`;
-      const r=await fetch('/api/ops?action=youtube_upload_video',{
+      const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -17291,6 +18346,7 @@ async function _srvEnglishRunPublish(pkgId,taskId){
 // ── vaGeneratePackage — Generate button handler for SRV English lifecycle ─────
 // Calls existing generatePackage() then auto-advances stage to 'review'
 async function vaGeneratePackage(taskId){
+  if(_srvStudioV2On())return _srvEnglishV2Generate(taskId); // SRV Studio V2 (flag OFF in production)
   const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
   if(!task){console.warn('[vaGeneratePackage] task not found:',taskId);return;}
   // Show a generating spinner in the card
@@ -18115,7 +19171,7 @@ async function _srvFarsiSetYouTubeThumbnail(pkg,videoId){
       pkg._srvThumbUrl=await _srvUploadToStorage(pkg.id,new File([blob],'thumb.jpg',{type:'image/jpeg'}),'thumb');
       if(pkg._srvThumbUrl)delete pkg._srvThumbDataUrl; // stored once; keep the package record small
     }
-    const r=await fetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await _publishFetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({videoId,engine:'SRV Farsi',thumbUrl:pkg._srvThumbUrl})});
     const d=await r.json().catch(function(){return {};});
     pkg.thumbnailSetOnYoutube=!!(d&&d.ok);
@@ -18163,7 +19219,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
       if(!videoUrl)return null;
       if(statusEl)statusEl.textContent=`Uploading ${label} to YouTube…`;
       const _title=_srvFarsiYouTubeTitle(pkg,isLong);
-      const r=await fetch('/api/ops?action=youtube_upload_video',{
+      const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -18252,7 +19308,7 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
   pkg.youtubePublishState='publishing'; pkg.youtubePublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         videoUrl:shortUrl,engine:pkgChannel,title:_inTestMode?'[TEST] '+_pkgTitle:_pkgTitle,
@@ -18314,7 +19370,7 @@ async function _srvFarsiPublishTikTok(pkgId,taskId){
   pkg.tiktokPublishState='publishing'; pkg.tiktokPublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=tiktok_publish_draft',{
+    const r=await _publishFetch('/api/ops?action=tiktok_publish_draft',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engine:'SRV Farsi',videoUrl:shortUrl,title:pkg.title||'SRV Farsi',caption:_ttCaption,hashtags:pkg.hashtags||''}),
     });
@@ -19402,7 +20458,7 @@ async function _nextWaveRunPublish(pkgId,taskId){
     // 3 angles and don't cleanly fit a single-pillar playlist).
     const _nwAngle=String(pkg.angle||'').toUpperCase();
     const _nwPlaylistCategory=(pkg.contentFormat==='long')?'Long Form':(['GROW','AVOID','SAVE','DECIDE'].find(function(a){return _nwAngle.indexOf(a)===0;})||null);
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -19449,7 +20505,7 @@ async function _nextWaveRunPublish(pkgId,taskId){
       const _nwThumbUrl=pkg.nextwaveV2ThumbnailUrl||pkg.thumbnailUrl;
       if(_nwThumbUrl&&_ytId){
         try{
-          const tr=await fetch('/api/ops?action=set_yt_thumbnail',{
+          const tr=await _publishFetch('/api/ops?action=set_yt_thumbnail',{
             method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({videoId:_ytId,engine:'NextWave',thumbUrl:_nwThumbUrl}),
           });
@@ -20254,7 +21310,7 @@ async function _aiStudioRunPublish(pkgId,taskId){
   const isLongTask=!!(task&&(task.isLong||task.contentFormat==='long'));
   try{
     if(statusEl)statusEl.textContent='Uploading to YouTube…';
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -20339,7 +21395,7 @@ async function _aiStudioPublishYouTube(pkgId,taskId){
   pkg.youtubePublishState='publishing'; pkg.youtubePublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=youtube_upload_video',{
+    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         videoUrl,engine:'AI Studio',title:pkg.title||'AI Creation Studio',
@@ -20386,7 +21442,7 @@ async function _aiStudioPublishTikTok(pkgId,taskId){
   pkg.tiktokPublishState='publishing'; pkg.tiktokPublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
-    const r=await fetch('/api/ops?action=tiktok_publish_draft',{
+    const r=await _publishFetch('/api/ops?action=tiktok_publish_draft',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engine:'AI Studio',videoUrl,title:pkg.title||'AI Creation Studio',caption:_ttCaption,hashtags:pkg.hashtags||''}),
     });
@@ -21699,7 +22755,7 @@ async function srvBuildPackage(pkgId){
     const _srvPublishAt = _inTestMode ? null : (_pkgLocal.publishAt || null);
     const _uploadTitle = _inTestMode ? '[TEST] ' + pkgTitle : pkgTitle;
     async function ytPrivateUpload(videoUrl, label){
-      const r2 = await fetch('/api/ops?action=youtube_upload_video', {
+      const r2 = await _publishFetch('/api/ops?action=youtube_upload_video', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -21717,7 +22773,7 @@ async function srvBuildPackage(pkgId){
     const shortUp = await ytPrivateUpload(shortUrl, 'SHORT');
     // v13.69.8 — set thumbnail on LONG video after upload (fire and forget)
     if(thumbUrl && longUp && longUp.ok && longUp.videoId){
-      fetch('/api/ops?action=set_yt_thumbnail', {
+      _publishFetch('/api/ops?action=set_yt_thumbnail', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ videoId: longUp.videoId, engine: pkgChannel, thumbUrl }),
       }).catch(()=>{});
@@ -22184,7 +23240,8 @@ async function generatePackage(taskId){
     const res=await fetch(API_URL,{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engine:t.engine,mood:t.mood,platform:t.platform,
-        contentType:t.contentType,contentFormat:t.contentFormat||(t.contentType==='Long'?'long':'short'),taskName:t.name,recentPackages})
+        contentType:t.contentType,contentFormat:t.contentFormat||(t.contentType==='Long'?'long':'short'),taskName:t.name,recentPackages,
+        ...(t.engine==='SRV English'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: request V2 music direction only while the flag is on
     });
     const data=await res.json();
     console.log('[MMM] Claude response received | success:',data.success,'| engineType:',data.engineType);
@@ -24540,7 +25597,58 @@ function renderIntegrations(){
     }).join('')}
     ${integrations.finance.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">Finance</div>${integrations.finance.map(intCard).join('')}` : ''}
     ${integrations.system.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">System</div>${integrations.system.map(intCard).join('')}` : ''}
+    ${isAdmin?_publishAuthCardHtml():''}
   `;
+}
+
+// SRV-STUDIO-V2-017 — Publishing sign-in (CEO only). Sets the VA PIN the server checks and the enforcement
+// switch; both live server-side in ceo_auth_config. Status is read after render, never cached in app state.
+function _publishAuthCardHtml(){
+  setTimeout(function(){ _publishAuthRefresh(); }, 0);
+  return `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">Publishing sign-in</div>
+    <div class="card" id="pubauth-card" style="padding:14px;margin-bottom:10px">
+      <div id="pubauth-status" style="font-size:12px;color:var(--dim)">Checking…</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+        <input id="pubauth-pin" type="password" inputmode="numeric" autocomplete="new-password" placeholder="New VA PIN (6+ characters)" style="flex:1;min-width:160px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px">
+        <button onclick="_publishAuthSetPin()" style="padding:8px 12px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">Set VA PIN</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button onclick="_publishAuthSetMode('enforce')" style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer">Require sign-in</button>
+        <button onclick="_publishAuthSetMode('observe')" style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer">Log only (rollback)</button>
+        <button onclick="_publishAuthSetMode('auto')" style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:11px;cursor:pointer">Automatic</button>
+      </div>
+      <div id="pubauth-msg" style="font-size:11px;color:var(--dim);margin-top:8px"></div>
+    </div>`;
+}
+async function _publishAuthRefresh(){
+  const el=document.getElementById('pubauth-status');if(!el)return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=publish_auth_status',{});
+    const d=await r.json().catch(function(){return {};});
+    if(!d.ok){el.textContent=d.error==='ceo_authorization_required'?'Sign in again as CEO to manage publishing sign-in.':'Status unavailable ('+(d.error||('HTTP '+r.status))+').';return;}
+    const enforced=d.effectiveMode==='enforce';
+    el.innerHTML='<b style="color:'+(enforced?'#22c55e':'#f59e0b')+'">'+(enforced?'Sign-in required for publishing':'Log only: unsigned publishing is still allowed')+'</b><br>VA PIN: '+(d.operatorPinSet?'set':'not set (the VA still uses the old browser PIN)')+' · switch: '+d.modeSetting;
+  }catch(e){el.textContent='Status unavailable: '+e.message;}
+}
+async function _publishAuthSetPin(){
+  const inp=document.getElementById('pubauth-pin');const msg=document.getElementById('pubauth-msg');
+  const pin=inp?inp.value:'';
+  if(inp)inp.value='';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=publish_auth_set_operator_pin',{pin});
+    const d=await r.json().catch(function(){return {};});
+    if(msg)msg.textContent=d.ok?'VA PIN saved. Every VA must sign in again with the new PIN.':('Not saved: '+(d.error||('HTTP '+r.status)).replace(/_/g,' '));
+  }catch(e){if(msg)msg.textContent='Not saved: '+e.message;}
+  _publishAuthRefresh();
+}
+async function _publishAuthSetMode(mode){
+  const msg=document.getElementById('pubauth-msg');
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=publish_auth_set_mode',{mode});
+    const d=await r.json().catch(function(){return {};});
+    if(msg)msg.textContent=d.ok?('Saved. Publishing is now: '+(d.effectiveMode==='enforce'?'sign-in required':'log only')+'. Takes effect within 30 seconds.'):('Not saved: '+(d.error||('HTTP '+r.status)));
+  }catch(e){if(msg)msg.textContent='Not saved: '+e.message;}
+  _publishAuthRefresh();
 }
 
 // ── CONSTITUTION ──
@@ -25625,7 +26733,7 @@ async function startGeneration(){
     const response=await fetch('/api/ops?action=generate_package',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({engineId:fEngine.id,mode:fMode,existingMemory,contentFormat:_fContentFormat})
+      body:JSON.stringify({engineId:fEngine.id,mode:fMode,existingMemory,contentFormat:_fContentFormat,...(fEngine.id==='srv_english'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: flag-gated
     });
     statusEl.textContent='Processing response...';
     const data=await response.json();

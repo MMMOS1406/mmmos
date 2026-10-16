@@ -1,0 +1,149 @@
+{
+ "title": "SRV Studio V2 concept avatar registry \u2014 backup before Checkpoint C2 (final collection)",
+ "commit": "03ebdd04434b3ae6ec8d000add9ea12add107b1d",
+ "registryFile": "lib/srvStudioV2Avatars.mjs (copy: docs/srv-studio-v2/backup/srvStudioV2Avatars.concept-registry-03ebdd0.mjs.txt)",
+ "registrySha256": "1d0e70b2e439fae8707d39226277f4ba252d9577a37a7483843057e670f0d815",
+ "assets": [
+  {
+   "id": "srv2-av-01",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-01.png",
+   "sha256": "0830f51a882590c4b16a7c2523335d3152c7ebfb62cfb74028ed77600dbd0b22",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-02",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-02.png",
+   "sha256": "fc0a9d6202417346bd23bf48deefafc1db3e3e5ca12dab42e5a4fd3858677201",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-03",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-03.png",
+   "sha256": "85b5aaab3902d43f4bcaac0dac4e9f3d5349483f4f580a17b035521c91ef0793",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-04",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-04.png",
+   "sha256": "9af84aa7a3331d0bf0d93a70001edd4cbb201b6104d738e3ef43533320bc08be",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-05",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-05.png",
+   "sha256": "b487a252890a8e002d86a8464ec257610f0b96a85417c7c90983d6b69f4f5518",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-06",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-06.png",
+   "sha256": "8c77fd88a947dc40a5e01a13feaf72296299abe6a6838f9f201c8281ce5fdc97",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-07",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-07.png",
+   "sha256": "05adb1f53d3051b8bc6904d09f45cf799fcf16641ceb8f035ee7c44e63c9722e",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-08",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-08.png",
+   "sha256": "e396cbd343274d42a986e6955f3ccde159fd6686ba0234c1f560365b768aac68",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-09",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-09.png",
+   "sha256": "632045f0375c343ec2fd9e3759fa10641dd6a7dd0f2007c8c0e5d0074dbbac2b",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-10",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-10.png",
+   "sha256": "e5c7e565c435bb09cfd775a727c4bd487af14f9ed8864f72170500166037708a",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-11",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-11.png",
+   "sha256": "6e4f9f13e20a26eef84760fa4c956664690322259e7519b51306e8bb8da86b29",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-12",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-12.png",
+   "sha256": "46075f0ff925435ca3dc7a2b4ba60d3f4cd428ed04eafebf5ea57947578d50e7",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-13",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-13.png",
+   "sha256": "36bb27255ccd59a5cd6e14956dab272bb241c548f5615769439c5ea3453c7035",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-14",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-14.png",
+   "sha256": "6f8ee88246559a3e3eccaa9c1c955cc55bbc84233b22143b3949a6efa2c3a22a",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-15",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-15.png",
+   "sha256": "4485ad1a6fed474b3551fb3210426881026b81d1c1ebf5ff19278ff5be34e6fb",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-16",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-16.png",
+   "sha256": "24dadf246429ad45cf221befc55ca745d91971ecdace61e5048a6097f55af356",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-17",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-17.png",
+   "sha256": "75262f31899666b3ff2e608dfa07a1a69f9ce5c69a7a685adbbcdfeb07c66f73",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-18",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-18.png",
+   "sha256": "15812774e5e53c6e47d058b85397e0150efed34c915f30246c1f0f37edc20bb3",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-19",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-19.png",
+   "sha256": "8b7ba4a13d49f1dd0cab8eb032b352fb9ddb890bd184440bcf31d0bb2c4981be",
+   "present": true,
+   "shaMatches": true
+  },
+  {
+   "id": "srv2-av-20",
+   "src": "/assets/srv-studio-v2/avatars/concept/SRV-Avatar-20.png",
+   "sha256": "be3adf9c52fce2d0917144c764b48c6ca1b6488a8af60ae22f17616a2a97a5c4",
+   "present": true,
+   "shaMatches": true
+  }
+ ],
+ "note": "The concept PNGs stay in public/assets/srv-studio-v2/avatars/concept/ and their registry entries stay resolvable (archived, not in rotation) so packages that reference srv2-av-* keep working. The CEO replaced the Desktop folder contents with the final collection on 2026-10-14 23:24-23:56, so this branch now holds the only copy of the concept crops."
+}

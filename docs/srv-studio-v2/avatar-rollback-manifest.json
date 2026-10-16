@@ -1,0 +1,77 @@
+{
+  "title": "SRV Studio (SRV English) V1 avatar collection \u2014 rollback manifest",
+  "createdFor": "SRV-STUDIO-V2-004 Checkpoint C",
+  "baseline": {
+    "ref": "origin/main",
+    "commit": "db766dd6ed3c561bdb5ea3577ab4e1bf68c98912"
+  },
+  "collection": [
+    {
+      "path": "public/assets/avatars/SRV_Face_01_GoldenField.png",
+      "gitBlob": "574e530918e6a45f0a6207effa588868aa677f9d",
+      "bytes": 2168970,
+      "sha256": "767c5f867b78aa67154233845f54b4d8b84be77255ce57583caa2776caa0a865"
+    },
+    {
+      "path": "public/assets/avatars/SRV_Face_02_RainStreet.png",
+      "gitBlob": "19b5bf7d3ca55e569251f13202737d4262e4e31f",
+      "bytes": 2116098,
+      "sha256": "cf914acd2db7ba53f97532ea32984b2f2c7aac7020f7d46643722c18cfac7150"
+    },
+    {
+      "path": "public/assets/avatars/SRV_Face_03_WindowNight.png",
+      "gitBlob": "5d2eff14a40b2e0bd13ee61161e0b49cd8450a45",
+      "bytes": 1969939,
+      "sha256": "42fd3dc8c9bb4e6547bbe447e6db214dee85d69bc47f1b5310787ef8b52666b5"
+    },
+    {
+      "path": "public/assets/avatars/SRV_Face_04_Cafe.png",
+      "gitBlob": "7d58723f57b341364910c9292b6330bba69b7e54",
+      "bytes": 1708150,
+      "sha256": "7899167068de22e5519a197995f8c157d3ae73190ff7c40623c4c17d5d761d47"
+    },
+    {
+      "path": "public/assets/avatars/SRV_Face_05_AutumnPark.png",
+      "gitBlob": "97356aff2d11fce3541343765dd54fce3962864f",
+      "bytes": 2095664,
+      "sha256": "35ff0c7781d40c7544946f23f9210f534ae35aaa27bc3f7d3fe6a9af055cb79b"
+    },
+    {
+      "path": "public/assets/avatars/SRV_Face_06_PianoRoom.png",
+      "gitBlob": "2eb9ca3583d30a0760f3a5c53e2603a08e228514",
+      "bytes": 1678914,
+      "sha256": "206a5f0d32eaad06d0ef32d75732d0eabfd7e3e165335475aa0b6886e3271814"
+    },
+    {
+      "path": "public/assets/avatars/SRV_Face_07_BeachSunset.png",
+      "gitBlob": "91ecb1ee2bf8f4f530eec531305b15e097d2235c",
+      "bytes": 1765534,
+      "sha256": "63e9401aa31f284078ced753c1c55f680c68c0f219a19e0680e917d92eebd83d"
+    },
+    {
+      "path": "public/assets/avatars/SRV_Face_08_CityRooftop.png",
+      "gitBlob": "23abbf2bae389f58fa3b3fd96c52d06f5f15468f",
+      "bytes": 1762173,
+      "sha256": "7c734148d0ccba2166b8e17c82d1b720e5f8d87fe5f23e9a3a3236265d361ce4"
+    }
+  ],
+  "configSource": "public/index.html ENGINES_CONFIG srv_english.avatarLibrary (unchanged by V2)",
+  "configText": "   avatarLibrary:{\n     baseUrl:'/assets/avatars/',\n     avatars:[\n       {file:'SRV_Face_01_GoldenField.png',name:'Golden Field'},\n       {file:'SRV_Face_02_RainStreet.png',name:'Rain Street'},\n       {file:'SRV_Face_03_WindowNight.png',name:'Window Night'},\n       {file:'SRV_Face_04_Cafe.png',name:'Cafe'},\n       {file:'SRV_Face_05_AutumnPark.png',name:'Autumn Park'},\n       {file:'SRV_Face_06_PianoRoom.png',name:'Piano Room'},\n       {file:'SRV_Face_07_BeachSunset.png',name:'Beach Sunset'},\n       {file:'SRV_Face_08_CityRooftop.png',name:'City Rooftop'},\n     ],\n   },\n",
+  "selectionCode": [
+    "_srvEnglishBuildTrigger avatar block (flag-OFF path unchanged)"
+  ],
+  "productionState": {
+    "app_settings.mmm_finance_v118.srvEnglishAvatarIdx": 0,
+    "readAt": "2026-10-14 (read-only)",
+    "dbRowsReferencingSRV_Face": {
+      "packages": 0,
+      "app_settings": 0
+    }
+  },
+  "v2Behaviour": "V2 adds a separate collection at public/assets/srv-studio-v2/avatars/concept/ and a separate registry (lib/srvStudioV2Avatars.mjs). It never deletes, moves, renames or edits the files above, never edits avatarLibrary, and never advances srvEnglishAvatarIdx. Published videos keep their baked-in images.",
+  "rollback": [
+    "Flag OFF (delete or set false app_settings.srv_studio_v2_enabled): the V1 avatarLibrary and pointer are used exactly as before; nothing to restore.",
+    "If V2 code were ever merged and must be removed: git revert the V2 commits; the files above are byte-identical to the blobs listed (verify with sha256).",
+    "Restore a file: git show <ref>:<path> > <path> and compare sha256 with this manifest."
+  ]
+}

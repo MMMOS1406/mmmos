@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SRV Studio V2 · Render studio</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{--bg:#0c0b10;--panel:#15131c;--line:#2a2633;--text:#ece8df;--dim:#9b95a8;--acc:#a78bfa;--ok:#22c55e;--warn:#fbbf24;--bad:#ef4444}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 system-ui,-apple-system,sans-serif}
+  header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+  header h1{margin:0;font-size:16px}header span{color:var(--dim);font-size:12px}
+  main{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:16px}
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  label{display:block;font-size:11px;color:var(--dim);margin:8px 0 3px;letter-spacing:.04em}
+  select,input,textarea{width:100%;background:#0f0e14;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+  textarea{height:96px;font:12px/1.4 ui-monospace,monospace}
+  button{background:rgba(139,92,246,.16);color:var(--acc);border:1px solid rgba(139,92,246,.5);border-radius:8px;padding:8px 10px;cursor:pointer;margin:8px 6px 0 0;font:inherit;font-weight:700}
+  button:disabled{opacity:.45;cursor:default}
+  button:focus-visible,canvas:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  h2{font-size:11px;letter-spacing:.12em;color:var(--dim);margin:0 0 8px}
+  .stage{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+  .transport{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+  .transport button{margin:0;min-width:96px;padding:10px 14px;font-size:14px}
+  .transport button.primary{background:var(--acc);color:#120f1d;border-color:var(--acc)}
+  .clock{font:600 15px ui-monospace,monospace;min-width:110px;text-align:center}
+  .progress{flex:1 1 220px;display:flex;align-items:center;gap:8px}
+  .progress input{padding:0;height:6px;accent-color:var(--acc)}
+  .state{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;font-size:13px}
+  .chip{padding:3px 10px;border-radius:999px;border:1px solid var(--line);font-weight:700;font-size:12px}
+  .chip.play{color:#0b0a0f;background:var(--ok);border-color:var(--ok)}.chip.pause{color:#0b0a0f;background:var(--warn);border-color:var(--warn)}.chip.stop{color:var(--dim)}.chip.load{color:var(--acc)}
+  .chip.snd-on{color:var(--ok)}.chip.snd-off{color:var(--warn)}
+  #enableSound{margin:0;padding:4px 10px;font-size:12px}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px}.cmp figure{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0;position:relative}
+  .cmp figcaption{font-size:12px;color:var(--dim)}.cmp figcaption b{color:var(--text)}
+  .cmp canvas{width:100%;aspect-ratio:16/9;background:#000;border-radius:8px;cursor:pointer}
+  .cmp.short canvas{width:auto;height:min(58vh,520px);aspect-ratio:9/16;align-self:center}
+  .overlay{position:absolute;inset:0 0 26px 0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .overlay span{width:74px;height:74px;border-radius:50%;background:rgba(12,11,16,.62);border:2px solid rgba(255,255,255,.75);display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff}
+  @media (max-width:700px){.cmp{grid-template-columns:1fr}}
+  fieldset{border:1px solid var(--line);border-radius:8px;margin:10px 0 0;padding:6px 10px 10px}legend{font-size:11px;color:var(--dim);letter-spacing:.04em;padding:0 4px}
+  .tog{display:flex;align-items:center;gap:8px;margin:6px 0 0;font-size:12px;color:var(--text)}.tog input{width:auto;margin:0}
+  .perf{font:12px ui-monospace,monospace;color:var(--dim)}
+  video{background:#000;border-radius:8px;max-width:100%}
+  .vids{display:grid;grid-template-columns:1fr 1fr;gap:12px}.vids video{width:100%}.vids.short video{height:min(58vh,520px);width:auto;justify-self:center}
+  @media (max-width:700px){.vids{grid-template-columns:1fr}}
+  table{border-collapse:collapse;font:12px ui-monospace,monospace}td{padding:2px 10px 2px 0;border-bottom:1px solid #1f1c26;vertical-align:top}td:first-child{color:var(--dim)}
+  pre{white-space:pre-wrap;font:12px/1.45 ui-monospace,monospace;background:#0f0e14;border:1px solid var(--line);border-radius:6px;padding:8px;max-height:280px;overflow:auto;margin:0}
+  .rot{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}.rot figure{margin:0}.rot img{width:100%;border-radius:6px;display:block}.rot figcaption{font-size:11px;color:var(--dim)}
+  .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+  section{margin-bottom:16px}
+  .help{color:var(--dim);font-size:12px;margin:6px 0 0}
+</style></head>
+<body>
+<header><h1>SRV Studio V2 · Render studio</h1><span>Preview only · sample data · the real srv2-render.mjs module · nothing is published</span></header>
+<main>
+  <div class="panel">
+    <label for="avatar">Avatar</label><select id="avatar"></select>
+    <label for="kind">Format</label><select id="kind"><option value="long">Long · 1920×1080 · 8 Mbps</option><option value="short">Short · 1080×1920 · 6 Mbps</option></select>
+    <label for="dur">Preview / render length (seconds)</label><input id="dur" type="number" min="5" max="360" value="30">
+    <label for="title">Title</label><input id="title" value="Neon Nights">
+    <label for="hook">Hook (Long, shown at the detected chorus)</label><input id="hook" value="Under neon lights I find my way back to you">
+    <label for="lyrics">Lyrics (Short lines)</label><textarea id="lyrics">[Verse]
+Under neon lights
+I find my way back to you
+City breathing slow tonight
+Hold me through the night drive
+[Chorus]
+Under neon lights
+I find my way back to you</textarea>
+    <label for="audio">Audio</label><select id="audio"><option value="/__v2/test-audio.mp3">Sample MP3 on this computer (read-only)</option></select>
+    <fieldset><legend>B · CINEMATIC MOTION LAYERS</legend>
+      <label class="tog"><input type="checkbox" id="fx_camera" checked> Camera movement</label>
+      <label class="tog"><input type="checkbox" id="fx_atmosphere" checked> Night atmosphere</label>
+      <label class="tog"><input type="checkbox" id="fx_film" checked> Film texture</label>
+      <label class="tog"><input type="checkbox" id="fx_reactive" checked> Music-responsive effects</label>
+      <label class="tog"><input type="checkbox" id="fx_rain"> Rain texture (optional)</label>
+      <div class="perf" style="margin-top:6px">Production default: camera, atmosphere, film and music on; rain off. <a href="#" id="fx_reset" style="color:var(--acc)">Reset to default</a></div>
+    </fieldset>
+    <label for="version">Version to render as a real video</label><select id="version"><option value="motion">B · cinematic motion (production default)</option><option value="static">A · current static presentation</option></select>
+    <div><button id="render">● Render test video</button></div>
+    <div id="status" style="margin-top:10px;color:var(--dim);font-size:12px"></div>
+  </div>
+  <div>
+    <section class="panel" aria-label="A/B comparison">
+      <h2>A / B COMPARISON · LIVE · SAME AVATAR, TITLE, AUDIO AND CLOCK</h2>
+      <div class="transport" role="group" aria-label="Playback controls">
+        <button id="play" class="primary" aria-label="Play">▶ Play</button>
+        <button id="pause" aria-label="Pause" disabled>❚❚ Pause</button>
+        <button id="restart" aria-label="Restart from the beginning">↺ Restart</button>
+        <button id="stopAnim" aria-label="Stop" disabled>■ Stop</button>
+        <span class="clock" id="clock">0:00 / 0:30</span>
+        <span class="progress"><input id="seek" type="range" min="0" max="30" step="0.1" value="0" aria-label="Playback position"></span>
+      </div>
+      <div class="state" aria-live="polite"><span id="pstate" class="chip stop">■ STOPPED</span><span id="snd" class="chip">sound: —</span><button id="enableSound" hidden>🔊 Enable sound</button><span id="pmsg" class="help" style="margin:0"></span></div>
+      <div id="cmp" class="cmp">
+        <figure><canvas id="cmpA" class="live" width="1920" height="1080" tabindex="0" aria-label="A, current presentation. Click to play or pause."></canvas><div class="overlay" id="ovA"><span>▶</span></div><figcaption><b>A · current</b> static presentation (D4)</figcaption></figure>
+        <figure><canvas id="cmpB" class="live" width="1920" height="1080" tabindex="0" aria-label="B, cinematic motion. Click to play or pause."></canvas><div class="overlay" id="ovB"><span>▶</span></div><figcaption><b>B · cinematic motion</b> <span id="fxlabel"></span></figcaption></figure>
+      </div>
+      <div id="perf" class="perf" style="margin-top:8px"></div>
+      <p class="help">Press <b>▶ Play</b>, click either picture, or press the space bar. Both pictures always run on the same clock. If the browser does not allow sound, the animation still plays (silently) and an <b>Enable sound</b> button appears.</p>
+    </section>
+    <section class="panel" aria-label="Encoded comparison videos">
+      <h2>ENCODED A / B VIDEOS (REAL MP4 FILES FROM CHECKPOINT D5 · PLAY IN SYNC)</h2>
+      <div class="transport" role="group" aria-label="Encoded video controls">
+        <select id="vkind" style="width:auto" aria-label="Encoded video format"><option value="long">Long · 1920×1080 · 110 s</option><option value="short">Short · 1080×1920 · 30 s</option></select>
+        <button id="vplay" class="primary">▶ Play both</button><button id="vpause">❚❚ Pause</button><button id="vrestart">↺ Restart</button>
+        <span class="clock" id="vclock">0:00</span><span id="vmsg" class="help" style="margin:0"></span>
+      </div>
+      <div id="vids" class="vids">
+        <figure style="margin:0"><video id="vA" playsinline preload="metadata" controls></video><figcaption class="help"><b>A · current</b> (sound)</figcaption></figure>
+        <figure style="margin:0"><video id="vB" playsinline preload="metadata" controls muted></video><figcaption class="help"><b>B · cinematic motion</b> (muted, follows A)</figcaption></figure>
+      </div>
+    </section>
+    <section class="panel"><h2>RENDERED TEST VIDEO</h2><div class="stage"><div id="noVideo" class="help" style="margin:0">No test video yet. Choose a version and press <b>● Render test video</b> on the left (it takes as long as the clip).</div><video id="out" controls playsinline hidden style="max-height:420px"></video><table id="stats"></table></div></section>
+    <section class="panel"><h2>THUMBNAIL (1280×720)</h2><div class="stage"><img id="thumb" alt="Generated 1280×720 thumbnail" style="width:min(100%,640px);border-radius:8px;background:#000"><table id="tstats"></table></div></section>
+    <section class="panel"><h2>PUBLISH METADATA (DRY RUN)</h2><div class="stage" style="align-items:stretch"><div style="flex:1;min-width:280px"><h2>LONG</h2><pre id="metaL"></pre></div><div style="flex:1;min-width:280px"><h2>SHORT</h2><pre id="metaS"></pre></div></div></section>
+    <section class="panel"><h2>ROTATION — NEXT 19 PACKAGES FROM AN EMPTY HISTORY (MOODS CYCLING)</h2><div id="rot" class="rot"></div></section>
+  </div>
+</main>
+<script type="module">
+import * as R from '/srv-studio-v2/srv2-render.mjs';
+import * as A from '/__v2/avatars.mjs';
+const $ = (id) => document.getElementById(id);
+const say = (t, c) => { $('status').textContent = t; $('status').className = c || ''; };
+const finals = A.SRV_STUDIO_V2_AVATARS;
+for (const a of finals) { const o = document.createElement('option'); o.value = a.id; o.textContent = `#${a.number} ${a.title}${a.rotationEligible ? '' : ' (alternate, not in rotation)'}`; $('avatar').appendChild(o); }
+const q = new URLSearchParams(location.search);
+if (q.get('avatar')) $('avatar').value = q.get('avatar');
+if (q.get('kind')) { $('kind').value = q.get('kind'); $('vkind').value = q.get('kind'); }
+if (q.get('dur')) $('dur').value = q.get('dur');
+const av = () => A.srv2AvatarById($('avatar').value);
+const fxB = () => { const o = {}; for (const k of R.SRV2_FX_KEYS) o[k] = $('fx_' + k).checked; return o; };
+const fxLabel = () => { const f = fxB(); $('fxlabel').textContent = '· ' + (R.SRV2_FX_KEYS.filter((k) => f[k]).join(' · ') || 'all layers off (= A)'); };
+if (q.get('fx') === 'static') $('version').value = 'static';
+const sizeCanvases = () => { const k = $('kind').value; const [w, h] = k === 'long' ? [1920, 1080] : [1080, 1920]; for (const id of ['cmpA', 'cmpB']) { if ($(id).width !== w) { $(id).width = w; $(id).height = h; } } $('cmp').className = 'cmp' + (k === 'short' ? ' short' : ''); };
+const lines = () => R.srv2LyricLines($('lyrics').value);
+const prepCache = new Map();
+async function prepared(a) { if (!prepCache.has(a.id)) prepCache.set(a.id, R.srv2PrepareSource(await R.srv2LoadImage(a.src), a.crop)); return prepCache.get(a.id); }
+const tbl = (el, rows) => { el.innerHTML = rows.map(([k, v, c]) => `<tr><td>${k}</td><td class="${c || ''}">${v}</td></tr>`).join(''); };
+const mmss = (s) => { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); };
+
+function showMeta() {
+  const pkg = { title: $('title').value, lyrics: $('lyrics').value, hook: $('hook').value, mood: 'Female — Romantic', captionYT: 'A late-night drive through the city, and the one person you still look for in the lights. 🌃 #vibes' };
+  const fmt = (m) => `Title (${m.title.length}/100): ${m.title}\nPrivacy: ${m.privacyStatus} · category ${m.categoryId} · madeForKids ${m.madeForKids} · containsSyntheticMedia ${m.containsSyntheticMedia}\nTags: ${m.tags.join(', ')}\n\n${m.description}`;
+  $('metaL').textContent = fmt(R.srv2YouTubeMetadata('long', pkg, {})); $('metaS').textContent = fmt(R.srv2YouTubeMetadata('short', pkg, {}));
+}
+async function showThumb() {
+  await R.srv2LoadFonts(); const a = av(); const c = document.createElement('canvas'); c.width = 1280; c.height = 720;
+  const info = R.srv2PaintThumbnail(c.getContext('2d'), await prepared(a), a, { title: $('title').value });
+  const b = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9)); $('thumb').src = URL.createObjectURL(b);
+  tbl($('tstats'), [['Size', '1280×720 JPEG q0.9'], ['Bytes', (b.size / 1024).toFixed(0) + ' KB', b.size < 2 * 1048576 ? 'ok' : 'bad'], ['Layout', info.layout], ['Source used', info.sourcePx + ' px (×' + info.sourceScale + ', downscaled)'], ['Avatar', a.id]]);
+  window.__srv2Thumb = { bytes: b.size, info };
+}
+async function showRotation() {
+  await R.srv2LoadFonts(); const hist = []; const moods = ['romantic', 'emotional', 'hopeful']; $('rot').innerHTML = '';
+  const seen = [];
+  for (let i = 0; i < 19; i++) {
+    const moodKey = moods[i % 3]; const pick = A.srv2AvatarPick({ history: hist, moodKey });
+    hist.push({ id: pick.id, at: new Date(Date.UTC(2026, 9, 15, 0, i)).toISOString() }); seen.push(pick.id);
+    const c = document.createElement('canvas'); c.width = 640; c.height = 360;
+    const ctx = c.getContext('2d'); ctx.scale(0.5, 0.5);
+    R.srv2PaintThumbnail(ctx, await prepared(pick), pick, { title: $('title').value });
+    const f = document.createElement('figure'); f.innerHTML = `<img src="${c.toDataURL('image/jpeg', 0.8)}" alt=""><figcaption>${i + 1}. #${pick.number} · ${moodKey} · ${pick.pose}</figcaption>`; $('rot').appendChild(f);
+  }
+  const uniq = new Set(seen).size; const adj = seen.some((x, i) => i && seen[i - 1] === x);
+  window.__srv2Rotation = { picks: seen, unique: uniq, adjacentRepeat: adj, held: finals.filter((a) => !a.rotationEligible).map((a) => a.id) };
+}
+
+// ── poster frames: both panels open on a real graded frame, never black ──
+async function showPoster() {
+  await R.srv2LoadFonts(); const a = av(); const prep = await prepared(a);
+  sizeCanvases(); fxLabel(); const kind = $('kind').value;
+  const tl = kind === 'long' ? R.srv2LongTimeline({ duration: 60, chorusStart: null, hook: '', seed: a.id }) : R.srv2ShortTimeline({ duration: 30, lines: lines() });
+  const t = kind === 'long' ? 4.2 : 2.0; // Long: title card fully in · Short: first lyric line in
+  for (const [id, fx] of [['cmpA', R.SRV2_FX_STATIC], ['cmpB', fxB()]]) R.srv2DrawFrame($(id).getContext('2d'), R.srv2CreateScene({ kind, img: null, avatar: a, title: $('title').value, prepared: prep, timeline: tl, fx }), t, 0, Math.round(t * 30));
+  if (!anim) setState('stop', 'Poster frames shown · press ▶ Play');
+  window.__srv2Poster = true;
+}
+
+// ═══ Live A/B player (D6) ═══
+// The animation runs on its own clock (performance.now), so it never depends on the browser allowing audio.
+// When sound is allowed, the music starts at the clock position and the clock follows the audio, keeping
+// picture and music in sync; when it is not, the picture still plays silently and "Enable sound" is offered.
+let anim = null;            // the prepared session: scenes, timeline, decoded song
+let audioCtx = null;        // created inside the first click, so the browser counts it as user-started
+let audioCache = null;      // { url, buf, env, an1, ch, sr }
+const P = { state: 'stop', offset: 0, perfBase: 0, src: null, an: null, bins: null, audioBase: 0, audioOn: false, raf: 0 };
+function getAudioCtx() {
+  if (!audioCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) { try { audioCtx = new AC(); audioCtx.addEventListener('statechange', onAudioState); } catch (_) { audioCtx = null; } } }
+  if (audioCtx && audioCtx.state !== 'running') { try { audioCtx.resume().catch(() => {}); } catch (_) {} }
+  return audioCtx;
+}
+function soundState() { return !audioCtx ? 'none' : audioCtx.state; }
+function showSound() {
+  const s = soundState(); const on = s === 'running' && P.audioOn;
+  $('snd').textContent = on ? '🔊 sound on' : (P.state === 'play' ? '🔇 sound blocked by the browser — playing silently' : 'sound: ' + (s === 'running' ? 'ready' : s === 'none' ? 'starts with ▶ Play' : 'waiting for permission'));
+  $('snd').className = 'chip ' + (on ? 'snd-on' : P.state === 'play' ? 'snd-off' : '');
+  $('enableSound').hidden = !(P.state === 'play' && !on);
+}
+function setState(st, msg) {
+  P.state = st; const chip = $('pstate');
+  chip.textContent = { play: '▶ PLAYING', pause: '❚❚ PAUSED', stop: '■ STOPPED', load: '… LOADING' }[st]; chip.className = 'chip ' + st;
+  $('play').disabled = st === 'play' || st === 'load'; $('pause').disabled = st !== 'play'; $('stopAnim').disabled = st === 'stop'; $('restart').disabled = st === 'load';
+  $('play').textContent = st === 'pause' ? '▶ Resume' : '▶ Play';
+  for (const id of ['ovA', 'ovB']) $(id).style.display = st === 'play' || st === 'load' ? 'none' : 'flex';
+  if (msg !== undefined) $('pmsg').textContent = msg;
+  showSound(); window.__srv2Player = { state: st, t: +curT().toFixed(2), sound: soundState(), audioOn: P.audioOn };
+}
+async function loadAudio() {
+  const url = $('audio').value; if (audioCache && audioCache.url === url) return audioCache;
+  const ab = await (await fetch(url)).arrayBuffer();
+  const off = new OfflineAudioContext(2, 48000, 48000); const buf = await off.decodeAudioData(ab); // decoding needs no permission
+  const ch = buf.getChannelData(0); const env = R.srv2Envelope(ch, buf.sampleRate, 1 / 30); const mx = env.reduce((m, v) => Math.max(m, v), 1e-6);
+  audioCache = { url, buf, env: env.map((v) => v / mx), an1: R.srv2AnalyzeAudio(ch, buf.sampleRate, { lineCount: 0 }), ch, sr: buf.sampleRate };
+  return audioCache;
+}
+async function buildSession() {
+  const a = av(); const prep = await prepared(a); const au = await loadAudio(); const kind = $('kind').value; sizeCanvases(); fxLabel();
+  const dur = Math.min(au.buf.duration, Number($('dur').value) || 30, kind === 'short' ? 60 : 360);
+  const an2 = R.srv2AnalyzeAudio(au.ch, au.sr, { lineCount: lines().length, windowSec: Math.min(dur, 30), fromStart: true });
+  const tl = kind === 'long' ? R.srv2LongTimeline({ duration: dur, chorusStart: Math.min(au.an1.chorusStart + au.an1.vocalOnset, dur - 18), hook: $('hook').value, seed: a.id })
+    : R.srv2ShortTimeline({ duration: Math.min(dur, 30), lines: lines(), lineTimings: an2.lineTimings });
+  const mk = (fx) => R.srv2CreateScene({ kind, img: null, avatar: a, title: $('title').value, prepared: prep, timeline: tl, fx });
+  anim = { kind, tl, end: tl.duration, SA: mk(R.SRV2_FX_STATIC), SB: mk(fxB()), au, bass: R.srv2BassFollower(), pA: [], pB: [], f: 0, key: sessionKey() };
+  $('seek').max = String(anim.end.toFixed(1));
+  return anim;
+}
+const sessionKey = () => [$('avatar').value, $('kind').value, $('title').value, $('dur').value, $('audio').value].join('|');
+function curT() {
+  if (P.state !== 'play') return P.offset;
+  if (P.audioOn && audioCtx && audioCtx.state === 'running') return audioCtx.currentTime - P.audioBase;
+  return P.offset + (performance.now() - P.perfBase) / 1000;
+}
+function startAudioAt(t) {
+  stopAudio(); const ctx = audioCtx; if (!ctx || ctx.state !== 'running' || !anim) { P.audioOn = false; showSound(); return; }
+  const src = ctx.createBufferSource(); src.buffer = anim.au.buf; const an = ctx.createAnalyser(); an.fftSize = 2048;
+  src.connect(an); an.connect(ctx.destination); const at = ctx.currentTime + 0.05; src.start(at, Math.min(t, anim.au.buf.duration - 0.05));
+  P.src = src; P.an = an; P.bins = new Uint8Array(an.frequencyBinCount); P.audioBase = at - t; P.audioOn = true; showSound();
+}
+function stopAudio() { if (P.src) { try { P.src.stop(); } catch (_) {} try { P.src.disconnect(); } catch (_) {} } P.src = null; P.an = null; P.audioOn = false; }
+function onAudioState() { // permission arrived (or was withdrawn) while playing: hand the clock over without a jump
+  if (P.state !== 'play') { showSound(); return; }
+  const t = curT(); P.offset = t; P.perfBase = performance.now();
+  if (audioCtx.state === 'running' && !P.audioOn) startAudioAt(t); else if (audioCtx.state !== 'running') stopAudio();
+  showSound();
+}
+function level(t) {
+  if (P.audioOn && P.an) { P.an.getByteFrequencyData(P.bins); return anim.bass(P.bins, audioCtx.sampleRate / P.an.fftSize); }
+  const e = anim.au.env; const i = Math.min(e.length - 1, Math.max(0, Math.round(t * 30))); return Math.min(1, e[i] * e[i]); // silent: music energy from the decoded file
+}
+function drawAt(t, lv) {
+  const ca = $('cmpA').getContext('2d'), cb = $('cmpB').getContext('2d');
+  let m = performance.now(); R.srv2DrawFrame(ca, anim.SA, t, lv, anim.f); anim.pA.push(performance.now() - m);
+  m = performance.now(); R.srv2DrawFrame(cb, anim.SB, t, lv, anim.f); anim.pB.push(performance.now() - m); anim.f++;
+}
+function tick() {
+  if (P.state !== 'play') return;
+  const t = curT();
+  if (t >= anim.end) { P.offset = 0; stopAudio(); setState('stop', 'Finished · press ▶ Play or ↺ Restart to watch again'); $('seek').value = '0'; $('clock').textContent = mmss(0) + ' / ' + mmss(anim.end); showPoster(); return; }
+  drawAt(t, level(t));
+  $('clock').textContent = mmss(t) + ' / ' + mmss(anim.end); $('seek').value = t.toFixed(1);
+  const p95 = (a) => { const s = a.slice(-150).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length * 0.95)].toFixed(1) : '–'; };
+  $('perf').textContent = `Paint per frame (p95): A ${p95(anim.pA)} ms · B ${p95(anim.pB)} ms · budget 33 ms`;
+  window.__srv2Player = { state: 'play', t: +t.toFixed(2), sound: soundState(), audioOn: P.audioOn, frames: anim.f };
+  window.__srv2Perf = { a: p95(anim.pA), b: p95(anim.pB), frames: anim.f };
+  P.raf = requestAnimationFrame(tick);
+}
+async function play(fromStart) {
+  getAudioCtx(); // inside the click (user gesture), before any await
+  if (!anim || anim.key !== sessionKey()) { setState('load', 'Loading the song and preparing both versions…'); try { await buildSession(); } catch (e) { setState('stop', 'Could not load the audio: ' + e.message); return; } P.offset = 0; }
+  if (fromStart || P.offset >= anim.end) P.offset = 0;
+  anim.SB.fx = R.srv2NormalizeFx(fxB());
+  P.perfBase = performance.now(); P.state = 'play';
+  startAudioAt(P.offset);
+  setState('play', P.audioOn ? 'Both versions are playing with the song' : 'Playing silently — the browser has not allowed sound yet');
+  cancelAnimationFrame(P.raf); P.raf = requestAnimationFrame(tick);
+}
+function pause() { if (P.state !== 'play') return; P.offset = curT(); cancelAnimationFrame(P.raf); stopAudio(); setState('pause', 'Paused at ' + mmss(P.offset) + ' · ▶ Resume continues from here'); }
+function stopAnim() { cancelAnimationFrame(P.raf); stopAudio(); P.offset = 0; $('seek').value = '0'; if (anim) $('clock').textContent = mmss(0) + ' / ' + mmss(anim.end); anim = null; setState('stop', 'Stopped'); showPoster(); }
+function restart() { cancelAnimationFrame(P.raf); stopAudio(); P.offset = 0; P.state = 'pause'; play(true); }
+function seekTo(t) {
+  if (!anim) return; P.offset = Math.max(0, Math.min(anim.end - 0.1, t));
+  if (P.state === 'play') { P.perfBase = performance.now(); startAudioAt(P.offset); }
+  else { drawAt(P.offset, level(P.offset)); $('clock').textContent = mmss(P.offset) + ' / ' + mmss(anim.end); setState('pause', 'Paused at ' + mmss(P.offset)); }
+}
+const toggle = () => (P.state === 'play' ? pause() : play(false));
+$('play').onclick = () => play(false); $('pause').onclick = pause; $('restart').onclick = restart; $('stopAnim').onclick = stopAnim;
+for (const id of ['cmpA', 'cmpB']) { $(id).onclick = toggle; $(id).onkeydown = (e) => { if (e.key === 'Enter') toggle(); }; }
+document.addEventListener('keydown', (e) => { if (e.code === 'Space' && !/INPUT|TEXTAREA|SELECT|BUTTON|VIDEO/.test(document.activeElement.tagName)) { e.preventDefault(); toggle(); } });
+$('enableSound').onclick = () => { getAudioCtx(); if (audioCtx && audioCtx.state === 'running' && P.state === 'play') onAudioState(); };
+$('seek').oninput = () => seekTo(Number($('seek').value));
+
+// ── encoded A/B videos, played in sync (needs no live rendering at all) ──
+const V = { A: $('vA'), B: $('vB'), raf: 0 };
+function loadVideos() {
+  const k = $('vkind').value; V.A.src = `/__v2/compare/${k}-A.mp4`; V.B.src = `/__v2/compare/${k}-B.mp4`; $('vids').className = 'vids' + (k === 'short' ? ' short' : ''); $('vmsg').textContent = '';
+  V.A.onerror = V.B.onerror = () => { $('vmsg').textContent = 'The encoded comparison files are not on this computer (run the D5 sample renders).'; };
+}
+function vsync() {
+  if (!V.A.paused && Math.abs(V.B.currentTime - V.A.currentTime) > 0.08) V.B.currentTime = V.A.currentTime;
+  $('vclock').textContent = mmss(V.A.currentTime) + ' / ' + mmss(V.A.duration);
+  window.__srv2Videos = { a: +V.A.currentTime.toFixed(2), b: +V.B.currentTime.toFixed(2), paused: V.A.paused, bPaused: V.B.paused };
+  V.raf = requestAnimationFrame(vsync);
+}
+async function vplay() {
+  if (P.state === 'play') pause();
+  V.B.currentTime = V.A.currentTime;
+  try { await V.A.play(); } catch (_) { V.A.muted = true; await V.A.play().catch(() => {}); $('vmsg').textContent = 'Sound blocked by the browser — playing muted; unmute on the A player.'; }
+  await V.B.play().catch(() => {});
+}
+function vpause() { V.A.pause(); V.B.pause(); V.B.currentTime = V.A.currentTime; }
+V.A.addEventListener('pause', () => { if (!V.B.paused) V.B.pause(); });
+V.A.addEventListener('play', () => { if (P.state === 'play') pause(); if (V.B.paused) { V.B.currentTime = V.A.currentTime; V.B.play().catch(() => {}); } });
+V.A.addEventListener('seeked', () => { V.B.currentTime = V.A.currentTime; });
+$('vplay').onclick = vplay; $('vpause').onclick = vpause; $('vrestart').onclick = () => { V.A.currentTime = 0; V.B.currentTime = 0; vplay(); };
+$('vkind').onchange = () => { vpause(); loadVideos(); };
+loadVideos(); vsync();
+
+// ── real recorder test ──
+async function renderTest() {
+  if (P.state === 'play') pause();
+  $('render').disabled = true; const a = av(); const kind = $('kind').value;
+  try {
+    const ab = await (await fetch($('audio').value)).arrayBuffer();
+    const motion = $('version').value === 'motion'; const fx = motion ? fxB() : R.SRV2_FX_STATIC;
+    const off = document.createElement('canvas');
+    const out = await R.srv2RenderVideo({ kind, audio: ab, avatar: a, title: $('title').value, hook: $('hook').value, lyrics: $('lyrics').value, shortLyrics: $('lyrics').value, fx,
+      maxDuration: Number($('dur').value) || undefined, canvas: off, onProgress: (m) => say(m) });
+    $('out').src = URL.createObjectURL(out.blob); $('out').hidden = false; $('noVideo').hidden = true;
+    const s = out.stats, f = s.frames;
+    tbl($('stats'), [['Container / codecs', `${s.container} · ${s.videoCodec} / ${s.audioCodec}`], ['MIME', s.mime], ['Resolution', `${s.width}×${s.height} @ ${s.fps} fps`],
+      ['Bitrate', `${s.videoBitsPerSecondTarget / 1e6} Mbps target · ${(s.measuredKbps / 1000).toFixed(2)} Mbps overall`], ['Duration', s.durationSec + ' s'], ['File', (s.sizeBytes / 1048576).toFixed(2) + ' MB'],
+      ['Frames drawn', `${f.drawn} / ${f.expected} · dropped ${f.droppedPct}%`, f.warn ? 'bad' : 'ok'], ['Paint time', `p50 ${f.paintMsP50} ms · p95 ${f.paintMsP95} ms`], ['Max gap', f.maxGapMs + ' ms'],
+      ['Render time', s.renderSec + ' s'], ['Source enlargement', '×' + s.maxSourceUpscale], ['Audio analysis', `${s.analysis.method} · chorus ${s.analysis.chorusStart}s · onset ${s.analysis.vocalOnset}s`],
+      ['Version', motion ? 'B · cinematic motion (' + (R.SRV2_FX_KEYS.filter((k) => s.fx[k]).join(', ') || 'none') + ')' : 'A · current static'], ['Hooks / lines', `${s.hooks.length} / ${s.lyricLines}`], ['Fonts loaded', String(s.fontsLoaded)], ['Tab hidden', String(s.hiddenDuringRender), s.hiddenDuringRender ? 'warn' : '']]);
+    if (out.thumbBlob) $('thumb').src = URL.createObjectURL(out.thumbBlob);
+    say('Rendered.', 'ok');
+    const name = q.get('save');
+    if (name) {
+      const r1 = await fetch('/__stub/save-render?name=' + encodeURIComponent(name + '.' + out.ext), { method: 'POST', body: out.blob });
+      const r2 = out.thumbBlob ? await fetch('/__stub/save-render?name=' + encodeURIComponent(name + '-thumb.jpg'), { method: 'POST', body: out.thumbBlob }) : null;
+      window.__srv2Saved = { video: await r1.json(), thumb: r2 && await r2.json() };
+    }
+    window.__srv2Result = { stats: s };
+  } catch (e) { say('Render failed: ' + e.message, 'bad'); window.__srv2Result = { error: String(e.message || e) }; }
+  $('render').disabled = false;
+}
+$('render').onclick = renderTest;
+for (const k of R.SRV2_FX_KEYS) $('fx_' + k).addEventListener('change', () => { fxLabel(); if (anim) { anim.SB.fx = R.srv2NormalizeFx(fxB()); if (P.state !== 'play') drawAt(P.offset, level(P.offset)); } else showPoster(); });
+$('fx_reset').onclick = (e) => { e.preventDefault(); for (const k of R.SRV2_FX_KEYS) $('fx_' + k).checked = !!R.SRV2_FX_DEFAULTS[k]; fxLabel(); if (anim) anim.SB.fx = R.srv2NormalizeFx(fxB()); else showPoster(); };
+$('kind').addEventListener('change', () => { if (anim) stopAnim(); else showPoster(); $('vkind').value = $('kind').value; vpause(); loadVideos(); });
+for (const id of ['avatar', 'title']) $(id).addEventListener('change', () => { showThumb(); showMeta(); if (!anim) showPoster(); else stopAnim(); if (id === 'title') showRotation(); });
+for (const id of ['dur', 'hook', 'lyrics', 'audio']) $(id).addEventListener('change', () => { if (anim) stopAnim(); });
+showMeta(); await showThumb(); await showPoster(); await showRotation(); window.__srv2Ready = true;
+loadAudio().then(() => { if (P.state === 'stop') $('pmsg').textContent = 'Ready · press ▶ Play'; }).catch(() => {}); // preload so Play starts at once
+if (q.get('auto') === 'render') renderTest();
+</script>
+</body></html>

@@ -134,6 +134,7 @@ function env(setOk,uploadFails){
     _srvUploadToStorage:async(id,file,kind)=>{calls.push(['upload',id,file.name,file.type,kind]);if(uploadFails)throw new Error('upload thumb failed (500)');return 'https://x/storage/'+id+'/thumb.jpg';},
     fetch:async(u,o)=>{if(String(u).startsWith('data:'))return {blob:async()=>({size:1234})};
       calls.push(['api',u,JSON.parse(o.body)]);return {status:setOk?200:500,json:async()=>setOk?{ok:true,videoId:JSON.parse(o.body).videoId}:{ok:false,error:'yt_thumb_failed'}};}};
+  e._publishFetch=e.fetch; // SRV-STUDIO-V2-017: publishing calls go through _publishFetch (same request + the session)
   e.fn=new Function(...Object.keys(e),top('_srvFarsiSetYouTubeThumbnail')+'\nreturn _srvFarsiSetYouTubeThumbnail;')(...Object.values(e));return e;
 }
 { const e=env(true);const pkg={id:'pkg_1',_srvThumbDataUrl:'data:image/jpeg;base64,AAAA'};const r=await e.fn(pkg,'vidLONG');

@@ -1,0 +1,349 @@
+{
+ "source": "~/Desktop/SRV_Studio_V2_Signature_Avatars (folder) and ~/Desktop/SRV_Studio_V2_Signature_Avatars.zip \u2014 byte-identical (21 entries incl. README.txt)",
+ "measuredFor": "SRV-STUDIO-V2-004 Checkpoint C",
+ "count": 20,
+ "exactDuplicates": [],
+ "nearDuplicateCheck": {
+  "method": "dHash 64-bit on the top 80% of each image",
+  "closestPairs": [
+   [
+    "SRV-Avatar-08.png",
+    "SRV-Avatar-11.png",
+    14
+   ],
+   [
+    "SRV-Avatar-02.png",
+    "SRV-Avatar-04.png",
+    16
+   ],
+   [
+    "SRV-Avatar-08.png",
+    "SRV-Avatar-09.png",
+    17
+   ],
+   [
+    "SRV-Avatar-08.png",
+    "SRV-Avatar-18.png",
+    17
+   ],
+   [
+    "SRV-Avatar-07.png",
+    "SRV-Avatar-18.png",
+    18
+   ],
+   [
+    "SRV-Avatar-09.png",
+    "SRV-Avatar-20.png",
+    18
+   ],
+   [
+    "SRV-Avatar-02.png",
+    "SRV-Avatar-12.png",
+    20
+   ],
+   [
+    "SRV-Avatar-12.png",
+    "SRV-Avatar-15.png",
+    20
+   ]
+  ],
+  "note": "closest pair differs by 14/64 bits; \u226410 would indicate a near-duplicate"
+ },
+ "files": [
+  {
+   "file": "SRV-Avatar-01.png",
+   "bytes": 132606,
+   "sha256": "0830f51a882590c4b16a7c2523335d3152c7ebfb62cfb74028ed77600dbd0b22",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 14.7,
+   "meanLum": 62,
+   "sharpness": 1417,
+   "brightRows": [
+    239,
+    240
+   ]
+  },
+  {
+   "file": "SRV-Avatar-02.png",
+   "bytes": 123398,
+   "sha256": "fc0a9d6202417346bd23bf48deefafc1db3e3e5ca12dab42e5a4fd3858677201",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 14.6,
+   "meanLum": 54,
+   "sharpness": 932,
+   "brightRows": [
+    239,
+    240
+   ]
+  },
+  {
+   "file": "SRV-Avatar-03.png",
+   "bytes": 130908,
+   "sha256": "85b5aaab3902d43f4bcaac0dac4e9f3d5349483f4f580a17b035521c91ef0793",
+   "width": 304,
+   "height": 252,
+   "aspect": 1.206,
+   "toneRB": 14.2,
+   "meanLum": 52,
+   "sharpness": 1264,
+   "brightRows": [
+    239,
+    240
+   ]
+  },
+  {
+   "file": "SRV-Avatar-04.png",
+   "bytes": 115614,
+   "sha256": "9af84aa7a3331d0bf0d93a70001edd4cbb201b6104d738e3ef43533320bc08be",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 12,
+   "meanLum": 45,
+   "sharpness": 490,
+   "brightRows": [
+    239,
+    240
+   ]
+  },
+  {
+   "file": "SRV-Avatar-05.png",
+   "bytes": 132849,
+   "sha256": "b487a252890a8e002d86a8464ec257610f0b96a85417c7c90983d6b69f4f5518",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 13.5,
+   "meanLum": 58,
+   "sharpness": 1447,
+   "brightRows": [
+    239,
+    240
+   ]
+  },
+  {
+   "file": "SRV-Avatar-06.png",
+   "bytes": 117657,
+   "sha256": "8c77fd88a947dc40a5e01a13feaf72296299abe6a6838f9f201c8281ce5fdc97",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 13.2,
+   "meanLum": 51,
+   "sharpness": 554,
+   "brightRows": [
+    228,
+    229,
+    230
+   ]
+  },
+  {
+   "file": "SRV-Avatar-07.png",
+   "bytes": 121610,
+   "sha256": "05adb1f53d3051b8bc6904d09f45cf799fcf16641ceb8f035ee7c44e63c9722e",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 9.9,
+   "meanLum": 44,
+   "sharpness": 1160,
+   "brightRows": [
+    228,
+    229,
+    230
+   ]
+  },
+  {
+   "file": "SRV-Avatar-08.png",
+   "bytes": 132214,
+   "sha256": "e396cbd343274d42a986e6955f3ccde159fd6686ba0234c1f560365b768aac68",
+   "width": 304,
+   "height": 252,
+   "aspect": 1.206,
+   "toneRB": 13.9,
+   "meanLum": 54,
+   "sharpness": 1238,
+   "brightRows": [
+    228,
+    229,
+    230
+   ]
+  },
+  {
+   "file": "SRV-Avatar-09.png",
+   "bytes": 117146,
+   "sha256": "632045f0375c343ec2fd9e3759fa10641dd6a7dd0f2007c8c0e5d0074dbbac2b",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 11.7,
+   "meanLum": 56,
+   "sharpness": 606,
+   "brightRows": [
+    228,
+    229,
+    230
+   ]
+  },
+  {
+   "file": "SRV-Avatar-10.png",
+   "bytes": 108555,
+   "sha256": "e5c7e565c435bb09cfd775a727c4bd487af14f9ed8864f72170500166037708a",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 8,
+   "meanLum": 40,
+   "sharpness": 606,
+   "brightRows": [
+    228,
+    229,
+    230
+   ]
+  },
+  {
+   "file": "SRV-Avatar-11.png",
+   "bytes": 128943,
+   "sha256": "6e4f9f13e20a26eef84760fa4c956664690322259e7519b51306e8bb8da86b29",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 10.1,
+   "meanLum": 54,
+   "sharpness": 1663,
+   "brightRows": [
+    219,
+    220
+   ]
+  },
+  {
+   "file": "SRV-Avatar-12.png",
+   "bytes": 123795,
+   "sha256": "46075f0ff925435ca3dc7a2b4ba60d3f4cd428ed04eafebf5ea57947578d50e7",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 13.8,
+   "meanLum": 58,
+   "sharpness": 1330,
+   "brightRows": [
+    219,
+    220
+   ]
+  },
+  {
+   "file": "SRV-Avatar-13.png",
+   "bytes": 117171,
+   "sha256": "36bb27255ccd59a5cd6e14956dab272bb241c548f5615769439c5ea3453c7035",
+   "width": 304,
+   "height": 252,
+   "aspect": 1.206,
+   "toneRB": 11.1,
+   "meanLum": 47,
+   "sharpness": 948,
+   "brightRows": [
+    219,
+    220
+   ]
+  },
+  {
+   "file": "SRV-Avatar-14.png",
+   "bytes": 130227,
+   "sha256": "6f8ee88246559a3e3eccaa9c1c955cc55bbc84233b22143b3949a6efa2c3a22a",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 12.9,
+   "meanLum": 60,
+   "sharpness": 1486,
+   "brightRows": [
+    219,
+    220
+   ]
+  },
+  {
+   "file": "SRV-Avatar-15.png",
+   "bytes": 124059,
+   "sha256": "4485ad1a6fed474b3551fb3210426881026b81d1c1ebf5ff19278ff5be34e6fb",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 12.4,
+   "meanLum": 54,
+   "sharpness": 1231,
+   "brightRows": [
+    219,
+    220
+   ]
+  },
+  {
+   "file": "SRV-Avatar-16.png",
+   "bytes": 124126,
+   "sha256": "24dadf246429ad45cf221befc55ca745d91971ecdace61e5048a6097f55af356",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 12.5,
+   "meanLum": 68,
+   "sharpness": 844,
+   "brightRows": []
+  },
+  {
+   "file": "SRV-Avatar-17.png",
+   "bytes": 108551,
+   "sha256": "75262f31899666b3ff2e608dfa07a1a69f9ce5c69a7a685adbbcdfeb07c66f73",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 11.3,
+   "meanLum": 47,
+   "sharpness": 391,
+   "brightRows": []
+  },
+  {
+   "file": "SRV-Avatar-18.png",
+   "bytes": 128802,
+   "sha256": "15812774e5e53c6e47d058b85397e0150efed34c915f30246c1f0f37edc20bb3",
+   "width": 304,
+   "height": 252,
+   "aspect": 1.206,
+   "toneRB": 14.4,
+   "meanLum": 57,
+   "sharpness": 1046,
+   "brightRows": []
+  },
+  {
+   "file": "SRV-Avatar-19.png",
+   "bytes": 131731,
+   "sha256": "8b7ba4a13d49f1dd0cab8eb032b352fb9ddb890bd184440bcf31d0bb2c4981be",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 16.8,
+   "meanLum": 69,
+   "sharpness": 1177,
+   "brightRows": []
+  },
+  {
+   "file": "SRV-Avatar-20.png",
+   "bytes": 121312,
+   "sha256": "be3adf9c52fce2d0917144c764b48c6ca1b6488a8af60ae22f17616a2a97a5c4",
+   "width": 303,
+   "height": 252,
+   "aspect": 1.202,
+   "toneRB": 14.3,
+   "meanLum": 53,
+   "sharpness": 987,
+   "brightRows": []
+  }
+ ],
+ "notes": [
+  "toneRB = mean(red - blue); 0 is neutral grey. All 20 are warm sepia (8-17), not neutral black-and-white.",
+  "brightRows = contact-sheet divider rows found near the bottom (rows 1-3 of the sheet); row 4 (16-20) has none.",
+  "sharpness = mean squared Laplacian (higher = more detail); 04, 06, 09, 10, 17 are the softest."
+ ]
+}

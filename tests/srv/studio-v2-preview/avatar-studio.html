@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRV Studio V2 Avatar Studio</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,600&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+/* Preview-only page (served by the SRV Studio V2 preview server). Dark studio palette to match the app. */
+:root{--bg:#0d0d10;--panel:#16161b;--line:#2a2a31;--fg:#ecebe6;--dim:#9b9aa3;--accent:#c4b5fd;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 Inter,system-ui,sans-serif;padding-inline:16px;padding-block:24px 70px}
+main{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:34px}
+h1{font:700 30px/1.15 'Playfair Display',Georgia,serif;margin:0}
+h2{font:700 20px/1.2 'Playfair Display',Georgia,serif;margin:0 0 4px}
+p{margin:0;color:var(--dim)}
+.eyebrow{font:600 11px/1 Inter,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+section{display:flex;flex-direction:column;gap:12px}
+.note{border:1px solid #4b3f12;background:#1f1a0b;color:#fde68a;border-radius:8px;padding:10px 12px;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.card.off{opacity:.62}
+.card.sel{outline:2px solid var(--accent)}
+.thumb{position:relative;background:#000;overflow:hidden}
+.thumb img{position:absolute;left:0;top:0;display:block}
+.num{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.7);border-radius:6px;padding:2px 7px;font:700 12px Inter}
+.meta{padding:8px 10px;display:flex;flex-direction:column;gap:4px;font-size:12px}
+.row{display:flex;flex-wrap:wrap;gap:4px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:0 7px;font-size:11px;color:var(--dim)}
+.chip.ok{color:var(--ok);border-color:#1f4d33}.chip.warn{color:var(--warn);border-color:#5a4612}.chip.bad{color:var(--bad);border-color:#5a1f22}
+.flag{font-size:11px;color:var(--warn)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select{background:#221c33;color:var(--fg);border:1px solid #3b2f5c;border-radius:8px;padding:7px 12px;font:600 12px Inter;cursor:pointer}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seq{display:flex;flex-wrap:wrap;gap:6px}
+.seq .s{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px;width:78px;text-align:center;font-size:11px}
+.seq .s img{width:70px;height:48px;object-fit:cover;display:block;border-radius:4px;filter:grayscale(1)}
+.compos{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:820px){.compos{grid-template-columns:1fr}}
+canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;display:block;background:#000}
+.cap{font-size:12px;color:var(--dim);margin-top:6px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font:600 11px Inter;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+td img{width:64px;height:44px;object-fit:cover;border-radius:4px;filter:grayscale(1);display:block}
+</style>
+</head>
+<body>
+<main>
+  <header style="display:flex;flex-direction:column;gap:8px">
+    <div class="eyebrow">SRV Studio V2 · Checkpoint C2 · local preview</div>
+    <h1>Signature Avatar Studio</h1>
+    <p>The CEO's final 20-image collection as delivered, its quality, the V2 rotation, the avatars assigned to the preview test tasks, and example compositions. Sample data on this computer only; nothing is published.</p>
+    <div class="note"><strong>Final masters, 1668–1672 × 941–943 px (16:9).</strong> HD for 1280×720 thumbnails (downscaled). Below full HD: a 1920×1080 frame would enlarge them 1.15×, and the square Short card 1.15×. Every caption states the scale used. Two images are held from rotation (see section 2). The earlier concept crops are archived, never picked, and kept so older packages still resolve.</div>
+  </header>
+
+  <section id="collection">
+    <div class="eyebrow">1 · Final collection</div>
+    <h2>All 20 final portraits</h2>
+    <p>Shown as delivered. Click a portrait to use it in the compositions below.</p>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section id="held">
+    <div class="eyebrow">2 · Held and questionable</div>
+    <h2>Assets that need a decision</h2>
+    <p>Held images are outside the rotation until the CEO decides. Flagged images rotate, but carry a note.</p>
+    <div class="tbl"><table><thead><tr><th>#</th><th>Image</th><th>Status</th><th>Finding</th></tr></thead><tbody id="heldrows"></tbody></table></div>
+    <details style="margin-top:6px"><summary style="cursor:pointer;color:var(--dim)">Archived concept avatars (Checkpoint C, 303×252, never picked again)</summary><div class="grid" id="archived" style="margin-top:10px"></div></details>
+  </section>
+
+  <section id="rotation">
+    <div class="eyebrow">3 · Selection and rotation</div>
+    <h2>Rotation simulator</h2>
+    <p>Runs the real <code>srv2AvatarPick</code> from <code>lib/srvStudioV2Avatars.mjs</code>: final eligible avatars only, never the previous avatar, mood-suited first, then a different pose from the previous avatar, least recently used first.</p>
+    <div class="controls">
+      <label for="n">Tasks</label><select id="n"><option>10</option><option selected>20</option><option>40</option></select>
+      <label for="moods">Moods</label><select id="moods"><option value="mix" selected>Task rotation mix</option><option value="romantic">All Romantic</option><option value="emotional">All Melancholic</option><option value="hopeful">All Hopeful</option></select>
+      <button id="run" type="button">Run rotation</button>
+      <span id="runres" class="cap"></span>
+    </div>
+    <div class="seq" id="seq"></div>
+  </section>
+
+  <section id="tasks">
+    <div class="eyebrow">4 · Assigned to test tasks</div>
+    <h2>Preview tasks and their avatars</h2>
+    <p>Read live from the preview's sample database. The avatar is stored on each task's package and survives reloads and regeneration.</p>
+    <div class="tbl"><table><thead><tr><th>Task</th><th>Song</th><th>Avatar</th><th>Assigned</th><th>How</th></tr></thead><tbody id="taskrows"><tr><td colspan="5">Loading…</td></tr></tbody></table></div>
+  </section>
+
+  <section id="compose">
+    <div class="eyebrow">5 · Compositions</div>
+    <h2>Example 16:9 thumbnail and 9:16 Short</h2>
+    <div class="controls">
+      <label for="av">Avatar</label><select id="av"></select>
+      <label for="song">Song</label><select id="song"></select>
+      <label for="tone">Tone</label><select id="tone"><option value="bw" selected>Cinematic B&amp;W (graded)</option><option value="source">As delivered</option></select>
+    </div>
+    <div class="compos">
+      <div><canvas id="thumb" width="1280" height="720" aria-label="16:9 thumbnail composition"></canvas><div class="cap" id="thumbcap"></div></div>
+      <div><canvas id="short" width="1080" height="1920" aria-label="9:16 Short composition"></canvas><div class="cap" id="shortcap"></div></div>
+    </div>
+    <p>Branding: original "SRV STUDIO" wordmark. No logo file exists yet; swap in the official logo when supplied. Layout and art direction are SRV Studio's own and copy no third-party channel.</p>
+  </section>
+</main>
+<script type="module">
+import { SRV_STUDIO_V2_AVATARS as AV, SRV_STUDIO_V2_AVATARS_ARCHIVED as ARCH, srv2AvatarPick, srv2AvatarPool, srv2AvatarById, srv2AvatarQualityLabel } from '/__v2/avatars.mjs';
+import { composeThumbnail, composeShort } from '/__v2/compose.mjs';
+const SONGS = [
+  ['Passenger Side of You', "I'd go anywhere from the passenger side of you"],
+  ['Leave the Engine Running', "Leave the engine running, I'm not ready to go in"],
+  ['Borrowed Headlights', 'I only needed a ride, now I need you to stay'],
+  ['When the Radio Plays You', 'The radio plays you and I miss my exit again'],
+  ["Neon Doesn't Lie", 'Under the neon I can finally see you'],
+];
+const MOOD_LABEL = { romantic: 'Romantic', emotional: 'Melancholic', hopeful: 'Hopeful' };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let selected = 'srv2-fm-06';
+function card(a) {
+  const W = 205, scale = W / a.native.w, h = Math.round(a.native.h * scale);
+  const full = a.crop.x === 0 && a.crop.y === 0 && a.crop.w === a.native.w && a.crop.h === a.native.h;
+  const box = full ? 'display:none' : `left:${a.crop.x * scale}px;top:${a.crop.y * scale}px;width:${a.crop.w * scale}px;height:${a.crop.h * scale}px`;
+  return `<div class="card ${a.rotationEligible ? '' : 'off'} ${a.id === selected ? 'sel' : ''}" data-id="${a.id}" tabindex="0" role="button" aria-label="Avatar ${a.number}">
+    <div class="thumb" style="height:${h}px"><img src="${a.src}" alt="" style="width:100%"><div style="position:absolute;${box};outline:1px dashed rgba(196,181,253,.9);outline-offset:-1px"></div><span class="num">${String(a.number).padStart(2, '0')}</span></div>
+    <div class="meta">
+      ${a.title ? `<div style="font-weight:600">${esc(a.title)}</div>` : ''}
+      <div><strong>${a.native.w}×${a.native.h}</strong> px · ${a.aspect}:1 · ${a.orientation}${full ? '' : ` · crop ${a.crop.w}×${a.crop.h}`}${a.pose ? ' · ' + esc(a.pose) : ''}</div>
+      <div class="row">${a.moods.map((m) => `<span class="chip">${MOOD_LABEL[m]}</span>`).join('')}<span class="chip ${a.rotationEligible ? 'ok' : 'warn'}">${a.archived ? 'archived' : a.rotationEligible ? 'in rotation' : 'held'}</span>${a.archived ? '<span class="chip bad">concept · not HD</span>' : '<span class="chip ok">final master</span><span class="chip warn">below full HD</span>'}${a.quality.detail === 'soft' ? '<span class="chip warn">soft</span>' : ''}</div>
+      ${a.flags.map((f) => `<div class="flag">${esc(f)}</div>`).join('')}
+    </div></div>`;
+}
+function drawHeld() {
+  const rows = AV.filter((a) => !a.rotationEligible || a.flags.some((f) => /CEO to confirm|pending CEO/.test(f)));
+  document.getElementById('heldrows').innerHTML = rows.map((a) => `<tr><td>${String(a.number).padStart(2, '0')}</td><td><img src="${a.src}" alt="" style="width:110px;height:auto;border-radius:4px;display:block"><div style="font-size:12px;margin-top:4px">${esc(a.title)}</div></td><td><span class="chip ${a.rotationEligible ? 'ok' : 'warn'}">${a.rotationEligible ? 'in rotation (flagged)' : 'held'}</span></td><td style="font-size:12px">${a.flags.filter((f) => !/^tone:/.test(f)).map(esc).join('<br>')}</td></tr>`).join('');
+  document.getElementById('archived').innerHTML = ARCH.map(card).join('');
+}
+function drawGrid() {
+  const g = document.getElementById('grid'); g.innerHTML = AV.map(card).join('');
+  g.querySelectorAll('.card').forEach((el) => { const go = () => { selected = el.dataset.id; document.getElementById('av').value = selected; drawGrid(); compose(); }; el.onclick = go; el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }; });
+}
+function runRotation() {
+  const n = +document.getElementById('n').value, mode = document.getElementById('moods').value;
+  const mix = ['romantic', 'emotional', 'romantic', 'hopeful', 'emotional'];
+  const hist = []; const out = [];
+  for (let i = 0; i < n; i++) { const mk = mode === 'mix' ? mix[i % mix.length] : mode; const a = srv2AvatarPick({ history: hist, moodKey: mk }); hist.push({ id: a.id, at: new Date(1e12 + i * 1000).toISOString() }); out.push([a, mk]); }
+  const repeats = out.filter((x, i) => i && x[0].id === out[i - 1][0].id).length;
+  const samePose = out.filter((x, i) => i && x[0].pose === out[i - 1][0].pose).length;
+  const distinct = new Set(out.map((x) => x[0].id)).size;
+  document.getElementById('seq').innerHTML = out.map(([a, mk], i) => `<div class="s"><img src="${a.src}" alt=""><div>#${i + 1} · <strong>${String(a.number).padStart(2, '0')}</strong></div><div style="color:var(--dim)">${MOOD_LABEL[mk]}</div></div>`).join('');
+  document.getElementById('runres').textContent = `${n} picks · ${repeats} immediate repeats · ${samePose} back-to-back same pose · ${distinct} of ${srv2AvatarPool().length} eligible avatars used`;
+}
+async function loadTasks() {
+  const tb = document.getElementById('taskrows');
+  try {
+    const d = await fetch('/__stub/v2-avatars').then((r) => r.json());
+    tb.innerHTML = d.tasks.map((t) => { const a = t.avatarId && srv2AvatarById(t.avatarId);
+      return `<tr><td>#${t.id} · ${esc(t.format)}</td><td>${esc(t.title || '—')}</td><td>${a ? `<img src="${a.src}" alt="Avatar ${a.number}"> <strong>${a.archived ? 'concept ' : ''}${String(a.number).padStart(2, '0')}</strong>${a.archived ? ' <span class="chip warn">archived</span>' : ''}` : '<span style="color:var(--dim)">none yet</span>'}</td><td>${esc((t.assignedAt || '').replace('T', ' ').slice(0, 19))}</td><td>${esc(t.by || '')}${t.inherited ? ' (kept on regenerate)' : ''}</td></tr>`; }).join('') || '<tr><td colspan="5">No SRV English test tasks.</td></tr>';
+  } catch (e) { tb.innerHTML = '<tr><td colspan="5">Could not read the preview data.</td></tr>'; }
+}
+const imgCache = {};
+function img(src) { return imgCache[src] || (imgCache[src] = new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; })); }
+async function compose() {
+  const a = AV.find((x) => x.id === document.getElementById('av').value) || AV[0];
+  const [title, lyric] = SONGS[+document.getElementById('song').value];
+  const tone = document.getElementById('tone').value;
+  try { await document.fonts.load("700 60px 'Playfair Display'"); await document.fonts.load("600 italic 60px 'Playfair Display'"); await document.fonts.load('600 20px Inter'); } catch (_) {}
+  const im = await img(a.src);
+  const t = composeThumbnail(document.getElementById('thumb').getContext('2d'), im, a, { title, tone });
+  const s = composeShort(document.getElementById('short').getContext('2d'), im, a, { title, lyric, tone });
+  const scl = (k) => k < 1 ? `downscaled ×${k} (HD)` : `enlarged ×${k}`;
+  document.getElementById('thumbcap').textContent = `16:9 · 1280×720 · avatar ${String(a.number).padStart(2, '0')} · source region ${t.sourcePx} px ${scl(t.upscale)} · ${srv2AvatarQualityLabel(a)}`;
+  document.getElementById('shortcap').textContent = `9:16 · 1080×1920 · source ${s.sourcePx} px ${scl(s.upscale)} · ${srv2AvatarQualityLabel(a)}`;
+}
+document.getElementById('av').innerHTML = AV.map((a) => `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>${String(a.number).padStart(2, '0')} · ${esc(a.title)}${a.rotationEligible ? '' : ' (held)'}</option>`).join('');
+document.getElementById('song').innerHTML = SONGS.map((s, i) => `<option value="${i}">${esc(s[0])}</option>`).join('');
+['av', 'song', 'tone'].forEach((id) => document.getElementById(id).addEventListener('change', () => { if (id === 'av') { selected = document.getElementById('av').value; drawGrid(); } compose(); }));
+document.getElementById('run').onclick = runRotation;
+drawGrid(); drawHeld(); runRotation(); loadTasks(); compose();
+</script>
+</body>
+</html>
