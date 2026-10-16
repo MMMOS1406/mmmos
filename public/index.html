@@ -2737,8 +2737,9 @@ async function savePackageToSupabase(pkg){
       const fieldSummary = ['videoUrl','renderStatus','submagicProjectId','uploadStatus','youtubeVideoId'].filter(k=>clean[k]).map(k=>k+'='+(typeof clean[k]==='string'?clean[k].slice(0,30):clean[k])).join(' · ');
       console.log('[v13.55.5] pkg upsert OK · id:', clean.id, '· pipeline fields:', fieldSummary || '(none)');
       pkg._pendingSync=false;
-      // Also write packages backup to app_settings for redundancy
-      await writePackagesBackup();
+      // 2026-10-16 — the per-save full backup (every package as one app_settings value, ~8.6 MB) is no longer written
+      // here: it exceeds the browser role's 3 s statement timeout, has failed on every save since 2026-05-23 and added
+      // seconds to every package save in every business. The packages table written above is the record.
       return true;
     }else{
       const t=await res.text();
