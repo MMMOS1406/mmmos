@@ -17508,7 +17508,12 @@ async function nextwaveV2RouteChunk(req, res) {
   if (!(await nwv2rIsEnabled())) return res.status(409).json({ ok: false, error: 'v2_route_disabled' });
   const { build_id: id, index } = req.body || {}; const i = Number(index);
   if (!/^nwv2r-[0-9a-f]{16}$/.test(String(id || '')) || !Number.isInteger(i) || i < 0) return res.status(400).json({ ok: false, error: 'build_id/index invalid' });
-  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-c${i}`);
+  // 2026-10-07 — dir MUST be unique per invocation, not just per chunk index: a concurrent/duplicate call for the
+  // SAME index (observed in production — two overlapping client build loops) raced on this shared path, and one
+  // invocation's `finally` cleanup (rm) deleted the directory out from under the other mid-write, producing
+  // "ENOENT: ... chunk.mp4". The chunk's own cached-output check (the HEAD request below) already makes a
+  // re-render of a genuinely-finished chunk a no-op, so isolating concurrent in-flight renders costs nothing.
+  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-c${i}-${randomBytes(6).toString('hex')}`);
   try {
     const state = await nwv2rGetState(id); if (!state) return res.status(404).json({ ok: false, error: 'build_not_found' });
     if (state.status !== 'planned' && state.status !== 'rendered') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });
@@ -17529,7 +17534,14 @@ async function nextwaveV2RouteFinish(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   if (!(await nwv2rIsEnabled())) return res.status(409).json({ ok: false, error: 'v2_route_disabled' });
   const id = String((req.body || {}).build_id || ''); if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id invalid' });
-  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-final`);
+  // 2026-10-07 — same isolation fix as the chunk handler: this dir was previously shared across every invocation
+  // for this build_id (no per-call uniqueness at all), so two overlapping finish calls — e.g. two client build
+  // loops racing after an earlier chunk-level failure and retry — downloaded chunks to the SAME local filenames
+  // concurrently, truncating/corrupting them before the `-c:v copy` concat. The resulting final.mp4 was a
+  // structurally valid but mostly-frozen file: probe() (duration/resolution/streams) saw nothing wrong, only
+  // actual playback revealed it. detectFreeze() below is the durable catch for that; this dir fix removes the
+  // race that caused it in the first place.
+  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-final-${randomBytes(6).toString('hex')}`);
   try {
     const state = await nwv2rGetState(id); if (!state) return res.status(404).json({ ok: false, error: 'build_not_found' });
     if (state.status !== 'planned' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_finishable: ${state.status}` });
@@ -17539,6 +17551,13 @@ async function nextwaveV2RouteFinish(req, res) {
     await L.route.finalizeVideo({ chunkPaths, audioPath: audio, outPath: out, ffmpegPath: ffmpegInstaller.path, workDir: dir, duration: state.duration_sec });
     const pr = await L.route.probe(ffmpegInstaller.path, out); const wantW = state.format === 'short' ? 1080 : 1920, wantH = state.format === 'short' ? 1920 : 1080;
     const issues = []; if (!pr.has_audio || !pr.has_video) issues.push('missing_stream'); if (pr.width !== wantW || pr.height !== wantH) issues.push('wrong_resolution'); if (!pr.duration || Math.abs(pr.duration - state.duration_sec) > 0.8) issues.push('duration_mismatch');
+    // FINAL-ENCODE INTEGRITY GATE (2026-10-07) — catches a stitch/concat defect that leaves the container
+    // structurally fine (duration/resolution/streams all pass the checks above) but visually frozen on one
+    // stale frame for most of the runtime. Real content in this renderer is continuously animated (camera
+    // tween, caption changes) every frame, so any freeze run this long in the ACTUAL encoded file — as opposed
+    // to the abstract draw() function compile_qc already checked pre-render — can only be an encoding defect.
+    const freeze = await L.route.detectFreeze(ffmpegInstaller.path, out, { minSec: 5 });
+    if (freeze.longest_sec >= 5) issues.push('frozen_final_output');
     const bench = await L.route.loadBench(); const thumb = L.route.makeThumbnail({ storyboard: state.storyboard, formatName: state.format, title: state.title || '', bench });
     const videoUrl = await sbStorageUpload(`${nwv2rBase(id)}/final.mp4`, await readFile(out), 'video/mp4'); const thumbUrl = await sbStorageUpload(`${nwv2rBase(id)}/thumbnail.png`, thumb, 'image/png');
     state.final = { video_url: videoUrl, thumbnail_url: thumbUrl, encode: pr, post_encode_issues: issues, finished_at: new Date().toISOString() };

@@ -17470,6 +17470,35 @@ async function nextwaveV2RouteBuild(pkg){
     return{ok:false,reason:'network_error',detail:e.message};
   }
 }
+// GOVERNED RE-FINALIZE (2026-10-07) — recovery path for a build already at 'ready_for_review' whose encoded
+// final.mp4 is suspected bad (e.g. the finalize-step race that produced a mostly-frozen video, task 125). Calls
+// nextwave_v2_route_finish directly: that endpoint already permits re-running finish on a 'ready_for_review'
+// build (no new server-side bypass), so this re-downloads the SAME already-rendered, already-correct chunks and
+// re-runs concat + the final-encode integrity check fresh -- no script/storyboard/chunk regeneration, no new
+// vendor spend beyond one ffmpeg pass. Deliberately a separate, explicitly-labeled action (never automatic) so a
+// healthy video is never silently re-processed on an ordinary click.
+async function nextwaveV2RouteRefinalize(pkg){
+  const buildId=pkg&&pkg.nextwaveV2Route&&pkg.nextwaveV2Route.buildId;
+  if(!buildId){alert('No build id on this package — cannot re-finalize.');return{ok:false,reason:'missing_build_id'};}
+  try{
+    const fr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_finish',{build_id:buildId});
+    const f=await fr.json();
+    if(!f.ok){alert('Re-finalize failed: '+(f.error||('HTTP '+fr.status)));return{ok:false,detail:f.error};}
+    pkg.nextwaveV2Route=Object.assign({},pkg.nextwaveV2Route,{status:f.status,final:f.final,exception:f.exception||null,progress:{done:(pkg.nextwaveV2Route.chunkCount||0),total:(pkg.nextwaveV2Route.chunkCount||0)}});
+    if(f.status==='ready_for_review'&&f.final&&f.final.video_url){
+      pkg.videoUrl=f.final.video_url;pkg.thumbnailUrl=f.final.thumbnail_url||null;
+      pkg.renderDurationSec=(f.final.encode&&f.final.encode.duration)||null;pkg.renderCompletedAt=new Date().toISOString();
+      pkg.renderStatus='enhanced';await _nextwaveV2RoutePersist(pkg);
+      return{ok:true,video_url:pkg.videoUrl};
+    }
+    // still flagged (e.g. frozen_final_output recurred) -- surface it as needs_review, same as any other finish failure
+    pkg.renderStatus='v2_needs_review';await _nextwaveV2RoutePersist(pkg);
+    return{ok:false,reason:'needs_review',detail:f.exception};
+  }catch(e){
+    alert('Re-finalize network error: '+e.message);
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
 function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
   const rs=pkg?pkg.renderStatus:'';const r=(pkg&&pkg.nextwaveV2Route)||{};
   const box=function(color,inner){return '<div style="padding:16px;background:rgba('+color+',0.08);border:1px solid rgba('+color+',0.4);border-radius:12px;margin-bottom:12px">'+inner+'</div>';};
@@ -17485,6 +17514,12 @@ function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
     // lifecycle change, out of scope for this order) — a human must see it and clear it before publishing.
     if(illuNeedsReview) h+=box('245,158,11','<div style="font-size:13px;font-weight:800;color:#f59e0b;margin-bottom:6px">⚠️ CREATIVE NEEDS REVIEW — illustration fell back to the standard template</div><div style="font-size:11px;color:var(--text);line-height:1.6;font-family:\'JetBrains Mono\',monospace">'+((illu.creative_qc.reasons||[]).map(function(x){return escHTML((x.scene||'')+' ('+(x.mode||'')+'): '+((x.reasons||[]).join(', ')));}).join('<br>')||'see build state')+'</div><div style="font-size:11px;color:var(--dim);margin-top:8px">Owner: '+escHTML(String(illu.creative_qc.owner||'va_production_product_qc').replace(/_/g,' '))+'. The technical build is complete and factually correct, but this is NOT a Creative PASS — review before publishing.</div>');
     h+='<button style="'+st.btnGreen+'" onclick="_nextWaveSetStage(\''+taskId+'\',\'approve\');if(typeof renderTab===\'function\')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>';
+    // GOVERNED RECOVERY (2026-10-07) — always visible on a finished build, never automatic. Watch the actual
+    // video before trusting it: a finalize-step race can leave this looking 'ready_for_review' (duration/
+    // resolution/streams all pass) while the encoded file is actually frozen on a stale frame for most of its
+    // runtime. If that happens, this re-runs finish fresh from the SAME already-correct chunks -- no script or
+    // render regeneration, no extra vendor spend.
+    h+='<button style="'+st.btnBlue+'" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||\'\')===String(\''+pkgId+'\');});if(!p){alert(\'Package not found\');return;}const b=event.target;b.disabled=true;b.textContent=\'⏳ Re-finalizing…\';const x=await nextwaveV2RouteRefinalize(p);b.disabled=false;b.textContent=\'↻ Re-finalize from existing chunks (recovery)\';if(typeof renderTab===\'function\')renderTab(currentTab);})()">↻ Re-finalize from existing chunks (recovery)</button>';
   }else if(rs==='v2_needs_review'||rs==='v2_blocked'){
     const blocked=rs==='v2_blocked';const ex=r.exception||{};
     h+=box(blocked?'239,68,68':'245,158,11','<div style="font-size:14px;font-weight:800;color:'+(blocked?'#ef4444':'#f59e0b')+';margin-bottom:8px">'+(blocked?'🛑 BLOCKED — factual/safety failure':'⚠️ NEEDS REVIEW — stopped before any render')+'</div><div style="font-size:11px;color:var(--text);line-height:1.6;font-family:\'JetBrains Mono\',monospace">'+((ex.reasons||[]).map(function(x){return escHTML(String(x.kind||'')+(x.scene?(' · '+x.scene):''));}).join('<br>')||'see build state')+'</div><div style="font-size:11px;color:var(--dim);margin-top:8px">Routed to '+escHTML(String(ex.owner||'VA Production / Product QC').replace(/_/g,' '))+'. No narration, asset or render spend occurred'+(r.vendor&&r.vendor.elevenlabs_chars?' (narration had already run)':'')+'. The system never guesses: edit the script (Review stage) or resolve with Product QC, then rebuild.</div>');
