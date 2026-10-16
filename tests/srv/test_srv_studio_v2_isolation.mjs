@@ -70,7 +70,8 @@ function makeEnv({ saveOk = true, engineState = {} } = {}) {
   return { ctx, calls, run: (code) => vm.runInContext(code, ctx), settle: () => new Promise((r) => setTimeout(r, 30)) };
 }
 const T0 = Date.UTC(2026, 9, 1);
-const task = (id, extra = {}) => ({ id, engine: 'SRV English', name: 'SRV English — Female · Short', status: 'assigned', contentType: 'Short Video', mood: 'Female — Romantic', createdAt: T0 + id * 1000, ...extra });
+// 026: SRV Studio is Female · Emotional · Long only — fixtures are Long tasks.
+const task = (id, extra = {}) => ({ id, engine: 'SRV English', name: 'SRV English — Female — Emotional · Long', status: 'assigned', contentType: 'Long', contentFormat: 'long', isLong: true, mood: 'Female — Emotional', createdAt: T0 + id * 1000, ...extra });
 const pkgOf = (id, t, extra = {}) => ({ id, taskId: t.id, engine: 'SRV English', srvTaskUid: 'srve_' + t.createdAt + '_' + t.id, generatedAt: new Date(T0 + 86400000).toISOString(), title: 'Stay Tonight', lyrics: '[Chorus]\nhold me now\nnight drive', shortLyrics: 'hold me now', sunoPrompt: 'p', shortSunoPrompt: 'sp', mood: 'Female — Romantic', srvAvatar: { id: 'srv2-fm-03', assignedAt: new Date(T0).toISOString(), by: 'rotation' }, ...extra });
 const FARSI_SLOT = 'farsi-reserved';
 const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._publishSlots));return _nextPublishSlotCandidates(30).find(s=>!t.has(s.iso)).iso;})()");
@@ -78,7 +79,7 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
 (async () => {
   // ── 1. F-2: TEST publish takes no shared slot ──
   {
-    const E = makeEnv(); const t = task(1, { name: 'SRV English — Female · Short [TEST]' }); const p = pkgOf('p1', t, { _srvShortVideoUrl: 'https://stub.invalid/v.mp4', _srvThumbUrl: 'https://stub.invalid/t.jpg' });
+    const E = makeEnv(); const t = task(1, { name: 'SRV English — Female — Emotional · Long [TEST]' }); const p = pkgOf('p1', t, { _srvLongVideoUrl: 'https://stub.invalid/v.mp4', _srvThumbUrl: 'https://stub.invalid/t.jpg' });
     E.ctx.D.tasks = [t, { id: 900, engine: 'SRV Farsi', createdAt: T0 }]; E.ctx.D.packages = [p];
     const farsiSlot = firstFreeSlot(E); E.ctx.D._publishSlots[farsiSlot] = 'pkg_farsi_1';
     const before = JSON.stringify(E.ctx.D._publishSlots);
@@ -88,21 +89,21 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
     ok('F-2: the SRV Farsi reservation is untouched', E.ctx.D._publishSlots[farsiSlot] === 'pkg_farsi_1');
   }
   {
-    const E = makeEnv(); const t = task(2, { isTest: true }); const p = pkgOf('p2', t, { _srvShortVideoUrl: 'https://stub.invalid/v.mp4' });
+    const E = makeEnv(); const t = task(2, { isTest: true }); const p = pkgOf('p2', t, { _srvLongVideoUrl: 'https://stub.invalid/v.mp4' });
     E.ctx.D.tasks = [t]; E.ctx.D.packages = [p];
     const mine = firstFreeSlot(E); E.ctx.D._publishSlots[mine] = 'p2'; p.publishAt = mine; E.ctx.D._publishSlots['2099-01-01T12:00:00.000Z'] = 'pkg_farsi_9';
     await E.run("_srvEnglishV2Publish('p2','2')"); await E.settle();
     ok('F-2: a TEST publish gives back a slot its own package held, and only that one', !(mine in E.ctx.D._publishSlots) && E.ctx.D._publishSlots['2099-01-01T12:00:00.000Z'] === 'pkg_farsi_9' && p.publishAt === null);
   }
   {
-    const E = makeEnv({ engineState: { 'SRV English': 'test' } }); const t = task(3); const p = pkgOf('p3', t, { _srvShortVideoUrl: 'https://stub.invalid/v.mp4' });
+    const E = makeEnv({ engineState: { 'SRV English': 'test' } }); const t = task(3); const p = pkgOf('p3', t, { _srvLongVideoUrl: 'https://stub.invalid/v.mp4' });
     E.ctx.D.tasks = [t]; E.ctx.D.packages = [p];
     await E.run("_srvEnglishV2Publish('p3','3')"); await E.settle();
     ok('F-2: engine-wide TEST mode also reserves zero slots', Object.keys(E.ctx.D._publishSlots).length === 0 && E.calls.yt[0].publishAt === null);
   }
   // ── 2. Live SRV Studio scheduling unchanged ──
   {
-    const E = makeEnv(); const t = task(4); const p = pkgOf('p4', t, { _srvShortVideoUrl: 'https://stub.invalid/v.mp4' });
+    const E = makeEnv(); const t = task(4); const p = pkgOf('p4', t, { _srvLongVideoUrl: 'https://stub.invalid/v.mp4' });
     E.ctx.D.tasks = [t]; E.ctx.D.packages = [p];
     const farsiSlot = firstFreeSlot(E); E.ctx.D._publishSlots[farsiSlot] = 'pkg_farsi_1';
     const expected = firstFreeSlot(E);
@@ -112,7 +113,7 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
     ok('Live: the SRV Farsi slot is neither reused nor moved', E.ctx.D._publishSlots[farsiSlot] === 'pkg_farsi_1' && expected !== farsiSlot);
   }
   {
-    const E = makeEnv({ engineState: { 'SRV English': 'paused' } }); const t = task(5); const p = pkgOf('p5', t, { _srvShortVideoUrl: 'https://stub.invalid/v.mp4' });
+    const E = makeEnv({ engineState: { 'SRV English': 'paused' } }); const t = task(5); const p = pkgOf('p5', t, { _srvLongVideoUrl: 'https://stub.invalid/v.mp4' });
     E.ctx.D.tasks = [t]; E.ctx.D.packages = [p];
     await E.run("_srvEnglishV2Publish('p5','5')"); await E.settle();
     ok('Live: a paused engine still gets no slot (unchanged _assignPublishSlot rule)', Object.keys(E.ctx.D._publishSlots).length === 0);
@@ -120,7 +121,7 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
   // ── 3. SRV Farsi scheduling unchanged ──
   {
     const E1 = makeEnv(); const fp1 = { id: 'pkg_farsi_x', engine: 'SRV Farsi' }; E1.ctx.__fp = fp1; E1.run('_assignPublishSlot(__fp)');
-    const E2 = makeEnv(); const t = task(6, { isTest: true }); const p = pkgOf('p6', t, { _srvShortVideoUrl: 'https://stub.invalid/v.mp4' });
+    const E2 = makeEnv(); const t = task(6, { isTest: true }); const p = pkgOf('p6', t, { _srvLongVideoUrl: 'https://stub.invalid/v.mp4' });
     E2.ctx.D.tasks = [t]; E2.ctx.D.packages = [p]; await E2.run("_srvEnglishV2Publish('p6','6')"); await E2.settle();
     const fp2 = { id: 'pkg_farsi_x', engine: 'SRV Farsi' }; E2.ctx.__fp = fp2; E2.run('_assignPublishSlot(__fp)');
     ok('Farsi: after an SRV Studio TEST publish, the next SRV Farsi package gets the same slot it would have had', fp1.publishAt && fp2.publishAt === fp1.publishAt);
@@ -134,7 +135,7 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
     await E.run("_srvEnglishV2Build('p7','7')"); await E.settle();
     const used = E.calls.renders[0] && E.calls.renders[0].avatar;
     ok('F-1: Build never hands an archived concept avatar to the renderer', E.calls.renders.length === 1 && used && used.collection === 'final' && !used.archived && used.quality.hdReady === true, used && used.id);
-    ok('F-1: the replacement is a rotation-eligible final avatar suited to the mood (never #09)', used && A.srv2AvatarPool().some((a) => a.id === used.id) && used.id !== 'srv2-fm-09' && used.moods.includes('romantic'));
+    ok('F-1: the replacement is a rotation-eligible final avatar suited to the mood (never #09)', used && A.srv2AvatarPool().some((a) => a.id === used.id) && used.id !== 'srv2-fm-09' && used.moods.includes('emotional')); // 026: Emotional is the only SRV Studio mood
     ok('F-1: replacement and reason recorded on the package', p.srvAvatar.id === used.id && p.srvAvatar.by === 'auto-replace-archived' && p.srvAvatar.replaced && p.srvAvatar.replaced.from === 'srv2-av-04' && /archived concept image 303×252/.test(p.srvAvatar.replaced.reason));
     const saved = E.calls.upserts.map((r) => JSON.parse(r.full_package)).filter((f) => f.id === 'p7');
     ok('F-1: the replacement is saved to the packages table before rendering', saved.length >= 1 && saved[0].srvAvatar.id === used.id && saved[0].srvAvatar.replaced.from === 'srv2-av-04');
@@ -192,7 +193,7 @@ const firstFreeSlot = (E) => E.run("(function(){const t=new Set(Object.keys(D._p
   }
   // ── 7. F-4: posters ──
   {
-    const E = makeEnv(); const t = task(9); const p = pkgOf('p9', t, { _srvShortVideoUrl: 'https://stub.invalid/s.mp4', _srvThumbUrl: 'https://stub.invalid/thumb.jpg', srvRender: { width: 1080, height: 1920, fps: 30, container: 'mp4', videoCodec: 'h264', audioCodec: 'aac', videoBitsPerSecondTarget: 6e6, measuredKbps: 6100, durationSec: 30, audioDurationSec: 110, sizeBytes: 2e7, frames: { drawn: 900, expected: 900, droppedPct: 0 }, maxSourceUpscale: 0.97 } });
+    const E = makeEnv(); const t = task(9); const p = pkgOf('p9', t, { _srvLongVideoUrl: 'https://stub.invalid/s.mp4', _srvThumbUrl: 'https://stub.invalid/thumb.jpg', srvRender: { width: 1920, height: 1080, fps: 30, container: 'mp4', videoCodec: 'h264', audioCodec: 'aac', videoBitsPerSecondTarget: 6e6, measuredKbps: 6100, durationSec: 30, audioDurationSec: 110, sizeBytes: 2e7, frames: { drawn: 900, expected: 900, droppedPct: 0 }, maxSourceUpscale: 0.97 } });
     E.ctx.D.tasks = [t]; E.ctx.D.packages = [p]; E.run("_srvEnglishV2SetStage('9','approve')");
     const html = E.run('renderSRVEnglishLifecycleCard(D.tasks[0])');
     ok('F-4: the Approve player uses the package thumbnail as its poster, playback attributes kept', /<video poster="https:\/\/stub\.invalid\/thumb\.jpg" preload="metadata" src="https:\/\/stub\.invalid\/s\.mp4" controls/.test(html));

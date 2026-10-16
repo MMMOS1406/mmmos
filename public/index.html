@@ -846,8 +846,9 @@ const ENGINES_CONFIG=[
          {src:'/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_02.png',fx:0.460,fy:0.270,fw:0.163}],
      },
    }},
-  {id:"srv_english",name:"SRV English",icon:"🎵",hint:"English indie pop songs",
-   modes:["Female — Romantic","Female — Emotional","Female — Happy"],
+  {id:"srv_english",name:"SRV English",icon:"🎵",hint:"SRV Studio · Female Emotional Deep House · Long",
+   modes:["Female — Emotional"], // SRV-STUDIO-V2-026 (CEO, final): Emotional only, Long only — no Romantic/Happy, no Shorts
+   productionFormat:'long',
    type:"song",weeklyCapacity:3,cadenceDays:["Monday","Tuesday","Wednesday","Thursday"], // v15.7.0 — Mon-Thu = VA production; Fri=Long/Sat=Short/Sun=Short (publish)
    // v13.69.50 — SRV English Lifecycle: Generate→Review→Build→Approve→Publish→Done
    // musicAdapter:'manual' (operator uploads MP3 — Suno API deferred until lifecycle stable)
@@ -7365,7 +7366,7 @@ function _renderHomeOperatorDashboard(){
     {name:'AI Studio',        icon:'🤖', status:_homeEngineStatus('AI Studio'),  detail:'AI Education Engine · Shorts & Long Videos · Audience Growth'},
     {name:'NextWave',         icon:'⚡', status:_homeEngineStatus('NextWave'),   detail:'Finance & Technology Engine · Shorts & Long Videos · Growth Engine'},
     {name:'SRV Farsi',        icon:'🌹', status:_homeEngineStatus('SRV Farsi'), detail:'Persian Music Engine · Long Songs & Shorts · Audience Building'},
-    {name:'SRV English',      icon:'🎵', status:_homeEngineStatus('SRV English'),detail:'English Music Engine · Long Songs & Shorts · Global Audience'},
+    {name:'SRV English',      icon:'🎵', status:_homeEngineStatus('SRV English'),detail:'SRV Studio · Female Emotional Deep House · Long videos · Global Audience'},
   ];
   const statusColor={running:'#22c55e',maintenance:'#f59e0b',disabled:'#ef4444',paused:'#6b7280',error:'#ef4444'};
   const notifs=_homeBuildNotifications();
@@ -12688,16 +12689,12 @@ function _srvFarsiResetPublishCalendar(){
   alert('SRV Farsi calendar reset ✓\nNext 3 tasks will publish:\n• Long → Fri '+_fmt(_nextFri)+'\n• Short → Sat '+_fmt(_nextSat)+'\n• Short → Sun '+_fmt(_nextSun));
 }
 // ─── SRV English calendar system (v13.74.0) — mirrors Farsi. Fri=Long, Sat=Short, Sun=Short ───
+// SRV-STUDIO-V2-026 (CEO, final): SRV Studio produces Long videos only — the Long/Short/Short rotation is removed.
 function _srvEnglishNextFormat(){
-  if(typeof D.srvEnglishTaskSeq!=='number')D.srvEnglishTaskSeq=0;
-  const isLong=(D.srvEnglishTaskSeq%3===0); // 0→Long, 1→Short, 2→Short
-  D.srvEnglishTaskSeq++;
-  if(typeof saveAppState==='function')saveAppState();
-  return isLong?'long':'short';
+  return 'long';
 }
 function _srvEnglishPeekFormat(){
-  const seq=typeof D.srvEnglishTaskSeq==='number'?D.srvEnglishTaskSeq:0;
-  return (seq%3===0)?'long':'short';
+  return 'long';
 }
 // Cadence: seq%3: 0→Long→Fri(5), 1→Short→Sat(6), 2→Short→Sun(0)
 // After _srvEnglishNextFormat() increments seq, read updated value here.
@@ -12749,7 +12746,7 @@ function _srvEnglishResetPublishCalendar(){
   const _nextSat=new Date(_nextFri); _nextSat.setDate(_nextFri.getDate()+1);
   const _nextSun=new Date(_nextFri); _nextSun.setDate(_nextFri.getDate()+2);
   const _fmt=function(d){return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});};
-  alert('SRV English calendar reset ✓\nNext 3 tasks will publish:\n• Long → Fri '+_fmt(_nextFri)+'\n• Short → Sat '+_fmt(_nextSat)+'\n• Short → Sun '+_fmt(_nextSun));
+  alert('SRV English calendar reset ✓\nSRV Studio is Long-only: the next Long publishes Fri '+_fmt(_nextFri)+'.');
 }
 // v13.74.0 — one-click production task for SRV English
 function vaStartEnglishProductionTask(){
@@ -14672,6 +14669,11 @@ function autoCreateCadenceTasksForCurrentWeek(){
         assignmentReason:'[cadence-auto] v13.40 — '+cfg.name+' cadence day '+day+' ('+iso+')',
         createdAt:Date.now(),
       };
+      // SRV-STUDIO-V2-026 — SRV Studio (SRV English) slots are produced as Long, Female · Emotional only. The slot keeps
+      // its original (short) cadence format so the weekly cadence never re-creates it. Every other engine is untouched.
+      if(cfg.id==='srv_english'&&cfg.productionFormat==='long'){
+        Object.assign(task,{name:cfg.name+' — '+(mode||'Female — Emotional')+' · Long (auto-created)',contentType:'Long',contentFormat:'long',isLong:true,cadenceSlotFormat:'short'});
+      }
       D.tasks.push(task);
       D.cadenceAutoCreatedSlots[key]=Date.now();
       createdTasks.push(task);
@@ -16881,6 +16883,7 @@ async function _srvEnglishV2VaAllowance(){
 }
 // Which upload path Publish (and the dry-run preview) uses: {pilot}, {va}, {} for an ordinary upload, or {blocked}.
 async function _srvEnglishV2PublishRoute(task,kind){
+  if(kind!=='long')return {blocked:'SRV Studio publishes Emotional Deep House Long videos only — a Short is never uploaded.'}; // 026
   const p=await _srvEnglishV2PilotFor(task);
   const ceo=typeof _ceoGetSessionToken==='function'&&!!_ceoGetSessionToken();
   if(p&&ceo){
@@ -16894,7 +16897,7 @@ async function _srvEnglishV2PublishRoute(task,kind){
 }
 function _srvEnglishV2PilotReason(code){
   const m={ceo_session_required:'pilot uploads need a signed-in CEO session — sign in again as Mansoor',srv_studio_v2_off:'SRV Studio V2 is switched off on the server',pilot_not_configured:'no pilot is authorized',pilot_disabled:'the pilot authorization is disabled',pilot_expired:'the pilot authorization has expired',
-    task_not_allowlisted:'this task is not one of the two pilot tasks',publisher_session_required:'sign in again (VA or CEO) and retry',va_allowance_not_configured:'no VA upload allowance is authorized',va_allowance_disabled:'the VA upload allowance is switched off',va_allowance_expired:'the VA upload allowance has expired',va_allowance_limit_reached:'the VA allowance uploads have all been used',va_allowance_format_used:'the VA allowance for this format (Long or Short) has already been used',va_busy_try_again:'another VA upload was being recorded — try again',format_mismatch:'the task format does not match its pilot authorization',task_already_uploaded_or_in_progress:'this task already has a pilot upload (or one in progress)',
+    task_not_allowlisted:'this task is not one of the two pilot tasks',publisher_session_required:'sign in again (VA or CEO) and retry',va_allowance_not_configured:'no VA upload allowance is authorized',va_allowance_disabled:'the VA upload allowance is switched off',va_allowance_expired:'the VA upload allowance has expired',va_allowance_limit_reached:'the VA allowance uploads have all been used',va_allowance_format_used:'the VA allowance for this format (Long or Short) has already been used',va_allowance_format_not_allowed:'this format is not allowed — SRV Studio uploads Long videos only',va_busy_try_again:'another VA upload was being recorded — try again',format_mismatch:'the task format does not match its pilot authorization',task_already_uploaded_or_in_progress:'this task already has a pilot upload (or one in progress)',
     pilot_limit_reached:'the two pilot uploads have already been used',engine_not_in_test:'the SRV English engine is not in TEST mode',wrong_channel:'the YouTube connection is not the SRV Studio channel',
     pilot_busy_try_again:'another pilot upload was being recorded — try again',uploaded_but_unverified_channel_or_privacy:'YouTube accepted the video but its channel or privacy could not be verified — check YouTube Studio before anything else',
     upload_failed:'the upload to YouTube failed',bad_title:'the title is not valid for YouTube',missing_ai_disclosure:'the description is missing the AI disclosure',video_not_from_this_package:'the video file does not belong to this package'};
@@ -17039,6 +17042,9 @@ async function _srvEnglishV2GenerateInto(taskId,opts){
   if(!task)throw new Error('SRV English task '+taskId+' could not be identified uniquely');
   const first=(D.tasks||[]).find(x=>String(x.id||x.taskId||'')===String(taskId));
   if(first!==task)throw new Error('Task id '+taskId+' is shared with another engine\'s task — generation refused to avoid writing to the wrong task');
+  // SRV-STUDIO-V2-026 — SRV Studio produces Long only; a Short task is never generated (and never silently relabelled).
+  if(!_srvEnglishV2TaskIsLong(task))throw new Error('SRV Studio produces Emotional Deep House Long videos only — this is a Short task, so it cannot be generated. Start a new SRV Studio Long task.');
+  _srvEnglishV2ApplyProductionMood(task);
   const before=new Set((D.packages||[]).map(p=>String(p&&p.id)));
   const numericId=Number(taskId);
   await generatePackage(isNaN(numericId)?taskId:numericId);
@@ -17048,42 +17054,54 @@ async function _srvEnglishV2GenerateInto(taskId,opts){
   await _srvEnglishV2StampPkg(task,pkg);
   return pkg;
 }
-// ── SRV-STUDIO-V2-023: Long / Short selection on the Generate stage (same model as SRV Farsi) ──
-// The VA (or CEO) picks the format for THIS task before its package is generated. Only the format fields that
-// Review, Build, metadata and Publish already read change (contentFormat / contentType / isLong) plus the "· Short" /
-// "· Long" part of the task name. Mood, schedule and cadence pointers are untouched; cadenceSlotFormat keeps the
-// slot's original format so the weekly cadence never re-creates the task. "Auto" = the format the task was created with.
-function _srvEnglishV2SetFormat(taskId,value){
-  const task=_srvEnglishTaskById(taskId);
-  if(!task||!_srvEnglishIsTask(task))return false;
-  if(_srvEnglishGetStage(taskId)!=='generate')return false; // locked once the package exists
-  const cur=_srvEnglishV2TaskIsLong(task)?'Long':'Short';
-  let fmt=value;
-  if(value==='Auto'){if(!task.vaOriginal||!task.vaOriginal.format)return false;fmt=task.vaOriginal.format;}
-  if(fmt!=='Long'&&fmt!=='Short')return false;
-  if(fmt===cur)return false;
-  if(!task.vaOriginal)task.vaOriginal={format:cur};
-  if(!task.cadenceSlotFormat)task.cadenceSlotFormat=cur==='Long'?'long':'short';
-  const isLong=fmt==='Long';
-  task.contentFormat=isLong?'long':'short';
-  task.contentType=isLong?'Long':'Short Video';
-  task.isLong=isLong;
-  task.name=String(task.name||'').replace(/·\s*(Short|Long)\b/,'· '+fmt);
+// ── SRV-STUDIO-V2-026 (CEO, final): one production line — Female · Emotional Deep House · Long ──
+// No mood or format choice exists in SRV Studio. A Long task created under the old rotation with another mood is
+// generated as Emotional; the change is visible in its name and logged (format is never changed).
+function _srvEnglishV2ApplyProductionMood(task){
+  const want=typeof SRV_STUDIO_MODE!=='undefined'?SRV_STUDIO_MODE:'Female — Emotional';
+  const cur=task.mood||task.mode||'';
+  if(cur===want)return false;
+  task.mood=want;if(task.mode)task.mode=want;
+  task.name=String(task.name||'').replace(cur,want);
   if(!Array.isArray(task.vaOverrides))task.vaOverrides=[];
-  task.vaOverrides.push({field:'format',from:cur,to:fmt,by:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||'unknown',at:new Date().toISOString()});
+  task.vaOverrides.push({field:'mood',from:cur,to:want,by:'srv-studio-config (order SRV-STUDIO-V2-026)',at:new Date().toISOString()});
   if(typeof saveAppState==='function')saveAppState();
-  _srvEnglishV2Show(taskId);
   return true;
 }
+// Unfinished Short tasks are retired once (Short production no longer exists in SRV Studio): marked done exactly as
+// Cancel Task does, with the reason recorded. Packages, rendered media and any upload history are kept as they are;
+// nothing is relabelled. A Short that was uploaded (or whose package carries an upload record) is never touched.
+function _srvEnglishV2RetireShorts(){
+  let n=0;
+  (D.tasks||[]).forEach(function(t){
+    if(!_srvEnglishIsTask(t)||_srvEnglishV2TaskIsLong(t))return;
+    if(['done','cancelled','canceled','discarded','archived','complete','completed'].includes(String(t.status||'').toLowerCase()))return;
+    const pkg=_srvEnglishPkgForTask(t);
+    if(pkg&&(pkg.srvPublish||pkg.srvPilot||pkg.srvVa||pkg._srvYtShortId||pkg._srvYtLongId||pkg.youtubeVideoId))return;
+    const m=_srvEnglishV2StageMap();
+    const uid=_srvEnglishTaskUid(t);
+    t.srvRetired={at:new Date().toISOString(),reason:'SRV Studio is Long-only (CEO order SRV-STUDIO-V2-026): unfinished Short retired; package and media kept',fromStatus:t.status||null,fromStage:(uid&&m[uid])||m[String(t.id)]||null,packageId:pkg?String(pkg.id):null};
+    t.status='done';t.cancelledAt=Date.now();
+    delete m[String(t.id)];if(uid)delete m[uid];
+    n++;
+  });
+  if(n&&typeof saveAppState==='function')saveAppState();
+  return n;
+}
+// The 023 Long/Short selector is removed (026). The name is kept (top-level functions are never removed) and it
+// refuses every change: a task's format is never changed in SRV Studio.
+function _srvEnglishV2SetFormat(){
+  return false;
+}
 function _srvEnglishV2GenerateHtml(task,taskId,mood){
-  const cur=_srvEnglishV2TaskIsLong(task)?'Long':'Short';
-  const auto=(task.vaOriginal&&task.vaOriginal.format)||cur;
-  const opt=(v,label)=>`<option value="${v}"${(v==='Auto'?cur===auto:v===cur&&cur!==auto)?' selected':''}>${label}</option>`;
+  if(!_srvEnglishV2TaskIsLong(task))return `
+      <div style="padding:14px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.25);border-radius:10px;font-size:12px;color:var(--dim);line-height:1.6">
+        This is a <strong style="color:var(--text)">Short</strong> task. SRV Studio now produces <strong style="color:var(--text)">Emotional Deep House Long</strong> videos only, so it cannot be generated. Start a new SRV Studio Long task instead.
+      </div>`;
   return `
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mode: <strong style="color:var(--text)">${escHTML(mood)}</strong></div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Format:<select id="srv2fmt_${escHTML(taskId)}" onchange="_srvEnglishV2SetFormat('${escHTML(taskId)}',this.value)" style="margin-left:6px;padding:4px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.35);border-radius:6px;color:var(--text);font-size:12px;font-weight:700">${opt('Auto','Auto ('+auto+')')}${opt('Short','Short')}${opt('Long','Long')}</select></div>
-        <div style="font-size:11px;color:var(--dim);margin-bottom:14px">This <strong style="color:var(--text)">${cur}</strong> task will use only ${cur} lyrics and the ${cur} Suno prompt, and render ${cur==='Long'?'a 1920×1080 Long':'a 1080×1920 Short'}. The format is locked once the package is generated.</div>
+        <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:6px">SRV Studio — Female Emotional Deep House — Long</div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Female vocal · Emotional · Long only · English. Claude generates the title, full lyrics, the full-song Suno prompt and the YouTube caption. The video renders 1920×1080 in cinematic Version B with the female monochrome avatar library.</div>
         <button onclick="vaGeneratePackage('${escHTML(taskId)}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
           ✦ Generate Package
         </button>
@@ -17265,7 +17283,7 @@ function _srvEnglishPackageQualityHtml(pkg){
 }
 // ── Lifecycle-aware task card ─────────────────────────────────────────────────
 function renderSRVEnglishLifecycleCard(task){
-  if(_srvStudioV2On())_srvEnglishEnsureIdentity(); // SRV Studio V2
+  if(_srvStudioV2On()){_srvEnglishEnsureIdentity();if(!_srvEnglishV2RetireShorts._done){_srvEnglishV2RetireShorts._done=true;_srvEnglishV2RetireShorts();}} // SRV Studio V2 (026: retire unfinished Shorts once)
   const pkg=_srvEnglishPkgForTask(task);
   const stage=_srvEnglishGetStage(task.taskId||task.id);
   const taskId=String(task.taskId||task.id||'');
@@ -18957,40 +18975,15 @@ function _srvFarsiPeekNextMode(){
   return _srvFarsiPeekNextArtist()+' — '+_srvFarsiPeekNextMood();
 }
 
-// v13.74.0 — SRV English: balanced 20-mode rotation. Female only. ~35% Romantic, ~35% Emotional, ~30% Happy.
-// No mood dominates. Interleaved R→E→H cycling.
-const ENGLISH_ROTATION_MODES=[
-  'Female — Romantic',    //  1
-  'Female — Emotional',   //  2
-  'Female — Happy',       //  3
-  'Female — Romantic',    //  4
-  'Female — Emotional',   //  5
-  'Female — Romantic',    //  6
-  'Female — Happy',       //  7
-  'Female — Emotional',   //  8
-  'Female — Romantic',    //  9
-  'Female — Happy',       // 10
-  'Female — Emotional',   // 11
-  'Female — Romantic',    // 12
-  'Female — Happy',       // 13
-  'Female — Emotional',   // 14
-  'Female — Romantic',    // 15
-  'Female — Happy',       // 16
-  'Female — Emotional',   // 17
-  'Female — Romantic',    // 18
-  'Female — Happy',       // 19
-  'Female — Emotional',   // 20
-];
+// SRV-STUDIO-V2-026 (CEO, final): SRV Studio is Female · Emotional Deep House only — the 20-mode
+// Romantic/Emotional/Happy rotation is removed. D.srvEnglishRotationIdx is left as stored (no longer read).
+const SRV_STUDIO_MODE='Female — Emotional';
+const ENGLISH_ROTATION_MODES=[SRV_STUDIO_MODE];
 function _srvEnglishNextMode(){
-  if(typeof D.srvEnglishRotationIdx!=='number')D.srvEnglishRotationIdx=0;
-  const mode=ENGLISH_ROTATION_MODES[D.srvEnglishRotationIdx%20];
-  D.srvEnglishRotationIdx=(D.srvEnglishRotationIdx+1)%20;
-  if(typeof saveAppState==='function')saveAppState();
-  return mode;
+  return SRV_STUDIO_MODE;
 }
 function _srvEnglishPeekNextMode(){
-  if(typeof D.srvEnglishRotationIdx!=='number')D.srvEnglishRotationIdx=0;
-  return ENGLISH_ROTATION_MODES[D.srvEnglishRotationIdx%20];
+  return SRV_STUDIO_MODE;
 }
 
 function _srvFarsiEngineConfig(){

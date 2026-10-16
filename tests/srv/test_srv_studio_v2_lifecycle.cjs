@@ -121,9 +121,9 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
   }
   {
     const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx } = E;
-    ctx.D.tasks = [task(5)]; ctx.D.packages = [pkgOf('p1', 5)]; vm.runInContext("_srvEnglishSetStage('5','review')", ctx);
+    ctx.D.tasks = [task(5, { contentType: 'Long', contentFormat: 'long', isLong: true })]; ctx.D.packages = [pkgOf('p1', 5)]; vm.runInContext("_srvEnglishSetStage('5','review')", ctx);
     const v2 = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
-    ok('V2 Review shows the SRV Studio V2 quality panel (Checkpoint B) instead of the V1 pop scorer', /SRV STUDIO V2 QUALITY · SHORT/.test(v2) && !/Kiss Fixation|Commercial Potential/.test(v2));
+    ok('V2 Review shows the SRV Studio V2 quality panel (Checkpoint B) instead of the V1 pop scorer', /SRV STUDIO V2 QUALITY · LONG/.test(v2) && !/Kiss Fixation|Commercial Potential/.test(v2));
   }
 
   // ── 3. Identity (srvUid) ──
@@ -177,11 +177,14 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const html = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
     const fields = ['title', 'lyrics', 'shortLyrics', 'sunoPrompt', 'shortSunoPrompt'];
     // SRV-STUDIO-V2-021: a Short shows only its own lyrics + Suno prompt (plus title and the editable caption).
-    ok('Review (Short): only title, Short lyrics, Short Suno prompt and the caption are editable boxes', ['title', 'shortLyrics', 'shortSunoPrompt', 'captionYT'].every((k) => html.includes('id="srv2f_p1_' + k + '"')) && !html.includes('id="srv2f_p1_lyrics"') && !html.includes('id="srv2f_p1_sunoPrompt"'));
-    ok('Review (Short): the Long lyrics and Long Suno prompt are not displayed at all', !/FULL LYRICS/.test(html) && !/SUNO STYLE PROMPT — FULL SONG/.test(html) && !html.includes('[HOOK]\nfull lyric') && !html.includes('full prompt'));
-    ok('Review: title is a text input, Short lyrics / Short prompt / caption are textareas', /<input type="text" id="srv2f_p1_title"/.test(html) && (html.match(/<textarea id="srv2f_p1_/g) || []).length === 3);
-    ok('Review: Short task marks short lyrics + short prompt as USED IN BUILD', /SHORT LYRICS<span[^>]*>USED IN BUILD/.test(html) && /SUNO STYLE PROMPT — SHORT<span[^>]*>USED IN BUILD/.test(html) && !/FULL LYRICS<span[^>]*>USED IN BUILD/.test(html));
-    ok('Review: Approve / Regenerate / Cancel present', /Save &amp; Approve Package → Build/.test(html) && /_srvEnglishV2RegeneratePackage/.test(html) && /_srvEnglishV2CancelTask/.test(html));
+    // 026: SRV Studio is Long-only — an unfinished Short in Review is retired on its first render (nothing editable).
+    ok('Review (026): an unfinished Short task is retired on first render — no editable fields, Long-only message', !/id="srv2f_p1_/.test(html) && /SRV Studio now produces <strong[^>]*>Emotional Deep House Long<\/strong> videos only/.test(html) && ctx.D.tasks[0].status === 'done' && !!ctx.D.tasks[0].srvRetired);
+    const lh = await (async () => { const L = makeEnv({ flag: 'true' }); await L.settle(); L.ctx.D.tasks = [task(5, { contentType: 'Long', contentFormat: 'long', isLong: true })]; L.ctx.D.packages = [pkgOf('p1', 5)]; vm.runInContext("_srvEnglishSetStage('5','review')", L.ctx); return vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', L.ctx); })();
+    ok('Review (Long): only title, full lyrics, full-song Suno prompt and the caption are editable boxes', ['title', 'lyrics', 'sunoPrompt', 'captionYT'].every((k) => lh.includes('id="srv2f_p1_' + k + '"')) && !lh.includes('id="srv2f_p1_shortLyrics"') && !lh.includes('id="srv2f_p1_shortSunoPrompt"'));
+    ok('Review (Long): Short lyrics and the Short Suno prompt are not displayed at all', !/SHORT LYRICS|SUNO STYLE PROMPT — SHORT/.test(lh) && !lh.includes('short lyric') && !lh.includes('short prompt'));
+    ok('Review: title is a text input, full lyrics / full prompt / caption are textareas', /<input type="text" id="srv2f_p1_title"/.test(lh) && (lh.match(/<textarea id="srv2f_p1_/g) || []).length === 3);
+    ok('Review: Long task marks full lyrics + full-song prompt as USED IN BUILD', /FULL LYRICS<span[^>]*>USED IN BUILD/.test(lh) && /SUNO STYLE PROMPT — FULL SONG<span[^>]*>USED IN BUILD/.test(lh));
+    ok('Review: Approve / Regenerate / Cancel present', /Save &amp; Approve Package → Build/.test(lh) && /_srvEnglishV2RegeneratePackage/.test(lh) && /_srvEnglishV2CancelTask/.test(lh));
     ok('Review: HTML in a field is escaped', (() => { p.title = '<b>x</b>'; const h2 = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx); p.title = 'Stay Tonight'; return !h2.includes('<b>x</b>'); })());
     fields.forEach((k) => el('srv2f_p1_' + k, p[k])); fields.forEach((k) => el('srv2st_p1_' + k)); el('srv2capst_p1'); el('srv2cap_p1'); el('srv2tags_p1'); el('srv2approve_st_p1');
     els.srv2f_p1_title.value = '  Night   Drive Home ';
@@ -255,19 +258,20 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
   // ── 7. Generate / regenerate bind the new package to the task ──
   {
     const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx, calls } = E;
-    ctx.D.tasks = [task(5, { isTest: true })];
+    const LONG = { contentType: 'Long', contentFormat: 'long', isLong: true }; // 026: SRV Studio generates Long tasks only
+    ctx.D.tasks = [task(5, { isTest: true, ...LONG })];
     await vm.runInContext("vaGeneratePackage('5')", ctx); await E.settle();
     const g = ctx.D.packages[0];
     ok('Generate: package stamped with srvTaskUid and isTest, task moved to Review', g && g.srvTaskUid === 'srve_' + (T0 + 5000) + '_5' && g.isTest === true && vm.runInContext("_srvEnglishGetStage('5')", ctx) === 'review');
     ok('Generate: stamped package saved to the database', calls.upserts.some((r) => JSON.parse(r.full_package).srvTaskUid === g.srvTaskUid));
     await vm.runInContext(`_srvEnglishV2RegeneratePackage('5','${g.id}')`, ctx); await E.settle();
     ok('Regenerate: old package replaced by a new stamped one', ctx.D.packages.length === 1 && ctx.D.packages[0].id !== g.id && ctx.D.packages[0].srvTaskUid === g.srvTaskUid && vm.runInContext("_srvEnglishPkgForTask(D.tasks[0])", ctx) === ctx.D.packages[0]);
-    ctx.D.tasks = [{ id: 7, engine: 'NextWave', createdAt: T0 }, task(7)];
+    ctx.D.tasks = [{ id: 7, engine: 'NextWave', createdAt: T0 }, task(7, LONG)];
     const before = calls.generate;
     await vm.runInContext("vaGeneratePackage('7')", ctx);
     ok('Generate: refused when the numeric id is shared with another engine\'s task', calls.generate === before && calls.alerts.some((a) => /shared with another engine/.test(a)));
     ctx.generatePackage = async () => { throw new Error('model timeout'); };
-    ctx.D.tasks = [task(5)]; const keep = pkgOf('p_keep', 5, { srvTaskUid: 'srve_' + (T0 + 5000) + '_5' }); ctx.D.packages = [keep];
+    ctx.D.tasks = [task(5, LONG)]; const keep = pkgOf('p_keep', 5, { srvTaskUid: 'srve_' + (T0 + 5000) + '_5' }); ctx.D.packages = [keep];
     vm.runInContext("_srvEnglishSetStage('5','review')", ctx);
     await vm.runInContext("_srvEnglishV2RegeneratePackage('5','p_keep')", ctx);
     ok('Regenerate failure: the previous package is kept and the task stays in Review', ctx.D.packages.includes(keep) && vm.runInContext("_srvEnglishGetStage('5')", ctx) === 'review');
@@ -306,7 +310,9 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ctx.D.tasks = [task(5)]; const p = pkgOf('p1', 5, { title: 'The part you left behind', lyrics: 'The part you left behind\nStill reaches out for you', shortLyrics: 'Touch my hand first', captionYT: 'I need to feel you choose me', _srvV2Edits: { title: '2026-10-16T01:15:40.281Z', lyrics: '2026-10-16T01:15:41.838Z' } });
     ctx.D.packages = [p]; vm.runInContext("_srvEnglishSetStage('5','review')", ctx);
     const html = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
-    ok('021 live case: Review explains the Full Lyrics edit and offers to copy it into Short Lyrics', /FULL LYRICS<\/strong> \(Long content\) was edited on 2026-10-16 01:15 UTC/.test(html) && /_srvEnglishV2CopyFromOther\('p1','lyrics','shortLyrics'\)/.test(html));
+    // 026: the Short itself is retired on render; the other-format notice is checked on the Long analog.
+    const lnh = await (async () => { const L = makeEnv({ flag: 'true' }); await L.settle(); L.ctx.D.tasks = [task(5, { contentType: 'Long', contentFormat: 'long', isLong: true })]; L.ctx.D.packages = [pkgOf('p1', 5, { shortLyrics: 'edited short text', _srvV2Edits: { shortLyrics: '2026-10-16T01:15:41.838Z' } })]; vm.runInContext("_srvEnglishSetStage('5','review')", L.ctx); return vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', L.ctx); })();
+    ok('021 other-format edit: Review explains it and offers to copy it into this format (Long analog)', /SHORT LYRICS<\/strong> \(Short content\) was edited on 2026-10-16 01:15 UTC/.test(lnh) && /_srvEnglishV2CopyFromOther\('p1','shortLyrics','lyrics'\)/.test(lnh));
     ok('021 live case: the stale caption is detected', vm.runInContext('_srvEnglishV2CaptionState(D.tasks[0],D.packages[0]).fresh', ctx) === false);
     fieldEls(E, p, SHORT_KEYS);
     vm.runInContext("_srvEnglishV2CopyFromOther('p1','lyrics','shortLyrics')", ctx);
@@ -482,38 +488,69 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('022 Build refuses content changed after approval', /changed after approval/.test(els['srv-lc-build-status-p1'].textContent));
   }
 
-  // ── 12. SRV-STUDIO-V2-023: VA Long/Short selection + publish routing ──
+  // ── 12. SRV-STUDIO-V2-026: one production line — Female · Emotional Deep House · Long ──
   {
     const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx, calls } = E;
-    ctx.currentUser = { id: 'va' };
-    const t = task(140, { name: 'SRV English — Female — Romantic · Short (auto-created)' }); ctx.D.tasks = [t];
-    vm.runInContext("_srvEnglishSetStage('140','generate')", ctx);
-    const html = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
-    ok('023 Generate (V2): the VA sees a Long/Short selector before generating', /id="srv2fmt_140"/.test(html) && /<option value="Short"/.test(html) && /<option value="Long"/.test(html) && /vaGeneratePackage\('140'\)/.test(html));
-    ok('023 VA selects Long: format fields, task name and the original are recorded; change logged', vm.runInContext("_srvEnglishV2SetFormat('140','Long')", ctx) === true && t.isLong === true && t.contentType === 'Long' && t.contentFormat === 'long' && t.name === 'SRV English — Female — Romantic · Long (auto-created)' && t.vaOriginal.format === 'Short' && t.cadenceSlotFormat === 'short' && t.vaOverrides[0].by === 'va');
-    ok('023 Long task: Build/Review use ONLY the Long lyrics and Long Suno prompt', JSON.stringify(vm.runInContext("_srvEnglishV2BuildKeys(D.tasks[0],{})", ctx)) === JSON.stringify({ isLong: true, lyrics: 'lyrics', sunoPrompt: 'sunoPrompt', otherLyrics: 'shortLyrics', otherSunoPrompt: 'shortSunoPrompt' }));
-    ok('023 Auto returns to the format the task was created with', vm.runInContext("_srvEnglishV2SetFormat('140','Auto')", ctx) === true && t.isLong === false && t.contentType === 'Short Video' && /· Short/.test(t.name));
-    vm.runInContext("_srvEnglishV2SetFormat('140','Long')", ctx);
-    await vm.runInContext("vaGeneratePackage('140')", ctx); await E.settle();
-    ok('023 format is locked once the package is generated', vm.runInContext("_srvEnglishGetStage('140')", ctx) === 'review' && vm.runInContext("_srvEnglishV2SetFormat('140','Short')", ctx) === false && t.isLong === true);
-    const rv = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
-    ok('023 the generated Long task reviews Long content only', /id="srv2f_pkg_gen_1_lyrics"/.test(rv) && !/id="srv2f_pkg_gen_1_shortLyrics"/.test(rv) && /THIS BUILD WILL USE \(LONG\)|FULL LYRICS/.test(rv));
+    const LONG = { contentType: 'Long', contentFormat: 'long', isLong: true };
+    const tl = task(150, { ...LONG, name: 'SRV English — Female — Romantic · Long', mood: 'Female — Romantic' });
+    const ts = task(151, { name: 'SRV English — Female — Emotional · Short (auto-created)', mood: 'Female — Emotional' });
+    ctx.D.tasks = [tl, ts];
+    vm.runInContext("_srvEnglishSetStage('150','generate')", ctx); vm.runInContext("_srvEnglishSetStage('151','generate')", ctx);
+    const hl = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
+    ok('026 Generate (Long): one fixed line, no mood or format selection', /SRV Studio — Female Emotional Deep House — Long/.test(hl) && !/<select/.test(hl) && !/Romantic|Happy/.test(hl.replace(/Female — Romantic · Long/, '')) && /vaGeneratePackage\('150'\)/.test(hl));
+    ok('026 the 023 format dropdown is gone from the app; the kept function name refuses every change', !/srv2fmt_|onchange="_srvEnglishV2SetFormat/.test(H) && vm.runInContext("_srvEnglishV2SetFormat('150','Short')", ctx) === false && tl.isLong === true);
+    await vm.runInContext("vaGeneratePackage('150')", ctx); await E.settle();
+    ok('026 a Long task created with another mood is generated as Emotional: mood, name and a logged change; format untouched', tl.mood === 'Female — Emotional' && tl.name === 'SRV English — Female — Emotional · Long' && tl.vaOverrides.some((o) => o.field === 'mood' && o.from === 'Female — Romantic') && tl.isLong === true && vm.runInContext("_srvEnglishGetStage('150')", ctx) === 'review');
+    const n0 = calls.generate;
+    await vm.runInContext("vaGeneratePackage('151')", ctx); await E.settle();
+    ok('026 a Short task is never generated and never relabelled as Long', calls.generate === n0 && ts.isLong !== true && ts.contentType !== 'Long' && calls.alerts.some((a) => /Long videos only/.test(a)));
   }
   {
-    const VA = JSON.stringify({ enabled: true, maxUploads: 2, perKind: { long: 1, short: 1 }, expires: new Date(Date.now() + 5 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
-    const t137 = task(137, { contentType: 'Long', isLong: true }); const t140 = task(140);
+    // Retire unfinished Shorts once; uploaded/completed Shorts and every Long are untouched; packages kept.
+    const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx } = E;
+    const LONG = { contentType: 'Long', contentFormat: 'long', isLong: true };
+    const s137 = task(137, { status: 'generating', contentType: 'Short Video', contentFormat: 'short', isLong: false }); // switched to Short, built, refused at publish
+    const s143 = task(143, { status: 'assigned', contentType: 'Short', contentFormat: 'short' });
+    const s133 = task(133, { status: 'done' });
+    const s160 = task(160, { status: 'review' }); // unfinished Short whose package was uploaded → keep
+    const l138 = task(138, { ...LONG, status: 'assigned' });
+    ctx.D.tasks = [s137, s143, s133, s160, l138];
+    const p137 = pkgOf('pkg_137', 137, { srvRender: { kind: 'short' }, _srvShortVideoUrl: 'https://x/s.mp4' }); const p160 = pkgOf('pkg_160', 160, { srvVa: { youtubeVideoId: 'abc' } });
+    ctx.D.packages = [p137, p160];
+    vm.runInContext("_srvEnglishSetStage('137','publish')", ctx);
+    vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[4])', ctx);
+    ok('026 unfinished Shorts (#137 built, #143 not started) are retired: done, reason recorded, stage removed', s137.status === 'done' && s137.srvRetired && /Long-only/.test(s137.srvRetired.reason) && s137.srvRetired.fromStage === 'publish' && s137.srvRetired.packageId === 'pkg_137' && s143.status === 'done' && !!s143.srvRetired && vm.runInContext("_srvEnglishGetStage('137')", ctx) === 'generate');
+    ok('026 retiring keeps the package and its media, and never relabels the task', ctx.D.packages.includes(p137) && p137._srvShortVideoUrl === 'https://x/s.mp4' && s137.contentType === 'Short Video' && s137.isLong === false);
+    ok('026 completed Shorts, Shorts with an upload record, and Long tasks are untouched', s133.status === 'done' && !s133.srvRetired && s160.status === 'review' && !s160.srvRetired && l138.status === 'assigned' && !l138.srvRetired);
+  }
+  {
+    // Rotation and task creation: Emotional + Long only (SRV English); the Farsi helpers are not touched.
+    const ctx = { D: { tasks: [], srvLifecycleStages: {} }, Date, Math, Number, String, Array, Object, JSON, saveAppState() {}, saveData() {}, renderTab() {}, window: { scrollTo() {} }, document: { getElementById: () => ({}) }, alert() {},
+      ENGINES_CONFIG: [{ id: 'srv_english', name: 'SRV English' }], _getEngineState: () => 'test', _srvEnglishPlaylistCategory: () => 'x', _srvEnglishNextPublishDate: () => '2026-10-23', renderVAOperatorMode: () => '' };
+    vm.createContext(ctx);
+    const cst = (name) => { const a = H.indexOf('const ' + name + '='); return H.slice(a, H.indexOf(';\n', a) + 2); };
+    vm.runInContext([cst('SRV_STUDIO_MODE'), top(H, '_srvEnglishNextMode'), top(H, '_srvEnglishPeekNextMode'), top(H, '_srvEnglishNextFormat'), top(H, '_srvEnglishPeekFormat'), top(H, 'vaStartEnglishProductionTask')].join('\n'), ctx);
+    const r = [0, 1, 2, 3, 4].map(() => vm.runInContext('_srvEnglishNextMode()+"/"+_srvEnglishNextFormat()', ctx));
+    ok('026 rotation: every next task is Female — Emotional / long (no Romantic, Happy or Short)', r.every((x) => x === 'Female — Emotional/long') && vm.runInContext('_srvEnglishPeekNextMode()+"/"+_srvEnglishPeekFormat()', ctx) === 'Female — Emotional/long');
+    vm.runInContext('vaStartEnglishProductionTask()', ctx);
+    const t = ctx.D.tasks[0];
+    ok('026 the VA one-click production task is Female · Emotional · Long', t && t.mood === 'Female — Emotional' && t.isLong === true && t.contentType === 'Long' && t.contentFormat === 'long' && /Female — Emotional · Long \[TEST\]$/.test(t.name));
+    const cad = top(H, 'autoCreateCadenceTasksForCurrentWeek');
+    ok('026 cadence: SRV English slots are created as Long Emotional (slot keeps its cadence format); other engines unchanged', /if\(cfg\.id==='srv_english'&&cfg\.productionFormat==='long'\)\{\n\s*Object\.assign\(task,\{name:cfg\.name\+' — '\+\(mode\|\|'Female — Emotional'\)\+' · Long \(auto-created\)',contentType:'Long',contentFormat:'long',isLong:true,cadenceSlotFormat:'short'\}\);/.test(cad) && /modes:\["Female — Emotional"\]/.test(H) && /productionFormat:'long'/.test(H));
+  }
+  {
+    const VA = JSON.stringify({ enabled: true, maxUploads: 2, perKind: { long: 2, short: 0 }, expires: new Date(Date.now() + 5 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const t137 = task(137, { contentType: 'Long', isLong: true }); const t140 = task(140, { contentType: 'Long', isLong: true });
     const pilotCfg = (uid) => JSON.stringify({ enabled: true, tasks: { long: uid, short: 'srve_1791661404055_133' }, maxUploads: 2, expires: new Date(Date.now() + 5 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
     const route = async (settings, ceo, t, kind) => { const E = makeEnv({ flag: 'true', settings }); await E.settle(); E.ctx.D.tasks = [t]; E.ctx._ceoGetSessionToken = () => (ceo ? 'tok' : null); return vm.runInContext(`_srvEnglishV2PublishRoute(D.tasks[0],'${kind}')`, E.ctx); };
     const uid137 = 'srve_' + t137.createdAt + '_137';
+    const sh = await route({ srv_studio_v2_va_allowance: VA }, true, task(141), 'short');
     const a = await route({ srv_studio_v2_pilot: pilotCfg(uid137) }, true, t137, 'long');
     const b = await route({ srv_studio_v2_pilot: pilotCfg(uid137) }, false, t137, 'long');
-    const c = await route({ srv_studio_v2_pilot: pilotCfg(uid137), srv_studio_v2_va_allowance: VA }, false, t137, 'long');
-    const d = await route({}, false, t140, 'short');
-    const e = await route({ srv_studio_v2_va_allowance: VA }, false, t140, 'short');
-    ok('023 routing: CEO + pilot task → CEO pilot', !!(a.pilot && a.pilot.kind === 'long'));
-    ok('023 routing: VA on a CEO pilot task without a VA allowance → blocked (never a silent [TEST] upload)', !!b.blocked && /only a signed-in CEO can publish it/.test(b.blocked));
-    ok('023 routing: VA with an active VA allowance → VA allowance (pilot ledger not used)', !!(c.va && !c.pilot) && !!(e.va && !e.pilot));
-    ok('023 routing: no allowance and no pilot → ordinary path (Publish asks before any [TEST] upload)', !d.pilot && !d.va && !d.blocked && /if\(!pilot&&!va&&test&&!confirm\(/.test(top(H, '_srvEnglishV2Publish')));
+    const e = await route({ srv_studio_v2_va_allowance: VA }, false, t140, 'long');
+    ok('026 routing: a Short is never uploaded, whoever publishes and whatever allowance exists', !!sh.blocked && /Long videos only/.test(sh.blocked));
+    ok('026 routing: CEO + pilot Long → CEO pilot; VA on a CEO pilot task without a VA allowance → blocked', !!(a.pilot && a.pilot.kind === 'long') && !!b.blocked);
+    ok('026 routing: VA Long under the Long-only VA allowance → VA path', !!(e.va && !e.pilot));
     ok('023 VA path posts with the VA/CEO session to the VA action; pilot path keeps the CEO-only call', /_publishAuthedFetch\('\/api\/ops\?action=srv_studio_v2_va_upload'/.test(top(H, '_srvEnglishV2Publish')) && /_ceoAuthedFetch\('\/api\/ops\?action=srv_studio_v2_pilot_upload'/.test(top(H, '_srvEnglishV2Publish')));
   }
 
