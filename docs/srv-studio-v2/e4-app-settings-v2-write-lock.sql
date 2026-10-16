@@ -1,6 +1,7 @@
 -- SRV Studio V2 — Checkpoint E4 (order SRV-STUDIO-V2-016): write-lock the SRV Studio V2 control keys.
 --
--- STATUS: PROPOSED. NOT APPLIED. Requires separate CEO authorization (app_settings is a shared table).
+-- STATUS: APPLIED to production 2026-10-15 under CEO-approved order SRV-STUDIO-V2-018 (M1).
+--   Supabase migration 20261015211556 srv_studio_v2_app_settings_write_lock. Evidence: m1-implementation-record.md
 --
 -- What it does: the public roles (anon = the key embedded in the web app, authenticated) can no longer
 -- INSERT, UPDATE or DELETE any app_settings row whose key starts with 'srv_studio_v2_'
