@@ -67,7 +67,7 @@ const L = (w) => JSON.parse(w.table[P.SRV2_VA_LEDGER_KEY] || '{"entries":[]}').e
 }
 {
   const bad = (o) => P.srv2ParseVaConfig(JSON.stringify({ enabled: true, maxUploads: 2, perKind: { long: 1, short: 1 }, expires: iso(NOW + 86400000), channelId: CH, ...o }), NOW).error;
-  ok('VA config: ceiling ≤ 2, ≤ 1 per format, SRV Studio channel, expiry within 14 days', bad({ maxUploads: 3 }) === 'va_allowance_max_invalid' && bad({ perKind: { long: 2, short: 1 } }) === 'va_allowance_per_kind_invalid' && bad({ channelId: 'UC_x' }) === 'va_allowance_channel_invalid' && bad({ expires: iso(NOW + 20 * 86400000) }) === 'va_allowance_expiry_too_far' && bad({ enabled: false }) === 'va_allowance_disabled' && !bad({}));
+  ok('VA config: ceiling ≤ 2, per-format quota ≤ ceiling, SRV Studio channel, expiry within 14 days', bad({ maxUploads: 3 }) === 'va_allowance_max_invalid' && bad({ perKind: { long: 3, short: 0 } }) === 'va_allowance_per_kind_invalid' && bad({ perKind: { long: 0, short: 0 } }) === 'va_allowance_per_kind_invalid' && !bad({ perKind: { long: 2, short: 0 } }) && bad({ channelId: 'UC_x' }) === 'va_allowance_channel_invalid' && bad({ expires: iso(NOW + 20 * 86400000) }) === 'va_allowance_expiry_too_far' && bad({ enabled: false }) === 'va_allowance_disabled' && !bad({}));
 }
 {
   // The pilot is unchanged by the shared runner: still its own key/ledger/tag, one Long slot left.
@@ -76,6 +76,20 @@ const L = (w) => JSON.parse(w.table[P.SRV2_VA_LEDGER_KEY] || '{"entries":[]}').e
   ok('Pilot unchanged: Long #137 uses the remaining pilot slot, recorded in the pilot ledger only', r.status === 200 && r.json.pilot === true && JSON.parse(w.table[P.SRV2_PILOT_LEDGER_KEY]).entries.length === 2 && !(P.SRV2_VA_LEDGER_KEY in w.table));
   const r2 = await P.srv2RunPilotUpload(w.deps, req('srve_1791661404055_133', 'short'), { supabaseUrl: SB });
   ok('Pilot unchanged: the already-uploaded Short #133 is refused (ledger not reset)', r2.json.error === 'task_already_uploaded_or_in_progress');
+}
+
+// ── 026: Long-only VA allowance on the existing ledger (one Long already uploaded) ──
+{
+  const LONG_ONLY = JSON.stringify({ enabled: true, maxUploads: 2, perKind: { long: 2, short: 0 }, expires: iso(NOW + 6 * 86400000), channelId: CH });
+  const prior = JSON.stringify({ rev: 2, entries: [{ id: 'va_1', taskUid: 'srve_1791661404055_136', kind: 'long', status: 'uploaded', youtubeVideoId: '9-GE-FEAUNM', channelId: CH, by: 'operator' }] });
+  const w = world({ [P.SRV2_VA_KEY]: LONG_ONLY, [P.SRV2_VA_LEDGER_KEY]: prior });
+  const sh = await P.srv2RunVaUpload(w.deps, req('srve_1792170000000_150', 'short'), { supabaseUrl: SB });
+  const l1 = await P.srv2RunVaUpload(w.deps, req('srve_1792170000000_151', 'long'), { supabaseUrl: SB });
+  const l2 = await P.srv2RunVaUpload(w.deps, req('srve_1792170000000_152', 'long'), { supabaseUrl: SB });
+  const entries = L(w);
+  ok('026 VA allowance: a Short is refused (format not allowed) and nothing is uploaded for it', sh.json.error === 'va_allowance_format_not_allowed' && !w.uploads.some((u) => u.title.includes('_150') || /150/.test(u.title)));
+  ok('026 VA allowance: exactly ONE new Long is allowed on top of the existing upload; a further Long is refused', l1.status === 200 && l2.json.error === 'va_allowance_limit_reached' && w.uploads.length === 1);
+  ok('026 the existing ledger entry (#136, 9-GE-FEAUNM) is kept — counters are not reset', entries.length === 2 && entries[0].youtubeVideoId === '9-GE-FEAUNM' && entries[1].kind === 'long' && entries[1].status === 'uploaded');
 }
 
 // ── One-time title correction ──

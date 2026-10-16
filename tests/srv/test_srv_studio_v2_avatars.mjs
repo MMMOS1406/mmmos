@@ -98,7 +98,7 @@ function makeEnv() {
 {
   const E = makeEnv(); await E.settle(); const { ctx } = E;
   const T0 = Date.UTC(2026, 9, 1);
-  ctx.D.tasks = [{ id: 1, engine: 'SRV English', mood: 'Female — Emotional', contentType: 'Short Video', createdAt: T0 + 1, status: 'assigned' }, { id: 2, engine: 'SRV English', mood: 'Female — Emotional', contentType: 'Long', contentFormat: 'long', isLong: true, createdAt: T0 + 2, status: 'assigned' }];
+  ctx.D.tasks = [{ id: 1, engine: 'SRV English', mood: 'Female — Emotional', contentType: 'Long', contentFormat: 'long', isLong: true, createdAt: T0 + 1, status: 'assigned' }, /* 026: Long only */ { id: 2, engine: 'SRV English', mood: 'Female — Emotional', contentType: 'Long', contentFormat: 'long', isLong: true, createdAt: T0 + 2, status: 'assigned' }];
   await vm.runInContext("vaGeneratePackage('1')", ctx); await E.settle();
   const p1 = ctx.D.packages[0];
   ok('Generate: the new package gets an avatar from the rotation, mood-suited', p1.srvAvatar && A.srv2AvatarById(p1.srvAvatar.id).moods.includes('emotional') && p1.srvAvatar.by === 'rotation');
@@ -146,8 +146,9 @@ function makeEnv() {
 {
   const diffFiles = execSync('git diff --name-only db766dd6ed3c561bdb5ea3577ab4e1bf68c98912 -- public/assets/avatars public/assets/srv-farsi-avatars', { cwd: repo }).toString().trim();
   ok('V1 SRV English avatars (public/assets/avatars) and SRV Farsi avatar files unchanged vs main', diffFiles === '');
-  const cfg = (s) => s.slice(s.indexOf('{id:"srv_english"'), s.indexOf('{id:"nextwave"'));
-  ok('V1 avatarLibrary config (ENGINES_CONFIG.srv_english) unchanged', cfg(H) === cfg(BASE_H));
+  // 026 changed SRV English's modes/hint/productionFormat (Long-only, Emotional-only); the V1 avatar library itself must not change.
+  const cfg = (s) => { const b = s.slice(s.indexOf('{id:"srv_english"'), s.indexOf('{id:"nextwave"')); return b.slice(b.indexOf('avatarLibrary:'), b.indexOf('lifecycle:')); };
+  ok('V1 avatarLibrary config (ENGINES_CONFIG.srv_english) unchanged', cfg(H).length > 200 && cfg(H) === cfg(BASE_H));
   const farsiCfg = (s) => s.slice(s.indexOf('{id:"srv_farsi"'), s.indexOf('{id:"srv_english"'));
   ok('SRV Farsi avatar pools config unchanged', farsiCfg(H) === farsiCfg(BASE_H));
   const nested = (s, sig) => { const i = s.indexOf(sig); return s.slice(i, s.indexOf('\n    }\n', i)); };

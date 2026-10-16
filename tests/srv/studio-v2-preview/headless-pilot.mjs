@@ -44,20 +44,22 @@ async function buildAndPublish(id, label) {
 const L = await buildAndPublish('203', 'long');
 ok('Approve preview announces the pilot upload with the normal title', /PILOT UPLOAD \(LONG/.test(L.meta) && /Title \(\d+\/100\): Leave the Engine Running - Emotional Deep House \| Night Drive SRV Studio/.test(L.meta) && !/\[TEST\]/.test(L.meta), L.meta.split('\n').slice(0, 2));
 ok('Long pilot: Done, pilot record with YouTube id/time/channel, package still isTest', L.stage === 'done' && L.pkg.isTest === true && L.pkg.srvPilot && L.pkg.srvPilot.youtubeVideoId && L.pkg.srvPilot.channelId === 'UC0nzWQX6AaUqlF5FozNpWPg' && L.pkg.srvPublish.pilot === true, L.pkg.srvPilot);
-const S = await buildAndPublish('204', 'short');
-ok('Short pilot: Done with its own pilot record', S.stage === 'done' && S.pkg.srvPilot && S.pkg.srvPilot.kind === 'short' && S.pkg.isTest === true, S.pkg.srvPilot);
+// SRV-STUDIO-V2-026: SRV Studio is Long-only — the Short pilot task #204 is retired on load and never uploaded.
+const S = await page.evaluate(() => { const t = _srvEnglishTaskById('204'); const p = _srvEnglishV2PkgForTask(t); return { status: t.status, retired: t.srvRetired || null, isLong: _srvEnglishV2TaskIsLong(t), pkg: p ? p.id : null }; });
+ok('026: the unfinished Short #204 is retired (done, reason recorded), not relabelled, package kept', S.status === 'done' && S.retired && /Long-only/.test(S.retired.reason) && S.isLong === false, S);
+if (S.pkg) { await page.evaluate((p) => { const st = document.createElement('div'); st.id = 'srv-lc-publish-status-' + p; document.body.appendChild(st); }, S.pkg); await page.evaluate((p) => _srvEnglishV2Publish(p, '204'), S.pkg); await sleep(1200); }
 const dry = (await (await fetch(srv.origin + '/__stub/dryrun')).json()).dryRuns.filter((d) => d.action === 'youtube_upload_video');
-ok('Uploads: two, normal titles, private, publishAt null, AI disclosure, SRV English engine', dry.length === 2 && dry.every((d) => !/\[TEST\]/.test(d.payload.title) && d.payload.privacyStatus === 'private' && d.payload.publishAt === null && d.payload.containsSyntheticMedia === true && d.payload.engine === 'SRV English'), dry.map((d) => d.payload.title));
-// a repeat publish of #204 and an unlisted #205
-await page.evaluate((i) => _srvEnglishV2SetStage(i, 'publish'), '204');
-const pkg204 = S.pkgId; await page.evaluate((p, i) => _srvEnglishV2Publish(p, i), pkg204, '204'); await sleep(1500);
-const rep = await page.evaluate((p) => D.packages.find((q) => q.id === p).srvPilotAttempt, pkg204);
-ok('Repeat publish of an already-uploaded pilot task is refused by the server (no new upload)', rep && rep.error === 'task_already_uploaded_or_in_progress' && (await (await fetch(srv.origin + '/__stub/dryrun')).json()).dryRuns.filter((d) => d.action === 'youtube_upload_video').length === 2, rep);
+ok('Uploads: one (the Long), normal title, private, publishAt null, AI disclosure, SRV English engine — no Short upload', dry.length === 1 && dry.every((d) => !/\[TEST\]/.test(d.payload.title) && d.payload.privacyStatus === 'private' && d.payload.publishAt === null && d.payload.containsSyntheticMedia === true && d.payload.engine === 'SRV English'), dry.map((d) => d.payload.title));
+// a repeat publish of the uploaded Long #203 and an unlisted Long #205
+await page.evaluate((i) => _srvEnglishV2SetStage(i, 'publish'), '203');
+await page.evaluate((p, i) => _srvEnglishV2Publish(p, i), L.pkgId, '203'); await sleep(1500);
+const rep = await page.evaluate((p) => D.packages.find((q) => q.id === p).srvPilotAttempt, L.pkgId);
+ok('Repeat publish of an already-uploaded pilot task is refused by the server (no new upload)', rep && rep.error === 'task_already_uploaded_or_in_progress' && (await (await fetch(srv.origin + '/__stub/dryrun')).json()).dryRuns.filter((d) => d.action === 'youtube_upload_video').length === 1, rep);
 const U = await buildAndPublish('205', 'unlisted');
 const dry2 = (await (await fetch(srv.origin + '/__stub/dryrun')).json()).dryRuns.filter((d) => d.action === 'youtube_upload_video');
-ok('Unlisted task #205 still publishes as ordinary TEST ([TEST] title, private, unscheduled)', U.stage === 'done' && !U.pkg.srvPilot && dry2.length === 3 && /^\[TEST\] /.test(dry2[2].payload.title) && dry2[2].payload.publishAt === null);
+ok('Unlisted Long #205 still publishes as ordinary TEST ([TEST] title, private, unscheduled)', U.stage === 'done' && !U.pkg.srvPilot && dry2.length === 2 && /^\[TEST\] /.test(dry2[1].payload.title) && dry2[1].payload.publishAt === null);
 const pilot = await (await fetch(srv.origin + '/__stub/pilot')).json();
-ok('Ledger: exactly two "uploaded" entries (Long #203, Short #204) with ids and timestamps', pilot.ledger && pilot.ledger.entries.filter((e) => e.status === 'uploaded').length === 2 && pilot.ledger.entries.every((e) => e.status !== 'uploaded' || (e.youtubeVideoId && e.uploadedAt && e.claimedAt)), pilot.ledger && pilot.ledger.entries.map((e) => [e.kind, e.status, e.youtubeVideoId]));
+ok('Ledger: exactly one "uploaded" entry (Long #203) with ids and timestamps', pilot.ledger && pilot.ledger.entries.filter((e) => e.status === 'uploaded').length === 1 && pilot.ledger.entries.every((e) => e.status !== 'uploaded' || (e.youtubeVideoId && e.uploadedAt && e.claimedAt && e.kind === 'long')), pilot.ledger && pilot.ledger.entries);
 const after = await page.evaluate(() => ({ slots: JSON.stringify(D._publishSlots || {}), engine: _getEngineState('SRV English') }));
 ok('Zero publishing slots taken; the SRV English engine is still in TEST', after.slots === slots0 && after.engine === 'test', after);
 ok('No page errors; no production requests', errors.length === 0 && srv.productionHits === 0, errors.slice(0, 2));
