@@ -16257,23 +16257,48 @@ async function _srvEnglishV2TitleConflict(pkg){
   }catch(_){return null;}
 }
 const _srvEnglishV2Same=(a,b)=>JSON.stringify(a===undefined?null:a)===JSON.stringify(b===undefined?null:b);
-// Writes the package and verifies the listed keys came back unchanged. Resolves { ok, reason, conflict?, keys? }.
+// SRV-STUDIO-V2-025 — V2 saves of one package run one at a time (title, lyrics, caption, approval…). Before this,
+// a lyrics Save pressed while the title Save was still writing/reading back made the title's read-back compare
+// against memory that already held the lyrics edit, reported a false mismatch on _srvV2Edits, and rolled memory
+// back over data that had in fact been saved.
+const _srvEnglishV2SerialQ={};
+function _srvEnglishV2Serial(pkgId,fn){
+  const k=String(pkgId||'');
+  const run=(_srvEnglishV2SerialQ[k]||Promise.resolve()).then(fn,fn);
+  _srvEnglishV2SerialQ[k]=run.catch(function(){});
+  return run;
+}
+// Edit stamps only ever gain keys: the database must hold at least the stamps this save wrote (newer extra stamps
+// written by a later save are fine).
+function _srvEnglishV2EditsContain(dbEdits,expected){
+  const d=dbEdits||{},e=expected||{};
+  return Object.keys(e).every(k=>d[k]===e[k]);
+}
+// Writes the package and verifies, against a snapshot of exactly what THIS save wrote, that the listed keys came back
+// from the database. Resolves { ok, reason, conflict?, keys?, rb? } — rb (the stored row) is present whenever the
+// write reached the database, so a caller never rolls memory back over saved data.
 async function _srvEnglishV2Persist(pkg,keys){
   keys=keys||[];
-  if(keys.includes('title')){
-    const c=await _srvEnglishV2TitleConflict(pkg);
-    if(c)return {ok:false,reason:'duplicate_title',conflict:c};
-  }
-  const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
-  if(ok!==true){
-    const c=keys.includes('title')?await _srvEnglishV2TitleConflict(pkg):null;
-    return c?{ok:false,reason:'duplicate_title',conflict:c}:{ok:false,reason:'save_failed'};
-  }
-  const rb=await _srvEnglishV2ReadBack(pkg.id);
-  if(!rb.ok)return {ok:false,reason:'readback_failed',detail:rb.error};
-  const bad=keys.filter(k=>!_srvEnglishV2Same(rb.pkg[k],pkg[k]));
-  if(String(rb.title||'')!==String(pkg.title||'')&&!bad.includes('title'))bad.push('title');
-  return bad.length?{ok:false,reason:'readback_mismatch',keys:bad}:{ok:true};
+  return _srvEnglishV2Serial(pkg.id,async function(){
+    if(keys.includes('title')){
+      const c=await _srvEnglishV2TitleConflict(pkg);
+      if(c)return {ok:false,reason:'duplicate_title',conflict:c};
+    }
+    const expect={};keys.forEach(k=>{expect[k]=pkg[k]===undefined?undefined:JSON.parse(JSON.stringify(pkg[k]));});
+    const ok=(typeof savePackageToSupabase==='function')?await _srvSavePackageQueued(pkg):false;
+    const rb=await _srvEnglishV2ReadBack(pkg.id);
+    if(ok!==true){
+      const c=keys.includes('title')?await _srvEnglishV2TitleConflict(pkg):null;
+      if(c)return {ok:false,reason:'duplicate_title',conflict:c};
+      // The write reported failure: if the row nevertheless holds this save's values, it did land.
+      if(!(rb.ok&&keys.every(k=>k==='_srvV2Edits'?_srvEnglishV2EditsContain(rb.pkg[k],expect[k]):_srvEnglishV2Same(rb.pkg[k],expect[k]))))
+        return {ok:false,reason:'save_failed',rb:rb.ok?rb:null};
+    }
+    if(!rb.ok)return {ok:false,reason:'readback_failed',detail:rb.error};
+    const bad=keys.filter(k=>k==='_srvV2Edits'?!_srvEnglishV2EditsContain(rb.pkg[k],expect[k]):!_srvEnglishV2Same(rb.pkg[k],expect[k]));
+    if(keys.includes('title')&&String(rb.title||'')!==String(expect.title||'')&&!bad.includes('title'))bad.push('title');
+    return bad.length?{ok:false,reason:'readback_mismatch',keys:bad,rb}:{ok:true,rb};
+  });
 }
 function _srvEnglishV2ConflictMovable(c){
   // A title can be released only from a draft that was cancelled (or whose task no longer exists) and was never
@@ -16327,7 +16352,7 @@ async function _srvEnglishV2VerifySaved(task,pkg,opts){
   const L=k=>SRV_STUDIO_V2_FIELD_LABEL[k]||k;
   const dirty=_srvEnglishV2DirtyKeys(pkg.id);
   if(dirty.length)return {ok:false,msg:'not saved: '+dirty.map(L).join(', ')+'.'};
-  const rb=await _srvEnglishV2ReadBack(pkg.id);
+  const rb=await _srvEnglishV2Serial(pkg.id,()=>_srvEnglishV2ReadBack(pkg.id)); // after any save still in flight
   if(!rb.ok)return {ok:false,msg:'the saved package could not be read back ('+rb.error+').'};
   const used=_srvEnglishV2BuildKeys(task,pkg);
   const keys=['title',used.lyrics,used.sunoPrompt,'captionYT','_srvV2Meta'].concat(opts.approved?['_srvV2Approved']:[]);
@@ -16381,7 +16406,19 @@ async function _srvEnglishV2SaveField(pkgId,key,opts){
   if(!res.ok){
     // The package keeps what the database holds (every preview and payload is built from saved content); the
     // typed text stays in the box and the field is recorded as NOT saved, which blocks Approve, Build and Publish.
-    if(pkg[key]===val){pkg[key]=prevVal;pkg._srvV2Edits=prevEdits;if(key==='captionYT'){pkg.captionYouTube=prevYouTube;pkg._srvV2Meta=prevMeta;}if(typeof saveAppState==='function')saveAppState();}
+    if(res.rb&&res.rb.ok!==false&&res.rb.pkg){
+      // The write reached the database: memory takes exactly what is stored for this field (never an older value).
+      const db=res.rb.pkg;
+      pkg[key]=db[key];
+      const ed=Object.assign({},pkg._srvV2Edits||{});if(db._srvV2Edits&&key in db._srvV2Edits)ed[key]=db._srvV2Edits[key];else delete ed[key];pkg._srvV2Edits=ed;
+      if(key==='captionYT'){pkg.captionYouTube=db.captionYouTube;pkg._srvV2Meta=db._srvV2Meta;}
+    }else if(pkg[key]===val){
+      // Nothing was stored: undo only this field and only its own edit stamp (other fields' edits stay).
+      pkg[key]=prevVal;
+      const ed=Object.assign({},pkg._srvV2Edits||{});if(prevEdits&&key in prevEdits)ed[key]=prevEdits[key];else delete ed[key];pkg._srvV2Edits=ed;
+      if(key==='captionYT'){pkg.captionYouTube=prevYouTube;pkg._srvV2Meta=prevMeta;}
+    }
+    if(typeof saveAppState==='function')saveAppState();
     const msg=_srvEnglishV2FailMsg(res);
     (_srvEnglishV2Unsaved[pkgId]=_srvEnglishV2Unsaved[pkgId]||{})[key]={value:val,msg,at:new Date().toISOString()};
     _srvEnglishV2SetFieldStatus(pkgId,key,'⚠ Not saved — '+msg,'#ef4444');

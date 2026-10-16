@@ -13,7 +13,7 @@ function slice(src, start, end) { const s = src.indexOf(start); if (s < 0) throw
 function top(src, name) { const m = src.match(new RegExp('\\n(async )?function ' + name + '\\(')); if (!m) throw new Error('missing ' + name); const s = m.index + 1; return src.slice(s, src.indexOf('\n}\n', s) + 2); }
 
 // ── sandbox ───────────────────────────────────────────────────────────────────
-function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, readbackLie = false, settings = {}, src = H } = {}) {
+function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, readbackLie = false, settings = {}, upsertDelayMs = 0, src = H } = {}) {
   const els = {};
   const el = (id, value = '') => (els[id] = { id, value, textContent: '', style: {}, disabled: false });
   const calls = { upserts: [], caption: [], generate: 0, renders: 0, alerts: [] };
@@ -24,6 +24,7 @@ function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, re
     if (u.includes('/rest/v1/app_settings?key=eq.srv_studio_v2_enabled')) return json(flag === null ? [] : [{ value: flag }]);
     if (u.includes('/rest/v1/packages?on_conflict')) {
       const row = JSON.parse(opt.body); calls.upserts.push(row);
+      if (upsertDelayMs) await new Promise((r) => setTimeout(r, upsertDelayMs)); // production package writes take seconds
       if (!saveOk) return { ok: false, status: 500, text: async () => 'boom', json: async () => ({}) };
       // production has UNIQUE (engine, title) on packages
       if (Object.values(table).some((r) => r.package_id !== row.package_id && r.engine === row.engine && r.title === row.title)) return { ok: false, status: 409, text: async () => '{"code":"23505","message":"duplicate key value violates unique constraint \\"packages_engine_title_unique\\""}', json: async () => ({}) };
@@ -514,6 +515,44 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('023 routing: VA with an active VA allowance → VA allowance (pilot ledger not used)', !!(c.va && !c.pilot) && !!(e.va && !e.pilot));
     ok('023 routing: no allowance and no pilot → ordinary path (Publish asks before any [TEST] upload)', !d.pilot && !d.va && !d.blocked && /if\(!pilot&&!va&&test&&!confirm\(/.test(top(H, '_srvEnglishV2Publish')));
     ok('023 VA path posts with the VA/CEO session to the VA action; pilot path keeps the CEO-only call', /_publishAuthedFetch\('\/api\/ops\?action=srv_studio_v2_va_upload'/.test(top(H, '_srvEnglishV2Publish')) && /_ceoAuthedFetch\('\/api\/ops\?action=srv_studio_v2_pilot_upload'/.test(top(H, '_srvEnglishV2Publish')));
+  }
+
+  // ── 13. SRV-STUDIO-V2-025: overlapping saves (VA, Long #136, 2026-10-16 14:39 UTC) ──
+  {
+    // Production: title saved at 14:39:35.7, lyrics Save pressed at 14:39:37.2 while the title write (slowed by the
+    // shared packages-backup timeout) was still in flight. Both writes reached the database, but each read-back
+    // compared against memory that already held the other edit → "different values for _srvV2Edits", and memory was
+    // rolled back to the old title.
+    const E = makeEnv({ flag: 'true', upsertDelayMs: 40 }); await E.settle(); const { ctx, els } = E;
+    ctx.D.tasks = [task(136, { contentType: 'Long', isLong: true })];
+    const p = pkgOf('pkg_1792160628322', 136, { title: 'Say My Name Like That', lyrics: '[Verse]\nold lyrics' }); ctx.D.packages = [p]; E.seed(p);
+    const P = p.id; const f = (k, v) => { E.el('srv2f_' + P + '_' + k, v); E.el('srv2st_' + P + '_' + k); E.el('srv2fa_' + P + '_' + k); };
+    f('title', p.title); f('lyrics', p.lyrics); f('sunoPrompt', p.sunoPrompt); f('captionYT', p.captionYT);
+    ['srv2capst_', 'srv2capact_', 'srv2approve_st_', 'srv2prev_'].forEach((x) => E.el(x + P));
+    els['srv2f_' + P + '_title'].value = 'You never saw me break';
+    const t1 = vm.runInContext(`_srvEnglishV2SaveField('${P}','title',{skipCaption:true})`, ctx);
+    await new Promise((r) => setTimeout(r, 5));
+    els['srv2f_' + P + '_lyrics'].value = 'You never saw me break...\nI waited till you left\n\n[Verse 1]\nnew lyrics';
+    const t2 = vm.runInContext(`_srvEnglishV2SaveField('${P}','lyrics',{skipCaption:true})`, ctx);
+    const [r1, r2] = await Promise.all([t1, t2]); await E.settle();
+    const row = JSON.parse(E.table[P].full_package);
+    ok('025 overlapping title + lyrics saves: both succeed and both say "Saved and verified"', r1 === true && r2 === true && /Saved and verified/.test(els['srv2st_' + P + '_title'].textContent) && /Saved and verified/.test(els['srv2st_' + P + '_lyrics'].textContent), [r1, r2, els['srv2st_' + P + '_title'].textContent, els['srv2st_' + P + '_lyrics'].textContent]);
+    ok('025 database holds the new title and lyrics with both edit stamps', E.table[P].title === 'You never saw me break' && row.title === 'You never saw me break' && /new lyrics/.test(row.lyrics) && row._srvV2Edits.title && row._srvV2Edits.lyrics);
+    ok('025 memory equals the database (the payload uses the saved title), nothing marked unsaved', p.title === 'You never saw me break' && p.lyrics === row.lyrics && JSON.stringify(p._srvV2Edits) === JSON.stringify(row._srvV2Edits) && vm.runInContext(`_srvEnglishV2DirtyKeys('${P}')`, ctx).length === 0);
+    ok('025 the caption is now flagged out of date for the new song (refreshed at Approve), never shown "up to date"', vm.runInContext('_srvEnglishV2CaptionState(D.tasks[0],D.packages[0]).fresh', ctx) === false);
+  }
+  {
+    // A write that reached the database but whose read-back disagrees: memory adopts what is stored, never an older value.
+    const E = makeEnv({ flag: 'true', readbackLie: true }); await E.settle(); const { ctx, els } = E;
+    ctx.D.tasks = [task(5)]; const p = pkgOf('p1', 5); ctx.D.packages = [p]; E.seed(p); fieldEls(E, p, SHORT_KEYS);
+    els.srv2f_p1_title.value = 'Typed Title';
+    await vm.runInContext("_srvEnglishV2SaveField('p1','title')", ctx);
+    const stored = JSON.parse(E.table.p1.full_package).title;
+    ok('025 failed verification after a landed write: memory takes the stored value (never the older one) and the field stays listed as not saved', stored === 'Typed Title' && p.title === stored && /Not saved/.test(els.srv2st_p1_title.textContent) && vm.runInContext("_srvEnglishV2DirtyKeys('p1')", ctx).includes('title'), [p.title, stored, els.srv2st_p1_title.textContent]);
+  }
+  {
+    // Writes to one package are serialized: a read-back can never run while another save of it is still writing.
+    ok('025 V2 package saves and approval read-backs run through one per-package queue', /return _srvEnglishV2Serial\(pkg\.id,async function\(\)\{/.test(H) && /_srvEnglishV2Serial\(pkg\.id,\(\)=>_srvEnglishV2ReadBack\(pkg\.id\)\)/.test(H));
   }
 
   // ── 9. Shared systems untouched ──
