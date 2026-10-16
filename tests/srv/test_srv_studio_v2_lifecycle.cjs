@@ -13,7 +13,7 @@ function slice(src, start, end) { const s = src.indexOf(start); if (s < 0) throw
 function top(src, name) { const m = src.match(new RegExp('\\n(async )?function ' + name + '\\(')); if (!m) throw new Error('missing ' + name); const s = m.index + 1; return src.slice(s, src.indexOf('\n}\n', s) + 2); }
 
 // ── sandbox ───────────────────────────────────────────────────────────────────
-function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, readbackLie = false, src = H } = {}) {
+function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, readbackLie = false, settings = {}, src = H } = {}) {
   const els = {};
   const el = (id, value = '') => (els[id] = { id, value, textContent: '', style: {}, disabled: false });
   const calls = { upserts: [], caption: [], generate: 0, renders: 0, alerts: [] };
@@ -35,6 +35,8 @@ function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, re
       if (u.includes('/rest/v1/packages?engine=eq.')) { const e = q.get('engine').slice(3), t = q.get('title').slice(3); return json(Object.values(table).filter((r) => r.engine === e && r.title === t).map((r) => ({ package_id: r.package_id, task_id: r.task_id, full_package: r.full_package }))); }
     }
     if (u.includes('/rest/v1/packages?order=')) return json(Object.values(table).sort((a, b) => String(b.generated_at).localeCompare(String(a.generated_at))));
+    { const k = (u.match(/app_settings\?key=eq\.([a-z0-9_]+)/) || [])[1]; if (k && k in settings) return json([{ value: settings[k] }]); }
+    if (u.includes('/rest/v1/app_settings?key=eq.srv_studio_v2_')) return json([]);
     if (u.includes('/rest/v1/app_settings')) return json(null);
     if (u.includes('action=srv_english_regen_caption')) {
       const b = JSON.parse(opt.body); calls.caption.push(b);
@@ -432,7 +434,7 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     await vm.runInContext(`_srvEnglishV2ApprovePackage('133','${P}')`, ctx); await E.settle();
     ok('022 Approve revalidates against the database and records what was approved', vm.runInContext("_srvEnglishGetStage('133')", ctx) === 'build' && cur._srvV2Approved && cur._srvV2Approved.title === 'The part you left behind' && JSON.parse(E.table[P].full_package)._srvV2Approved.src === cur._srvV2Approved.src);
     const m = R.srv2YouTubeMetadata('short', cur, { test: false, moodKey: 'romantic' });
-    ok('022 final payload: YouTube title, description, caption and tags all carry "The part you left behind"; branding and #Shorts kept', m.title === 'The part you left behind | Night Drive Deep House | SRV Studio #Shorts' && m.description.startsWith('The part you left behind — ') && m.description.includes('Caption for The part you left behind') && m.tags.includes('The part you left behind') && m.tags.includes('shorts') && !/Your Hand Found Mine/.test(JSON.stringify(m)));
+    ok('022 final payload: YouTube title, description, caption and tags all carry "The part you left behind"; branding kept (023 title convention)', m.title === 'The part you left behind - Emotional Deep House | Night Drive SRV Studio' && m.description.startsWith('The part you left behind — ') && m.description.includes('Caption for The part you left behind') && m.tags.includes('The part you left behind') && m.tags.includes('shorts') && !/Your Hand Found Mine/.test(JSON.stringify(m)));
     // Publish revalidation: the video must be built from the approved content, and the database must still match.
     vm.runInContext("_srvEnglishSetStage('133','approve')", ctx);
     const st2 = pubEl(E, P);
@@ -477,6 +479,41 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     E.el('srv-lc-build-status-p1'); ctx._srvAudioData = { p1: { file: {} } };
     vm.runInContext("_srvEnglishV2Build('p1','5')", ctx); await E.settle();
     ok('022 Build refuses content changed after approval', /changed after approval/.test(els['srv-lc-build-status-p1'].textContent));
+  }
+
+  // ── 12. SRV-STUDIO-V2-023: VA Long/Short selection + publish routing ──
+  {
+    const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx, calls } = E;
+    ctx.currentUser = { id: 'va' };
+    const t = task(140, { name: 'SRV English — Female — Romantic · Short (auto-created)' }); ctx.D.tasks = [t];
+    vm.runInContext("_srvEnglishSetStage('140','generate')", ctx);
+    const html = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
+    ok('023 Generate (V2): the VA sees a Long/Short selector before generating', /id="srv2fmt_140"/.test(html) && /<option value="Short"/.test(html) && /<option value="Long"/.test(html) && /vaGeneratePackage\('140'\)/.test(html));
+    ok('023 VA selects Long: format fields, task name and the original are recorded; change logged', vm.runInContext("_srvEnglishV2SetFormat('140','Long')", ctx) === true && t.isLong === true && t.contentType === 'Long' && t.contentFormat === 'long' && t.name === 'SRV English — Female — Romantic · Long (auto-created)' && t.vaOriginal.format === 'Short' && t.cadenceSlotFormat === 'short' && t.vaOverrides[0].by === 'va');
+    ok('023 Long task: Build/Review use ONLY the Long lyrics and Long Suno prompt', JSON.stringify(vm.runInContext("_srvEnglishV2BuildKeys(D.tasks[0],{})", ctx)) === JSON.stringify({ isLong: true, lyrics: 'lyrics', sunoPrompt: 'sunoPrompt', otherLyrics: 'shortLyrics', otherSunoPrompt: 'shortSunoPrompt' }));
+    ok('023 Auto returns to the format the task was created with', vm.runInContext("_srvEnglishV2SetFormat('140','Auto')", ctx) === true && t.isLong === false && t.contentType === 'Short Video' && /· Short/.test(t.name));
+    vm.runInContext("_srvEnglishV2SetFormat('140','Long')", ctx);
+    await vm.runInContext("vaGeneratePackage('140')", ctx); await E.settle();
+    ok('023 format is locked once the package is generated', vm.runInContext("_srvEnglishGetStage('140')", ctx) === 'review' && vm.runInContext("_srvEnglishV2SetFormat('140','Short')", ctx) === false && t.isLong === true);
+    const rv = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
+    ok('023 the generated Long task reviews Long content only', /id="srv2f_pkg_gen_1_lyrics"/.test(rv) && !/id="srv2f_pkg_gen_1_shortLyrics"/.test(rv) && /THIS BUILD WILL USE \(LONG\)|FULL LYRICS/.test(rv));
+  }
+  {
+    const VA = JSON.stringify({ enabled: true, maxUploads: 2, perKind: { long: 1, short: 1 }, expires: new Date(Date.now() + 5 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const t137 = task(137, { contentType: 'Long', isLong: true }); const t140 = task(140);
+    const pilotCfg = (uid) => JSON.stringify({ enabled: true, tasks: { long: uid, short: 'srve_1791661404055_133' }, maxUploads: 2, expires: new Date(Date.now() + 5 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const route = async (settings, ceo, t, kind) => { const E = makeEnv({ flag: 'true', settings }); await E.settle(); E.ctx.D.tasks = [t]; E.ctx._ceoGetSessionToken = () => (ceo ? 'tok' : null); return vm.runInContext(`_srvEnglishV2PublishRoute(D.tasks[0],'${kind}')`, E.ctx); };
+    const uid137 = 'srve_' + t137.createdAt + '_137';
+    const a = await route({ srv_studio_v2_pilot: pilotCfg(uid137) }, true, t137, 'long');
+    const b = await route({ srv_studio_v2_pilot: pilotCfg(uid137) }, false, t137, 'long');
+    const c = await route({ srv_studio_v2_pilot: pilotCfg(uid137), srv_studio_v2_va_allowance: VA }, false, t137, 'long');
+    const d = await route({}, false, t140, 'short');
+    const e = await route({ srv_studio_v2_va_allowance: VA }, false, t140, 'short');
+    ok('023 routing: CEO + pilot task → CEO pilot', !!(a.pilot && a.pilot.kind === 'long'));
+    ok('023 routing: VA on a CEO pilot task without a VA allowance → blocked (never a silent [TEST] upload)', !!b.blocked && /only a signed-in CEO can publish it/.test(b.blocked));
+    ok('023 routing: VA with an active VA allowance → VA allowance (pilot ledger not used)', !!(c.va && !c.pilot) && !!(e.va && !e.pilot));
+    ok('023 routing: no allowance and no pilot → ordinary path (Publish asks before any [TEST] upload)', !d.pilot && !d.va && !d.blocked && /if\(!pilot&&!va&&test&&!confirm\(/.test(top(H, '_srvEnglishV2Publish')));
+    ok('023 VA path posts with the VA/CEO session to the VA action; pilot path keeps the CEO-only call', /_publishAuthedFetch\('\/api\/ops\?action=srv_studio_v2_va_upload'/.test(top(H, '_srvEnglishV2Publish')) && /_ceoAuthedFetch\('\/api\/ops\?action=srv_studio_v2_pilot_upload'/.test(top(H, '_srvEnglishV2Publish')));
   }
 
   // ── 9. Shared systems untouched ──

@@ -42,7 +42,7 @@ async function buildAndPublish(id, label) {
   return { pkgId, meta, stage: await stage(id), pkg: await page.evaluate((p) => { const x = D.packages.find((q) => q.id === p); return { isTest: x.isTest, srvPilot: x.srvPilot || null, srvPublish: x.srvPublish || null, attempt: x.srvPilotAttempt || null }; }, pkgId) };
 }
 const L = await buildAndPublish('203', 'long');
-ok('Approve preview announces the pilot upload with the normal title', /PILOT UPLOAD \(LONG/.test(L.meta) && /Title \(\d+\/100\): Leave the Engine Running \| Emotional Deep House \| Night Drive \| SRV Studio/.test(L.meta) && !/\[TEST\]/.test(L.meta), L.meta.split('\n').slice(0, 2));
+ok('Approve preview announces the pilot upload with the normal title', /PILOT UPLOAD \(LONG/.test(L.meta) && /Title \(\d+\/100\): Leave the Engine Running - Emotional Deep House \| Night Drive SRV Studio/.test(L.meta) && !/\[TEST\]/.test(L.meta), L.meta.split('\n').slice(0, 2));
 ok('Long pilot: Done, pilot record with YouTube id/time/channel, package still isTest', L.stage === 'done' && L.pkg.isTest === true && L.pkg.srvPilot && L.pkg.srvPilot.youtubeVideoId && L.pkg.srvPilot.channelId === 'UC0nzWQX6AaUqlF5FozNpWPg' && L.pkg.srvPublish.pilot === true, L.pkg.srvPilot);
 const S = await buildAndPublish('204', 'short');
 ok('Short pilot: Done with its own pilot record', S.stage === 'done' && S.pkg.srvPilot && S.pkg.srvPilot.kind === 'short' && S.pkg.isTest === true, S.pkg.srvPilot);

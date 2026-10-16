@@ -38,16 +38,16 @@ const top = (src, name) => { const m = src.match(new RegExp('\\n(async )?functio
 
 // ── 2. YouTube metadata ──
 {
-  ok('Title: Long template exact', R.srv2YouTubeTitle('long', 'Neon Nights') === 'Neon Nights | Emotional Deep House | Night Drive | SRV Studio');
-  ok('Title: Short template exact', R.srv2YouTubeTitle('short', 'Neon Nights') === 'Neon Nights | Night Drive Deep House | SRV Studio #Shorts');
-  ok('Title: emoji wrappers, [TEST], quotes and "| …" suffixes removed from the song title', R.srv2YouTubeTitle('long', '💔 "Neon Nights" 💔 | old suffix') === 'Neon Nights | Emotional Deep House | Night Drive | SRV Studio' && R.srv2CleanTitle('[TEST] 💫 Stay 💫') === 'Stay');
-  ok('Title: TEST mode prefixes [TEST]', R.srv2YouTubeTitle('short', 'Stay', { test: true }) === '[TEST] Stay | Night Drive Deep House | SRV Studio #Shorts');
+  ok('Title (023 CEO convention): Long exact', R.srv2YouTubeTitle('long', 'Neon Nights') === 'Neon Nights - Emotional Deep House | Night Drive SRV Studio');
+  ok('Title (023 CEO convention): Short exact, same convention', R.srv2YouTubeTitle('short', 'Neon Nights') === 'Neon Nights - Emotional Deep House | Night Drive SRV Studio' && R.srv2YouTubeTitle('short', 'The part you left behind') === 'The part you left behind - Emotional Deep House | Night Drive SRV Studio');
+  ok('Title: emoji wrappers, [TEST], quotes and "| …" suffixes removed from the song title', R.srv2YouTubeTitle('long', '💔 "Neon Nights" 💔 | old suffix') === 'Neon Nights - Emotional Deep House | Night Drive SRV Studio' && R.srv2CleanTitle('[TEST] 💫 Stay 💫') === 'Stay');
+  ok('Title: TEST mode prefixes [TEST]', R.srv2YouTubeTitle('short', 'Stay', { test: true }) === '[TEST] Stay - Emotional Deep House | Night Drive SRV Studio');
   const long = 'When the City Lights Fade Into the Rearview Mirror Tonight';
   const tl = R.srv2YouTubeTitle('long', long), ts = R.srv2YouTubeTitle('short', long, { test: true });
-  ok('Title: over 100 characters → descriptor segments dropped, song title kept whole', tl.length <= 100 && tl.startsWith(long + ' | ') && tl.endsWith('SRV Studio') && ts.length <= 100 && ts.includes(long) && ts.endsWith('#Shorts'), tl + ' / ' + ts);
+  ok('Title: over 100 characters → descriptor segments dropped, song title kept whole', tl.length <= 100 && tl.startsWith(long + ' - ') && tl.endsWith('SRV Studio') && ts.length <= 100 && ts.includes(long) && ts.startsWith('[TEST] '), tl + ' / ' + ts);
   const huge = 'A '.repeat(70).trim() + ' End';
   const th = R.srv2YouTubeTitle('long', huge), th2 = R.srv2YouTubeTitle('short', huge, { test: true });
-  ok('Title: a title longer than 100 by itself is cut at a word boundary with …, still ≤ 100', th.length <= 100 && th.endsWith('…') && th2.length <= 100 && th2.endsWith('… #Shorts'));
+  ok('Title: a title longer than 100 by itself is cut at a word boundary with …, still ≤ 100', th.length <= 100 && th.endsWith('…') && th2.length <= 100 && th2.startsWith('[TEST] ') && th2.endsWith('…'));
   ok('Title: every generated title ≤ 100 for 200 random titles', Array.from({ length: 200 }, (_, i) => 'Word'.repeat(1 + (i % 30)) + ' ' + i).every((t) => R.srv2YouTubeTitle(i2k(t), t, { test: t.length % 2 === 0 }).length <= 100));
   function i2k(t) { return t.length % 3 ? 'long' : 'short'; }
   const pkg = { title: '💔 Neon Nights 💔', mood: 'Female — Romantic', lyrics: '[Verse]\nUnder neon lights\n[Chorus]\nI find my way back to you\n(ooh)', shortLyrics: 'x', captionYT: 'A late drive and the one you still look for. 🌃 #vibes #love <b>' };
@@ -226,6 +226,19 @@ else {
     const tf = path.join(dir, `srv2-sample-${kind}-thumb.jpg`);
     if (fs.existsSync(tf)) { const t = probe(tf).streams[0]; ok(`ffprobe ${kind} thumbnail: 1280x720 JPEG under 2 MB`, t.codec_name === 'mjpeg' && t.width === 1280 && t.height === 720 && fs.statSync(tf).size < 2 * 1048576); }
   }
+}
+
+// ── SRV-STUDIO-V2-023: on-screen lyrics only from a verified, time-coded source ──
+{
+  const V = R.srv2VerifiedLyrics;
+  ok('023 lyrics: no verified source → no lyric lines (never derived from package lyrics)', V(undefined, 30).length === 0 && V([], 30).length === 0 && V(null, 30).length === 0);
+  ok('023 lyrics: a valid verified source is kept as given (no re-timing)', JSON.stringify(V([{ text: 'Line one', start: 1.2, end: 3.4 }, { text: 'Line two', start: 3.4, end: 6 }], 30)) === JSON.stringify([{ start: 1.2, end: 3.4, text: 'Line one' }, { start: 3.4, end: 6, text: 'Line two' }]));
+  ok('023 lyrics: any unreliable entry (out of order, negative, past the end, empty text) → the whole source is refused', V([{ text: 'a', start: 5, end: 6 }, { text: 'b', start: 2, end: 3 }], 30).length === 0 && V([{ text: 'a', start: -1, end: 2 }], 30).length === 0 && V([{ text: 'a', start: 1, end: 40 }], 30).length === 0 && V([{ text: ' ', start: 1, end: 2 }], 30).length === 0);
+  const src = read('public/srv-studio-v2/srv2-render.mjs');
+  const rv = src.slice(src.indexOf('export async function srv2RenderVideo('), src.indexOf('export async function srv2RenderVideo(') + 2600);
+  ok('023 renderer: Short timeline lines come only from the verified source; no estimated line timings, no package lyric text', /lines: verified/.test(rv) && /lineCount: 0, windowSec: duration, fromStart: true/.test(rv) && !/srv2LyricLines\(kind === 'short'/.test(rv) && !/opts\.shortLyrics|opts\.lyrics/.test(rv));
+  ok('023 renderer: no hook overlay on Long (hook text never placed at an estimated chorus)', /srv2LongTimeline\(\{ duration, chorusStart: analysis\.chorusStart \+ analysis\.vocalOnset, hook: '',/.test(rv) && /srv2CreateScene\(\{ kind, img, avatar: opts\.avatar, title: opts\.title, hook: '',/.test(rv));
+  ok('023 renderer: render stats record the lyrics decision', /lyrics: verified\.length \? 'verified-sync' : 'off \(no verified lyric timing\)'/.test(src));
 }
 
 console.log(out.join('\n'));
