@@ -19,7 +19,7 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
-import { srv2RunPilotUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (Checkpoint E3) — two-video private pilot, server-enforced
+import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -236,6 +236,7 @@ async function ceoCheckSession(req, res) {
 const PUBLISH_GATED_ACTIONS = new Set([
   'youtube_upload_video', 'set_yt_thumbnail', 'tiktok_publish_draft', 'tiktok_check_publish_status',
   'youtube_video_status', 'youtube_check_scope', 'sm_va_task_mark_published',
+  'srv_studio_v2_va_upload', // SRV-STUDIO-V2-023 (it also requires a VA/CEO session itself)
 ]);
 const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
 const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -3792,6 +3793,62 @@ async function srvStudioV2PilotUpload(req, res) {
     return res.status(out.status).json(out.json);
   } catch (e) {
     return res.status(500).json({ ok: false, pilot: true, error: 'pilot_server_error', message: e.message });
+  }
+}
+
+// SRV-STUDIO-V2-023 — VA upload allowance: same server-enforced runner as the pilot, its own CEO-authorized
+// configuration (app_settings.srv_studio_v2_va_allowance) and its own ledger. A VA (operator) or CEO session is
+// required — never an unsigned call, even while the publishing gate is in log-only mode. Off unless configured.
+async function srvStudioV2VaUpload(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, va: true, error: 'POST only' });
+  const who = await _publisherFromRequest(req);
+  if (!who || (who.role !== 'operator' && who.role !== 'ceo')) return res.status(401).json({ ok: false, va: true, error: 'publisher_session_required' });
+  try {
+    const out = await srv2RunVaUpload({
+      now: () => Date.now(),
+      flagOn: () => srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY }),
+      getSetting: srvStudioV2PilotSetting,
+      casSetting: srvStudioV2PilotCas,
+      engineState: async () => { const r = await srvStudioV2PilotSetting('mmm_finance_v118'); let st = {}; try { st = JSON.parse((r && r.text) || '{}'); } catch (_) {} return (st.engineState && st.engineState['SRV English']) || 'running'; },
+      lookupChannel: () => _getYoutubeConnectionByTitle('SRV Studio', { exact: true }),
+      upload: (body) => new Promise((resolve) => {
+        const cap = { code: 200, status(c) { this.code = c; return this; }, json(j) { resolve({ status: this.code, json: j }); return this; }, setHeader() {} };
+        youtubeUploadVideo({ method: 'POST', body, query: {}, headers: {} }, cap).catch((e) => resolve({ status: 502, json: { ok: false, error: 'upload_exception', message: e.message } }));
+      }),
+      newId: () => 'va_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      by: who.role,
+    }, req.body || {}, { supabaseUrl: SUPABASE_URL });
+    return res.status(out.status).json(out.json);
+  } catch (e) {
+    return res.status(500).json({ ok: false, va: true, error: 'va_server_error', message: e.message });
+  }
+}
+// SRV-STUDIO-V2-023 — runs the one CEO-authorized title correction (app_settings.srv_studio_v2_retitle_job, writable
+// only through the server/admin path). Metadata only; a job runs at most once (compare-and-set), see lib.
+async function srvStudioV2RetitleJob(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, retitle: true, error: 'POST only' });
+  try {
+    const out = await srv2RunRetitleJob({
+      now: () => Date.now(),
+      flagOn: () => srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY }),
+      getSetting: srvStudioV2PilotSetting,
+      casSetting: srvStudioV2PilotCas,
+      lookupChannel: () => _getYoutubeConnectionByTitle('SRV Studio', { exact: true }),
+      accessToken: async (conn) => (await _refreshYoutubeToken(conn.refresh_token)).accessToken,
+      ytGetVideo: async (token, id) => {
+        const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,status&id=${encodeURIComponent(id)}`, { headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) throw new Error('videos.list HTTP ' + r.status);
+        const d = await r.json(); return (d.items || [])[0] || null;
+      },
+      ytPutSnippet: async (token, id, snippet) => {
+        const r = await fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet', { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ id, snippet }) });
+        if (!r.ok) { const t = await r.text().catch(() => ''); console.error('[srv2-retitle] videos.update failed:', r.status, t.slice(0, 300)); throw new Error('videos.update HTTP ' + r.status); }
+        return r.json();
+      },
+    });
+    return res.status(out.status).json(out.json);
+  } catch (e) {
+    return res.status(500).json({ ok: false, retitle: true, error: 'retitle_server_error', message: e.message });
   }
 }
 
@@ -19627,6 +19684,8 @@ export default async function handler(req, res) {
     if (action === 'farsi_regen_caption')        return await farsiRegenCaption(req, res); // v15.6.5
     if (action === 'srv_english_regen_caption')  return await srvEnglishRegenCaption(req, res); // SRV Studio V2 (flag-gated client)
     if (action === 'srv_studio_v2_pilot_upload') return await srvStudioV2PilotUpload(req, res); // SRV Studio V2 pilot (server-enforced, off unless authorized)
+    if (action === 'srv_studio_v2_va_upload')    return await srvStudioV2VaUpload(req, res);    // SRV-STUDIO-V2-023 VA allowance (VA/CEO session; off unless authorized)
+    if (action === 'srv_studio_v2_retitle_job')  return await srvStudioV2RetitleJob(req, res);  // SRV-STUDIO-V2-023 one-time, admin-authorized title correction
     if (action === 'youtube_sync_performance')   return await youtubeSyncPerformance(req, res);
     if (action === 'log_performance_manual')     return await logPerformanceManual(req, res);
     if (action === 'get_performance_summary')    return await getPerformanceSummary(req, res);

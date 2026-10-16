@@ -102,17 +102,18 @@ export const SRV2_TITLE_MAX = 100;
 // Long: "{Title} | Emotional Deep House | Night Drive | SRV Studio"
 // Short: "{Title} | Night Drive Deep House | SRV Studio #Shorts"
 // Over 100 characters, descriptor segments are dropped (never the song title, never "SRV Studio" while it fits).
+// SRV-STUDIO-V2-023 (CEO convention): "<saved song title> - Emotional Deep House | Night Drive SRV Studio" for Long
+// and Short alike, built only from the saved title. Shorter fallbacks keep the song title whole within 100 chars.
+export const SRV2_TITLE_SUFFIX = ' - Emotional Deep House | Night Drive SRV Studio';
 export function srv2YouTubeTitle(kind, title, { test = false } = {}) {
   const T = srv2CleanTitle(title) || 'Untitled';
   const pre = test ? '[TEST] ' : '';
-  const variants = kind === 'short'
-    ? [`${T} | Night Drive Deep House | SRV Studio #Shorts`, `${T} | SRV Studio #Shorts`, `${T} #Shorts`]
-    : [`${T} | Emotional Deep House | Night Drive | SRV Studio`, `${T} | Emotional Deep House | SRV Studio`, `${T} | SRV Studio`, T];
+  const variants = [`${T}${SRV2_TITLE_SUFFIX}`, `${T} - Emotional Deep House | SRV Studio`, `${T} | SRV Studio`, T];
   for (const v of variants) if ((pre + v).length <= SRV2_TITLE_MAX) return pre + v;
   // Only a title that is itself over the limit is shortened (at a word boundary).
-  const room = SRV2_TITLE_MAX - pre.length - (kind === 'short' ? ' #Shorts'.length : 0) - 1;
+  const room = SRV2_TITLE_MAX - pre.length - 1;
   let cut = T.slice(0, room); const sp = cut.lastIndexOf(' '); if (sp > room * 0.6) cut = cut.slice(0, sp);
-  return pre + cut.trim() + '…' + (kind === 'short' ? ' #Shorts' : '');
+  return pre + cut.trim() + '…';
 }
 export function srv2Hashtags(kind, moodKey) {
   const tags = ['#SRVStudio', '#DeepHouse', '#NightDrive', '#EmotionalHouse', MOOD_TAG[moodKey] || MOOD_TAG.emotional];
@@ -792,8 +793,25 @@ export function srv2AvatarProductionReady(a) {
 }
 
 // Renders a Long or a Short in real time and returns the video, the thumbnail and measurements.
-// opts: { kind, audio (File|Blob|ArrayBuffer|url), avatar, imageUrl, title, lyrics, shortLyrics, hook,
-//         maxDuration, logoUrl, reactive, onProgress(msg, fraction), canvas (optional, for a live preview) }
+// SRV-STUDIO-V2-023 — on-screen lyrics are shown ONLY from a verified, time-coded source passed explicitly as
+// opts.syncedLyrics = [{ text, start, end }] (seconds, as actually sung). Lyric timing is never estimated from the
+// audio and lyric text is never taken from the package (the saved lyrics may differ from what Suno sang), so
+// without a verified source the video renders with NO lyric lines and NO hook overlay — motion, avatar, title and
+// brand are unchanged. Returns the validated lines, or [] when the source is missing or not trustworthy.
+export function srv2VerifiedLyrics(synced, duration) {
+  if (!Array.isArray(synced) || !synced.length) return [];
+  const out = [];
+  for (const x of synced) {
+    const text = srv2StripEmoji(String((x && x.text) || '')).replace(/\s+/g, ' ').trim();
+    const st = Number(x && x.start), en = Number(x && x.end);
+    if (!text || !isFinite(st) || !isFinite(en) || st < 0 || en <= st || en > duration + 0.05) return [];
+    if (out.length && st < out[out.length - 1].start) return []; // out of order → not trustworthy
+    out.push({ start: +st.toFixed(2), end: +Math.min(en, duration - 0.2).toFixed(2), text });
+  }
+  return out;
+}
+// opts: { kind, audio (File|Blob|ArrayBuffer|url), avatar, imageUrl, title, syncedLyrics (verified only, see
+//         srv2VerifiedLyrics), maxDuration, logoUrl, reactive, onProgress(msg, fraction), canvas (optional preview) }
 export async function srv2RenderVideo(opts) {
   const kind = opts.kind === 'short' ? 'short' : 'long'; const cfg = SRV2_RENDER_CONFIG[kind];
   const say = (m, f) => { try { opts.onProgress && opts.onProgress(m, f); } catch (_) {} };
@@ -811,18 +829,18 @@ export async function srv2RenderVideo(opts) {
   const actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
   const buf = await actx.decodeAudioData(ab.slice(0));
   const ch = buf.getChannelData(0);
-  const lines = srv2LyricLines(kind === 'short' ? (opts.shortLyrics || opts.lyrics) : '');
   const duration = Math.min(buf.duration, kind === 'short' ? (opts.maxDuration || cfg.targetSec) : (opts.maxDuration || cfg.maxSec), cfg.maxSec);
+  const verified = srv2VerifiedLyrics(opts.syncedLyrics, duration);
   const analysis = kind === 'short'
-    ? srv2AnalyzeAudio(ch, buf.sampleRate, { lineCount: lines.length, windowSec: duration, fromStart: true })
+    ? srv2AnalyzeAudio(ch, buf.sampleRate, { lineCount: 0, windowSec: duration, fromStart: true })
     : srv2AnalyzeAudio(ch, buf.sampleRate, { lineCount: 0, windowSec: 30 });
   const timeline = kind === 'short'
-    ? srv2ShortTimeline({ duration, lines, lineTimings: analysis.lineTimings })
-    : srv2LongTimeline({ duration, chorusStart: analysis.chorusStart + analysis.vocalOnset, hook: opts.hook || '', seed: (opts.avatar && opts.avatar.id) + '|' + opts.title });
+    ? { duration, lines: verified }
+    : srv2LongTimeline({ duration, chorusStart: analysis.chorusStart + analysis.vocalOnset, hook: '', seed: (opts.avatar && opts.avatar.id) + '|' + opts.title });
   say('Preparing the black-and-white grade…', 0);
   const prepared = srv2PrepareSource(img, opts.avatar && opts.avatar.crop);
   const fx = srv2NormalizeFx(opts.fx === undefined ? SRV2_FX_DEFAULTS : opts.fx); // production entry: D5 motion on by default
-  const scene = srv2CreateScene({ kind, img, avatar: opts.avatar, title: opts.title, hook: opts.hook, timeline, logo, reactive: opts.reactive, prepared, fx });
+  const scene = srv2CreateScene({ kind, img, avatar: opts.avatar, title: opts.title, hook: '', timeline, logo, reactive: opts.reactive, prepared, fx });
 
   const canvas = opts.canvas || mk(cfg.W, cfg.H); canvas.width = cfg.W; canvas.height = cfg.H;
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -880,6 +898,7 @@ export async function srv2RenderVideo(opts) {
     measuredKbps: Math.round((blob.size * 8) / duration / 1000), renderSec: +((performance.now() - started) / 1000).toFixed(1),
     captureMode: vtrack ? 'requestFrame' : 'captureStream(fps)', frames: m, hiddenDuringRender: hidden > 0, fontsLoaded: !!fontsOk, maxSourceUpscale: +scene.stats.maxUpscale.toFixed(2),
     analysis, hooks: timeline.hooks || [], lyricLines: (timeline.lines || []).length,
+    lyrics: verified.length ? 'verified-sync' : 'off (no verified lyric timing)',
     avatarId: opts.avatar && opts.avatar.id, logo: !!logo, fx,
     thumb: Object.assign({ width: th.W, height: th.H, type: th.type, bytes: thumbBlob ? thumbBlob.size : 0 }, thumbInfo),
   };
