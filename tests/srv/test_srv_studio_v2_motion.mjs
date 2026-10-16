@@ -172,7 +172,8 @@ else {
   const hd = execSync(`git diff ${D4_COMMIT} ${D5_COMMIT} -U0 -- public/index.html`, { cwd: repo }).toString();
   const fns = [...hd.matchAll(/^@@[^@]*@@ (?:async )?function ([A-Za-z0-9_$]+)/gm)].map((m) => m[1]);
   ok('Scope: every index.html hunk is inside a V2 function', fns.length > 0 && fns.every((f) => /^_srvEnglishV2/.test(f)), fns.join(','));
-  const base = show('origin/main', 'public/index.html');
+  // db766dd = main before SRV Studio V2 shipped (PR #40): the protected baseline these checks diff against.
+  const base = show('db766dd6ed3c561bdb5ea3577ab4e1bf68c98912', 'public/index.html');
   ok('Protected: _srvRenderVideo, _assignPublishSlot and SRV Farsi build/publish byte-identical to main', ['_srvRenderVideo', '_assignPublishSlot', '_srvFarsiBuildTrigger', '_srvFarsiRunPublish'].every((n) => n017(top(H, n)) === top(base, n)));
   ok('Protected: api/ and lib/ untouched by D5', execSync(`git diff ${D4_COMMIT} ${D5_COMMIT} --name-only -- api lib`, { cwd: repo }).toString().trim() === '');
 }
