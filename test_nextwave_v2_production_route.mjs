@@ -14,7 +14,7 @@ import { STYLE } from './lib/nextwaveV2Renderer/core.mjs';
 import { wordsFromAlignment } from './lib/nextwaveV2Renderer/captions.mjs';
 import { loadHostPoses } from './lib/nextwaveV2Renderer/assets.mjs';
 import { loadBench } from './lib/nextwaveV2Renderer/props3.mjs';
-import { startRoute, classifyGate, planAssets, chunkPlan, compileFromState, buildStateFrom, parseFreezeDetect, ROUTE_VERSION } from './lib/nextwaveV2Renderer/production/route.mjs';
+import { startRoute, classifyGate, planAssets, chunkPlan, compileFromState, buildStateFrom, parseFreezeDetect, parseDecodedFrameCount, expectedFrameCount, fpsFor, ROUTE_VERSION } from './lib/nextwaveV2Renderer/production/route.mjs';
 import { composeStoryboard } from './lib/nextwaveV2Renderer/production/compose.mjs';
 import { runQc, collectDrawnText, numberProvenance, allowedNumbers, occupancy, idleWindows } from './lib/nextwaveV2Renderer/production/qc.mjs';
 import { placeScenes, eventTime } from './lib/nextwaveV2Renderer/production/timing.mjs';
@@ -134,6 +134,21 @@ const OPS_A2_ALLOWED_REMOVED_LINES = new Set([
   // nothing else in either handler's control flow changed.
   "  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-c${i}`);",
   "  const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-final`);",
+  // Chunk-corruption investigation (2026-10-16, task 125) — widened the chunk handler's destructuring to
+  // also read `force`, widened the status gate to also permit a targeted single-chunk recovery on an
+  // already-`ready_for_review` build (mirrors finish's existing allowance), and replaced the chunk reuse
+  // HEAD-check with a `force`-aware version (same check, now skippable). Also replaced the PR #35 final
+  // freeze-only comment with an expanded one explaining why that check alone missed task 125's real defect
+  // (a mid-stream decode failure, not a repeated-frame freeze) and what was added to catch it too.
+  "  const { build_id: id, index } = req.body || {}; const i = Number(index);",
+  "    if (state.status !== 'planned' && state.status !== 'rendered') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });",
+  "    const rel = `${nwv2rBase(id)}/chunk_${String(i).padStart(3, '0')}.mp4`; const head = await fetch(nwv2rPublic(rel), { method: 'HEAD' }).catch(() => null);",
+  "    if (head && head.ok && Number(head.headers.get('content-length') || 0) > 2048) return res.status(200).json({ ok: true, index: i, url: nwv2rPublic(rel), reused: true });",
+  "    // FINAL-ENCODE INTEGRITY GATE (2026-10-07) — catches a stitch/concat defect that leaves the container",
+  "    // structurally fine (duration/resolution/streams all pass the checks above) but visually frozen on one",
+  "    // stale frame for most of the runtime. Real content in this renderer is continuously animated (camera",
+  "    // tween, caption changes) every frame, so any freeze run this long in the ACTUAL encoded file — as opposed",
+  "    // to the abstract draw() function compile_qc already checked pre-render — can only be an encoding defect.",
 ]);
 // Reconciliation closeout (2026-10-03) — this test's comparison point was `BASELINE` (fa34eb0, the
 // commit immediately before NextWave existed in this file at all). That stopped being the right
@@ -1075,11 +1090,13 @@ await t('route.mjs: ROUTE_VERSION was NOT bumped by this fix — intentional. Th
 await t('index.html: a governed, explicitly-labeled re-finalize recovery action exists, reuses the existing finish endpoint (no new endpoint, no CEO DevTools), and never fires automatically', () => {
   const html = fs.readFileSync('./public/index.html', 'utf8');
   assert.ok(/async function nextwaveV2RouteRefinalize\(pkg\)/.test(html), 'nextwaveV2RouteRefinalize function missing');
-  const fnIdx = html.indexOf('async function nextwaveV2RouteRefinalize'); const fnEnd = html.indexOf('\nfunction _nextwaveV2RoutePanel', fnIdx);
+  const fnIdx = html.indexOf('async function nextwaveV2RouteRefinalize');
+  const nextFnMatch = /\n(?:async )?function /.exec(html.slice(fnIdx + 10));
+  const fnEnd = nextFnMatch ? fnIdx + 10 + nextFnMatch.index : html.length;
   const fnBody = html.slice(fnIdx, fnEnd);
   assert.ok(/nextwave_v2_route_finish/.test(fnBody), 'must call the existing nextwave_v2_route_finish action, not a new endpoint');
   assert.ok(!/nextwave_v2_route_start/.test(fnBody), 'must not re-run route_start (no Brain re-classification, no extra Anthropic spend)');
-  assert.ok(!/nextwave_v2_route_chunk/.test(fnBody), 'must not re-render chunks — only re-finalize from what already exists');
+  assert.ok(!/nextwave_v2_route_chunk/.test(fnBody), 'must not re-render chunks — only re-finalize from what already exists (chunk-level recovery is a separate, explicitly distinct action: nextwaveV2RouteRecoverChunks)');
   // the trigger button only renders inside the rs==='enhanced' branch (a finished build), never inside the
   // v2_building/needs_review/blocked/failed branches — i.e. it is a deliberate, visible, explicitly-clicked
   // action on an already-complete build, never something that fires as part of the normal build/retry flow.
@@ -1092,7 +1109,29 @@ await t('index.html: a governed, explicitly-labeled re-finalize recovery action 
 await t('index.html: re-finalize is scoped to NextWave V2 only — no other engine (SRV Farsi/English, AI Studio, SMM) file or build path references it', () => {
   const html = fs.readFileSync('./public/index.html', 'utf8');
   const occurrences = (html.match(/nextwaveV2RouteRefinalize/g) || []).length;
-  assert.equal(occurrences, 2, 'expected exactly 2 references: the function definition and its single onclick call-site inside _nextwaveV2RoutePanel — any more suggests it leaked into another engine\'s code path');
+  assert.equal(occurrences, 3, 'expected exactly 3 references: the function definition, its onclick call-site inside _nextwaveV2RoutePanel, and the internal call from nextwaveV2RouteRecoverChunks (chunk recovery re-finalizes once chunks are fixed) — any more suggests it leaked into another engine\'s code path');
+});
+await t('index.html: governed chunk recovery exists (2026-10-16, task 125 chunk-corruption investigation) — re-renders ONLY the chunk_invalid-flagged index/indices via force:true, never a healthy chunk, and is scoped to the needs_review branch only', () => {
+  const html = fs.readFileSync('./public/index.html', 'utf8');
+  assert.ok(/async function nextwaveV2RouteRecoverChunks\(pkg\)/.test(html), 'nextwaveV2RouteRecoverChunks function missing');
+  const fnIdx = html.indexOf('async function nextwaveV2RouteRecoverChunks');
+  const nextFnMatch = /\n(?:async )?function /.exec(html.slice(fnIdx + 10));
+  const fnEnd = nextFnMatch ? fnIdx + 10 + nextFnMatch.index : html.length;
+  const fnBody = html.slice(fnIdx, fnEnd);
+  assert.ok(/nextwave_v2_route_chunk/.test(fnBody), 'must call the chunk endpoint to re-render the flagged chunk(s)');
+  assert.ok(/force\s*:\s*true/.test(fnBody), 'must pass force:true (the existing content-length-only reuse check would otherwise just re-serve the same corrupted chunk)');
+  assert.ok(/chunk_invalid/.test(fnBody), 'must read the chunk_invalid reasons to know exactly which index/indices to target — never a blanket re-render of every chunk');
+  assert.ok(/nextwaveV2RouteRefinalize/.test(fnBody), 'must re-finalize after fixing the flagged chunk(s), reusing the existing re-finalize action rather than duplicating its logic');
+  assert.ok(!/nextwave_v2_route_start/.test(fnBody), 'must not re-run route_start — the script/storyboard is not the problem');
+  // the recovery button only renders when chunk_invalid reasons are present, inside the needs_review
+  // branch specifically (never blocked, never any other branch) — never a blanket "fix anything" control.
+  const panelIdx = html.indexOf('function _nextwaveV2RoutePanel');
+  const needsReviewIdx = html.indexOf('v2_needs_review\'||rs===\'v2_blocked\'', panelIdx);
+  const buildingIdx = html.indexOf('}else if(rs===\'v2_building\'', panelIdx);
+  const needsReviewBranch = html.slice(needsReviewIdx, buildingIdx);
+  assert.ok(/nextwaveV2RouteRecoverChunks/.test(needsReviewBranch), 'chunk-recovery button must be inside the needs_review/blocked branch');
+  assert.ok(/chunkInvalidIdx\.length/.test(needsReviewBranch), 'button visibility must be gated on actually having chunk_invalid reasons, not shown unconditionally');
+  assert.ok(/!blocked/.test(needsReviewBranch), 'the chunk-recovery banner/button must be conditioned on NOT blocked (a BLOCK-class factual/safety failure is a completely different, unrelated class of problem)');
 });
 await t('healthy multi-chunk Long build is unaffected end to end: compile_qc, scene placement and provenance are unchanged by the finalize/chunk infrastructure fix (which never touches compose/render output, only post-render temp-file isolation and a post-encode-only check)', async () => {
   const sbB = await brain(scriptOf('B'));
@@ -1107,4 +1146,72 @@ await t('Short-format behavior does not regress: placeScenes/compose/QC paths ar
   const C = composeStoryboard({ storyboard: sbA, words: wA, assets: { poses: await loadHostPoses(), bench: await loadBench() }, format: STYLE.formats.short });
   assert.ok(C.scenes.every((s) => s.located));
 });
+console.log('\n[23] Chunk corruption / decode-progression integrity (2026-10-16, task 125 investigation) — PR #35\'s freeze-only final check missed task 125\'s real defect because it was the wrong failure class: chunk 2 corrupted during its ORIGINAL serverless render (proven via direct ffprobe analysis: garbage/negative NAL unit sizes; a byte-identical LOCAL re-render of the same storyboard/scene via the real production code path produced a clean file, so this is not a deterministic code bug, and a fresh, non-concurrent re-finalize reproduced the identical broken output byte-for-byte, ruling out PR #35\'s concurrency hypothesis for THIS defect). The corrupted chunk uploaded successfully and was silently reused by every retry since (the reuse check only verifies file existence/size). ffmpeg\'s own decoder — and every browser tested — responded by silently STOPPING decode entirely at that point (confirmed: ffmpeg\'s own `frame=N` progress line stopped at 480 of an expected 3778 frames for the final file), never emitting a repeated/frozen frame, so freezedetect found nothing to flag even though the container\'s duration metadata still claimed the full length. Fix: a decode-progression check (ffmpeg\'s own frame=N progress output vs. the expected count from duration*fps — needs only the bundled ffmpeg binary, no separate ffprobe) applied BOTH per-chunk (before concat, pinpointing exactly which index is bad) and to the final muxed output (defense in depth), plus a governed, explicitly-labeled recovery action that re-renders ONLY the flagged chunk(s) via a new force:true chunk-endpoint parameter.');
+await t('parseDecodedFrameCount: parses the LAST frame=N progress line ffmpeg prints during a decode pass (handles multiple progress updates, takes the final/highest one)', () => {
+  const stderr = 'frame=  100 fps=0.0 q=-1.0 size=N/A time=00:00:03.33 bitrate=N/A speed=10x\nframe=  240 fps=0.0 q=-1.0 Lsize=N/A time=00:00:08.00 bitrate=N/A speed=12x\n';
+  assert.equal(parseDecodedFrameCount(stderr), 240);
+});
+await t('parseDecodedFrameCount: a stream that stops decoding partway (task 125\'s actual failure shape) reports the LOW count it actually reached, not the container\'s claimed total', () => {
+  const stderr = 'frame=  386 fps=0.0 q=-0.0 size=N/A time=00:00:12.86 bitrate=N/A speed=25.5x\nframe=  480 fps=0.0 q=-0.0 Lsize=N/A time=00:00:16.00 bitrate=N/A speed=25.8x\n';
+  assert.equal(parseDecodedFrameCount(stderr), 480); // the real observed value for task 125's broken final.mp4, expected 3778
+});
+await t('parseDecodedFrameCount: no frame= lines at all (e.g. ffmpeg failed before decoding anything) returns 0, never throws or returns a stale/undefined value', () => {
+  assert.equal(parseDecodedFrameCount(''), 0);
+  assert.equal(parseDecodedFrameCount('some unrelated ffmpeg banner text with no frame markers'), 0);
+});
+await t('expectedFrameCount / fpsFor: deterministic, matches the real production numbers from task 125 exactly (8s chunk -> 240 frames; 125.94s Long -> 3778 frames; 30fps for both formats)', () => {
+  assert.equal(fpsFor('long'), 30);
+  assert.equal(fpsFor('short'), 30);
+  assert.equal(expectedFrameCount(8, 30), 240);
+  assert.equal(expectedFrameCount(125.94, 30), 3778);
+});
+await t('ops.js: chunk endpoint now accepts force (bypassing the content-length-only reuse check) and permits recovery on an already-ready_for_review build, mirroring finish\'s existing allowance', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const chunkIdx = ops.indexOf('async function nextwaveV2RouteChunk'); const chunkEnd = ops.indexOf('\n// FINISH', chunkIdx);
+  const body = ops.slice(chunkIdx, chunkEnd);
+  assert.ok(/const \{ build_id: id, index, force \} = req\.body/.test(body), 'force must be destructured from the request body');
+  assert.ok(/state\.status !== 'ready_for_review'/.test(body), 'status gate must now also permit ready_for_review (targeted single-chunk recovery on a finished build)');
+  assert.ok(/if \(!force\) \{/.test(body), 'the reuse/HEAD-check must be skippable via force, not removed outright (healthy chunks still get the cheap reuse path by default)');
+});
+await t('ops.js: chunk endpoint validates a freshly-rendered chunk before trusting/uploading it (the exact gap that let task 125\'s corrupted chunk 2 go unnoticed at render time)', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const chunkIdx = ops.indexOf('async function nextwaveV2RouteChunk'); const chunkEnd = ops.indexOf('\n// FINISH', chunkIdx);
+  const body = ops.slice(chunkIdx, chunkEnd);
+  assert.ok(/L\.route\.countDecodedFrames\(/.test(body), 'must decode-validate the freshly-rendered chunk');
+  assert.ok(/L\.route\.expectedFrameCount\(/.test(body), 'must compare against the expected frame count for that chunk\'s own duration');
+  assert.ok(/chunk_render_invalid/.test(body), 'an invalid fresh render must return a distinct, actionable error — never silently upload a bad chunk as if it were healthy');
+  assert.ok(!/await readFile\(out\); const url = await sbStorageUpload\(rel, buf/.test(body.slice(0, body.indexOf('chunk_render_invalid'))), 'the upload must happen AFTER the integrity check, never before it');
+});
+await t('ops.js: finish validates every locally-staged chunk BEFORE concatenation and reports exactly which index(es) are bad, without wasting the concat/upload work on a known-bad input', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const finishIdx = ops.indexOf('async function nextwaveV2RouteFinish'); const finishEnd = ops.indexOf('\nasync function nextwaveV2CompositeLongSegmentRender');
+  const body = ops.slice(finishIdx, finishEnd);
+  const chunkDownloadIdx = body.indexOf('smDownloadToFile(nwv2rPublic(`${nwv2rBase(id)}/chunk_');
+  const concatIdx = body.indexOf('finalizeVideo(');
+  assert.ok(chunkDownloadIdx > -1 && concatIdx > -1 && chunkDownloadIdx < concatIdx, 'chunk download must happen before concat (precondition for the ordering check below)');
+  const preConcatRegion = body.slice(chunkDownloadIdx, concatIdx);
+  assert.ok(/L\.route\.countDecodedFrames\(/.test(preConcatRegion), 'every chunk must be decode-validated between download and concat, not after');
+  assert.ok(/badChunks\.push\(\{ index: ch\.index/.test(preConcatRegion), 'a bad chunk must be reported with its specific index — not a generic/unlocated failure');
+  assert.ok(/kind: 'chunk_invalid'/.test(preConcatRegion), 'the reported reason kind must be chunk_invalid specifically, distinct from the other needs_review reason kinds, so the client can target the right recovery action');
+  assert.ok(!/finalizeVideo\(/.test(preConcatRegion), 'finalizeVideo must not be reachable before the validation loop — confirms the gate runs first, every time');
+});
+await t('ops.js: the final-output check now also catches incomplete decode progression (task 125\'s actual failure class), not just pixel-freeze, using the same proven frame-count technique', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const finishIdx = ops.indexOf('async function nextwaveV2RouteFinish'); const finishEnd = ops.indexOf('\nasync function nextwaveV2CompositeLongSegmentRender');
+  const body = ops.slice(finishIdx, finishEnd);
+  assert.ok(/freeze\.decodedFrames/.test(body), 'must read decodedFrames off the SAME detectFreeze() call — no second decode pass, no extra cost');
+  assert.ok(/incomplete_decoded_output/.test(body), 'must feed a distinct issue kind into the SAME issues[] array that already blocks ready_for_review');
+  assert.ok(/frozen_final_output/.test(body), 'the original PR #35 pixel-freeze check must remain intact — this is additive, not a replacement (a genuine repeated-frame freeze is still a real, separate, still-valid thing to catch)');
+});
+await t('healthy chunk/finish flow is unaffected: a chunk whose decode-check passes is uploaded exactly as before; a finish whose chunks all validate proceeds to concat exactly as before (both gates are pure additions in the success path, not restructured)', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  assert.ok(/const buf = await readFile\(out\); const url = await sbStorageUpload\(rel, buf, 'video\/mp4'\);\s*\n\s*return res\.status\(200\)\.json\(\{ ok: true, index: i, url, bytes: buf\.length \}\);/.test(ops), 'the chunk success-path upload+response is byte-for-byte the pre-existing code, just now gated behind a passing integrity check rather than removed/changed');
+});
+await t('the new decode-validation call sites are exactly the chunk handler and finish\'s pre-concat loop — no leakage into any other engine or code path', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  assert.equal((ops.match(/countDecodedFrames/g) || []).length, 2, 'expected exactly 2 call sites: the chunk handler\'s own fresh-render check, and finish\'s pre-concat validation loop');
+  const html = fs.readFileSync('./public/index.html', 'utf8');
+  assert.equal((html.match(/countDecodedFrames/g) || []).length, 0, 'this is a server-side-only check — no client code should reference it directly');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

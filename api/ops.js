@@ -17563,7 +17563,7 @@ async function nextwaveV2RouteChunk(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
   if (!(await nwv2rIsEnabled())) return res.status(409).json({ ok: false, error: 'v2_route_disabled' });
-  const { build_id: id, index } = req.body || {}; const i = Number(index);
+  const { build_id: id, index, force } = req.body || {}; const i = Number(index);
   if (!/^nwv2r-[0-9a-f]{16}$/.test(String(id || '')) || !Number.isInteger(i) || i < 0) return res.status(400).json({ ok: false, error: 'build_id/index invalid' });
   // 2026-10-07 — dir MUST be unique per invocation, not just per chunk index: a concurrent/duplicate call for the
   // SAME index (observed in production — two overlapping client build loops) raced on this shared path, and one
@@ -17573,13 +17573,32 @@ async function nextwaveV2RouteChunk(req, res) {
   const { mkdir, rm } = await import('node:fs/promises'); const dir = join(tmpdir(), `${id}-c${i}-${randomBytes(6).toString('hex')}`);
   try {
     const state = await nwv2rGetState(id); if (!state) return res.status(404).json({ ok: false, error: 'build_not_found' });
-    if (state.status !== 'planned' && state.status !== 'rendered') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });
+    // 2026-10-16 — 'ready_for_review' is now also accepted (not just planned/rendered), and `force` is
+    // accepted, so a SPECIFIC confirmed-bad chunk can be re-rendered on an already-finished build without
+    // touching any other chunk or the script/storyboard — see the chunk integrity gate below for how a bad
+    // chunk gets confirmed in the first place (task 125: chunk 2 silently corrupted during the original
+    // Vercel render, reproduced to be undetectable by any pre-existing check, including PR #35's).
+    if (state.status !== 'planned' && state.status !== 'rendered' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });
     const ch = (state.chunks || [])[i]; if (!ch) return res.status(400).json({ ok: false, error: 'chunk_out_of_range' });
-    const rel = `${nwv2rBase(id)}/chunk_${String(i).padStart(3, '0')}.mp4`; const head = await fetch(nwv2rPublic(rel), { method: 'HEAD' }).catch(() => null);
-    if (head && head.ok && Number(head.headers.get('content-length') || 0) > 2048) return res.status(200).json({ ok: true, index: i, url: nwv2rPublic(rel), reused: true });
+    const rel = `${nwv2rBase(id)}/chunk_${String(i).padStart(3, '0')}.mp4`;
+    if (!force) {
+      const head = await fetch(nwv2rPublic(rel), { method: 'HEAD' }).catch(() => null);
+      if (head && head.ok && Number(head.headers.get('content-length') || 0) > 2048) return res.status(200).json({ ok: true, index: i, url: nwv2rPublic(rel), reused: true });
+    }
     const L = await nwv2rLib(); await mkdir(dir, { recursive: true }); const out = join(dir, 'chunk.mp4');
     const { C, format } = await L.route.compileFromState(state, { loadPoses: L.route.loadHostPoses, loadBench: L.route.loadBench });
     await L.route.renderChunk({ C, format, chunk: ch, outPath: out, ffmpegPath: ffmpegInstaller.path });
+    // CHUNK INTEGRITY GATE (2026-10-16) — verify the freshly-rendered chunk actually decodes to its full
+    // expected frame count before trusting/uploading it. The chunk that corrupted task 125 uploaded
+    // successfully, had a plausible size, and reported no error at render time -- it just silently stopped
+    // decoding partway through (proven via direct ffmpeg/NAL-level analysis: garbage NAL unit sizes mid-
+    // stream, consistent with a transient serverless-environment fault during that specific render; a
+    // byte-identical local re-render of the SAME storyboard/scene produced a clean file, so this is not a
+    // deterministic code defect). A 1-frame tolerance absorbs ordinary encoder rounding, never real corruption
+    // (the observed defect was a >99% frame-count shortfall, not an off-by-one).
+    const decoded = await L.route.countDecodedFrames(ffmpegInstaller.path, out);
+    const expected = L.route.expectedFrameCount(ch.dur, format.fps);
+    if (decoded < expected - 1) return res.status(500).json({ ok: false, error: 'chunk_render_invalid', index: i, decoded, expected });
     const buf = await readFile(out); const url = await sbStorageUpload(rel, buf, 'video/mp4');
     return res.status(200).json({ ok: true, index: i, url, bytes: buf.length });
   } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
@@ -17604,17 +17623,44 @@ async function nextwaveV2RouteFinish(req, res) {
     if (state.status !== 'planned' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_finishable: ${state.status}` });
     const L = await nwv2rLib(); await mkdir(dir, { recursive: true });
     const chunkPaths = []; for (const ch of state.chunks) { const p = join(dir, `c${String(ch.index).padStart(3, '0')}.mp4`); await smDownloadToFile(nwv2rPublic(`${nwv2rBase(id)}/chunk_${String(ch.index).padStart(3, '0')}.mp4`), p); chunkPaths.push(p); }
+    // PRE-CONCAT CHUNK INTEGRITY GATE (2026-10-16) — validate every locally-staged chunk BEFORE handing it to
+    // ffmpeg's `-c:v copy` concat. Proven on task 125: one silently-corrupted chunk (passed its own upload,
+    // plausible size, no error) made the concat demuxer stop decoding entirely from that point forward in the
+    // FINAL file — every later, individually-healthy chunk never actually appeared, even though each one's own
+    // standalone file was fine. Checking chunks here, before concat, both prevents wasting the concat/upload
+    // work on an input already known to be bad and reports exactly which chunk index needs re-rendering,
+    // instead of leaving that to be reverse-engineered from a broken final.mp4 after the fact.
+    const fps = L.route.fpsFor(state.format); const badChunks = [];
+    for (const ch of state.chunks) {
+      const p = chunkPaths[ch.index]; const decoded = await L.route.countDecodedFrames(ffmpegInstaller.path, p);
+      const expected = L.route.expectedFrameCount(ch.dur, fps);
+      if (decoded < expected - 1) badChunks.push({ index: ch.index, decoded, expected });
+    }
+    if (badChunks.length) {
+      const reasons = badChunks.map((b) => ({ kind: 'chunk_invalid', chunk: b.index, decoded: b.decoded, expected: b.expected }));
+      state.status = 'needs_review'; state.exception = { route: 'NEEDS_REVIEW', reasons, owner: 'engineering_triage' };
+      await nwv2rPutState(id, state);
+      return res.status(200).json(nwv2rSummary(state));
+    }
     const audio = join(dir, 'narration.mp3'); await smDownloadToFile(state.audio_url, audio); const out = join(dir, 'final.mp4');
     await L.route.finalizeVideo({ chunkPaths, audioPath: audio, outPath: out, ffmpegPath: ffmpegInstaller.path, workDir: dir, duration: state.duration_sec });
     const pr = await L.route.probe(ffmpegInstaller.path, out); const wantW = state.format === 'short' ? 1080 : 1920, wantH = state.format === 'short' ? 1920 : 1080;
     const issues = []; if (!pr.has_audio || !pr.has_video) issues.push('missing_stream'); if (pr.width !== wantW || pr.height !== wantH) issues.push('wrong_resolution'); if (!pr.duration || Math.abs(pr.duration - state.duration_sec) > 0.8) issues.push('duration_mismatch');
-    // FINAL-ENCODE INTEGRITY GATE (2026-10-07) — catches a stitch/concat defect that leaves the container
-    // structurally fine (duration/resolution/streams all pass the checks above) but visually frozen on one
-    // stale frame for most of the runtime. Real content in this renderer is continuously animated (camera
-    // tween, caption changes) every frame, so any freeze run this long in the ACTUAL encoded file — as opposed
-    // to the abstract draw() function compile_qc already checked pre-render — can only be an encoding defect.
+    // FINAL-ENCODE INTEGRITY GATE (2026-10-07, corrected 2026-10-16) — catches a stitch/concat defect that
+    // leaves the container structurally fine (duration/resolution/streams all pass the checks above). The
+    // ORIGINAL version of this gate (PR #35) only checked for freezedetect's repeated-identical-frame pattern,
+    // which missed task 125's actual defect: a mid-stream decode failure makes the decoder stop and exit
+    // cleanly rather than emit a repeated frame, so no freeze run ever exists for freezedetect to find, even
+    // though the container's duration metadata still claims the full length. detectFreeze now also returns
+    // decodedFrames (ffmpeg's own last `frame=N` progress line from the same decode pass, at no extra cost) —
+    // comparing that to the number the claimed duration implies catches exactly this class, in addition to
+    // genuine pixel-freeze still being checked by the original logic. The pre-concat gate above should prevent
+    // this from ever reaching here again, but this stays as defense in depth for any other path that could
+    // introduce a similar defect during concat/mux itself.
     const freeze = await L.route.detectFreeze(ffmpegInstaller.path, out, { minSec: 5 });
     if (freeze.longest_sec >= 5) issues.push('frozen_final_output');
+    const expectedFinalFrames = L.route.expectedFrameCount(state.duration_sec, fps);
+    if (freeze.decodedFrames < expectedFinalFrames - fps) issues.push('incomplete_decoded_output'); // 1s tolerance
     const bench = await L.route.loadBench(); const thumb = L.route.makeThumbnail({ storyboard: state.storyboard, formatName: state.format, title: state.title || '', bench });
     const videoUrl = await sbStorageUpload(`${nwv2rBase(id)}/final.mp4`, await readFile(out), 'video/mp4'); const thumbUrl = await sbStorageUpload(`${nwv2rBase(id)}/thumbnail.png`, thumb, 'image/png');
     state.final = { video_url: videoUrl, thumbnail_url: thumbUrl, encode: pr, post_encode_issues: issues, finished_at: new Date().toISOString() };
