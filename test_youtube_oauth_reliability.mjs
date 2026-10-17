@@ -258,4 +258,87 @@ await t('diff scope: this patch touches only api/youtube/callback.js and api/ops
   });
 });
 
+console.log('\n[4] Sync-log attribution fix (2026-10-17) — reconnect-success logs must name the channel that was actually authorized, never channels[0] (which is always whichever brand channel resolves first, regardless of target)');
+
+// Resolves purely via the title-match fallback (mine=true returns nothing), so the
+// chosen channel comes from channelTarget matching the real forHandle-fetched title —
+// exercising the exact same resolution path a real per-channel reconnect uses.
+async function runCallbackForChannel(channelTargetTitle) {
+  const { fetchMock, calls } = makeMockFetch({
+    'youtube/v3/channels?part=snippet,statistics&mine=true': () => ({ ok: true, status: 200, text: async () => '{"items":[]}', json: async () => ({ items: [] }) }),
+  });
+  const redirectedTo = await runCallback({ fetchMock, channelTarget: channelTargetTitle });
+  const syncLogWrites = calls.filter((c) => c.url.includes('youtube_sync_logs') && c.method === 'POST');
+  return { redirectedTo, syncLogWrites, calls };
+}
+
+const KNOWN_CHANNELS = {
+  'NextWave Systems': 'UC41nsMBfVJCqj4vJRLktZTQ',
+  'SRV Studio': 'UC0nzWQX6AaUqlF5FozNpWPg',
+  'Silk Road Voices': 'UCCUa5BLzGh2eRBoqqWBCK_g',
+  'AI Creation Studio': 'UCs3bHOHKiHLPg_zdVcd8_gQ',
+};
+
+for (const [title, channelId] of Object.entries(KNOWN_CHANNELS)) {
+  await t(`reconnect-success log for "${title}" is attributed to its OWN channel_id (${channelId}), not channels[0]`, async () => {
+    const { redirectedTo, syncLogWrites } = await runCallbackForChannel(title);
+    assert.ok(redirectedTo && redirectedTo.includes('yt_connected=true'), 'expected a successful reconnect, got: ' + redirectedTo);
+    const successLogs = syncLogWrites.filter((c) => c.body.status === 'success');
+    assert.equal(successLogs.length, 1, 'expected exactly one success sync-log write');
+    assert.equal(successLogs[0].body.channel_id, channelId, `the success log must be attributed to ${title}'s own channel_id, never a different channel's`);
+    assert.ok(successLogs[0].body.message.includes(title), 'the log message must explicitly name the channel that was actually authorized');
+  });
+}
+
+await t('this is the exact regression case that was broken before the fix: AI Creation Studio (the LAST-resolved handle, never channels[0]) must never log success under Silk Road Voices\'s (channels[0]\'s) channel_id', async () => {
+  const { syncLogWrites } = await runCallbackForChannel('AI Creation Studio');
+  const successLogs = syncLogWrites.filter((c) => c.body.status === 'success');
+  assert.notEqual(successLogs[0].body.channel_id, KNOWN_CHANNELS['Silk Road Voices'], 'must not be misattributed to Silk Road Voices (the old channels[0] bug)');
+  assert.equal(successLogs[0].body.channel_id, KNOWN_CHANNELS['AI Creation Studio']);
+});
+
+await t('failed/unresolved channel targeting still produces NO success log (and no sync-log write at all) — the attribution fix does not weaken Change 3\'s existing safe-rejection behavior', async () => {
+  const { fetchMock, calls } = makeMockFetch({
+    'youtube/v3/channels?part=snippet,statistics&mine=true': () => ({ ok: true, status: 200, text: async () => '{"items":[]}', json: async () => ({ items: [] }) }),
+  });
+  const redirectedTo = await runCallback({ fetchMock, channelTarget: 'Some Totally Unknown Channel' });
+  assert.ok(redirectedTo.includes('yt_error=channel_resolution_failed'));
+  const syncLogWrites = calls.filter((c) => c.url.includes('youtube_sync_logs') && c.method === 'POST');
+  assert.equal(syncLogWrites.length, 0, 'an unresolved target must write zero sync-log rows — no misleading success, no misleading failure either');
+});
+
+await t('cross-business isolation: each reconnect writes exactly one sync-log row, to exactly one channel_id — never logging against multiple channels in a single call', async () => {
+  for (const [title, channelId] of Object.entries(KNOWN_CHANNELS)) {
+    const { syncLogWrites } = await runCallbackForChannel(title);
+    const distinctIds = new Set(syncLogWrites.map((c) => c.body.channel_id));
+    assert.equal(distinctIds.size, 1, `${title}'s reconnect must touch exactly one channel_id's log history`);
+    assert.ok(distinctIds.has(channelId));
+  }
+});
+
+await t('PR #53\'s existing reliability protections (refresh-token preservation, structured errors, channel isolation) remain completely intact — re-run as a direct regression guard for this follow-up patch', async () => {
+  // Change 1 + 3 regression: a successful reconnect still writes exactly one
+  // youtube_connections row, with the fresh refresh_token, targeting only the resolved channel.
+  const { fetchMock, calls } = makeMockFetch();
+  const redirectedTo = await runCallback({ fetchMock, channelTarget: 'NextWave Systems' });
+  assert.ok(redirectedTo.includes('yt_connected=true'));
+  const connWrites = calls.filter((c) => c.url.includes('youtube_connections') && c.method === 'POST');
+  assert.equal(connWrites.length, 1);
+  assert.equal(connWrites[0].body.channel_id, 'UC41nsMBfVJCqj4vJRLktZTQ');
+  assert.equal(connWrites[0].body.refresh_token, 'new-refresh-token');
+});
+
+await t('source check: this patch touches only the sync-log write inside the callback handler — the youtube_connections upsert logic (Changes 1 and 3) is byte-for-byte unchanged', () => {
+  const src = fs.readFileSync('./api/youtube/callback.js', 'utf8');
+  assert.ok(/const connectionPayload = \{/.test(src), 'Change 1\'s payload-building logic must still be present, untouched');
+  assert.ok(/if \(!targetChannel \|\| !targetChannel\.channelId\) \{/.test(src), 'Change 3\'s safe-rejection check must still be present, untouched');
+  assert.ok(!/LEGACY mode/.test(src), 'the removed legacy fallback must still be gone');
+});
+
+await t('diff scope: this follow-up patch touches only api/youtube/callback.js plus its own test file — no other production code', () => {
+  const diffFiles = execFileSync('git', ['diff', '--name-only', 'origin/main']).toString().trim().split('\n').filter(Boolean);
+  const allowed = new Set(['api/youtube/callback.js', 'test_youtube_oauth_reliability.mjs']);
+  diffFiles.forEach((f) => assert.ok(allowed.has(f), `unexpected file in diff: ${f}`));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

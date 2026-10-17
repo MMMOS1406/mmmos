@@ -343,11 +343,22 @@ export default async function handler(req, res) {
     }
 
     // 5. Log (non-fatal, append-only — no on_conflict)
+    // OAuth reliability patch, sync-log attribution fix (2026-10-17) — this previously
+    // logged against channels[0].channelId, which is always whichever brand channel
+    // resolves first in fetchAllChannels' fixed handle-iteration order (Silk Road
+    // Voices), regardless of which channel this reconnect actually authorized. Every
+    // per-channel reconnect therefore logged "success" against the wrong channel_id,
+    // leaving the real target's own sync-log history (and dashboard status) stale —
+    // confirmed live: a healthy, freshly-reconnected AI Creation Studio still showed a
+    // stale "Sync Failed" badge because its own last log row was an old cron failure,
+    // never overwritten by its own (misattributed) reconnect success. Fix: log against
+    // targetChannel.channelId — the one actually resolved and authorized above — with a
+    // message that names it explicitly, not the full metadata-refresh list.
     try {
       await sbUpsert('youtube_sync_logs', {
-        channel_id: channels[0].channelId,
+        channel_id: targetChannel.channelId,
         status: 'success',
-        message: `Connected ${channels.length} channel(s): ${channels.map(c => c.title).join(', ')}`,
+        message: `Reconnected: ${targetChannel.title} (metadata refreshed for ${channels.length} channel(s): ${channels.map(c => c.title).join(', ')})`,
         synced_at: new Date().toISOString(),
       }, null);
     } catch (e) {
