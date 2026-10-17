@@ -52,6 +52,24 @@ const BRAND_HANDLES = [
   'AICreation-tool',
 ];
 
+// OAuth reliability patch (2026-10-17), Change 1 — reads the ALREADY-STORED row for
+// exactly one channel_id, scoped by that single id only (never a broader query), so a
+// fresh reconnect can tell whether a usable refresh_token already exists before
+// deciding whether omitting a new one from Google's response leaves the channel
+// reauthorization-required or still fine on its existing token.
+async function sbGetOne(table, channelId) {
+  const url = `${SUPABASE_URL}/rest/v1/${table}?channel_id=eq.${encodeURIComponent(channelId)}&select=*&limit=1`;
+  const res = await fetch(url, {
+    headers: {
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY,
+    },
+  });
+  if (!res.ok) return null;
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
 async function sbUpsert(table, data, onConflict = 'channel_id') {
   const url = onConflict
     ? `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`
@@ -264,34 +282,46 @@ export default async function handler(req, res) {
       return t === want || t.includes(want) || want.includes(t);
     });
 
-    if (targetChannel && targetChannel.channelId) {
-      // Update ONLY this specific channel's row with the new write-scope token
-      await sbUpsert('youtube_connections', {
-        channel_id: targetChannel.channelId,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token || null,
-        token_expires_at: tokenExpiry,
-        scope: tokens.scope || '',
-        connected_at: new Date().toISOString(),
-        last_sync: new Date().toISOString(),
-        status: 'connected',
-      });
-      console.log('[v13.56.0] PER-CHANNEL token saved to:', targetChannel.title, '(', targetChannel.channelId, ')');
-    } else {
-      // Legacy fallback (channel_target not specified): write to all rows like before
-      for (const channel of channels) {
-        await sbUpsert('youtube_connections', {
-          channel_id: channel.channelId,
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token || null,
-          token_expires_at: tokenExpiry,
-          scope: tokens.scope || '',
-          connected_at: new Date().toISOString(),
-          last_sync: new Date().toISOString(),
-          status: 'connected',
-        });
-      }
-      console.log('[v13.56.0] LEGACY mode — same token saved to all 4 channels');
+    // OAuth reliability patch (2026-10-17):
+    // Change 3 — the former legacy fallback (channel_target unresolved → write the same
+    // token to all 4 channels' rows) is removed. A reconnect that can't resolve exactly
+    // one target channel is rejected safely instead of silently broadening to every
+    // connected channel — a failed channel-specific resolution must never become a
+    // multi-channel write.
+    if (!targetChannel || !targetChannel.channelId) {
+      console.error('[v13.56.0] OAuth callback: could not resolve a specific target channel · channel_target:', channelTarget || '(none)', '· mine=true result:', actualChannel ? actualChannel.title : '(none)');
+      return res.redirect(302, `${appUrl}/?yt_error=channel_resolution_failed`);
+    }
+    // Change 1 — Google's authorization_code grant does not always include a
+    // refresh_token (only guaranteed on a genuinely fresh consent; the prompt=consent
+    // above exists to force one, but must not be the ONLY defense). Previously this
+    // wrote `tokens.refresh_token || null` unconditionally, which — if Google ever
+    // omitted it despite the forced prompt — would null out a previously-valid, still-
+    // working refresh token for this exact channel. Fix: only include refresh_token in
+    // the upsert payload when Google's response actually has one; an omitted key leaves
+    // the stored column untouched under PostgREST's merge-duplicates upsert (it performs
+    // INSERT ... ON CONFLICT DO UPDATE SET <only the submitted columns>). The existing
+    // row is read first, scoped to this exact channel_id only, to know whether a prior
+    // refresh_token is there to fall back on.
+    const existingConn = await sbGetOne('youtube_connections', targetChannel.channelId);
+    const hasNewRefreshToken = !!tokens.refresh_token;
+    const hasExistingRefreshToken = !!(existingConn && existingConn.refresh_token);
+    const hasUsableRefreshToken = hasNewRefreshToken || hasExistingRefreshToken;
+    const connectionPayload = {
+      channel_id: targetChannel.channelId,
+      access_token: tokens.access_token,
+      token_expires_at: tokenExpiry,
+      scope: tokens.scope || '',
+      connected_at: new Date().toISOString(),
+      last_sync: new Date().toISOString(),
+      status: hasUsableRefreshToken ? 'connected' : 'reauthorization_required',
+    };
+    if (hasNewRefreshToken) connectionPayload.refresh_token = tokens.refresh_token;
+    await sbUpsert('youtube_connections', connectionPayload);
+    console.log('[v13.56.0] PER-CHANNEL token saved to:', targetChannel.title, '(', targetChannel.channelId, ')',
+      hasNewRefreshToken ? '(new refresh_token)' : hasExistingRefreshToken ? '(preserved existing refresh_token)' : '(NO refresh_token available — reauthorization required)');
+    if (!hasUsableRefreshToken) {
+      return res.redirect(302, `${appUrl}/?yt_error=reauthorization_required&channel=${encodeURIComponent(targetChannel.title)}`);
     }
 
     // 4. Save channel metadata (non-fatal per channel)
