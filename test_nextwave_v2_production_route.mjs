@@ -157,6 +157,12 @@ const OPS_A2_ALLOWED_REMOVED_LINES = new Set([
   // pre-existing lines are replaced to also accept needs_review; nothing else in either gate changed.
   "    if (state.status !== 'planned' && state.status !== 'rendered' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_renderable: ${state.status}` });",
   "    if (state.status !== 'planned' && state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_finishable: ${state.status}` });",
+  // YouTube OAuth reliability patch (2026-10-17, test_youtube_oauth_reliability.mjs) — not a
+  // NextWave change, but this one pre-existing line in the unrelated youtubeVideoStatus
+  // handler was replaced with a try/catch around the same call so a dead refresh token
+  // returns a structured 401 instead of an uncaught exception falling through to a bare
+  // 500. See that test file for the full root-cause/fix/test coverage of this patch.
+  "  const refreshed = await _refreshYoutubeToken(conn.refresh_token);",
 ]);
 // Reconciliation closeout (2026-10-03) — this test's comparison point was `BASELINE` (fa34eb0, the
 // commit immediately before NextWave existed in this file at all). That stopped being the right

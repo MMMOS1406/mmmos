@@ -7859,7 +7859,19 @@ async function youtubeVideoStatus(req, res) {
   if (!channelTitle) return res.status(400).json({ ok: false, error: 'missing_channel_title' });
   const conn = await _getYoutubeConnectionByTitle(channelTitle);
   if (!conn || !conn.refresh_token) return res.status(404).json({ ok: false, error: 'no_connection' });
-  const refreshed = await _refreshYoutubeToken(conn.refresh_token);
+  // OAuth reliability patch (2026-10-17) — this call previously had no try/catch, so a
+  // dead refresh token (e.g. invalid_grant) threw uncaught and fell through to this
+  // file's generic top-level handler as a bare 500 {error: e.message}, losing the
+  // structured, actionable error youtubeUploadVideo already returns for this exact
+  // failure. Match that existing pattern instead of inventing a new one — confirmed
+  // live against AI Creation Studio's actually-expired token during the OAuth
+  // reliability audit: this now returns 401/token_refresh_failed instead of a bare 500.
+  let refreshed;
+  try {
+    refreshed = await _refreshYoutubeToken(conn.refresh_token);
+  } catch (e) {
+    return res.status(401).json({ ok: false, error: 'token_refresh_failed', message: e.message });
+  }
   const r = await fetch('https://www.googleapis.com/youtube/v3/videos?part=status,processingDetails,snippet&id=' + encodeURIComponent(videoId), {
     headers: { 'Authorization': 'Bearer ' + refreshed.accessToken },
   });
