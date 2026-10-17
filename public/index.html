@@ -17688,6 +17688,37 @@ async function nextwaveV2RouteRecoverChunks(pkg){
     return{ok:false,reason:'network_error',detail:e.message};
   }
 }
+// GOVERNED HOOK ILLUSTRATION CORRECTION (2026-10-17, task 125 creative correction) -- re-attempts the Long
+// format's S1 hook illustration through the SAME vendor pipeline (Ideogram + Claude-vision QC) every other
+// illustrated beat uses, via the server's nextwave_v2_route_regenerate_hook_illustration action. Never bypasses
+// a QC failure: a still-failing attempt leaves the persisted build, its chunks and its video completely
+// untouched and reports why. Only on a genuine QC pass does it then re-render (force:true) exactly the chunk
+// indices the server computed as overlapping the hook scene's own time span, and re-finalize -- narration,
+// values, storyboard and every other scene stay byte-for-byte what they already were.
+async function nextwaveV2RouteCorrectHookIllustration(pkg){
+  const buildId=pkg&&pkg.nextwaveV2Route&&pkg.nextwaveV2Route.buildId;
+  if(!buildId){alert('No build id on this package — cannot correct the hook illustration.');return{ok:false,reason:'missing_build_id'};}
+  try{
+    const gr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_regenerate_hook_illustration',{build_id:buildId});
+    const g=await gr.json();
+    if(!g.ok){
+      if(g.qc_failed){alert('Hook illustration still failed Creative QC: '+((g.reasons||[]).join('; ')||'see server log')+'. No chunk or video changes were made. You can try again.');return{ok:false,reason:'qc_failed',detail:g.reasons};}
+      alert('Hook illustration regeneration failed: '+(g.error||('HTTP '+gr.status)));return{ok:false,reason:'request_failed',detail:g.error};
+    }
+    const affected=g.affected_chunks||[];
+    for(const idx of affected){
+      const cr=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_route_chunk',{build_id:buildId,index:idx,force:true});
+      const c=await cr.json();
+      if(!c.ok){alert('Chunk '+idx+' re-render failed after a passing new illustration: '+(c.error||('HTTP '+cr.status)));return{ok:false,reason:'chunk_rerender_failed',index:idx,detail:c.error};}
+    }
+    const fin=await nextwaveV2RouteRefinalize(pkg);
+    if(fin&&fin.ok&&pkg.nextwaveV2Route){pkg.nextwaveV2Route.illustration=Object.assign({},pkg.nextwaveV2Route.illustration,{creative_qc:g.creative_qc});await _nextwaveV2RoutePersist(pkg);}
+    return fin;
+  }catch(e){
+    alert('Hook illustration correction network error: '+e.message);
+    return{ok:false,reason:'network_error',detail:e.message};
+  }
+}
 function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
   const rs=pkg?pkg.renderStatus:'';const r=(pkg&&pkg.nextwaveV2Route)||{};
   const box=function(color,inner){return '<div style="padding:16px;background:rgba('+color+',0.08);border:1px solid rgba('+color+',0.4);border-radius:12px;margin-bottom:12px">'+inner+'</div>';};
@@ -17702,6 +17733,13 @@ function _nextwaveV2RoutePanel(task,pkg,taskId,pkgId,st){
     // build completed. This banner is additive only — it does not block the Approve button below (that would be a
     // lifecycle change, out of scope for this order) — a human must see it and clear it before publishing.
     if(illuNeedsReview) h+=box('245,158,11','<div style="font-size:13px;font-weight:800;color:#f59e0b;margin-bottom:6px">⚠️ CREATIVE NEEDS REVIEW — illustration fell back to the standard template</div><div style="font-size:11px;color:var(--text);line-height:1.6;font-family:\'JetBrains Mono\',monospace">'+((illu.creative_qc.reasons||[]).map(function(x){return escHTML((x.scene||'')+' ('+(x.mode||'')+'): '+((x.reasons||[]).join(', ')));}).join('<br>')||'see build state')+'</div><div style="font-size:11px;color:var(--dim);margin-top:8px">Owner: '+escHTML(String(illu.creative_qc.owner||'va_production_product_qc').replace(/_/g,' '))+'. The technical build is complete and factually correct, but this is NOT a Creative PASS — review before publishing.</div>');
+    // GOVERNED HOOK ILLUSTRATION CORRECTION (2026-10-17, task 125 creative correction) — visible only when the
+    // needs_review reasons include a 'hook'-mode entry (this action only ever touches the hook beat); re-attempts
+    // generation+QC through the same vendor pipeline, then re-renders only the chunks the hook scene's time span
+    // actually covers and re-finalizes. Never automatic; never bypasses a QC failure (a still-failing attempt
+    // leaves the build and video untouched and says so).
+    const hookNeedsReview=illuNeedsReview&&(illu.creative_qc.reasons||[]).some(function(x){return x.mode==='hook';});
+    if(hookNeedsReview) h+='<button style="'+st.btnBlue+'" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||\'\')===String(\''+pkgId+'\');});if(!p){alert(\'Package not found\');return;}const b=event.target;b.disabled=true;b.textContent=\'⏳ Regenerating hook illustration…\';const x=await nextwaveV2RouteCorrectHookIllustration(p);b.disabled=false;b.textContent=\'🎨 Regenerate hook illustration (Creative QC)\';if(typeof renderTab===\'function\')renderTab(currentTab);})()">🎨 Regenerate hook illustration (Creative QC)</button>';
     h+='<button style="'+st.btnGreen+'" onclick="_nextWaveSetStage(\''+taskId+'\',\'approve\');if(typeof renderTab===\'function\')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>';
     // GOVERNED RECOVERY (2026-10-07) — always visible on a finished build, never automatic. Watch the actual
     // video before trusting it: a finalize-step race can leave this looking 'ready_for_review' (duration/
