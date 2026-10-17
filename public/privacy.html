@@ -34,7 +34,7 @@
   <h2>1. Information We Collect</h2>
   <p>We collect only the information necessary to operate the dashboard:</p>
   <ul>
-    <li><strong>YouTube data:</strong> Channel statistics, video metadata, view counts, and subscriber counts — fetched via the YouTube Data API v3 with read-only OAuth access.</li>
+    <li><strong>YouTube data:</strong> Channel statistics, video metadata, view counts, and subscriber counts, fetched via the YouTube Data API v3. YouTube access also includes the ability to upload and publish videos; this is used only when an operator explicitly reviews and approves a publish action inside the application's governed production workflow, never automatically.</li>
     <li><strong>TikTok data:</strong> Account display name, follower count, video metadata — fetched via the TikTok API with read-only OAuth access.</li>
     <li><strong>Financial data:</strong> Manually entered income, expense, debt, and portfolio figures stored locally and in our database.</li>
     <li><strong>OAuth tokens:</strong> Access and refresh tokens for connected platforms, stored securely in our Supabase database to enable periodic syncing.</li>
@@ -57,7 +57,7 @@
   <h2>4. Third-Party Services</h2>
   <p>MMM OS connects to the following external services:</p>
   <ul>
-    <li><strong>YouTube Data API v3</strong> (Google LLC) — read-only channel and video data</li>
+    <li><strong>YouTube Data API v3</strong> (Google LLC) — channel and video analytics (read-only), plus video upload/publish access used only for operator-approved publishing</li>
     <li><strong>TikTok API</strong> (ByteDance Ltd.) — read-only account and video data</li>
     <li><strong>Supabase</strong> — database and authentication infrastructure</li>
     <li><strong>Vercel</strong> — hosting and serverless function execution</li>
@@ -69,7 +69,7 @@
   <p>Sync logs and completed job records are purged after 30 days. Channel and video data is retained indefinitely to support historical trend analysis. You may request deletion of all stored data at any time by contacting us.</p>
 
   <h2>6. Security</h2>
-  <p>Access to the MMM OS dashboard is protected by a PIN-based authentication system. All API communication uses HTTPS. OAuth tokens are never exposed to the client beyond what is necessary to initiate sync operations. We apply the principle of least privilege — all platform OAuth scopes are read-only where the platform permits.</p>
+  <p>Access to the MMM OS dashboard is protected by a PIN-based authentication system. All API communication uses HTTPS. OAuth tokens are never exposed to the client beyond what is necessary to initiate sync or publish operations. We apply the principle of least privilege: TikTok access is read-only, and YouTube access is read-only for analytics/channel data plus upload access used exclusively to publish video content an operator has explicitly reviewed and approved through the application's governed production workflow.</p>
 
   <h2>7. Your Rights</h2>
   <p>You have the right to:</p>
