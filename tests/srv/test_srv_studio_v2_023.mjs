@@ -92,6 +92,58 @@ const L = (w) => JSON.parse(w.table[P.SRV2_VA_LEDGER_KEY] || '{"entries":[]}').e
   ok('026 the existing ledger entry (#136, 9-GE-FEAUNM) is kept — counters are not reset', entries.length === 2 && entries[0].youtubeVideoId === '9-GE-FEAUNM' && entries[1].kind === 'long' && entries[1].status === 'uploaded');
 }
 
+// ── 028: normal SRV Studio production uploads ──
+{
+  const PROD = JSON.stringify({ enabled: true, format: 'long', dailyCap: 2, channelId: CH });
+  const VA_LEDGER = JSON.stringify({ rev: 4, entries: [{ id: 'va_1', taskUid: 'srve_1791661404055_136', kind: 'long', pkgId: 'pkg_1792160628322', status: 'uploaded', youtubeVideoId: '9-GE-FEAUNM', channelId: CH }, { id: 'va_2', taskUid: 'srve_1791670106885_138', kind: 'long', pkgId: 'pkg_138', status: 'uploaded', youtubeVideoId: 'UvD7hUQH4aM', channelId: CH }] });
+  const tasks = {
+    srve_1792200000000_201: { id: 201, engine: 'SRV English', isLong: true, contentType: 'Long', status: 'assigned' },
+    srve_1792200000000_202: { id: 202, engine: 'SRV English', isLong: true, contentType: 'Long', status: 'generating' },
+    srve_1792200000000_203: { id: 203, engine: 'SRV English', isLong: true, contentType: 'Long', status: 'assigned' },
+    srve_1792200000000_204: { id: 204, engine: 'SRV English', isLong: false, contentType: 'Short Video', status: 'assigned' },
+    srve_1792200000000_205: { id: 205, engine: 'SRV English', isLong: true, status: 'done', srvRetired: { reason: 'x' }, cancelledAt: 1 },
+    srve_1792200000000_206: { id: 206, engine: 'SRV English', isLong: true, contentType: 'Long', status: 'done' },
+    srve_1791661404055_136: { id: 136, engine: 'SRV English', isLong: true, contentType: 'Long', status: 'assigned' },
+  };
+  const pw = (o = {}) => { const w = world({ [P.SRV2_PROD_KEY]: o.cfg === undefined ? PROD : o.cfg, [P.SRV2_VA_LEDGER_KEY]: VA_LEDGER }, o); Object.assign(w.deps, { engineState: async () => o.engine || 'test', taskByUid: async (u) => tasks[u] || null, getPackage: async (id) => ({ engine: 'SRV English', srvTaskUid: o.pkgTask || ('srve_1792200000000_' + id.slice(-3)) }) }); return w; };
+  const rq = (n, kind = 'long', o = {}) => req('srve_1792200000000_' + n, kind, { pkgId: 'pkg_' + n, videoUrl: `${SB}/storage/v1/object/public/srv-assets/pkg_${n}/v.mp4`, ...o });
+  const off = await P.srv2RunProductionUpload(pw({ cfg: null }).deps, rq(201), { supabaseUrl: SB });
+  ok('028 production: OFF until switched on (no config row → refused, nothing uploaded)', off.json.error === 'production_not_configured' && off.json.production === true);
+  const w = pw();
+  const a = await P.srv2RunProductionUpload(w.deps, rq(201), { supabaseUrl: SB });
+  ok('028 production: a new SRV Studio Long uploads PRIVATE, unscheduled, clean title, SRV English engine, recorded with who uploaded it', a.status === 200 && a.json.production === true && w.uploads.length === 1 && w.uploads[0].privacyStatus === 'private' && w.uploads[0].publishAt === null && !/\[TEST\]/.test(w.uploads[0].title) && w.uploads[0].engine === 'SRV English' && JSON.parse(w.table[P.SRV2_PROD_LEDGER_KEY]).entries[0].by === 'operator');
+  const dup = await P.srv2RunProductionUpload(w.deps, rq(201), { supabaseUrl: SB });
+  ok('028 duplicate prevention: the same task never uploads twice', dup.json.error === 'task_already_uploaded_or_in_progress' && w.uploads.length === 1);
+  const prev = await P.srv2RunProductionUpload(w.deps, req('srve_1791661404055_136', 'long', { pkgId: 'pkg_1792160628322', videoUrl: `${SB}/storage/v1/object/public/srv-assets/pkg_1792160628322/v.mp4` }), { supabaseUrl: SB });
+  ok('028 duplicate prevention spans the earlier ledgers: a task already uploaded under the VA allowance is refused', prev.json.error === 'task_already_uploaded_or_in_progress');
+  const b = await P.srv2RunProductionUpload(w.deps, rq(202), { supabaseUrl: SB });
+  const cap = await P.srv2RunProductionUpload(w.deps, rq(203), { supabaseUrl: SB });
+  ok('028 daily cap: the configured number per day (here 2), then refused until tomorrow', b.status === 200 && cap.json.error === 'production_daily_cap_reached' && w.uploads.length === 2);
+  const g = pw();
+  const sh = await P.srv2RunProductionUpload(g.deps, rq(204, 'short'), { supabaseUrl: SB });
+  const shLong = await P.srv2RunProductionUpload(g.deps, rq(204, 'long'), { supabaseUrl: SB });
+  const ret = await P.srv2RunProductionUpload(g.deps, rq(205), { supabaseUrl: SB });
+  const closed = await P.srv2RunProductionUpload(g.deps, rq(206), { supabaseUrl: SB });
+  const unknown = await P.srv2RunProductionUpload(g.deps, rq(299), { supabaseUrl: SB });
+  ok('028 Long only: a Short (or a Short task posted as long) is refused', sh.json.error === 'production_long_only' && shLong.json.error === 'production_long_only');
+  ok('028 cancelled/retired, closed and unknown tasks are refused', ret.json.error === 'task_retired_or_cancelled' && closed.json.error === 'task_closed' && unknown.json.error === 'task_not_found' && g.uploads.length === 0);
+  const other = await P.srv2RunProductionUpload(pw({ pkgTask: 'srve_1792200000000_999' }).deps, rq(201), { supabaseUrl: SB });
+  const paused = await P.srv2RunProductionUpload(pw({ engine: 'paused' }).deps, rq(201), { supabaseUrl: SB });
+  const running = await P.srv2RunProductionUpload(pw({ engine: 'running' }).deps, rq(201), { supabaseUrl: SB });
+  const wrongCh = await P.srv2RunProductionUpload(pw({ channel: 'UC_other' }).deps, rq(201), { supabaseUrl: SB });
+  const tt = await P.srv2RunProductionUpload(pw().deps, rq(201, 'long', { title: '[TEST] x' }), { supabaseUrl: SB });
+  const nodisc = await P.srv2RunProductionUpload(pw().deps, rq(201, 'long', { description: 'no disclosure' }), { supabaseUrl: SB });
+  ok('028 a package that belongs to another task, a paused engine, another channel, a [TEST] title or a missing AI disclosure are refused; running engine is allowed', other.json.error === 'package_not_of_this_task' && paused.json.error === 'engine_not_producing' && running.status === 200 && wrongCh.json.error === 'wrong_channel' && tt.json.error === 'bad_title' && nodisc.json.error === 'missing_ai_disclosure');
+  ok('028 the pilot and VA ledgers are never written by production uploads', w.table[P.SRV2_VA_LEDGER_KEY] === VA_LEDGER && w.table[P.SRV2_PILOT_LEDGER_KEY] === PILOT_LEDGER && !w.writes.includes(P.SRV2_VA_LEDGER_KEY) && !w.writes.includes(P.SRV2_PILOT_LEDGER_KEY));
+  const badCfg = (o) => P.srv2ParseProductionConfig(JSON.stringify({ enabled: true, format: 'long', dailyCap: 5, channelId: CH, ...o })).error;
+  ok('028 config: Long only, daily cap 1–10, SRV Studio channel', badCfg({ format: 'short' }) === 'production_format_invalid' && badCfg({ dailyCap: 0 }) === 'production_daily_cap_invalid' && badCfg({ dailyCap: 50 }) === 'production_daily_cap_invalid' && badCfg({ channelId: 'UC_x' }) === 'production_channel_invalid' && !badCfg({}));
+}
+{
+  const OPS = fs.readFileSync(path.join(repo, 'api/ops.js'), 'utf8');
+  const i = OPS.indexOf('async function srvStudioV2ProductionUpload('); const pr = OPS.slice(i, OPS.indexOf('\n}\n', i));
+  ok('028 server: production upload requires a VA or CEO session (never unsigned) and is behind the publishing gate', /const who = await _publisherFromRequest\(req\);\n\s*if \(!who \|\| \(who\.role !== 'operator' && who\.role !== 'ceo'\)\) return res\.status\(401\)/.test(pr) && /'srv_studio_v2_production_upload', \/\/ SRV-STUDIO-V2-028/.test(OPS) && /action === 'srv_studio_v2_production_upload'\)\s+return await srvStudioV2ProductionUpload/.test(OPS));
+}
+
 // ── One-time title correction ──
 const TITLE = 'The part you left behind - Emotional Deep House | Night Drive SRV Studio';
 function rworld(job, o = {}) {
