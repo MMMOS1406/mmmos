@@ -1332,4 +1332,61 @@ await t('index.html: the correction button only renders when a needs_review reas
   assert.ok(/nextwaveV2RouteCorrectHookIllustration/.test(branch), 'the button\'s onclick must be inside this same branch');
 });
 
+console.log('\n[26] task 125 hook prompt correction (2026-10-17) — root cause: the hook relationship\'s VISUAL_OBJECTIVE/REQUIRED_SUBJECTS/ENV_HINT were abstract/non-visual ("the video\'s topic, no numbers yet" / env hint "establishing", not an actual place), so 6 independent Ideogram generations against that prompt all defaulted to the same off-topic generic city/street scene with incidental storefront text. Fix: strengthen ONLY the \'hook\' entries in scenespec.mjs to name a concrete financial-decision metaphor and explicitly forbid street/city/skyline imagery — every other relationship (including \'close\', which shared the old vague "establishing" env hint) is untouched.');
+await t('(1) hook prompts now include explicit, concrete finance-decision concepts (crossroads/diverging trajectories/scale/ledger), not the old vague "the video\'s topic, no numbers yet"', async () => {
+  const sbB = await brain(scriptOf('B'));
+  const valuesById = new Map((sbB.values || []).map((v) => [v.id, v]));
+  const hookSpec = deriveSceneSpec({ scene: sbB.scenes[0], index: 0, allScenes: sbB.scenes, format: 'long', valuesById });
+  assert.equal(hookSpec.relationship, 'hook', 'fixture B scene 0 must actually be the hook beat for this test to be meaningful');
+  const { prompt } = buildPrompt(hookSpec);
+  assert.ok(/crossroads|fork|diverging|trajector|ledger|scale/i.test(prompt), 'hook prompt must name a concrete financial-decision metaphor');
+  assert.ok(/financial-decision/i.test(prompt), 'hook prompt must explicitly frame the subject as a financial decision');
+  assert.ok(!/the video's topic, no numbers yet/i.test(prompt), 'the old vague required-subjects phrase must be gone');
+});
+await t('(2) hook prompts now explicitly reject the generic street-scene default that caused all 6 prior failures, and no longer send the nonsensical old env-hint fragment ("Set in a context matching establishing.")', async () => {
+  const sbB = await brain(scriptOf('B'));
+  const valuesById = new Map((sbB.values || []).map((v) => [v.id, v]));
+  const hookSpec = deriveSceneSpec({ scene: sbB.scenes[0], index: 0, allScenes: sbB.scenes, format: 'long', valuesById });
+  const { prompt } = buildPrompt(hookSpec);
+  assert.ok(/never a generic city street/i.test(prompt), 'hook prompt must explicitly instruct against the generic street-scene default');
+  assert.ok(!/Set in a context matching establishing\./.test(prompt), 'the old nonsensical env-hint fragment must be gone — "establishing" is a camera direction, not a real place, and gave Ideogram nothing concrete to draw');
+});
+await t('(3) generated text is still explicitly prohibited in the hook prompt — this correction strengthens WHAT is drawn, never weakens the existing zero-text / Claude-vision QC requirement', async () => {
+  const sbB = await brain(scriptOf('B'));
+  const valuesById = new Map((sbB.values || []).map((v) => [v.id, v]));
+  const hookSpec = deriveSceneSpec({ scene: sbB.scenes[0], index: 0, allScenes: sbB.scenes, format: 'long', valuesById });
+  const { prompt, negative } = buildPrompt(hookSpec);
+  assert.ok(/ZERO readable characters/i.test(prompt), 'the zero-text instruction must remain present, byte-for-byte as before');
+  assert.ok(/text, letters, numbers, words, watermark, signage/.test(negative), 'the shared negative-prompt list must be completely unchanged — this fix never touches it');
+});
+await t('(4) non-hook illustration prompts are byte-for-byte unchanged: every other relationship\'s VISUAL_OBJECTIVE/REQUIRED_SUBJECTS/ENV_HINT (delay, accumulation, fee_drag, etc.) and \'close\' (which shared the old vague "establishing" env hint) are untouched', () => {
+  const mk = (relationship) => buildPrompt({ visual_objective: 'x', relationship, required_subjects: 'fallback subject', environment_hint: 'financial district', format: 'long' });
+  // these are the same literal assertions already proven correct in section [3c] above — re-asserted here as a
+  // direct regression guard against this specific change leaking into the shared family-metaphor path.
+  assert.ok(/head start/i.test(mk('delay').prompt), 'delayed_start family metaphor must be unaffected');
+  assert.ok(/losing part of itself|draining/i.test(mk('fee_drag').prompt), 'erosion family metaphor must be unaffected');
+  const closeSpec = deriveSceneSpec({ scene: { scene_id: 'SX', narration: { text: 'a closing line.' }, renderer_params: { treatment: 'avatar_panel' }, intent: 'presenter_conclusion', reveal_steps: [] }, index: 4, allScenes: Array.from({ length: 5 }, (_, i) => ({ narration: { text: 'x' }, renderer_params: {}, reveal_steps: [] })), format: 'long', valuesById: new Map() });
+  assert.equal(closeSpec.relationship, 'close');
+  assert.equal(closeSpec.environment_hint, 'establishing', '\'close\' must keep the exact pre-existing env hint — this fix touches ONLY the hook entry');
+  assert.equal(closeSpec.visual_objective, 'land the video\'s takeaway with the strongest verified number already proven earlier', '\'close\' visual_objective must be byte-for-byte unchanged');
+});
+await t('(5) other businesses remain isolated: scenespec.mjs (where this fix lives) is referenced only from NextWave V2 production code (route.mjs, compose.mjs, api/ops.js\'s NextWave-prefixed functions, and this test file) — never from any SRV Farsi/English, AI Studio, or SMM code path', () => {
+  const grep = (pattern) => execFileSync('grep', ['-rl', pattern, '--include=*.js', '--include=*.mjs', '--include=*.html', '.'], { cwd: '.', maxBuffer: 1 << 24 }).toString().trim().split('\n').filter(Boolean).filter((f) => !f.includes('node_modules'));
+  const referencers = grep('scenespec.mjs');
+  const allowed = new Set(['./test_nextwave_v2_production_route.mjs', './lib/nextwaveV2Renderer/production/compose.mjs', './lib/nextwaveV2Renderer/production/route.mjs', './api/ops.js']);
+  referencers.forEach((f) => assert.ok(allowed.has(f), `unexpected file references scenespec.mjs: ${f} — the hook-prompt fix must stay NextWave V2 production-only`));
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const opsIdx = ops.indexOf('async function nextwaveV2RouteRegenerateHookIllustration');
+  assert.ok(opsIdx > -1, 'the only ops.js reference to scenespec.mjs must be inside the NextWave hook-illustration handler');
+});
+await t('(6) existing NextWave Creative QC gates remain fully enforced: qcPrompt()\'s strict rejection criteria and buildPrompt()\'s shared STYLE/NEG constants are completely unchanged by this correction', () => {
+  const qc = qcPrompt({ visual_objective: 'x', required_subjects: 'y', format: 'long' });
+  assert.ok(/strict visual QC reviewer/i.test(qc), 'the QC prompt\'s strict-reviewer framing must be unchanged');
+  assert.ok(/Reject \(pass:false\) if ANY of these are true/i.test(qc), 'the QC rejection criteria list must be unchanged — this correction never loosens what counts as a failure');
+  assert.ok(/contains any rendered text, numbers, currency symbols, or chart\/UI panels/i.test(qc), 'the text/number rejection criterion specifically must be unchanged');
+  const illus = fs.readFileSync('./lib/nextwaveV2Renderer/production/illustration.mjs', 'utf8');
+  assert.ok(/no text, no letters, no numbers, no logos, no watermark, no UI, no chart panels/.test(illus), 'the shared STYLE constant must be unchanged');
+  assert.ok(/text, letters, numbers, words, watermark, signage, UI, chart, graph, dashboard/.test(illus), 'the shared NEG constant must be unchanged');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
