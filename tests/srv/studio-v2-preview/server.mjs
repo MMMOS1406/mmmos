@@ -18,7 +18,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { classifyAction } from '../../preservation/stub-server.mjs';
-import { srv2RunPilotUpload } from '../../../lib/srvStudioV2Pilot.mjs';
+import { srv2RunPilotUpload, srv2RunProductionUpload } from '../../../lib/srvStudioV2Pilot.mjs';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { makeStudioFixture, sampleGeneratedPackage, sampleCaption, v2SamplePackage } from './fixture.mjs';
@@ -191,6 +191,23 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
           lookupChannel: async () => ({ channel_id: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg' }),
           upload: async (body) => ({ status: 200, json: dryRun('youtube_upload_video', body) }),
           newId: () => 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        }, json || {}, { supabaseUrl: host + '/__sb' });
+        return send(res, out.status, out.json);
+      }
+      if (action === 'srv_studio_v2_production_upload') { // 028: the real production policy, with this server's settings/state as the store
+        if (!json || (json.ceo_session_token !== 'preview.session' && !json.operator_session_token)) return send(res, 401, { ok: false, production: true, error: 'publisher_session_required' });
+        const host = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(String(req.headers.host || '')) ? 'http://' + req.headers.host : origin;
+        const st = () => { try { return JSON.parse(store.settings.mmm_finance_v118); } catch { return {}; } };
+        const out = await srv2RunProductionUpload({
+          now: () => Date.now(), flagOn: async () => store.settings.srv_studio_v2_enabled === 'true',
+          getSetting: async (k) => (k in store.settings ? { text: store.settings[k] } : null),
+          casSetting: async (k, oldText, newText) => { await new Promise((r) => setTimeout(r, 5)); const cur = k in store.settings ? store.settings[k] : null; if (cur !== oldText) return false; store.settings[k] = newText; persist(); return true; },
+          engineState: async () => (st().engineState || {})['SRV English'] || 'running',
+          taskByUid: async (uid) => (st().tasks || []).find((t) => t && t.engine === 'SRV English' && (t.srvUid === uid || ('srve_' + t.createdAt + '_' + t.id) === uid)) || null,
+          getPackage: async (id) => { const r = store.packages[id]; try { return r ? JSON.parse(r.full_package) : null; } catch { return null; } },
+          lookupChannel: async () => ({ channel_id: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg' }),
+          upload: async (body) => ({ status: 200, json: dryRun('youtube_upload_video', body) }),
+          newId: () => 'pr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), by: json.ceo_session_token ? 'ceo' : 'operator',
         }, json || {}, { supabaseUrl: host + '/__sb' });
         return send(res, out.status, out.json);
       }

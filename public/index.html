@@ -16804,10 +16804,21 @@ async function _srvEnglishV2Publish(pkgId,taskId){
     // ordinary private [TEST] upload, which is never done silently.
     const route=await _srvEnglishV2PublishRoute(task,kind);
     if(route.blocked){say('⚠ '+route.blocked,'#ef4444');return;}
-    const pilot=route.pilot, va=route.va;
-    if(!pilot&&!va&&test&&!confirm('No clean-title allowance is active for this upload.\n\nIt will be uploaded to SRV Studio as a PRIVATE video titled "[TEST] …".\n\nContinue?')){say('Publish cancelled — nothing was uploaded.','#f59e0b');return;}
+    const pilot=route.pilot, va=route.va, production=route.production;
+    if(!pilot&&!va&&!production&&test&&!confirm('No clean-title allowance is active for this upload.\n\nIt will be uploaded to SRV Studio as a PRIVATE video titled "[TEST] …".\n\nContinue?')){say('Publish cancelled — nothing was uploaded.','#f59e0b');return;}
     let meta,r,up;
-    if(va){
+    if(production){
+      pkg.isTest=true;_srvEnglishV2ReleaseSlot(pkg); // never takes a publishing slot; never scheduled
+      meta=R.srv2YouTubeMetadata(kind,pkg,{test:false,moodKey,publishAt:null});meta.publishAt=null;meta.privacyStatus='private';meta.containsSyntheticMedia=true;
+      say('Uploading the Long video to SRV Studio (private, not scheduled)…');
+      r=await _publishAuthedFetch('/api/ops?action=srv_studio_v2_production_upload',{taskUid:_srvEnglishTaskUid(task),kind,pkgId:pkg.id,videoUrl,title:meta.title,description:meta.description,tags:meta.tags}); // VA or CEO session
+      up=await r.json().catch(function(){return {};});
+      if(!up||up.ok!==true){
+        pkg.srvProductionAttempt={at:new Date().toISOString(),error:(up&&up.error)||('HTTP '+r.status),detail:(up&&up.detail)||null,entryId:(up&&up.entryId)||null};
+        if(typeof savePackageToSupabase==='function')await _srvSavePackageQueued(pkg);
+        say('Upload refused — '+_srvEnglishV2PilotReason((up&&up.error)||('HTTP '+r.status))+((up&&up.detail)?' ('+up.detail+')':''),'#ef4444');return;
+      }
+    }else if(va){
       pkg.isTest=true;_srvEnglishV2ReleaseSlot(pkg);
       meta=R.srv2YouTubeMetadata(kind,pkg,{test:false,moodKey,publishAt:null});meta.publishAt=null;meta.privacyStatus='private';meta.containsSyntheticMedia=true;
       say('Uploading the '+kind.toUpperCase()+' video to SRV Studio under the VA allowance (private, not scheduled)…');
@@ -16841,6 +16852,7 @@ async function _srvEnglishV2Publish(pkgId,taskId){
     if(!up||up.ok===false||!vid){say('Upload failed — '+((up&&(up.error||up.message||up.hint))||('HTTP '+r.status)),'#ef4444');return;}
     if(kind==='long')pkg._srvYtLongId=vid;else pkg._srvYtShortId=vid;
     if(pilot)pkg.srvPilot={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
+    if(production)pkg.srvProduction={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
     if(va)pkg.srvVa={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
     let thumb=null;
     if(pkg._srvThumbUrl){
@@ -16849,7 +16861,7 @@ async function _srvEnglishV2Publish(pkgId,taskId){
       const tr=await _publishFetch('/api/ops?action=set_yt_thumbnail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({videoId:vid,engine:'SRV Studio',thumbUrl:pkg._srvThumbUrl})});
       thumb=await tr.json().catch(function(){return {ok:false,error:'HTTP '+tr.status};});
     }
-    pkg.srvPublish={kind,at:new Date().toISOString(),test,pilot:!!pilot,va:!!va,videoId:vid,channelId:up.channelId||null,uploadedAt:up.uploadedAt||null,dryRun:!!up.dryRun,title:meta.title,privacyStatus:meta.privacyStatus,publishAt:meta.publishAt,containsSyntheticMedia:meta.containsSyntheticMedia,thumbnail:thumb?(thumb.ok?'set':'failed: '+(thumb.error||'unknown')):'none'};
+    pkg.srvPublish={kind,at:new Date().toISOString(),test,pilot:!!pilot,va:!!va,production:!!production,videoId:vid,channelId:up.channelId||null,uploadedAt:up.uploadedAt||null,dryRun:!!up.dryRun,title:meta.title,privacyStatus:meta.privacyStatus,publishAt:meta.publishAt,containsSyntheticMedia:meta.containsSyntheticMedia,thumbnail:thumb?(thumb.ok?'set':'failed: '+(thumb.error||'unknown')):'none'};
     if(typeof saveAppState==='function')saveAppState();
     if(typeof savePackageToSupabase==='function')await _srvSavePackageQueued(pkg);
     _srvEnglishV2SetStage(taskId,'done');
@@ -16883,8 +16895,19 @@ async function _srvEnglishV2VaAllowance(){
   }catch(_){return null;}
 }
 // Which upload path Publish (and the dry-run preview) uses: {pilot}, {va}, {} for an ordinary upload, or {blocked}.
+// 028 — normal SRV Studio production (app_settings.srv_studio_v2_production), read fresh; the server re-checks everything.
+async function _srvEnglishV2ProductionConfig(){
+  try{
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.srv_studio_v2_production&select=value`,{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+    const rows=r.ok?await r.json():[];const c=rows&&rows[0]&&rows[0].value?JSON.parse(rows[0].value):null;
+    return c&&c.enabled===true&&c.format==='long'?{dailyCap:c.dailyCap}:null;
+  }catch(_){return null;}
+}
 async function _srvEnglishV2PublishRoute(task,kind){
   if(kind!=='long')return {blocked:'SRV Studio publishes Emotional Deep House Long videos only — a Short is never uploaded.'}; // 026
+  if(task&&(task.srvRetired||task.cancelledAt))return {blocked:'This task was cancelled or retired — it can never be uploaded. Start a new SRV Studio Long task.'}; // 028
+  const prod=await _srvEnglishV2ProductionConfig(); // 028: normal VA production replaces the pilot/allowance restrictions
+  if(prod)return {production:prod};
   const p=await _srvEnglishV2PilotFor(task);
   const ceo=typeof _ceoGetSessionToken==='function'&&!!_ceoGetSessionToken();
   if(p&&ceo){
@@ -16898,7 +16921,7 @@ async function _srvEnglishV2PublishRoute(task,kind){
 }
 function _srvEnglishV2PilotReason(code){
   const m={ceo_session_required:'pilot uploads need a signed-in CEO session — sign in again as Mansoor',srv_studio_v2_off:'SRV Studio V2 is switched off on the server',pilot_not_configured:'no pilot is authorized',pilot_disabled:'the pilot authorization is disabled',pilot_expired:'the pilot authorization has expired',
-    task_not_allowlisted:'this task is not one of the two pilot tasks',publisher_session_required:'sign in again (VA or CEO) and retry',va_allowance_not_configured:'no VA upload allowance is authorized',va_allowance_disabled:'the VA upload allowance is switched off',va_allowance_expired:'the VA upload allowance has expired',va_allowance_limit_reached:'the VA allowance uploads have all been used',va_allowance_format_used:'the VA allowance for this format (Long or Short) has already been used',va_allowance_format_not_allowed:'this format is not allowed — SRV Studio uploads Long videos only',va_busy_try_again:'another VA upload was being recorded — try again',format_mismatch:'the task format does not match its pilot authorization',task_already_uploaded_or_in_progress:'this task already has a pilot upload (or one in progress)',
+    task_not_allowlisted:'this task is not one of the two pilot tasks',publisher_session_required:'sign in again (VA or CEO) and retry',va_allowance_not_configured:'no VA upload allowance is authorized',va_allowance_disabled:'the VA upload allowance is switched off',va_allowance_expired:'the VA upload allowance has expired',va_allowance_limit_reached:'the VA allowance uploads have all been used',va_allowance_format_used:'the VA allowance for this format (Long or Short) has already been used',va_allowance_format_not_allowed:'this format is not allowed — SRV Studio uploads Long videos only',production_not_configured:'normal production uploads are not switched on',production_disabled:'normal production uploads are switched off',production_long_only:'SRV Studio uploads Long videos only',production_daily_cap_reached:'today\'s production upload limit has been reached — try again tomorrow',task_retired_or_cancelled:'this task was cancelled or retired',task_closed:'this task is already closed',task_not_found:'the task could not be found on the server — reload and try again',package_not_of_this_task:'this package does not belong to this task',engine_not_producing:'the SRV English engine is paused or in maintenance',production_busy_try_again:'another upload was being recorded — try again',va_busy_try_again:'another VA upload was being recorded — try again',format_mismatch:'the task format does not match its pilot authorization',task_already_uploaded_or_in_progress:'this task already has a pilot upload (or one in progress)',
     pilot_limit_reached:'the two pilot uploads have already been used',engine_not_in_test:'the SRV English engine is not in TEST mode',wrong_channel:'the YouTube connection is not the SRV Studio channel',
     pilot_busy_try_again:'another pilot upload was being recorded — try again',uploaded_but_unverified_channel_or_privacy:'YouTube accepted the video but its channel or privacy could not be verified — check YouTube Studio before anything else',
     upload_failed:'the upload to YouTube failed',bad_title:'the title is not valid for YouTube',missing_ai_disclosure:'the description is missing the AI disclosure',video_not_from_this_package:'the video file does not belong to this package'};
@@ -16978,11 +17001,11 @@ async function _srvEnglishV2FillMeta(taskId,pkgId){
     const R=await _srvEnglishV2Renderer();
     const kind=_srvEnglishV2IsLong(task,pkg)?'long':'short';
     const route=await _srvEnglishV2PublishRoute(task,kind);
-    const pilot=route.pilot, va=route.va, clean=!!(pilot||va);
+    const pilot=route.pilot, va=route.va, production=route.production, clean=!!(pilot||va||production);
     const test=!clean&&(_getEngineState('SRV English')==='test'||_srvEnglishV2IsTestPublish(taskId,pkg));
     const m=R.srv2YouTubeMetadata(kind,pkg,{test,moodKey:srvStudioV2MoodKeyClient(task&&(task.mood||task.mode)),publishAt:clean?null:(pkg&&pkg.publishAt||null)});
     if(clean)m.publishAt=null;
-    const head=route.blocked?'⚠ PUBLISH NOT AVAILABLE — '+route.blocked+'\n\n':va?'VA UPLOAD ('+kind.toUpperCase()+', allowance until '+va.expires+') — normal title, private, not scheduled\n':'';
+    const head=route.blocked?'⚠ PUBLISH NOT AVAILABLE — '+route.blocked+'\n\n':production?'SRV STUDIO PRODUCTION UPLOAD (LONG) — normal title, PRIVATE, not scheduled, SRV Studio channel\n':va?'VA UPLOAD ('+kind.toUpperCase()+', allowance until '+va.expires+') — normal title, private, not scheduled\n':'';
     const cs=_srvEnglishV2CaptionState(task,pkg);
     el.textContent=(cs.fresh?'':'⚠ PUBLISH BLOCKED — the caption is out of date with the latest title or lyrics. Go back to Review.\n\n')+head+(pilot?'PILOT UPLOAD ('+pilot.kind.toUpperCase()+', authorized until '+pilot.expires+') — normal title, private, not scheduled\n':'')+'Title ('+m.title.length+'/100): '+m.title+'\nPrivacy: '+m.privacyStatus+(m.publishAt?' · publishAt '+m.publishAt:' · no schedule')+(test?' · TEST':'')+
       '\nCategory: '+m.categoryId+' (Music) · madeForKids: false · containsSyntheticMedia: true\nThumbnail: '+(pkg&&pkg._srvThumbUrl?'set after upload (channel "SRV Studio")':'none')+

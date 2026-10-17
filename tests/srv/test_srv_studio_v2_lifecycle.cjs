@@ -554,6 +554,26 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('023 VA path posts with the VA/CEO session to the VA action; pilot path keeps the CEO-only call', /_publishAuthedFetch\('\/api\/ops\?action=srv_studio_v2_va_upload'/.test(top(H, '_srvEnglishV2Publish')) && /_ceoAuthedFetch\('\/api\/ops\?action=srv_studio_v2_pilot_upload'/.test(top(H, '_srvEnglishV2Publish')));
   }
 
+  // ── 14. SRV-STUDIO-V2-028: normal SRV Studio production route ──
+  {
+    const PROD = JSON.stringify({ enabled: true, format: 'long', dailyCap: 5, channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const VA = JSON.stringify({ enabled: true, maxUploads: 2, perKind: { long: 2, short: 0 }, expires: new Date(Date.now() + 5 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const LONG = { contentType: 'Long', contentFormat: 'long', isLong: true };
+    const route = async (settings, t, kind, ceo = false) => { const E = makeEnv({ flag: 'true', settings }); await E.settle(); E.ctx.D.tasks = [t]; E.ctx._ceoGetSessionToken = () => (ceo ? 'tok' : null); return vm.runInContext(`_srvEnglishV2PublishRoute(D.tasks[0],'${kind}')`, E.ctx); };
+    const a = await route({ srv_studio_v2_production: PROD, srv_studio_v2_va_allowance: VA }, task(170, LONG), 'long');
+    const b = await route({ srv_studio_v2_production: PROD }, task(171, { ...LONG, srvRetired: { reason: 'x' } }), 'long');
+    const c = await route({ srv_studio_v2_production: PROD }, task(172, { ...LONG, cancelledAt: 1 }), 'long');
+    const d = await route({ srv_studio_v2_production: PROD }, task(173), 'short');
+    const e = await route({}, task(174, LONG), 'long');
+    ok('028 routing: with production on, an ordinary new Long goes to the production upload (not the pilot or VA allowance)', !!(a.production && !a.va && !a.pilot));
+    ok('028 routing: cancelled or retired tasks are never uploaded', !!b.blocked && /cancelled or retired/.test(b.blocked) && !!c.blocked);
+    ok('028 routing: a Short is still never uploaded', !!d.blocked && /Long videos only/.test(d.blocked));
+    ok('028 routing: production off → previous behaviour (no production route)', !e.production);
+    const pub = top(H, '_srvEnglishV2Publish');
+    ok('028 Publish: production posts with the VA/CEO session, forces private + no schedule, records the upload; no [TEST] prompt', /_publishAuthedFetch\('\/api\/ops\?action=srv_studio_v2_production_upload'/.test(pub) && /if\(production\)\{\n\s*pkg\.isTest=true;_srvEnglishV2ReleaseSlot\(pkg\);[^\n]*\n\s*meta=R\.srv2YouTubeMetadata\(kind,pkg,\{test:false,moodKey,publishAt:null\}\);meta\.publishAt=null;meta\.privacyStatus='private';meta\.containsSyntheticMedia=true;/.test(pub) && /if\(production\)pkg\.srvProduction=/.test(pub) && /if\(!pilot&&!va&&!production&&test&&!confirm\(/.test(pub));
+    ok('028 Approve preview names the production upload (private, not scheduled, SRV Studio)', /SRV STUDIO PRODUCTION UPLOAD \(LONG\) — normal title, PRIVATE, not scheduled, SRV Studio channel/.test(top(H, '_srvEnglishV2FillMeta')));
+  }
+
   // ── 13. SRV-STUDIO-V2-025: overlapping saves (VA, Long #136, 2026-10-16 14:39 UTC) ──
   {
     // Production: title saved at 14:39:35.7, lyrics Save pressed at 14:39:37.2 while the title write (slowed by the
