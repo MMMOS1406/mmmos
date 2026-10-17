@@ -14,7 +14,7 @@ import { STYLE } from './lib/nextwaveV2Renderer/core.mjs';
 import { wordsFromAlignment } from './lib/nextwaveV2Renderer/captions.mjs';
 import { loadHostPoses } from './lib/nextwaveV2Renderer/assets.mjs';
 import { loadBench } from './lib/nextwaveV2Renderer/props3.mjs';
-import { startRoute, classifyGate, planAssets, chunkPlan, compileFromState, buildStateFrom, parseFreezeDetect, parseDecodedFrameCount, expectedFrameCount, fpsFor, ROUTE_VERSION } from './lib/nextwaveV2Renderer/production/route.mjs';
+import { startRoute, classifyGate, planAssets, chunkPlan, compileFromState, buildStateFrom, parseFreezeDetect, parseDecodedFrameCount, expectedFrameCount, fpsFor, chunksOverlappingSpan, ROUTE_VERSION } from './lib/nextwaveV2Renderer/production/route.mjs';
 import { composeStoryboard } from './lib/nextwaveV2Renderer/production/compose.mjs';
 import { runQc, collectDrawnText, numberProvenance, allowedNumbers, occupancy, idleWindows } from './lib/nextwaveV2Renderer/production/qc.mjs';
 import { placeScenes, eventTime } from './lib/nextwaveV2Renderer/production/timing.mjs';
@@ -1117,7 +1117,7 @@ await t('index.html: a governed, explicitly-labeled re-finalize recovery action 
 await t('index.html: re-finalize is scoped to NextWave V2 only — no other engine (SRV Farsi/English, AI Studio, SMM) file or build path references it', () => {
   const html = fs.readFileSync('./public/index.html', 'utf8');
   const occurrences = (html.match(/nextwaveV2RouteRefinalize/g) || []).length;
-  assert.equal(occurrences, 3, 'expected exactly 3 references: the function definition, its onclick call-site inside _nextwaveV2RoutePanel, and the internal call from nextwaveV2RouteRecoverChunks (chunk recovery re-finalizes once chunks are fixed) — any more suggests it leaked into another engine\'s code path');
+  assert.equal(occurrences, 4, 'expected exactly 4 references: the function definition, its onclick call-site inside _nextwaveV2RoutePanel, the internal call from nextwaveV2RouteRecoverChunks (chunk recovery re-finalizes once chunks are fixed), and the internal call from nextwaveV2RouteCorrectHookIllustration (hook-illustration correction re-finalizes once the affected chunks are re-rendered) — any more suggests it leaked into another engine\'s code path');
 });
 await t('index.html: governed chunk recovery exists (2026-10-16, task 125 chunk-corruption investigation) — re-renders ONLY the chunk_invalid-flagged index/indices via force:true, never a healthy chunk, and is scoped to the needs_review branch only', () => {
   const html = fs.readFileSync('./public/index.html', 'utf8');
@@ -1255,6 +1255,81 @@ await t('ops.js: finish handler applies the identical chunks-populated discrimin
   assert.equal(gateFn({ status: 'needs_review', chunks: [{ index: 0 }] }), false, 'needs_review WITH real chunks must be allowed through (second re-finalize pass after chunk recovery)');
   ['planned', 'ready_for_review'].forEach((status) => assert.equal(gateFn({ status }), false, `pre-existing allowed status ${status} must remain allowed`));
   ['blocked', 'generating', 'starting', ''].forEach((status) => assert.equal(gateFn({ status }), true, `non-recoverable status ${JSON.stringify(status)} must still be refused`));
+});
+
+console.log('\n[25] task 125 creative correction (2026-10-17) — governed hook-illustration regeneration + exactly-affected chunk re-render');
+await t('chunksOverlappingSpan: only chunks whose own [tStart, tStart+dur) genuinely intersects the scene span are returned — fully-inside, partially-overlapping-at-either-edge, and the real task-125 hook span (0..10.53s over a 125.94s Long) all behave correctly', () => {
+  const chunks = chunkPlan(24, 8); // -> [0,8) [8,16) [16,24)
+  assert.deepEqual(chunksOverlappingSpan(chunks, 0, 8), [0], 'a span exactly matching one chunk must return only that chunk');
+  assert.deepEqual(chunksOverlappingSpan(chunks, 2, 5), [0], 'a span fully inside one chunk must return only that chunk');
+  assert.deepEqual(chunksOverlappingSpan(chunks, 6, 10), [0, 1], 'a span straddling a chunk boundary must return BOTH chunks it touches');
+  assert.deepEqual(chunksOverlappingSpan(chunks, 8, 8), [], 'a zero-width span exactly on a boundary touches nothing (strict overlap, not touching)');
+  assert.deepEqual(chunksOverlappingSpan(chunks, 16, 24), [2], 'the last chunk is found correctly');
+  assert.deepEqual(chunksOverlappingSpan([], 0, 10), [], 'no chunks -> no overlap, never throws');
+  // the real task 125 numbers: Long duration 125.94s, hook scene [0, 10.53) -> chunks 0 (0-8) and 1 (8-16) both
+  // contain part of the hook scene's time range; chunk 2 (16-24, the previously-corrupted trajectory_comparison
+  // beat) must NOT be touched by a hook-only illustration change.
+  const longChunks = chunkPlan(125.94, 8);
+  assert.deepEqual(chunksOverlappingSpan(longChunks, 0, 10.53), [0, 1], 'task 125\'s real hook span must affect exactly chunks 0 and 1, never chunk 2 or later');
+});
+await t('ops.js: the new hook-illustration-regeneration action is wired exactly once in the dispatcher and the handler exists', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const wireCount = (ops.match(/action === 'nextwave_v2_route_regenerate_hook_illustration'/g) || []).length;
+  assert.equal(wireCount, 1, 'expected exactly one dispatcher wire-up');
+  assert.ok(/async function nextwaveV2RouteRegenerateHookIllustration\(req, res\)/.test(ops), 'handler function missing');
+});
+await t('ops.js: hook-illustration regeneration is gated to ready_for_review builds only, requires a valid build_id, and reuses the EXISTING nwv2rResolveIllustratedBeat vendor pipeline (same Ideogram+QC gate every illustrated beat already uses) rather than a new/duplicated vendor-call path', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const idx = ops.indexOf('async function nextwaveV2RouteRegenerateHookIllustration');
+  const end = ops.indexOf('\nasync function nextwaveV2CompositeLongSegmentRender');
+  const body = ops.slice(idx, end);
+  assert.ok(/state\.status !== 'ready_for_review'/.test(body), 'must gate on ready_for_review specifically — a build mid-flight or already needs_review from something else has nothing well-defined to correct');
+  assert.ok(/build_id invalid/.test(body), 'must validate build_id shape like every other build-scoped action');
+  assert.ok(/await nwv2rResolveIllustratedBeat\(spec, 'hook'\)/.test(body), 'must call the existing shared illustration vendor pipeline, not a new one');
+  assert.ok(!/nwv2rIdeogramGenerate|nwv2rClaudeVisionQc/.test(body), 'must not call the raw Ideogram/vision functions directly — only through the existing nwv2rResolveIllustratedBeat wrapper, so prompt discipline/QC/asset-banking all stay centralized');
+});
+await t('ops.js: a QC failure on the new generation attempt persists NOTHING and never reports affected_chunks — "do not bypass failed gates" means a still-bad result must leave the build, its chunks and its video completely untouched', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const idx = ops.indexOf('async function nextwaveV2RouteRegenerateHookIllustration');
+  const end = ops.indexOf('\nasync function nextwaveV2CompositeLongSegmentRender');
+  const body = ops.slice(idx, end);
+  const failReturnIdx = body.indexOf('if (!r.ok)');
+  const putStateIdx = body.indexOf('await nwv2rPutState(id, state)');
+  assert.ok(failReturnIdx > -1 && putStateIdx > -1, 'both the QC-fail check and the state-persist call must exist');
+  assert.ok(failReturnIdx < putStateIdx, 'the QC-fail early return must come BEFORE the only nwv2rPutState call in this handler — a failing attempt must never reach persistence');
+  assert.ok(/qc_failed: true/.test(body.slice(0, putStateIdx)), 'the QC-fail response must be clearly distinguishable from a request-shape error, so the client can tell "still bad art" apart from "broken call"');
+});
+await t('ops.js: on a genuine QC pass, affected_chunks is computed via chunksOverlappingSpan against the hook scene\'s own timeline span (never a hardcoded chunk list, never "re-render everything")', () => {
+  const ops = fs.readFileSync('./api/ops.js', 'utf8');
+  const idx = ops.indexOf('async function nextwaveV2RouteRegenerateHookIllustration');
+  const end = ops.indexOf('\nasync function nextwaveV2CompositeLongSegmentRender');
+  const body = ops.slice(idx, end);
+  assert.ok(/L\.route\.chunksOverlappingSpan\(state\.chunks, span\.start, span\.end\)/.test(body), 'affected_chunks must be derived from the actual hook scene span and the build\'s own chunk plan');
+});
+await t('index.html: governed hook-illustration correction exists, calls the regeneration action then re-renders ONLY the server-reported affected chunks (force:true) then re-finalizes -- and short-circuits before touching any chunk on a QC failure', () => {
+  const html = fs.readFileSync('./public/index.html', 'utf8');
+  assert.ok(/async function nextwaveV2RouteCorrectHookIllustration\(pkg\)/.test(html), 'nextwaveV2RouteCorrectHookIllustration function missing');
+  const fnIdx = html.indexOf('async function nextwaveV2RouteCorrectHookIllustration');
+  const fnEnd = html.indexOf('\nfunction _nextwaveV2RoutePanel', fnIdx);
+  const body = html.slice(fnIdx, fnEnd);
+  assert.ok(/nextwave_v2_route_regenerate_hook_illustration/.test(body), 'must call the new server action');
+  assert.ok(/g\.affected_chunks/.test(body), 'must re-render exactly the server-reported affected chunk indices, never a hardcoded list');
+  assert.ok(/force:true/.test(body), 'chunk re-render must use force (the illustration changed, so the cached-chunk reuse check would otherwise skip it)');
+  assert.ok(/nextwaveV2RouteRefinalize\(pkg\)/.test(body), 'must re-finalize through the existing governed finish flow, not a new one');
+  assert.ok(!/nextwave_v2_route_start/.test(body), 'must never trigger a full route restart — script/storyboard/narration stay untouched');
+  const qcFailIdx = body.indexOf('g.qc_failed');
+  const chunkLoopIdx = body.indexOf('for(const idx of affected)');
+  assert.ok(qcFailIdx > -1 && chunkLoopIdx > -1 && qcFailIdx < chunkLoopIdx, 'the QC-fail branch must be checked and returned from BEFORE the chunk re-render loop, so a failed attempt touches zero chunks');
+});
+await t('index.html: the correction button only renders when a needs_review reason is specifically mode:\'hook\' (this action only ever fixes the hook beat) and lives inside the same ready_for_review/"enhanced" branch as the existing creative-needs-review banner', () => {
+  const html = fs.readFileSync('./public/index.html', 'utf8');
+  const panelIdx = html.indexOf('function _nextwaveV2RoutePanel');
+  const enhancedIdx = html.indexOf("rs==='enhanced'", panelIdx);
+  const branchEnd = html.indexOf("}else if(rs==='v2_needs_review'", enhancedIdx);
+  const branch = html.slice(enhancedIdx, branchEnd);
+  assert.ok(/hookNeedsReview/.test(branch), 'button visibility must be gated on a dedicated hookNeedsReview flag');
+  assert.ok(/x\.mode===['"]hook['"]/.test(branch), 'the gate must check for a hook-mode reason specifically, not any needs_review reason (a comparison-beat failure is not something this action can fix)');
+  assert.ok(/nextwaveV2RouteCorrectHookIllustration/.test(branch), 'the button\'s onclick must be inside this same branch');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

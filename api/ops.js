@@ -17716,6 +17716,55 @@ async function nextwaveV2RouteFinish(req, res) {
   finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 
+// REGENERATE HOOK ILLUSTRATION — task 125 creative correction (2026-10-17). Re-derives the Long format's hook
+// (S1) Scene Spec from the build's own ALREADY-PERSISTED, already-verified storyboard (never a new Brain call,
+// never touches narration/values/other scenes) and re-attempts its topic-specific illustration through the exact
+// same vendor pipeline every other illustrated beat uses: nwv2rResolveIllustratedBeat (Ideogram generate + the
+// Claude-vision QC gate, 2 attempts, same prompt/negative-prompt discipline). A QC failure is reported as-is and
+// nothing is persisted — this never bypasses or lowers the QC bar; a caller sees exactly why and may call again.
+// On a genuine QC pass this only updates state.illustration's hook entry (so the NEXT chunk render actually draws
+// the new asset) and state.vendor's running totals; it never touches state.chunks/state.final/state.status itself
+// — re-rendering the chunks whose time range covers the hook scene and re-finalizing stays the existing, separate,
+// already-governed chunk(force)/finish flow, unchanged.
+async function nextwaveV2RouteRegenerateHookIllustration(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  if (!(await nwv2rIsEnabled())) return res.status(409).json({ ok: false, error: 'v2_route_disabled' });
+  const id = String((req.body || {}).build_id || ''); if (!/^nwv2r-[0-9a-f]{16}$/.test(id)) return res.status(400).json({ ok: false, error: 'build_id invalid' });
+  try {
+    const state = await nwv2rGetState(id); if (!state) return res.status(404).json({ ok: false, error: 'build_not_found' });
+    if (state.status !== 'ready_for_review') return res.status(409).json({ ok: false, error: `build_not_eligible: ${state.status}` });
+    if (!state.storyboard || !Array.isArray(state.storyboard.scenes)) return res.status(409).json({ ok: false, error: 'no_storyboard_on_build' });
+    if (!Array.isArray(state.timeline) || !Array.isArray(state.chunks)) return res.status(409).json({ ok: false, error: 'no_timeline_on_build' });
+    const { chooseIllustratedBeats } = await import('../lib/nextwaveV2Renderer/production/illustration.mjs');
+    const { deriveSceneSpec } = await import('../lib/nextwaveV2Renderer/production/scenespec.mjs');
+    const L = await nwv2rLib();
+    const choice = chooseIllustratedBeats(state.storyboard.scenes, state.format);
+    if (choice.hookIdx < 0) return res.status(409).json({ ok: false, error: 'build_has_no_hook_beat' });
+    const span = state.timeline[choice.hookIdx]; if (!span) return res.status(409).json({ ok: false, error: 'hook_scene_missing_from_timeline' });
+    const scene = state.storyboard.scenes[choice.hookIdx];
+    const valuesById = new Map((state.storyboard.values || []).map((v) => [v.id, v]));
+    const spec = deriveSceneSpec({ scene, index: choice.hookIdx, allScenes: state.storyboard.scenes, format: state.format, valuesById });
+    const r = await nwv2rResolveIllustratedBeat(spec, 'hook');
+    if (!r.ok) return res.status(200).json({ ok: false, qc_failed: true, reasons: r.reasons, vendor: r.vendor });
+    state.illustration = state.illustration || { perScene: {}, counts: { reused: 0, generated: 0, fallback: 0, deterministic: 0 }, creative_qc: { status: 'pass', reasons: [] } };
+    state.illustration.perScene[choice.hookIdx] = { mode: 'hook', asset_url: r.asset_url, asset_id: r.asset_id, source: r.mode, spec_relationship: spec.relationship, spec_topic: spec.topic };
+    const c = state.illustration.counts || { reused: 0, generated: 0, fallback: 0, deterministic: 0 };
+    c.fallback = Math.max(0, (c.fallback || 0) - 1); if (r.mode === 'reuse') c.reused = (c.reused || 0) + 1; else c.generated = (c.generated || 0) + 1;
+    state.illustration.counts = c;
+    const remainingReasons = ((state.illustration.creative_qc && state.illustration.creative_qc.reasons) || []).filter((x) => !(x.scene === scene.scene_id && x.mode === 'hook'));
+    state.illustration.creative_qc = remainingReasons.length ? { status: 'needs_review', reasons: remainingReasons, owner: 'va_production_product_qc' } : { status: 'pass', reasons: [] };
+    state.vendor = state.vendor || {};
+    state.vendor.ideogram_images = (state.vendor.ideogram_images || 0) + r.vendor.ideogram_images;
+    state.vendor.ideogram_usd = +(((state.vendor.ideogram_usd || 0) + r.vendor.ideogram_usd)).toFixed(4);
+    state.vendor.qc_calls = (state.vendor.qc_calls || 0) + r.vendor.qc_calls;
+    state.vendor.qc_usd = +(((state.vendor.qc_usd || 0) + r.vendor.qc_usd)).toFixed(4);
+    await nwv2rPutState(id, state);
+    const affectedChunks = L.route.chunksOverlappingSpan(state.chunks, span.start, span.end);
+    return res.status(200).json({ ok: true, asset_url: r.asset_url, scene_id: scene.scene_id, hookIdx: choice.hookIdx, creative_qc: state.illustration.creative_qc, vendor: r.vendor, affected_chunks: affectedChunks });
+  } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
+}
+
 async function nextwaveV2CompositeLongSegmentRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
@@ -19713,6 +19762,7 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_route_start')        return await nextwaveV2RouteStart(req, res);
     if (action === 'nextwave_v2_route_chunk')        return await nextwaveV2RouteChunk(req, res);
     if (action === 'nextwave_v2_route_finish')       return await nextwaveV2RouteFinish(req, res);
+    if (action === 'nextwave_v2_route_regenerate_hook_illustration') return await nextwaveV2RouteRegenerateHookIllustration(req, res);
     if (action === 'nextwave_v2_composite_long_segment') return await nextwaveV2CompositeLongSegmentRender(req, res);
     if (action === 'nextwave_v2_concat_long')         return await nextwaveV2ConcatLongRender(req, res);
     if (action === 'nextwave_v2_generate_long_thumbnail') return await nextwaveV2GenerateLongThumbnail(req, res);
