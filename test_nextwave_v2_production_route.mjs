@@ -20,6 +20,9 @@ import { runQc, collectDrawnText, numberProvenance, allowedNumbers, occupancy, i
 import { placeScenes, eventTime } from './lib/nextwaveV2Renderer/production/timing.mjs';
 import { barEnv } from './lib/nextwaveV2Renderer/production/vocab.mjs';
 import { integerToWords, numberToSpokenWords, spanTextToSpoken, expandNumbersForSpeech, wordsFromAlignmentWithSpeechSpans } from './lib/nextwaveV2Renderer/production/speech.mjs';
+import { planHookLabels } from './lib/nextwaveV2Renderer/production/illustration_scene.mjs';
+import { planPresenterIntroLabels, planPresenterObjectLabels, countUpMoneyString } from './lib/nextwaveV2Renderer/production/presenter_interaction.mjs';
+import { hostLayer } from './lib/nextwaveV2Renderer/scenes.mjs';
 
 const BASELINE = 'fa34eb0'; // pre-integration commit: the accepted benchmark standard, before the route was wired into ops.js / index.html
 let pass = 0, fail = 0; const failures = [];
@@ -1393,6 +1396,118 @@ await t('(6) existing NextWave Creative QC gates remain fully enforced: qcPrompt
   const illus = fs.readFileSync('./lib/nextwaveV2Renderer/production/illustration.mjs', 'utf8');
   assert.ok(/no text, no letters, no numbers, no logos, no watermark, no UI, no chart panels/.test(illus), 'the shared STYLE constant must be unchanged');
   assert.ok(/text, letters, numbers, words, watermark, signage, UI, chart, graph, dashboard/.test(illus), 'the shared NEG constant must be unchanged');
+});
+
+console.log('\n[27] Stage 2E Phase 1 — hook/presenter-intro headline overflow fix: planHookLabels/planPresenterIntroLabels now wrap via the renderer\'s own wrap()/measure() instead of drawing one unbounded line, and derive x0/plateW from the format\'s own declared safe zone instead of hardcoded literals. Positive cases prove the exact approved text survives wrapping untouched; negative cases reproduce the two real overflow bugs Stage 2D found/predicted (Task 125\'s real long hook sentence; short format\'s 6px right-edge overflow) and assert they no longer reproduce.');
+await t('(1) short headline that already fits stays on one line, byte-identical text, size unchanged from the design default', () => {
+  const ctx = { L: layoutForNW(fmtLong), p: { text: 'Three quiet decisions.' } };
+  const [plan] = planHookLabels(ctx);
+  assert.equal(plan.lines.length, 1);
+  assert.equal(plan.lines[0], 'Three quiet decisions.');
+  assert.equal(plan.size, 46, 'a short line must not be shrunk below the design default');
+});
+await t('(2) a long headline wraps to multiple lines with the EXACT approved text preserved (reflowed, never truncated or altered) and the plate grows to fit it', () => {
+  const longText = 'Three quiet financial decisions — when you start, what you pay in fees, where you park cash — cost people five and six figures over a lifetime, and most never run the actual math.';
+  const ctx = { L: layoutForNW(fmtLong), p: { text: longText } };
+  const [plan] = planHookLabels(ctx);
+  assert.ok(plan.lines.length >= 2, 'a sentence this long must wrap to more than one line');
+  assert.equal(plan.lines.join(' ').replace(/\s+/g, ' '), longText.replace(/\s+/g, ' '), 'rejoining the wrapped lines must reproduce the exact approved sentence, whitespace-normalized only');
+  const oneLinePlate = planHookLabels({ L: layoutForNW(fmtLong), p: { text: 'short.' } })[0].plateRect;
+  assert.ok(plan.plateRect.y1 - plan.plateRect.y0 > oneLinePlate.y1 - oneLinePlate.y0, 'a multi-line plate must be taller than a one-line plate, not clipped to the old fixed height');
+});
+await t('(3) NEGATIVE regression guard — Task 125\'s real long hook sentence (the exact one Stage 2D found overflowing) no longer exceeds the plate OR the frame\'s declared safe zone, in either format', () => {
+  const realHookText = 'Three quiet financial decisions — when you start, what you pay in fees, where you park cash — cost people five and six figures over a lifetime, and most never run the actual math.';
+  for (const [fmt, fmtName] of [[fmtLong, 'long'], [STYLE.formats.short, 'short']]) {
+    const safe = STYLE.formats[fmtName].safe;
+    const ctx = { L: layoutForNW(fmt), p: { text: realHookText } };
+    const [plan] = planHookLabels(ctx);
+    assert.ok(plan.plateRect.x1 <= fmt.w - safe.right + 0.01, `${fmtName}: plate right edge (${plan.plateRect.x1}) must not cross the declared safe.right boundary (${fmt.w - safe.right})`);
+    assert.ok(plan.plateRect.x0 >= safe.left - 0.01, `${fmtName}: plate left edge must not sit inside the declared safe.left boundary`);
+  }
+});
+await t('(4) NEGATIVE regression guard — short format\'s 6px right-edge overflow (w=900 at the old x0=90 gave x1=990, past short\'s safe.right boundary at 984) does not reproduce for any headline length', () => {
+  for (const text of ['Short one.', 'A medium length headline that might just barely wrap or might not, we are testing the boundary.']) {
+    const ctx = { L: layoutForNW(STYLE.formats.short), p: { text } };
+    const [plan] = planHookLabels(ctx);
+    assert.ok(plan.plateRect.x1 <= STYLE.formats.short.w - STYLE.formats.short.safe.right + 0.01, `short format plate must respect safe.right for "${text}"`);
+  }
+});
+await t('(5) planPresenterIntroLabels (Stage 2C\'s presenter_intro beat) carries the identical fix — wrapped, exact text preserved, safe-zone compliant in both formats', () => {
+  const longText = 'None of these require earning more, just optimizing what you already have and timing it correctly.';
+  for (const [fmt, fmtName] of [[fmtLong, 'long'], [STYLE.formats.short, 'short']]) {
+    const safe = STYLE.formats[fmtName].safe;
+    const ctx = { L: layoutForNW(fmt), p: { text: longText } };
+    const [plan] = planPresenterIntroLabels(ctx);
+    assert.equal(plan.lines.join(' ').replace(/\s+/g, ' '), longText.replace(/\s+/g, ' '), `${fmtName}: exact approved text must survive wrapping`);
+    assert.ok(plan.plateRect.x1 <= fmt.w - safe.right + 0.01, `${fmtName}: presenter_intro plate must respect safe.right`);
+    assert.ok(plan.plateRect.x0 >= safe.left - 0.01, `${fmtName}: presenter_intro plate must respect safe.left`);
+  }
+});
+await t('(6) readability floor: even the longest realistic headline never shrinks below planHookLabels\' declared minimum (32px, both formats)', () => {
+  const veryLong = 'This is a deliberately long run-on sentence meant to stress-test the font-shrink fallback path by including far more words than any real approved NextWave hook or presenter-intro headline would plausibly contain in production use.';
+  const planLong = planHookLabels({ L: layoutForNW(fmtLong), p: { text: veryLong } })[0];
+  assert.equal(planLong.size, 32, `long-format size floor must clamp to exactly 32, not undershoot: got ${planLong.size}`);
+  const planShort = planHookLabels({ L: layoutForNW(STYLE.formats.short), p: { text: veryLong } })[0];
+  assert.equal(planShort.size, 32, `short-format size floor must clamp to exactly 32, not undershoot: got ${planShort.size}`);
+});
+await t('(7) planPresenterIntroLabels has its own, lower readability floor (28px) and also clamps exactly rather than undershooting', () => {
+  const veryLong = 'This is a deliberately long run-on sentence meant to stress-test the font-shrink fallback path by including far more words than any real approved NextWave hook or presenter-intro headline would plausibly contain in production use.';
+  const plan = planPresenterIntroLabels({ L: layoutForNW(fmtLong), p: { text: veryLong } })[0];
+  assert.equal(plan.size, 28, `presenter_intro size floor must clamp to exactly 28, not undershoot: got ${plan.size}`);
+});
+
+console.log('\n[28] Stage 2E Phase 2 — presenter pose variation: share_compare\'s and calc_card\'s hostLayer timelines now use the already-approved, previously-unused-anywhere \'react\'/\'think\' live-manifest poses at a meaning-appropriate moment each (the gap-reveal instant; the evidence-appearing instant) instead of repeating/omitting a pose change. No new assets, no new vendor call -- these 2 poses already exist in the bundled host_manifest.json next to the 3 already in use.');
+await t('(1) share_compare\'s host now reacts (\'react\') at the exact gap-reveal instant (t=ev) instead of \'point\' -- a swap, not an added cut: still exactly 2 timeline entries', () => {
+  const src = fs.readFileSync('./lib/nextwaveV2Renderer/production/templates.mjs', 'utf8');
+  const m = /hostLayer\(g, t, \{ poses, timeline: \[\{ t: 0, pose: 'compare' \}, \{ t: ev, pose: '(\w+)' \}\]/.exec(src);
+  assert.ok(m, 'share_compare\'s hostLayer call must still have exactly the {compare}->{ev,X} 2-entry shape');
+  assert.equal(m[1], 'react', 'the second pose at the gap-reveal instant must be \'react\'');
+});
+await t('(2) calc_card\'s host now gains a SECOND pose (\'think\') at the evidence-appearing instant (t=ev) -- it previously had zero pose variation (a single static \'point\' for the whole scene)', () => {
+  const src = fs.readFileSync('./lib/nextwaveV2Renderer/production/templates.mjs', 'utf8');
+  const m = /calc_card\(ctx\) \{[\s\S]*?hostLayer\(g, t, \{ poses, timeline: \[\{ t: 0, pose: 'point' \}, \{ t: ev, pose: '(\w+)' \}\]/.exec(src);
+  assert.ok(m, 'calc_card\'s hostLayer call must now have a 2-entry timeline {0,point}->{ev,X}');
+  assert.equal(m[1], 'think', 'the second pose at the evidence instant must be \'think\'');
+});
+await t('(3) \'react\'/\'think\' are not new assets: both role keys already exist in the live host_manifest.json that assets.mjs\'s loadHostPoses() reads -- this stage wires EXISTING, already-approved, zero-marginal-cost poses, it does not generate anything', () => {
+  const manifest = JSON.parse(fs.readFileSync('./api/assets/nextwave-v2/bench/host_manifest.json', 'utf8'));
+  assert.ok(manifest.react && manifest.think, 'react/think must already be present in the bundled manifest, proving no new generation was needed for this stage');
+});
+await t('(4) safe-fallback behavior is unchanged: hostLayer() still returns null gracefully for a pose key absent from the supplied poses object (e.g. react/think not yet loaded), exactly as it already does for the 5 pre-existing roles', () => {
+  const r1 = hostLayer({ save() {}, restore() {}, translate() {}, scale() {}, drawImage() {} }, 1.0, { poses: { point: { canvas: {}, w: 10, h: 10 } }, timeline: [{ t: 0, pose: 'point' }, { t: 0.5, pose: 'react' }], x: 0, bottom: 0, scale: 1 });
+  assert.equal(r1, null, 'a pose key missing from the supplied poses object must degrade to null, not throw');
+});
+
+console.log('\n[29] Stage 2E Phase 3 — restrained financial-value count-up: presenter_object\'s hero value now interpolates from $0 to the verified storyboard figure over 1.0s using the renderer\'s own existing countTo() easing (already exported from core.mjs, already used by the reference/candidates/*.mjs prototypes for the identical purpose) -- no new animation machinery, no invented numbers, no change to any calculation.');
+await t('(1) before the count-up window starts, the displayed amount is exactly "$0" and every surrounding character (unit/label suffix) is preserved untouched', () => {
+  assert.equal(countUpMoneyString('$194,697 START TODAY', 0, 5, 1.0), '$0 START TODAY');
+  assert.equal(countUpMoneyString('$260/MO MONTHLY INVESTMENT', 0, 5, 1.0), '$0/MO MONTHLY INVESTMENT', 'a /MO unit suffix must survive untouched, confirming units are preserved, not just simple label suffixes');
+});
+await t('(2) during the count-up window the amount is strictly monotonically increasing and always between $0 and the final verified value (never overshoots, never invents a number outside the real range)', () => {
+  const str = '$194,697 START TODAY'; let prev = -1;
+  for (let t = 5; t <= 6; t += 0.1) {
+    const shown = countUpMoneyString(str, t, 5, 1.0);
+    const v = Number(/\$([\d,]+)/.exec(shown)[1].replace(/,/g, ''));
+    assert.ok(v >= prev, `count-up must be monotonically non-decreasing: ${prev} -> ${v} at t=${t.toFixed(1)}`);
+    assert.ok(v >= 0 && v <= 194697, `count-up value ${v} must stay within [0, 194697] at every frame`);
+    prev = v;
+  }
+});
+await t('(3) once t reaches t0+dur, the EXACT original approved string is returned byte-for-byte -- not a reconstruction from the rounded animated number, so the final value is guaranteed to match the verified storyboard figure even if the real figure has unusual formatting', () => {
+  const odd = '$1,234,567.00 UNUSUAL FORMATTING TEST';
+  assert.equal(countUpMoneyString(odd, 6.0, 5, 1.0), odd, 'at/after t0+dur the function must return the literal input string unchanged');
+  assert.equal(countUpMoneyString(odd, 100, 5, 1.0), odd, 'long after the window too');
+});
+await t('(4) a string with no parseable dollar amount is returned completely unchanged at every t (no invented figure, no crash) -- this is the explicit "no invented financial values" requirement, verified as a negative case', () => {
+  const noMoney = 'WAIT EIGHT YEARS';
+  for (const t of [0, 5, 5.5, 6, 100]) assert.equal(countUpMoneyString(noMoney, t, 5, 1.0), noMoney);
+});
+await t('(5) signs and exact comma/decimal formatting of the FINAL value are preserved because the final frame returns the literal input, not a reformatted reconstruction -- re-parsing it yields the identical numeric value to the original storyboard figure', () => {
+  const real = '$156,673 COST OF DELAY';
+  const finalStr = countUpMoneyString(real, 10, 5, 1.0);
+  const finalNum = Number(/\$([\d,]+)/.exec(finalStr)[1].replace(/,/g, ''));
+  assert.equal(finalNum, 156673, 'the final displayed number must exactly equal the verified storyboard figure, not a rounded/drifted approximation');
+  assert.equal(finalStr, real, 'and the full string, including the "COST OF DELAY" label, must be byte-identical to the storyboard value');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
