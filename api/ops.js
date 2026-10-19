@@ -14400,6 +14400,247 @@ async function nextwaveV2IdeogramResolvePose(poseRole, promptText) {
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
 }
 
+// ── Stage 4B — SECOND CHARACTER pose generation (additive, NextWave-only) ──
+// nextwaveV2IdeogramCall above already accepts an arbitrary
+// characterReferencePath; the only thing hardcoded to the single existing
+// host was the orchestrator above it (NEXTWAVE_V2_HOST_DEFAULT). These two
+// functions are a parallel, parameterized orchestrator for a SECOND
+// character, so that existing host path stays byte-for-byte untouched.
+// Crossover prevention: every role tag is namespaced `${characterId}_
+// ${poseRole}` (e.g. "support_idle") before being handed to the existing,
+// also-untouched _nextwaveV2FindExistingAsset('host_pose', ...) lookup, so
+// a second character's poses can never exact-match a host role tag
+// (point/card/compare/react/think) or vice versa. New rows are written
+// status:'draft' (the table's own default) rather than 'approved' --
+// per this stage's order, generated assets must be inspected before
+// approval, never auto-approved.
+// Reuse-before-generate for the second-character namespace specifically.
+// Deliberately NOT _nextwaveV2FindExistingAsset (which filters
+// status=eq.approved): Stage 4B writes every new asset status:'draft'
+// pending creative review (requirement 6), so a status=approved-only
+// lookup would never find them and would silently re-spend on every
+// repeated request before a human approves anything -- defeating
+// requirement 5 ("reuse-before-generate"). Draft rows count as "already
+// generated, don't re-spend"; approval is a separate, later, human gate
+// that this lookup does not need to wait on.
+async function _nextwaveV2FindExistingCharacterAsset(characterId, role) {
+  const namespacedRole = `${characterId}_${role}`;
+  const rows = await sbGetSafe(
+    `production_assets_library?engine=eq.NextWave&asset_type=eq.host_pose&tags=cs.{role:${namespacedRole}}&select=id,asset_name,asset_url,tags&order=created_at.desc&limit=1`
+  );
+  return rows && rows[0] ? rows[0] : null;
+}
+
+// Sums real cost_usd:<n> tags already banked for this character (draft or
+// approved -- money already spent regardless of review status), so the
+// $1.00 experimental cap (requirement 7) is enforced against ACTUAL spend,
+// not just this process's own in-memory counter (which would reset on
+// every cold start and be trivially bypassable).
+async function _nextwaveV2CharacterSpendSoFar(characterId) {
+  const rows = await sbGetSafe(
+    `production_assets_library?engine=eq.NextWave&asset_type=eq.host_pose&tags=cs.{character:${characterId}}&select=tags`
+  );
+  let total = 0;
+  for (const row of rows || []) {
+    for (const tag of row.tags || []) {
+      const m = typeof tag === 'string' && tag.match(/^cost_usd:([0-9.]+)$/);
+      if (m) total += parseFloat(m[1]);
+    }
+  }
+  return total;
+}
+
+export async function nextwaveV2IdeogramResolveCharacterReference(characterId, promptText) {
+  const existing = await _nextwaveV2FindExistingCharacterAsset(characterId, 'reference');
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, aspectRatio: '1x1' }); // no reference yet -- this image BECOMES one
+  if (!gen.ok) return gen;
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const namespacedRole = `${characterId}_reference`;
+  const assetName = `nextwave_character_reference_${namespacedRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'host_pose',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'draft',
+    tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:false', `cost_usd:${gen.cost_usd}`],
+  });
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRole, promptText, referenceImagePath) {
+  const namespacedRole = `${characterId}_${poseRole}`;
+  const existing = await _nextwaveV2FindExistingCharacterAsset(characterId, poseRole);
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, characterReferencePath: referenceImagePath });
+  if (!gen.ok) return gen;
+
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const assetName = `nextwave_character_pose_${namespacedRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'host_pose',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'draft',
+    tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
+  });
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+// Experimental cap (Stage 4B order: "Maximum $1.00 total"). Checked against
+// real banked spend via _nextwaveV2CharacterSpendSoFar, not a per-process
+// counter. A second, in-process in-flight lock below closes the narrower
+// same-instance concurrent-duplicate-request race that a pure
+// check-then-act DB read cannot by itself (see the two Action functions).
+const NEXTWAVE_V2_CHARACTER_GEN_CAP_USD = 1.00;
+
+// Fixed, CEO-reviewed prompt dictionary -- the ONLY prompts this pair of
+// actions will ever send to Ideogram. character_id and pose_role from the
+// request are used exclusively as dictionary KEYS, never concatenated into
+// a prompt string, so no request field ever reaches the vendor as
+// free-text: this is not a general-purpose image-generation endpoint and
+// has no prompt-injection surface. Character design grounded in the real
+// existing host asset (api/assets/nextwave-v2/host_hud_default.png: male,
+// medium-tan skin, brown swept-back hair, navy blazer, white shirt) --
+// deliberately zero palette/silhouette overlap.
+const NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS = {
+  support: {
+    reference:
+      'Flat vector illustration, professional headshot and shoulders portrait of a woman in her ' +
+      'mid-30s with warm brown skin tone, shoulder-length dark wavy hair with a side part, wearing ' +
+      'a mustard-yellow cardigan over a cream blouse, calm warm approachable expression, ' +
+      'front-facing, framed against a soft warm beige background with a thin dark border, clean ' +
+      'minimal corporate flat illustration style matching a financial-education explainer ' +
+      'character, no text, no logos, no watermark',
+    poses: {
+      idle:
+        'Flat vector illustration of the same woman character, standing at ease with hands loosely ' +
+        'clasped in front of her waist, calm patient waiting expression, slight head tilt, ' +
+        'shoulders-up to waist framing, mustard cardigan over cream blouse, isolated on a plain ' +
+        'white background, no text, no logo, clean corporate flat illustration style',
+      active:
+        'Flat vector illustration of the same woman character, leaning slightly forward with an ' +
+        'alert engaged expression, one hand raised near her chest as if actively listening, ' +
+        'shoulders-up to waist framing, mustard cardigan over cream blouse, isolated on a plain ' +
+        'white background, no text, no logo, clean corporate flat illustration style',
+      point:
+        'Flat vector illustration of the same woman character, arm extended pointing to the right ' +
+        'with a confident explaining gesture, friendly open expression, shoulders-up to waist ' +
+        'framing, mustard cardigan over cream blouse, isolated on a plain white background, no ' +
+        'text, no logo, clean corporate flat illustration style',
+      react:
+        'Flat vector illustration of the same woman character, one hand gently on her chest, ' +
+        'pleasantly surprised and reacting expression, other hand slightly open in a reacting ' +
+        'gesture, shoulders-up to waist framing, mustard cardigan over cream blouse, isolated on a ' +
+        'plain white background, no text, no logo, clean corporate flat illustration style',
+    },
+  },
+};
+
+// Same-instance concurrent-duplicate-request guard. Node is single-threaded
+// per process, so a synchronous has()+add() pair with no await between
+// them cannot race WITHIN one warm instance. This does NOT protect against
+// two different serverless instances racing the same role simultaneously
+// -- that would need a DB-level uniqueness constraint or advisory lock,
+// which is a real, disclosed residual risk, not implemented this round
+// (out of scope: "implementation and testing only").
+const _nextwaveV2CharacterGenInFlight = new Set();
+
+export async function nextwaveV2IdeogramGenerateCharacterReferenceAction(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { character_id } = req.body || {};
+  const dict = NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS[character_id];
+  if (!dict) return res.status(400).json({ ok: false, error: `unsupported character_id -- must be one of: ${Object.keys(NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS).join(', ')}` });
+
+  const spendSoFar = await _nextwaveV2CharacterSpendSoFar(character_id);
+  const estCost = 0.03; // no character reference on this call -- object-tier price
+  if (spendSoFar + estCost > NEXTWAVE_V2_CHARACTER_GEN_CAP_USD) {
+    return res.status(402).json({ ok: false, error: 'character_generation_cap_exceeded', spend_so_far_usd: spendSoFar, cap_usd: NEXTWAVE_V2_CHARACTER_GEN_CAP_USD });
+  }
+  const lockKey = `${character_id}:reference`;
+  if (_nextwaveV2CharacterGenInFlight.has(lockKey)) {
+    return res.status(409).json({ ok: false, error: 'generation_already_in_progress', role: lockKey });
+  }
+  _nextwaveV2CharacterGenInFlight.add(lockKey);
+  try {
+    const result = await nextwaveV2IdeogramResolveCharacterReference(character_id, dict.reference);
+    if (!result.ok) return res.status(502).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    _nextwaveV2CharacterGenInFlight.delete(lockKey);
+  }
+}
+
+export async function nextwaveV2IdeogramGenerateCharacterPoseAction(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { character_id, pose_role } = req.body || {};
+  const dict = NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS[character_id];
+  if (!dict) return res.status(400).json({ ok: false, error: `unsupported character_id -- must be one of: ${Object.keys(NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS).join(', ')}` });
+  const prompt = dict.poses[pose_role];
+  if (!prompt) return res.status(400).json({ ok: false, error: `unsupported pose_role -- must be one of: ${Object.keys(dict.poses).join(', ')}` });
+
+  const spendSoFar = await _nextwaveV2CharacterSpendSoFar(character_id);
+  const estCost = IDEOGRAM_COST_PER_IMAGE_USD; // $0.10 character-reference tier
+  if (spendSoFar + estCost > NEXTWAVE_V2_CHARACTER_GEN_CAP_USD) {
+    return res.status(402).json({ ok: false, error: 'character_generation_cap_exceeded', spend_so_far_usd: spendSoFar, cap_usd: NEXTWAVE_V2_CHARACTER_GEN_CAP_USD });
+  }
+
+  const refAsset = await _nextwaveV2FindExistingCharacterAsset(character_id, 'reference');
+  if (!refAsset) return res.status(409).json({ ok: false, error: 'character_reference_not_generated_yet' });
+
+  const lockKey = `${character_id}:${pose_role}`;
+  if (_nextwaveV2CharacterGenInFlight.has(lockKey)) {
+    return res.status(409).json({ ok: false, error: 'generation_already_in_progress', role: lockKey });
+  }
+  _nextwaveV2CharacterGenInFlight.add(lockKey);
+  let localRefPath;
+  try {
+    const refRes = await fetch(refAsset.asset_url);
+    if (!refRes.ok) return res.status(502).json({ ok: false, error: 'reference_download_failed' });
+    const refBuf = Buffer.from(await refRes.arrayBuffer());
+    localRefPath = join(tmpdir(), `nwv2-charref-${character_id}-${Date.now()}.png`);
+    await writeFile(localRefPath, refBuf);
+    const result = await nextwaveV2IdeogramResolveCharacterPose(character_id, pose_role, prompt, localRefPath);
+    if (!result.ok) return res.status(502).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    _nextwaveV2CharacterGenInFlight.delete(lockKey);
+    if (localRefPath) unlink(localRefPath).catch(() => {});
+  }
+}
+
 // ── Phase 5 — illustrated OBJECT generation (not character poses) ──────────
 // CEO rejection of Phase 4.7: adding host poses to a card-first renderer
 // didn't change the mechanism. Benchmark forensics (Wealth Logic: folder,
@@ -19741,6 +19982,12 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_set_ideogram_key')    return await nextwaveV2SetIdeogramKey(req, res);
     if (action === 'nextwave_v2_ideogram_generate_pose') return await nextwaveV2IdeogramGeneratePose(req, res);
     if (action === 'nextwave_v2_ideogram_generate_object') return await nextwaveV2IdeogramGenerateObject(req, res);
+    // Stage 4B — second-character generation. Same requireCeoSession gate, same
+    // fixed-dictionary-only pattern as the two actions directly above; the host
+    // path they call (nextwaveV2IdeogramGeneratePose/ResolvePose, NEXTWAVE_V2_HOST_DEFAULT)
+    // is untouched by either of these.
+    if (action === 'nextwave_v2_ideogram_generate_character_reference') return await nextwaveV2IdeogramGenerateCharacterReferenceAction(req, res);
+    if (action === 'nextwave_v2_ideogram_generate_character_pose') return await nextwaveV2IdeogramGenerateCharacterPoseAction(req, res);
     if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
     // Visual Composition Correction — persistent-canvas compositor (presenter
     // window + evidence zone), Submagic reduced to captions-only downstream.
