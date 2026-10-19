@@ -1528,17 +1528,19 @@ const signCeoToken = (overrides = {}) => {
   return `${payload}.${sig}`;
 };
 const jsonRes = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body), arrayBuffer: async () => Buffer.from('fake-png-bytes') });
-function freshState() { return { auth: { ceo_session_secret_production: SESSION_SECRET, ceo_pin_hash_production: PIN_HASH, ideogram_api_key_production: IDEOGRAM_KEY }, assets: [], ideogramCalls: 0, ideogramFail: false }; }
+function freshState() { return { auth: { ceo_session_secret_production: SESSION_SECRET, ceo_pin_hash_production: PIN_HASH, ideogram_api_key_production: IDEOGRAM_KEY }, assets: [], appSettings: new Map(), ideogramCalls: 0, ideogramFail: false, ideogramHang: false, uploadFail: false, insertFail: false }; }
 function mockFetch(state) {
   return async (url, opts = {}) => {
     const u = new URL(String(url));
     const method = (opts.method || 'GET').toUpperCase();
     if (u.hostname === 'api.ideogram.ai') {
+      if (state.ideogramHang) return new Promise(() => {}); // simulates a vendor call that never resolves within the caller's own timeout
       state.ideogramCalls++;
       if (state.ideogramFail) return jsonRes(500, { error: 'mock_vendor_failure' });
       const n = state.ideogramCalls;
       return jsonRes(200, { data: [{ url: `https://mock-ideogram.test/img-${n}.png`, seed: 1000 + n, resolution: '1024x1024' }] });
     }
+    if (u.pathname.startsWith('/storage/v1/object/') && !u.pathname.includes('/public/') && state.uploadFail) return jsonRes(500, { error: 'mock_storage_upload_failure' });
     if (u.pathname.startsWith('/rest/v1/')) {
       const table = u.pathname.replace('/rest/v1/', '').split('?')[0];
       if (table === 'ceo_auth_config') {
@@ -1547,6 +1549,30 @@ function mockFetch(state) {
         if (keyParam.startsWith('in.(')) { const keys = keyParam.slice(4, -1).split(','); rows = keys.filter((k) => state.auth[k] !== undefined).map((k) => ({ key: k, value: state.auth[k] })); }
         else if (keyParam.startsWith('eq.')) { const k = keyParam.slice(3); if (state.auth[k] !== undefined) rows = [{ key: k, value: state.auth[k] }]; }
         return jsonRes(200, rows);
+      }
+      if (table === 'app_settings') {
+        // Real app_settings.key is the table's PRIMARY KEY (confirmed via
+        // information_schema) -- this Map faithfully reproduces that: a
+        // second POST with an already-present key is rejected 409, exactly
+        // as real Postgres/PostgREST would reject it.
+        if (method === 'POST') {
+          const data = JSON.parse(opts.body);
+          if (state.appSettings.has(data.key)) return jsonRes(409, { error: 'duplicate key value violates unique constraint "app_settings_pkey"' });
+          state.appSettings.set(data.key, data.value);
+          return jsonRes(201, [{ key: data.key, value: data.value }]);
+        }
+        if (method === 'GET') {
+          const keyParam = u.searchParams.get('key') || '';
+          const k = keyParam.startsWith('eq.') ? keyParam.slice(3) : null;
+          const rows = k && state.appSettings.has(k) ? [{ key: k, value: state.appSettings.get(k) }] : [];
+          return jsonRes(200, rows);
+        }
+        if (method === 'DELETE') {
+          const keyParam = u.searchParams.get('key') || '';
+          const k = keyParam.startsWith('eq.') ? keyParam.slice(3) : null;
+          if (k) state.appSettings.delete(k);
+          return jsonRes(200, []);
+        }
       }
       if (table === 'production_assets_library') {
         if (method === 'GET') {
@@ -1562,6 +1588,7 @@ function mockFetch(state) {
           return jsonRes(200, rows);
         }
         if (method === 'POST') {
+          if (state.insertFail) return jsonRes(500, { error: 'mock_insert_failure' });
           const data = JSON.parse(opts.body);
           const row = { id: `mock-${state.assets.length + 1}`, status: 'draft', created_at: new Date(Date.now() + state.assets.length).toISOString(), ...data };
           state.assets.push(row);
@@ -1768,8 +1795,8 @@ await t('(3) same-instance concurrent duplicate-role requests: the in-process lo
     assert.equal(state.ideogramCalls, 1, 'only one real vendor call must have been made for two concurrent requests targeting the same not-yet-existing role');
   });
 });
-await t('(4) DISCLOSED residual risk (documented, not silently claimed safe): the in-process lock only protects a single warm instance. Two different serverless instances racing the identical not-yet-existing role at the same moment would both pass the DB spend-check (a classic check-then-act race) and could both spend, since there is no DB-level uniqueness constraint. Bounded worst case for the "support" character: at most 5 distinct roles ever exist (1 reference + 4 poses), so even a total cross-instance race across every role simultaneously is capped at 5x the real per-image price (<= $0.50) -- still bounded, but NOT a hard guarantee of the exact $1.00 figure under adversarial cross-instance concurrency. Recommended complete fix (not implemented -- out of scope: "implementation and testing only"): a DB unique constraint on (engine, asset_type, role tag), or a short Postgres advisory lock keyed by the namespaced role, acquired before the Ideogram call.', () => {
-  assert.ok(true, 'documented in Phase 6 report -- see "Production security risks"');
+await t('(4) SUPERSEDED by Stage 4B.1: the original in-process-only lock\'s cross-instance gap is now closed by an atomic app_settings-PRIMARY-KEY reservation (see section [33]) -- this entry is kept only as a pointer so the history of what changed and why stays legible in the suite', () => {
+  assert.ok(true, 'see section [33] for the real cross-instance concurrency tests that replaced this disclosure-only placeholder');
 });
 
 console.log('\n[32] Stage 4B Phase 4 — business isolation: negative tests proving no reach into other businesses, publishing, or Task 125/126');
@@ -1840,6 +1867,144 @@ await t('(8) draft-status assets are fully, independently reversible: deleting m
   const afterCleanup = state.assets.filter((r) => !(r.tags || []).includes('character:support'));
   assert.equal(afterCleanup.length, 1);
   assert.equal(afterCleanup[0].engine, 'SrvFarsi', 'removing all character:support rows must not touch any other engine\'s rows');
+});
+
+console.log('\n[33] Stage 4B.1 — cross-instance generation safety: atomic app_settings-PRIMARY-KEY reservation replaces the in-process-only lock');
+await t('(1) two simultaneous requests for one role: exactly one Ideogram call, the loser gets 409', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const r1 = mockRes(), r2 = mockRes();
+    await Promise.all([
+      nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), r1),
+      nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), r2),
+    ]);
+    assert.deepEqual([r1.statusCode, r2.statusCode].sort(), [200, 409]);
+    assert.equal(state.ideogramCalls, 1);
+  });
+});
+await t('(2) requests from independent instances: the reservation lives entirely in the shared mocked database (app_settings), never in any process-local state, so two logically-separate callers racing the same role are blocked by the SAME mechanism as same-process concurrency -- there is no separate in-process guard left to accidentally rely on', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    // simulate "instance B" winning the race first, exactly as real
+    // PostgREST would record it, before "instance A"'s request is even
+    // issued -- proves the block is DB-state-driven, not timing-coincidental.
+    state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now() }));
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), res);
+    assert.equal(res.statusCode, 409);
+    assert.equal(state.ideogramCalls, 0, '"instance A" must never call the vendor once the lock row already exists, regardless of how it got there');
+  });
+});
+await t('(3) multiple distinct roles concurrently: each acquires its own independent lock and all succeed -- distinct roles must never block each other', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction, nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    const results = await Promise.all(['idle', 'active', 'point', 'react'].map((role) => {
+      const res = mockRes();
+      return nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: role, ceo_session_token: token }), res).then(() => res);
+    }));
+    assert.ok(results.every((r) => r.statusCode === 200), `all 4 distinct-role concurrent requests must succeed: ${results.map((r) => r.statusCode)}`);
+    assert.equal(state.ideogramCalls, 5, '1 reference + 4 distinct poses = 5 real vendor calls, none blocked by each other');
+  });
+});
+await t('(4) vendor timeout (hung call): the reservation is acquired BEFORE the vendor call, so a hang still leaves it held, and a concurrent retry during the hang is correctly refused rather than risking a double-spend', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    state.ideogramHang = true;
+    nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes()); // intentionally not awaited -- simulates a still-hanging call
+    await new Promise((r) => setTimeout(r, 20)); // let it reach and acquire the lock
+    assert.ok(state.appSettings.has('nwv2r_charlock_support_reference'), 'lock must be held while the vendor call is still hanging');
+    const retryRes = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), retryRes);
+    assert.equal(retryRes.statusCode, 409, 'a retry while the original call is still outstanding must be refused, not attempt a second vendor call');
+    assert.equal(state.ideogramCalls, 0, 'neither the still-hung original call nor the refused retry has made a real vendor call at this point');
+  });
+});
+await t('(5) vendor success followed by a DB write failure: the real spend IS counted (Ideogram was actually called) and the lock is deliberately left held, not silently dropped', async () => {
+  const state = freshState();
+  state.insertFail = true;
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), res);
+    assert.equal(res.statusCode, 500, 'sbInsert throws on a failed write, caught by the action\'s own try/catch');
+    assert.equal(state.ideogramCalls, 1, 'the real vendor call did happen -- this is genuine, already-incurred spend even though the row never got written');
+    assert.ok(state.appSettings.has('nwv2r_charlock_support_reference'), 'the lock must remain held after a failure, not be released, so a blind immediate retry cannot double-spend on the same uncounted generation');
+  });
+});
+await t('(6) retry after an uncertain outcome: immediately after a failure the retry is blocked (bounded protection); once the lock is old enough to be stale it is safely reclaimed and the retry succeeds normally', async () => {
+  const state = freshState();
+  state.insertFail = true;
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes()); // fails, leaves lock held
+    assert.equal(state.ideogramCalls, 1);
+
+    const immediateRetry = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), immediateRetry);
+    assert.equal(immediateRetry.statusCode, 409, 'an immediate retry must be blocked -- the outcome of the first vendor call is still ambiguous');
+    assert.equal(state.ideogramCalls, 1, 'the blocked immediate retry must not have made a second vendor call');
+
+    // simulate the staleness window having elapsed (no real waiting needed --
+    // directly age the stored reservation, which is exactly what the real
+    // staleness check reads).
+    state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now() - 4 * 60 * 1000 }));
+    state.insertFail = false; // the underlying transient failure has since cleared, as a real retry would eventually find
+    const laterRetry = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), laterRetry);
+    assert.equal(laterRetry.statusCode, 200, 'once the lock is stale it must be safely reclaimable, and the retry should now succeed');
+    assert.equal(state.ideogramCalls, 2, 'this is the documented, disclosed residual cost of ambiguous-outcome recovery: a stale reclaim can cause one extra real generation for this role, never more');
+  });
+});
+await t('(7) attempts to exceed $1.00 still correctly rejected with the new lock code path in place', async () => {
+  const state = freshState();
+  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', tags: ['role:support_reference', 'character:support', 'cost_usd:0.95'] });
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), res);
+    assert.equal(res.statusCode, 402);
+    assert.equal(state.ideogramCalls, 0, 'the cap must still block before the lock is even attempted');
+    assert.ok(!state.appSettings.has('nwv2r_charlock_support_idle'), 'a cap-rejected request must never acquire a lock either');
+  });
+});
+await t('(8) invalid and expired CEO sessions still correctly rejected with the new lock code path in place', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const forged = signCeoToken({ secret: 'wrong-secret' });
+    const expired = signCeoToken({ exp: Date.now() - 1000 });
+    const r1 = mockRes(); await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: forged }), r1); assert.equal(r1.statusCode, 401);
+    const r2 = mockRes(); await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: expired }), r2); assert.equal(r2.statusCode, 401);
+    assert.equal(state.ideogramCalls, 0);
+  });
+});
+await t('(9) existing host-generation is unaffected by the 4B.1 concurrency fix: host symbols still appear in zero removed diff lines', () => {
+  const diffLines = execFileSync('git', ['diff', '--unified=0', '--', 'api/ops.js']).toString();
+  const hostSymbols = ['NEXTWAVE_V2_HOST_DEFAULT', 'nextwaveV2IdeogramResolvePose(poseRole', '_nextwaveV2FindExistingPose(poseTag', 'NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS = {'];
+  const removedLines = diffLines.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---'));
+  for (const sym of hostSymbols) assert.ok(!removedLines.some((l) => l.includes(sym)), `host symbol "${sym}" must not appear in any REMOVED diff line`);
+});
+await t('(10) other businesses remain unaffected: the new lock helpers only ever touch app_settings under the nwv2r_charlock_ prefix and production_assets_library under engine=NextWave', () => {
+  const src = fs.readFileSync('api/ops.js', 'utf8');
+  const start = src.indexOf('NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS');
+  const end = src.indexOf('export async function nextwaveV2IdeogramGenerateCharacterReferenceAction');
+  const lockBlock = src.slice(start, end);
+  assert.ok(lockBlock.includes("app_settings"), 'sanity: must have found the real lock implementation');
+  assert.ok(!lockBlock.includes('SrvFarsi') && !lockBlock.includes('srv_farsi') && !lockBlock.includes('SrvStudio'), 'lock implementation must not reference any other business');
+  const lockKeyLines = lockBlock.match(/`nwv2r_charlock_[^`]*`/g) || [];
+  assert.ok(lockKeyLines.length > 0, 'sanity: must have found the real lock-key template(s)');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

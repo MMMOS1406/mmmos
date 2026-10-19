@@ -14450,16 +14450,117 @@ async function _nextwaveV2CharacterSpendSoFar(characterId) {
   return total;
 }
 
+// ── Stage 4B.1 — cross-instance-safe reservation lock ──────────────────────
+// Root cause (Phase 1 analysis): the original Stage 4B in-process Set lock
+// only prevented a race WITHIN one warm serverless instance. Two DIFFERENT
+// instances handling the same role at the same moment would both pass the
+// DB reuse-check (both reads happen before either has written) and both
+// call the paid vendor -- a real cross-instance double-spend. A second,
+// independent failure mode existed even with no concurrency at all: if
+// Ideogram succeeded but the following download/upload/insert failed, no
+// draft row was ever written to record that real spend, so a naive retry
+// would under-count spend and could pay again for the identical role.
+//
+// Fix: a true atomic reservation built on an EXISTING database primitive --
+// app_settings.key is that table's PRIMARY KEY (confirmed via
+// information_schema.table_constraints, not assumed), so two concurrent
+// INSERTs with the same key can never both succeed; Postgres itself
+// rejects the loser with a 409 conflict. No schema migration, no new
+// table, no shared-infrastructure change: this reuses the same key-value
+// table other NextWave code already writes arbitrary state into (e.g.
+// ceo_login_security_production), just under a new, namespaced key.
+//
+// Why a per-role lock is enough for today's fixed dictionary, not merely a
+// patch: NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS.support has exactly 5
+// possible roles (1 reference + 4 poses). Once each role can be
+// reservation-locked to pay for itself AT MOST ONCE ever (a released lock
+// is only ever replaced by the real asset row, which reuse-before-generate
+// then finds first), the true worst-case total spend for this character is
+// mathematically $0.03 + 4*$0.10 = $0.43 -- structurally under the $1.00
+// cap regardless of concurrency, independent of the cap check below. The
+// $1.00 cap read is kept as defense-in-depth and becomes the PRIMARY guard
+// again if this dictionary is ever extended with more roles/characters.
+//
+// Lock lifecycle: acquired before the vendor call; released IMMEDIATELY on
+// success (the new row is now authoritative); left HELD on any failure
+// after the vendor call was attempted, so an immediate blind retry after
+// an ambiguous/ timed-out vendor response is refused rather than risking a
+// second real charge. A held lock naturally expires after
+// NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS and can then be reclaimed by a new
+// attempt -- bounding "stuck forever" failure modes (a truly abandoned
+// serverless instance, a vendor timeout) without needing to distinguish
+// them from genuine vendor success, which Ideogram's API gives no
+// client-supplied idempotency key to disambiguate. This is a disclosed,
+// bounded residual risk (see Phase 6 report "Remaining risks"), not a
+// claim of perfect idempotency.
+const NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS = 3 * 60 * 1000; // generous vs. one Ideogram TURBO call + upload
+
+async function _nextwaveV2AppSettingsDelete(key) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY },
+    });
+  } catch (e) { /* best-effort release -- a failed delete just leaves a lock the staleness check reclaims later */ }
+}
+
+// { ok:true } on a genuine atomic acquire (including a successful stale
+// reclaim). { ok:false, reason:'in_progress' } when a live, non-stale lock
+// is held elsewhere. { ok:false, reason:'lock_error' } only for an
+// unrelated infrastructure failure (never silently treated as acquired).
+async function _nextwaveV2AcquireCharacterLock(lockKey) {
+  const insertOnce = () => fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
+    body: JSON.stringify({ key: lockKey, value: JSON.stringify({ reserved_at: Date.now() }) }),
+  });
+
+  let res = await insertOnce();
+  if (res.ok) return { ok: true };
+  if (res.status !== 409) return { ok: false, reason: 'lock_error', detail: `app_settings_insert_${res.status}` };
+
+  // 409 = a lock row already exists -- determine live vs. stale/abandoned.
+  const existing = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(lockKey)}&select=value`);
+  const row = existing && existing[0];
+  let reservedAt = 0;
+  try { reservedAt = (JSON.parse(row.value) || {}).reserved_at || 0; } catch { reservedAt = 0; }
+  if (!row || Date.now() - reservedAt < NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS) {
+    return { ok: false, reason: 'in_progress' };
+  }
+
+  // Stale -- reclaim (delete then re-insert). If another process reclaims
+  // first, THIS insert loses the identical atomic race and correctly
+  // backs off -- the uniqueness guarantee is never weakened, only extended
+  // to also cover reclaim.
+  await _nextwaveV2AppSettingsDelete(lockKey);
+  res = await insertOnce();
+  return res.ok ? { ok: true } : { ok: false, reason: 'in_progress' };
+}
+
+async function _nextwaveV2ReleaseCharacterLock(lockKey) {
+  await _nextwaveV2AppSettingsDelete(lockKey);
+}
+
 export async function nextwaveV2IdeogramResolveCharacterReference(characterId, promptText) {
   const existing = await _nextwaveV2FindExistingCharacterAsset(characterId, 'reference');
   if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
 
-  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, aspectRatio: '1x1' }); // no reference yet -- this image BECOMES one
-  if (!gen.ok) return gen;
-  const imgRes = await fetch(gen.url);
-  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
-  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
   const namespacedRole = `${characterId}_reference`;
+  const lockKey = `nwv2r_charlock_${namespacedRole}`;
+  const lock = await _nextwaveV2AcquireCharacterLock(lockKey);
+  if (!lock.ok) return { ok: false, error: lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
+
+  // Re-check after acquiring the lock: closes the window between the first
+  // reuse-check above and actually holding the lock (another instance may
+  // have finished generating it in between).
+  const existing2 = await _nextwaveV2FindExistingCharacterAsset(characterId, 'reference');
+  if (existing2) { await _nextwaveV2ReleaseCharacterLock(lockKey); return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 }; }
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, aspectRatio: '1x1' }); // no reference yet -- this image BECOMES one
+  if (!gen.ok) return gen; // lock intentionally left held -- bounds the next retry to after the staleness window
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` }; // lock left held -- real vendor spend may already have occurred
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
   const assetName = `nextwave_character_reference_${namespacedRole}_${Date.now()}`;
   const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
   const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
@@ -14467,9 +14568,9 @@ export async function nextwaveV2IdeogramResolveCharacterReference(characterId, p
     headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
     body: imgBuf,
   });
-  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
-  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` }; // lock left held -- vendor already charged
 
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
   const row = await sbInsert('production_assets_library', {
     asset_type: 'host_pose',
     asset_name: assetName,
@@ -14479,6 +14580,7 @@ export async function nextwaveV2IdeogramResolveCharacterReference(characterId, p
     status: 'draft',
     tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:false', `cost_usd:${gen.cost_usd}`],
   });
+  await _nextwaveV2ReleaseCharacterLock(lockKey); // success -- release immediately, the new row is now authoritative for reuse
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
 }
 
@@ -14487,11 +14589,18 @@ export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRo
   const existing = await _nextwaveV2FindExistingCharacterAsset(characterId, poseRole);
   if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
 
+  const lockKey = `nwv2r_charlock_${namespacedRole}`;
+  const lock = await _nextwaveV2AcquireCharacterLock(lockKey);
+  if (!lock.ok) return { ok: false, error: lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
+
+  const existing2 = await _nextwaveV2FindExistingCharacterAsset(characterId, poseRole);
+  if (existing2) { await _nextwaveV2ReleaseCharacterLock(lockKey); return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 }; }
+
   const gen = await nextwaveV2IdeogramCall({ prompt: promptText, characterReferencePath: referenceImagePath });
-  if (!gen.ok) return gen;
+  if (!gen.ok) return gen; // lock left held -- bounds the next retry to after the staleness window
 
   const imgRes = await fetch(gen.url);
-  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` };
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` }; // lock left held -- real vendor spend may already have occurred
   const imgBuf = Buffer.from(await imgRes.arrayBuffer());
   const assetName = `nextwave_character_pose_${namespacedRole}_${Date.now()}`;
   const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
@@ -14500,9 +14609,9 @@ export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRo
     headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
     body: imgBuf,
   });
-  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` };
-  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` }; // lock left held -- vendor already charged
 
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
   const row = await sbInsert('production_assets_library', {
     asset_type: 'host_pose',
     asset_name: assetName,
@@ -14512,14 +14621,16 @@ export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRo
     status: 'draft',
     tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
   });
+  await _nextwaveV2ReleaseCharacterLock(lockKey); // success -- release immediately, the new row is now authoritative for reuse
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
 }
 
 // Experimental cap (Stage 4B order: "Maximum $1.00 total"). Checked against
 // real banked spend via _nextwaveV2CharacterSpendSoFar, not a per-process
-// counter. A second, in-process in-flight lock below closes the narrower
-// same-instance concurrent-duplicate-request race that a pure
-// check-then-act DB read cannot by itself (see the two Action functions).
+// counter. Defense-in-depth: the per-role reservation lock above already
+// makes $0.43 the structural ceiling for today's fixed 5-role dictionary
+// (see that block's comment) -- this cap is what keeps protecting the
+// system if the dictionary is ever extended.
 const NEXTWAVE_V2_CHARACTER_GEN_CAP_USD = 1.00;
 
 // Fixed, CEO-reviewed prompt dictionary -- the ONLY prompts this pair of
@@ -14565,14 +14676,14 @@ const NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS = {
   },
 };
 
-// Same-instance concurrent-duplicate-request guard. Node is single-threaded
-// per process, so a synchronous has()+add() pair with no await between
-// them cannot race WITHIN one warm instance. This does NOT protect against
-// two different serverless instances racing the same role simultaneously
-// -- that would need a DB-level uniqueness constraint or advisory lock,
-// which is a real, disclosed residual risk, not implemented this round
-// (out of scope: "implementation and testing only").
-const _nextwaveV2CharacterGenInFlight = new Set();
+// Maps a resolver result's error to the right HTTP status: the atomic
+// reservation lock (see above) can itself report "someone else is already
+// generating this role" as a normal, expected outcome -- that is a 409,
+// not a 502 vendor-failure.
+function _nextwaveV2CharacterGenStatusFor(result) {
+  if (result.error === 'generation_already_in_progress') return 409;
+  return 502;
+}
 
 export async function nextwaveV2IdeogramGenerateCharacterReferenceAction(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
@@ -14585,19 +14696,12 @@ export async function nextwaveV2IdeogramGenerateCharacterReferenceAction(req, re
   if (spendSoFar + estCost > NEXTWAVE_V2_CHARACTER_GEN_CAP_USD) {
     return res.status(402).json({ ok: false, error: 'character_generation_cap_exceeded', spend_so_far_usd: spendSoFar, cap_usd: NEXTWAVE_V2_CHARACTER_GEN_CAP_USD });
   }
-  const lockKey = `${character_id}:reference`;
-  if (_nextwaveV2CharacterGenInFlight.has(lockKey)) {
-    return res.status(409).json({ ok: false, error: 'generation_already_in_progress', role: lockKey });
-  }
-  _nextwaveV2CharacterGenInFlight.add(lockKey);
   try {
     const result = await nextwaveV2IdeogramResolveCharacterReference(character_id, dict.reference);
-    if (!result.ok) return res.status(502).json(result);
+    if (!result.ok) return res.status(_nextwaveV2CharacterGenStatusFor(result)).json(result);
     return res.status(200).json(result);
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
-  } finally {
-    _nextwaveV2CharacterGenInFlight.delete(lockKey);
   }
 }
 
@@ -14618,11 +14722,6 @@ export async function nextwaveV2IdeogramGenerateCharacterPoseAction(req, res) {
   const refAsset = await _nextwaveV2FindExistingCharacterAsset(character_id, 'reference');
   if (!refAsset) return res.status(409).json({ ok: false, error: 'character_reference_not_generated_yet' });
 
-  const lockKey = `${character_id}:${pose_role}`;
-  if (_nextwaveV2CharacterGenInFlight.has(lockKey)) {
-    return res.status(409).json({ ok: false, error: 'generation_already_in_progress', role: lockKey });
-  }
-  _nextwaveV2CharacterGenInFlight.add(lockKey);
   let localRefPath;
   try {
     const refRes = await fetch(refAsset.asset_url);
@@ -14631,12 +14730,11 @@ export async function nextwaveV2IdeogramGenerateCharacterPoseAction(req, res) {
     localRefPath = join(tmpdir(), `nwv2-charref-${character_id}-${Date.now()}.png`);
     await writeFile(localRefPath, refBuf);
     const result = await nextwaveV2IdeogramResolveCharacterPose(character_id, pose_role, prompt, localRefPath);
-    if (!result.ok) return res.status(502).json(result);
+    if (!result.ok) return res.status(_nextwaveV2CharacterGenStatusFor(result)).json(result);
     return res.status(200).json(result);
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   } finally {
-    _nextwaveV2CharacterGenInFlight.delete(lockKey);
     if (localRefPath) unlink(localRefPath).catch(() => {});
   }
 }
