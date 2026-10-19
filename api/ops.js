@@ -14431,11 +14431,25 @@ async function _nextwaveV2FindExistingCharacterAsset(characterId, role) {
   return rows && rows[0] ? rows[0] : null;
 }
 
+function _nextwaveV2RoleMaxPrice(role) {
+  return role === 'reference' ? 0.03 : IDEOGRAM_COST_PER_IMAGE_USD;
+}
+
 // Sums real cost_usd:<n> tags already banked for this character (draft or
 // approved -- money already spent regardless of review status), so the
 // $1.00 experimental cap (requirement 7) is enforced against ACTUAL spend,
 // not just this process's own in-memory counter (which would reset on
 // every cold start and be trivially bypassable).
+//
+// Stage 4B.2: this alone is not an honest cap. A reservation can be in an
+// 'uncertain' state (vendor was contacted, outcome unresolved -- see the
+// reservation lock below) with NO cost_usd tag yet, by definition, since
+// no asset row was ever written. Counting only confirmed rows here would
+// let a human clearing and retrying uncertain reservations push real
+// spend past $1.00 without this check ever seeing it. Every currently-
+// uncertain lock for this character therefore also adds its role's known
+// price to the running total until a human explicitly reconciles it via
+// nextwaveV2IdeogramClearUncertainReservation.
 async function _nextwaveV2CharacterSpendSoFar(characterId) {
   const rows = await sbGetSafe(
     `production_assets_library?engine=eq.NextWave&asset_type=eq.host_pose&tags=cs.{character:${characterId}}&select=tags`
@@ -14447,98 +14461,195 @@ async function _nextwaveV2CharacterSpendSoFar(characterId) {
       if (m) total += parseFloat(m[1]);
     }
   }
+  const lockRows = await sbGetSafe(`app_settings?key=like.nwv2r_charlock_${characterId}_*&select=key,value`);
+  for (const row of lockRows || []) {
+    let parsed = {};
+    try { parsed = JSON.parse(row.value) || {}; } catch { parsed = {}; }
+    if (parsed.state === 'uncertain') {
+      const role = row.key.slice(`nwv2r_charlock_${characterId}_`.length);
+      total += _nextwaveV2RoleMaxPrice(role);
+    }
+  }
   return total;
 }
 
-// ── Stage 4B.1 — cross-instance-safe reservation lock ──────────────────────
-// Root cause (Phase 1 analysis): the original Stage 4B in-process Set lock
-// only prevented a race WITHIN one warm serverless instance. Two DIFFERENT
-// instances handling the same role at the same moment would both pass the
-// DB reuse-check (both reads happen before either has written) and both
-// call the paid vendor -- a real cross-instance double-spend. A second,
-// independent failure mode existed even with no concurrency at all: if
-// Ideogram succeeded but the following download/upload/insert failed, no
-// draft row was ever written to record that real spend, so a naive retry
-// would under-count spend and could pay again for the identical role.
+// ── Stage 4B.2 — ownership-safe reservation + uncertain-outcome handling ──
+// Stage 4B.1 closed the cross-instance double-generation race but left two
+// real gaps, found by this stage's own Phase 1 re-inspection of that code:
 //
-// Fix: a true atomic reservation built on an EXISTING database primitive --
-// app_settings.key is that table's PRIMARY KEY (confirmed via
-// information_schema.table_constraints, not assumed), so two concurrent
-// INSERTs with the same key can never both succeed; Postgres itself
-// rejects the loser with a 409 conflict. No schema migration, no new
-// table, no shared-infrastructure change: this reuses the same key-value
-// table other NextWave code already writes arbitrary state into (e.g.
-// ceo_login_security_production), just under a new, namespaced key.
+// (a) OWNERSHIP RACE: release and stale-reclaim both did an UNCONDITIONAL
+//     DELETE by key. If process A's lock is reclaimed as stale by process B
+//     while A is still legitimately working (slow but not dead), A later
+//     finishing and calling release() would delete B's NEWER row -- A has
+//     no way to tell "my lock" from "someone else's lock that now happens
+//     to sit at the same key". A third process could then acquire while B
+//     still believes it holds the lock: a real double-generation.
 //
-// Why a per-role lock is enough for today's fixed dictionary, not merely a
-// patch: NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS.support has exactly 5
-// possible roles (1 reference + 4 poses). Once each role can be
-// reservation-locked to pay for itself AT MOST ONCE ever (a released lock
-// is only ever replaced by the real asset row, which reuse-before-generate
-// then finds first), the true worst-case total spend for this character is
-// mathematically $0.03 + 4*$0.10 = $0.43 -- structurally under the $1.00
-// cap regardless of concurrency, independent of the cap check below. The
-// $1.00 cap read is kept as defense-in-depth and becomes the PRIMARY guard
-// again if this dictionary is ever extended with more roles/characters.
+// (b) AMBIGUOUS-OUTCOME AUTO-RETRY: the old staleness window treated EVERY
+//     held lock the same regardless of whether the vendor had actually
+//     been contacted. A timeout or an unconfirmed failure AFTER Ideogram
+//     was reached would quietly become reclaimable again after 3 minutes
+//     -- an automatic retry of a call whose billing outcome is unknown.
+//     Ideogram gives no client-supplied idempotency key, so a local
+//     timeout is never proof the vendor didn't charge.
 //
-// Lock lifecycle: acquired before the vendor call; released IMMEDIATELY on
-// success (the new row is now authoritative); left HELD on any failure
-// after the vendor call was attempted, so an immediate blind retry after
-// an ambiguous/ timed-out vendor response is refused rather than risking a
-// second real charge. A held lock naturally expires after
-// NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS and can then be reclaimed by a new
-// attempt -- bounding "stuck forever" failure modes (a truly abandoned
-// serverless instance, a vendor timeout) without needing to distinguish
-// them from genuine vendor success, which Ideogram's API gives no
-// client-supplied idempotency key to disambiguate. This is a disclosed,
-// bounded residual risk (see Phase 6 report "Remaining risks"), not a
-// claim of perfect idempotency.
+// Fix for (a): every reservation carries a unique, randomly-generated
+// owner token in its value (app_settings.value is a plain text column --
+// no schema change). Release and reclaim are both CONDITIONAL deletes
+// (DELETE ... WHERE key=eq.X AND value=eq.<exact string I last wrote>),
+// which PostgREST applies as a normal AND'd filter on any method. If the
+// row has changed since I last read/wrote it -- reclaimed, renewed, or
+// completed by someone else -- my conditional delete matches zero rows
+// and I correctly back off instead of destroying their newer ownership.
+//
+// Fix for (b): a reservation now carries an explicit state machine:
+//   'reserving' -- acquired, vendor not yet contacted. Safe to
+//                  staleness-reclaim after NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS
+//                  (covers a process that died before ever reaching the
+//                  vendor -- no ambiguity, nothing was ever charged).
+//   'uncertain' -- vendor contact was about to be attempted or was
+//                  attempted and the outcome did not resolve into a
+//                  written asset row. NEVER auto-reclaimed, regardless of
+//                  age. The only way out is an explicit, separate,
+//                  CEO-authorized decision via
+//                  nextwaveV2IdeogramClearUncertainReservation below --
+//                  exactly the "separate authorized decision before
+//                  another paid attempt" this stage's order requires.
+// A lock is released outright (deleted) only once the real asset row has
+// been durably written -- the only point at which the outcome is no
+// longer ambiguous.
+//
+// Honest accounting (Phase 3): because an 'uncertain' lock can represent
+// REAL, unconfirmed spend with no cost_usd tag yet, _nextwaveV2CharacterSpendSoFar
+// (above) now also counts every currently-uncertain lock's role at its
+// known price. The $1.00 cap is therefore enforced against confirmed
+// spend AND possible-unconfirmed spend together, not confirmed spend
+// alone -- closing the gap where repeated clear-and-retry cycles after
+// ambiguous outcomes could otherwise push real spend past the cap without
+// the check ever seeing it. This stage does NOT claim a mathematically
+// guaranteed ceiling independent of that check; Stage 4B.1's "$0.43
+// regardless of concurrency" claim relied on an unconditional release that
+// no longer exists in this form -- see Phase 6 "Remaining risks" for the
+// precise, current bound.
 const NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS = 3 * 60 * 1000; // generous vs. one Ideogram TURBO call + upload
 
-async function _nextwaveV2AppSettingsDelete(key) {
-  try {
-    await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${encodeURIComponent(key)}`, {
-      method: 'DELETE',
-      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY },
-    });
-  } catch (e) { /* best-effort release -- a failed delete just leaves a lock the staleness check reclaims later */ }
+function _nextwaveV2NewLockOwnerToken() {
+  return randomBytes(12).toString('hex');
 }
 
-// { ok:true } on a genuine atomic acquire (including a successful stale
-// reclaim). { ok:false, reason:'in_progress' } when a live, non-stale lock
-// is held elsewhere. { ok:false, reason:'lock_error' } only for an
-// unrelated infrastructure failure (never silently treated as acquired).
+async function _nextwaveV2AppSettingsConditionalDelete(key, exactValue) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${encodeURIComponent(key)}&value=eq.${encodeURIComponent(exactValue)}`, {
+      method: 'DELETE',
+      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
+    });
+    if (!res.ok) return { ok: false, deleted: 0 };
+    const rows = await res.json().catch(() => []);
+    return { ok: true, deleted: Array.isArray(rows) ? rows.length : 0 };
+  } catch (e) { return { ok: false, deleted: 0 }; }
+}
+
+async function _nextwaveV2AppSettingsConditionalUpdate(key, expectedValue, newValue) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${encodeURIComponent(key)}&value=eq.${encodeURIComponent(expectedValue)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
+      body: JSON.stringify({ value: newValue }),
+    });
+    if (!res.ok) return { ok: false, updated: 0 };
+    const rows = await res.json().catch(() => []);
+    return { ok: true, updated: Array.isArray(rows) ? rows.length : 0 };
+  } catch (e) { return { ok: false, updated: 0 }; }
+}
+
+// { ok:true, token:<exact value string just written, state:'reserving'> }
+// on a genuine atomic acquire (including a successful stale reclaim).
+// { ok:false, reason:'in_progress' } for a live 'reserving' lock OR ANY
+// 'uncertain' lock (regardless of age -- see state machine above).
+// { ok:false, reason:'lock_error' } only for an unrelated infrastructure
+// failure (never silently treated as acquired).
 async function _nextwaveV2AcquireCharacterLock(lockKey) {
-  const insertOnce = () => fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
+  const reservingValue = JSON.stringify({ reserved_at: Date.now(), owner: _nextwaveV2NewLockOwnerToken(), state: 'reserving' });
+  const insertOnce = (val) => fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
-    body: JSON.stringify({ key: lockKey, value: JSON.stringify({ reserved_at: Date.now() }) }),
+    body: JSON.stringify({ key: lockKey, value: val }),
   });
 
-  let res = await insertOnce();
-  if (res.ok) return { ok: true };
+  let res = await insertOnce(reservingValue);
+  if (res.ok) return { ok: true, token: reservingValue };
   if (res.status !== 409) return { ok: false, reason: 'lock_error', detail: `app_settings_insert_${res.status}` };
 
-  // 409 = a lock row already exists -- determine live vs. stale/abandoned.
+  // 409 = a lock row already exists.
   const existing = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(lockKey)}&select=value`);
   const row = existing && existing[0];
-  let reservedAt = 0;
-  try { reservedAt = (JSON.parse(row.value) || {}).reserved_at || 0; } catch { reservedAt = 0; }
-  if (!row || Date.now() - reservedAt < NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS) {
+  if (!row) return { ok: false, reason: 'in_progress' }; // vanished between our failed insert and this read -- contended, back off rather than guess
+
+  let parsed = {};
+  try { parsed = JSON.parse(row.value) || {}; } catch { parsed = {}; }
+
+  if (parsed.state === 'uncertain') {
+    return { ok: false, reason: 'reconciliation_required' }; // never auto-reclaimed -- Phase 2
+  }
+  if (Date.now() - (parsed.reserved_at || 0) < NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS) {
     return { ok: false, reason: 'in_progress' };
   }
 
-  // Stale -- reclaim (delete then re-insert). If another process reclaims
-  // first, THIS insert loses the identical atomic race and correctly
-  // backs off -- the uniqueness guarantee is never weakened, only extended
-  // to also cover reclaim.
-  await _nextwaveV2AppSettingsDelete(lockKey);
-  res = await insertOnce();
-  return res.ok ? { ok: true } : { ok: false, reason: 'in_progress' };
+  // Stale 'reserving' lock (vendor was never contacted) -- reclaim via a
+  // CONDITIONAL delete keyed to the EXACT value just read. If someone else
+  // has since reclaimed, renewed, or completed it, this delete matches
+  // zero rows and we correctly back off instead of clobbering their newer
+  // ownership (the Phase 1 bug this stage fixes).
+  const del = await _nextwaveV2AppSettingsConditionalDelete(lockKey, row.value);
+  if (!del.ok || del.deleted === 0) return { ok: false, reason: 'in_progress' };
+
+  res = await insertOnce(reservingValue);
+  return res.ok ? { ok: true, token: reservingValue } : { ok: false, reason: 'in_progress' };
 }
 
-async function _nextwaveV2ReleaseCharacterLock(lockKey) {
-  await _nextwaveV2AppSettingsDelete(lockKey);
+// Marks a held 'reserving' lock as 'uncertain' right before vendor contact
+// -- from this instant on, any failure means the outcome is genuinely
+// unknown, not "safe to assume nothing happened". Conditional on the
+// EXACT token this call itself holds, so it can never touch a lock
+// another process has since reclaimed. Returns the new token on success
+// (the caller must use this one going forward, including to release).
+async function _nextwaveV2MarkCharacterLockUncertain(lockKey, currentToken) {
+  let parsed = {};
+  try { parsed = JSON.parse(currentToken) || {}; } catch { parsed = {}; }
+  const uncertainValue = JSON.stringify({ reserved_at: parsed.reserved_at || Date.now(), owner: parsed.owner, state: 'uncertain', vendor_contact_at: Date.now() });
+  const upd = await _nextwaveV2AppSettingsConditionalUpdate(lockKey, currentToken, uncertainValue);
+  if (!upd.ok || upd.updated === 0) return { ok: false };
+  return { ok: true, token: uncertainValue };
+}
+
+// Conditional release: deletes the row only if it STILL holds exactly the
+// token this call currently owns. If the lock has since been reclaimed by
+// someone else, the conditional delete matches zero rows and the
+// reclaimer's newer reservation is left completely untouched.
+async function _nextwaveV2ReleaseCharacterLock(lockKey, ownerToken) {
+  if (!ownerToken) return;
+  await _nextwaveV2AppSettingsConditionalDelete(lockKey, ownerToken);
+}
+
+// CEO-gated: the explicit, separate, authorized decision Phase 2 requires
+// before any further paid attempt at a role left in 'uncertain' state.
+// Clears the reservation only if it is STILL exactly the uncertain record
+// being inspected (conditional delete, same CAS discipline as everywhere
+// else in this block) -- never blind. Returns what it cleared for audit.
+export async function nextwaveV2IdeogramClearUncertainReservation(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { character_id, role } = req.body || {};
+  if (!character_id || !role) return res.status(400).json({ ok: false, error: 'character_id and role are required' });
+  const lockKey = `nwv2r_charlock_${character_id}_${role}`;
+  const existing = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(lockKey)}&select=value`);
+  const row = existing && existing[0];
+  if (!row) return res.status(404).json({ ok: false, error: 'no_reservation_found' });
+  let parsed = {};
+  try { parsed = JSON.parse(row.value) || {}; } catch { parsed = {}; }
+  if (parsed.state !== 'uncertain') return res.status(409).json({ ok: false, error: 'reservation_not_in_uncertain_state', current_state: parsed.state || 'unknown' });
+  const del = await _nextwaveV2AppSettingsConditionalDelete(lockKey, row.value);
+  if (!del.ok || del.deleted === 0) return res.status(409).json({ ok: false, error: 'reservation_changed_concurrently_retry' });
+  return res.status(200).json({ ok: true, cleared: lockKey, was: parsed });
 }
 
 export async function nextwaveV2IdeogramResolveCharacterReference(characterId, promptText) {
@@ -14548,18 +14659,22 @@ export async function nextwaveV2IdeogramResolveCharacterReference(characterId, p
   const namespacedRole = `${characterId}_reference`;
   const lockKey = `nwv2r_charlock_${namespacedRole}`;
   const lock = await _nextwaveV2AcquireCharacterLock(lockKey);
-  if (!lock.ok) return { ok: false, error: lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
+  if (!lock.ok) return { ok: false, error: lock.reason === 'reconciliation_required' ? 'reconciliation_required' : lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
 
   // Re-check after acquiring the lock: closes the window between the first
   // reuse-check above and actually holding the lock (another instance may
   // have finished generating it in between).
   const existing2 = await _nextwaveV2FindExistingCharacterAsset(characterId, 'reference');
-  if (existing2) { await _nextwaveV2ReleaseCharacterLock(lockKey); return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 }; }
+  if (existing2) { await _nextwaveV2ReleaseCharacterLock(lockKey, lock.token); return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 }; }
+
+  const marked = await _nextwaveV2MarkCharacterLockUncertain(lockKey, lock.token);
+  if (!marked.ok) return { ok: false, error: 'lock_ownership_lost' }; // extremely unlikely -- someone else touched our just-created lock
+  let lockToken = marked.token;
 
   const gen = await nextwaveV2IdeogramCall({ prompt: promptText, aspectRatio: '1x1' }); // no reference yet -- this image BECOMES one
-  if (!gen.ok) return gen; // lock intentionally left held -- bounds the next retry to after the staleness window
+  if (!gen.ok) return { ...gen, reconciliation_required: true, lock_key: lockKey }; // lock left 'uncertain' -- requires explicit human reconciliation, never auto-retried
   const imgRes = await fetch(gen.url);
-  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` }; // lock left held -- real vendor spend may already have occurred
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}`, reconciliation_required: true, lock_key: lockKey }; // vendor already contacted -- outcome unresolved
   const imgBuf = Buffer.from(await imgRes.arrayBuffer());
   const assetName = `nextwave_character_reference_${namespacedRole}_${Date.now()}`;
   const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
@@ -14568,7 +14683,7 @@ export async function nextwaveV2IdeogramResolveCharacterReference(characterId, p
     headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
     body: imgBuf,
   });
-  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` }; // lock left held -- vendor already charged
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}`, reconciliation_required: true, lock_key: lockKey }; // vendor already charged
 
   const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
   const row = await sbInsert('production_assets_library', {
@@ -14580,7 +14695,7 @@ export async function nextwaveV2IdeogramResolveCharacterReference(characterId, p
     status: 'draft',
     tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:false', `cost_usd:${gen.cost_usd}`],
   });
-  await _nextwaveV2ReleaseCharacterLock(lockKey); // success -- release immediately, the new row is now authoritative for reuse
+  await _nextwaveV2ReleaseCharacterLock(lockKey, lockToken); // success -- the new row is now authoritative, outcome no longer ambiguous
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
 }
 
@@ -14591,16 +14706,20 @@ export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRo
 
   const lockKey = `nwv2r_charlock_${namespacedRole}`;
   const lock = await _nextwaveV2AcquireCharacterLock(lockKey);
-  if (!lock.ok) return { ok: false, error: lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
+  if (!lock.ok) return { ok: false, error: lock.reason === 'reconciliation_required' ? 'reconciliation_required' : lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
 
   const existing2 = await _nextwaveV2FindExistingCharacterAsset(characterId, poseRole);
-  if (existing2) { await _nextwaveV2ReleaseCharacterLock(lockKey); return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 }; }
+  if (existing2) { await _nextwaveV2ReleaseCharacterLock(lockKey, lock.token); return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 }; }
+
+  const marked = await _nextwaveV2MarkCharacterLockUncertain(lockKey, lock.token);
+  if (!marked.ok) return { ok: false, error: 'lock_ownership_lost' };
+  let lockToken = marked.token;
 
   const gen = await nextwaveV2IdeogramCall({ prompt: promptText, characterReferencePath: referenceImagePath });
-  if (!gen.ok) return gen; // lock left held -- bounds the next retry to after the staleness window
+  if (!gen.ok) return { ...gen, reconciliation_required: true, lock_key: lockKey };
 
   const imgRes = await fetch(gen.url);
-  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}` }; // lock left held -- real vendor spend may already have occurred
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}`, reconciliation_required: true, lock_key: lockKey };
   const imgBuf = Buffer.from(await imgRes.arrayBuffer());
   const assetName = `nextwave_character_pose_${namespacedRole}_${Date.now()}`;
   const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
@@ -14609,7 +14728,7 @@ export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRo
     headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
     body: imgBuf,
   });
-  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}` }; // lock left held -- vendor already charged
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}`, reconciliation_required: true, lock_key: lockKey };
 
   const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
   const row = await sbInsert('production_assets_library', {
@@ -14621,16 +14740,22 @@ export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRo
     status: 'draft',
     tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
   });
-  await _nextwaveV2ReleaseCharacterLock(lockKey); // success -- release immediately, the new row is now authoritative for reuse
+  await _nextwaveV2ReleaseCharacterLock(lockKey, lockToken); // success -- the new row is now authoritative, outcome no longer ambiguous
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
 }
 
 // Experimental cap (Stage 4B order: "Maximum $1.00 total"). Checked against
-// real banked spend via _nextwaveV2CharacterSpendSoFar, not a per-process
-// counter. Defense-in-depth: the per-role reservation lock above already
-// makes $0.43 the structural ceiling for today's fixed 5-role dictionary
-// (see that block's comment) -- this cap is what keeps protecting the
-// system if the dictionary is ever extended.
+// real banked spend via _nextwaveV2CharacterSpendSoFar, which (as of Stage
+// 4B.2) also counts possible-unconfirmed spend from any currently-
+// 'uncertain' reservation, not only confirmed cost_usd tags -- this is the
+// ACTUAL enforcement mechanism, not a claimed-but-unenforced number. Stage
+// 4B.1's earlier claim that the per-role lock alone made $0.43 a
+// mathematically guaranteed ceiling "regardless of concurrency" no longer
+// holds as stated: that argument depended on each role completing at most
+// once ever, which an unconditional release made true, but an
+// 'uncertain'-then-human-cleared-then-retried role can in principle be
+// attempted more than once. See Phase 6 "Remaining risks" for the actual,
+// current bound this cap provides.
 const NEXTWAVE_V2_CHARACTER_GEN_CAP_USD = 1.00;
 
 // Fixed, CEO-reviewed prompt dictionary -- the ONLY prompts this pair of
@@ -14678,10 +14803,13 @@ const NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS = {
 
 // Maps a resolver result's error to the right HTTP status: the atomic
 // reservation lock (see above) can itself report "someone else is already
-// generating this role" as a normal, expected outcome -- that is a 409,
-// not a 502 vendor-failure.
+// generating this role" or "this role needs human reconciliation before
+// another attempt" as normal, expected outcomes -- both are a 409, not a
+// 502 vendor-failure.
 function _nextwaveV2CharacterGenStatusFor(result) {
   if (result.error === 'generation_already_in_progress') return 409;
+  if (result.error === 'reconciliation_required') return 409;
+  if (result.reconciliation_required) return 409;
   return 502;
 }
 
@@ -20086,6 +20214,9 @@ export default async function handler(req, res) {
     // is untouched by either of these.
     if (action === 'nextwave_v2_ideogram_generate_character_reference') return await nextwaveV2IdeogramGenerateCharacterReferenceAction(req, res);
     if (action === 'nextwave_v2_ideogram_generate_character_pose') return await nextwaveV2IdeogramGenerateCharacterPoseAction(req, res);
+    // Stage 4B.2 — the explicit, separate, CEO-authorized decision required
+    // before another paid attempt at a role left in an 'uncertain' state.
+    if (action === 'nextwave_v2_ideogram_clear_uncertain_reservation') return await nextwaveV2IdeogramClearUncertainReservation(req, res);
     if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
     // Visual Composition Correction — persistent-canvas compositor (presenter
     // window + evidence zone), Submagic reduced to captions-only downstream.

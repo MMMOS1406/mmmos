@@ -1528,13 +1528,13 @@ const signCeoToken = (overrides = {}) => {
   return `${payload}.${sig}`;
 };
 const jsonRes = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body), arrayBuffer: async () => Buffer.from('fake-png-bytes') });
-function freshState() { return { auth: { ceo_session_secret_production: SESSION_SECRET, ceo_pin_hash_production: PIN_HASH, ideogram_api_key_production: IDEOGRAM_KEY }, assets: [], appSettings: new Map(), ideogramCalls: 0, ideogramFail: false, ideogramHang: false, uploadFail: false, insertFail: false }; }
+function freshState() { return { auth: { ceo_session_secret_production: SESSION_SECRET, ceo_pin_hash_production: PIN_HASH, ideogram_api_key_production: IDEOGRAM_KEY }, assets: [], appSettings: new Map(), ideogramCalls: 0, ideogramFail: false, ideogramHang: false, ideogramHangResolvers: [], uploadFail: false, insertFail: false }; }
 function mockFetch(state) {
   return async (url, opts = {}) => {
     const u = new URL(String(url));
     const method = (opts.method || 'GET').toUpperCase();
     if (u.hostname === 'api.ideogram.ai') {
-      if (state.ideogramHang) return new Promise(() => {}); // simulates a vendor call that never resolves within the caller's own timeout
+      if (state.ideogramHang) return new Promise((resolve) => { state.ideogramHangResolvers.push(resolve); }); // a controllable hang: the test can release one held call at a time via state.ideogramHangResolvers.shift()(...)
       state.ideogramCalls++;
       if (state.ideogramFail) return jsonRes(500, { error: 'mock_vendor_failure' });
       const n = state.ideogramCalls;
@@ -1554,7 +1554,14 @@ function mockFetch(state) {
         // Real app_settings.key is the table's PRIMARY KEY (confirmed via
         // information_schema) -- this Map faithfully reproduces that: a
         // second POST with an already-present key is rejected 409, exactly
-        // as real Postgres/PostgREST would reject it.
+        // as real Postgres/PostgREST would reject it. PATCH/DELETE honor a
+        // second `value=eq.X` filter as a genuine AND'd condition (the same
+        // CAS discipline _nextwaveV2AppSettingsConditionalDelete/Update
+        // rely on), matching real PostgREST filter semantics.
+        const keyParam = u.searchParams.get('key') || '';
+        const k = keyParam.startsWith('eq.') ? keyParam.slice(3) : null;
+        const valueParam = u.searchParams.get('value') || '';
+        const expectedValue = valueParam.startsWith('eq.') ? valueParam.slice(3) : null;
         if (method === 'POST') {
           const data = JSON.parse(opts.body);
           if (state.appSettings.has(data.key)) return jsonRes(409, { error: 'duplicate key value violates unique constraint "app_settings_pkey"' });
@@ -1562,16 +1569,26 @@ function mockFetch(state) {
           return jsonRes(201, [{ key: data.key, value: data.value }]);
         }
         if (method === 'GET') {
-          const keyParam = u.searchParams.get('key') || '';
-          const k = keyParam.startsWith('eq.') ? keyParam.slice(3) : null;
-          const rows = k && state.appSettings.has(k) ? [{ key: k, value: state.appSettings.get(k) }] : [];
-          return jsonRes(200, rows);
+          if (k) { const rows = state.appSettings.has(k) ? [{ key: k, value: state.appSettings.get(k) }] : []; return jsonRes(200, rows); }
+          const likeParam = keyParam.startsWith('like.') ? keyParam.slice(5) : null;
+          if (likeParam) {
+            const re = new RegExp('^' + likeParam.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+            const rows = [...state.appSettings.entries()].filter(([kk]) => re.test(kk)).map(([kk, vv]) => ({ key: kk, value: vv }));
+            return jsonRes(200, rows);
+          }
+          return jsonRes(200, []);
         }
         if (method === 'DELETE') {
-          const keyParam = u.searchParams.get('key') || '';
-          const k = keyParam.startsWith('eq.') ? keyParam.slice(3) : null;
-          if (k) state.appSettings.delete(k);
-          return jsonRes(200, []);
+          if (!k || !state.appSettings.has(k) || (expectedValue !== null && state.appSettings.get(k) !== expectedValue)) return jsonRes(200, []);
+          const deleted = [{ key: k, value: state.appSettings.get(k) }];
+          state.appSettings.delete(k);
+          return jsonRes(200, deleted);
+        }
+        if (method === 'PATCH') {
+          if (!k || !state.appSettings.has(k) || (expectedValue !== null && state.appSettings.get(k) !== expectedValue)) return jsonRes(200, []);
+          const data = JSON.parse(opts.body);
+          state.appSettings.set(k, data.value);
+          return jsonRes(200, [{ key: k, value: data.value }]);
         }
       }
       if (table === 'production_assets_library') {
@@ -1941,30 +1958,8 @@ await t('(5) vendor success followed by a DB write failure: the real spend IS co
     assert.ok(state.appSettings.has('nwv2r_charlock_support_reference'), 'the lock must remain held after a failure, not be released, so a blind immediate retry cannot double-spend on the same uncounted generation');
   });
 });
-await t('(6) retry after an uncertain outcome: immediately after a failure the retry is blocked (bounded protection); once the lock is old enough to be stale it is safely reclaimed and the retry succeeds normally', async () => {
-  const state = freshState();
-  state.insertFail = true;
-  await withMockFetch(state, async () => {
-    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
-    const token = signCeoToken();
-    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes()); // fails, leaves lock held
-    assert.equal(state.ideogramCalls, 1);
-
-    const immediateRetry = mockRes();
-    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), immediateRetry);
-    assert.equal(immediateRetry.statusCode, 409, 'an immediate retry must be blocked -- the outcome of the first vendor call is still ambiguous');
-    assert.equal(state.ideogramCalls, 1, 'the blocked immediate retry must not have made a second vendor call');
-
-    // simulate the staleness window having elapsed (no real waiting needed --
-    // directly age the stored reservation, which is exactly what the real
-    // staleness check reads).
-    state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now() - 4 * 60 * 1000 }));
-    state.insertFail = false; // the underlying transient failure has since cleared, as a real retry would eventually find
-    const laterRetry = mockRes();
-    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), laterRetry);
-    assert.equal(laterRetry.statusCode, 200, 'once the lock is stale it must be safely reclaimable, and the retry should now succeed');
-    assert.equal(state.ideogramCalls, 2, 'this is the documented, disclosed residual cost of ambiguous-outcome recovery: a stale reclaim can cause one extra real generation for this role, never more');
-  });
+await t('(6) SUPERSEDED by Stage 4B.2: an ambiguous-outcome lock is no longer time-based-reclaimable at all -- see section [34] for the corrected behavior (permanent block until an explicit CEO-authorized clear) and the real reconciliation flow', () => {
+  assert.ok(true, 'see section [34] for the current, correct uncertain-reservation tests');
 });
 await t('(7) attempts to exceed $1.00 still correctly rejected with the new lock code path in place', async () => {
   const state = freshState();
@@ -2005,6 +2000,174 @@ await t('(10) other businesses remain unaffected: the new lock helpers only ever
   assert.ok(!lockBlock.includes('SrvFarsi') && !lockBlock.includes('srv_farsi') && !lockBlock.includes('SrvStudio'), 'lock implementation must not reference any other business');
   const lockKeyLines = lockBlock.match(/`nwv2r_charlock_[^`]*`/g) || [];
   assert.ok(lockKeyLines.length > 0, 'sanity: must have found the real lock-key template(s)');
+});
+
+console.log('\n[34] Stage 4B.2 — final generation safety hardening: reservation ownership + uncertain-outcome reconciliation');
+await t('(1)+(2) concurrent requests across instances / same-role duplicates: unaffected by the ownership rewrite -- still exactly one winner, one 409 loser', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const r1 = mockRes(), r2 = mockRes();
+    await Promise.all([
+      nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), r1),
+      nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), r2),
+    ]);
+    assert.deepEqual([r1.statusCode, r2.statusCode].sort(), [200, 409]);
+    assert.equal(state.ideogramCalls, 1);
+  });
+});
+await t('(3) reservation-owner mismatch: a belated release using a stale, previously-captured token must NOT delete a different, newer reservation that now occupies the same key', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    state.ideogramHang = true;
+    const callA = nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    await new Promise((r) => setTimeout(r, 20)); // let A acquire, mark 'uncertain', and park at the hung vendor call
+    assert.equal(state.ideogramHangResolvers.length, 1, 'A must be parked at the vendor call holding an "uncertain" lock');
+
+    // Simulate a DIFFERENT, newer reservation now sitting at the same key
+    // -- e.g. a human cleared A's (believed-dead) uncertain lock and a
+    // fresh process B started its own attempt.
+    const foreignValue = JSON.stringify({ reserved_at: Date.now(), owner: 'process-b', state: 'reserving' });
+    state.appSettings.set('nwv2r_charlock_support_reference', foreignValue);
+
+    // A's original hung vendor call finally resolves -- A was never
+    // actually dead, just slow -- and A runs to completion down its own
+    // success path using the token it captured BEFORE the foreign value
+    // was written.
+    state.ideogramCalls++;
+    const n = state.ideogramCalls;
+    state.ideogramHangResolvers.shift()(jsonRes(200, { data: [{ url: `https://mock-ideogram.test/img-${n}.png`, seed: n, resolution: '1024x1024' }] }));
+    await callA;
+
+    assert.equal(state.appSettings.get('nwv2r_charlock_support_reference'), foreignValue, 'A\'s belated release must not have touched process B\'s unrelated, newer reservation at the same key');
+  });
+});
+await t('(4) stale reservation recovery: a "reserving" lock (vendor never contacted) is safely reclaimable once stale; an "uncertain" lock (vendor was contacted) is NOT, no matter how old', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction, nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+
+    state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now() - 4 * 60 * 1000, owner: 'dead', state: 'reserving' }));
+    const res1 = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), res1);
+    assert.equal(res1.statusCode, 200, 'a stale "reserving" lock (vendor never contacted) must be safely reclaimable');
+
+    state.appSettings.set('nwv2r_charlock_support_idle', JSON.stringify({ reserved_at: Date.now() - 60 * 60 * 1000, owner: 'dead', state: 'uncertain' })); // 1 hour old
+    const res2 = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), res2);
+    assert.equal(res2.statusCode, 409, 'an "uncertain" lock must never be auto-reclaimed regardless of age');
+    assert.equal(res2.body.error, 'reconciliation_required');
+  });
+});
+await t('(5) vendor timeout after request submission: the lock is acquired and marked "uncertain" BEFORE the vendor call, so a hang still leaves a durable, non-reclaimable record', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    state.ideogramHang = true;
+    nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    await new Promise((r) => setTimeout(r, 20));
+    const stored = JSON.parse(state.appSettings.get('nwv2r_charlock_support_reference'));
+    assert.equal(stored.state, 'uncertain', 'the lock must already be marked uncertain before the vendor call even returns');
+  });
+});
+await t('(6) vendor success followed by a DB failure: real spend is counted via the uncertain-lock accounting even though no asset row exists yet', async () => {
+  const state = freshState();
+  state.insertFail = true;
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    assert.equal(state.ideogramCalls, 1);
+    assert.equal(state.assets.length, 0, 'no asset row exists -- the insert failed');
+    assert.ok(state.appSettings.has('nwv2r_charlock_support_reference'), 'but the uncertain lock IS the durable record of this unconfirmed spend');
+  });
+});
+await t('(7) retry after an ambiguous outcome: blocked until an explicit CEO-authorized clear (the real reconciliation flow), never auto-retried', async () => {
+  const state = freshState();
+  state.insertFail = true;
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction, nextwaveV2IdeogramClearUncertainReservation } = await import('./api/ops.js');
+    const token = signCeoToken();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    assert.equal(state.ideogramCalls, 1);
+
+    const blockedRetry = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), blockedRetry);
+    assert.equal(blockedRetry.statusCode, 409);
+    assert.equal(blockedRetry.body.error, 'reconciliation_required');
+    assert.equal(state.ideogramCalls, 1, 'a blocked retry must never spend again automatically');
+
+    const unauthClear = mockRes();
+    await nextwaveV2IdeogramClearUncertainReservation(mockReq({ character_id: 'support', role: 'reference' }), unauthClear);
+    assert.equal(unauthClear.statusCode, 401, 'clearing an uncertain reservation requires CEO authentication too');
+
+    const clear = mockRes();
+    await nextwaveV2IdeogramClearUncertainReservation(mockReq({ character_id: 'support', role: 'reference', ceo_session_token: token }), clear);
+    assert.equal(clear.statusCode, 200);
+    assert.equal(clear.body.was.state, 'uncertain');
+
+    state.insertFail = false; // the underlying transient condition has since cleared
+    const retryAfterClear = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), retryAfterClear);
+    assert.equal(retryAfterClear.statusCode, 200, 'after an explicit, separate, authorized decision, a fresh attempt may proceed');
+    assert.equal(state.ideogramCalls, 2, 'this second real vendor call only happened after an explicit human decision -- never automatically');
+  });
+});
+await t('(8) spending-cap enforcement now also counts possible-unconfirmed spend from uncertain locks: a case the OLD (confirmed-only) accounting would have let through is correctly blocked', async () => {
+  const state = freshState();
+  // $0.90 confirmed + a $0.03 uncertain reservation = $0.93 real possible spend already.
+  // Under Stage 4B.1's confirmed-only accounting, this request's own $0.10 would read
+  // spend_so_far=$0.90, total projected $1.00, which the cap check's strict ">" does NOT
+  // block (not > 1.00) -- an honest miss. Stage 4B.2 must count the $0.03 uncertain
+  // reservation too, making the projected total $1.03, which IS blocked.
+  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', tags: ['character:support', 'cost_usd:0.90'] });
+  state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now(), owner: 'x', state: 'uncertain' }));
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), res);
+    assert.equal(res.statusCode, 402, 'projected spend (confirmed + uncertain + this attempt) must exceed the cap, where confirmed-only accounting alone would not have');
+    assert.equal(res.body.spend_so_far_usd, 0.93, 'spend_so_far must include the $0.03 uncertain reservation on top of the $0.90 confirmed total');
+    assert.equal(state.ideogramCalls, 0);
+  });
+});
+await t('(9) CEO authentication still correctly enforced on both generation actions and the new clear-reservation action', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction, nextwaveV2IdeogramClearUncertainReservation } = await import('./api/ops.js');
+    const forged = signCeoToken({ secret: 'wrong-secret' });
+    const r1 = mockRes(); await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: forged }), r1); assert.equal(r1.statusCode, 401);
+    const r2 = mockRes(); await nextwaveV2IdeogramClearUncertainReservation(mockReq({ character_id: 'support', role: 'reference', ceo_session_token: forged }), r2); assert.equal(r2.statusCode, 401);
+    assert.equal(state.ideogramCalls, 0);
+  });
+});
+await t('(10) cross-business isolation: the new clear-reservation action and conditional-CAS helpers only ever touch app_settings under nwv2r_charlock_ and production_assets_library under engine=NextWave', () => {
+  const src = fs.readFileSync('api/ops.js', 'utf8');
+  const start = src.indexOf('NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS');
+  const end = src.indexOf('export async function nextwaveV2IdeogramResolveCharacterReference');
+  const block = src.slice(start, end);
+  for (const forbidden of ['SrvFarsi', 'srv_farsi', 'SrvStudio', 'srv_studio']) assert.ok(!block.includes(forbidden), `must not reference other business "${forbidden}"`);
+});
+await t('(11) existing NextWave host behavior is unaffected: host symbols appear in zero removed diff lines', () => {
+  const diffLines = execFileSync('git', ['diff', '--unified=0', '--', 'api/ops.js']).toString();
+  const hostSymbols = ['NEXTWAVE_V2_HOST_DEFAULT', 'nextwaveV2IdeogramResolvePose(poseRole', '_nextwaveV2FindExistingPose(poseTag', 'NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS = {'];
+  const removedLines = diffLines.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---'));
+  for (const sym of hostSymbols) assert.ok(!removedLines.some((l) => l.includes(sym)), `host symbol "${sym}" must not appear in any REMOVED diff line`);
+});
+await t('(12) no publishing or task side effects: the new clear-reservation action and lock helpers reference no publishing/task/package symbols', () => {
+  const src = fs.readFileSync('api/ops.js', 'utf8');
+  const start = src.indexOf('NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS');
+  const end = src.indexOf('export async function nextwaveV2IdeogramResolveCharacterReference');
+  const block = src.slice(start, end);
+  for (const forbidden of ['youtubeUploadVideo', 'PUBLISH_GATED_ACTIONS', 'publishGate', 'updateTask(', 'createTask(', 'productionPackageReview']) {
+    assert.ok(!block.includes(forbidden), `must not reference "${forbidden}"`);
+  }
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
