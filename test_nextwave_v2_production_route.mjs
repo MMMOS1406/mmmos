@@ -1782,10 +1782,11 @@ await t('(1) sequential requests are blocked once projected spend would exceed t
     assert.equal(Math.round(totalSpent * 100), 43, 'expected exactly $0.43 for 1 reference + 4 poses at confirmed production pricing');
   });
 });
-await t('(2) a request that would push projected spend over $1.00 is rejected 402 before any vendor call, cap is reported in the response', async () => {
+await t('(2) a request that would push projected spend over $1.00 is rejected 402 before any vendor call, cap is reported in the response [Stage 4B.3: seeded via the real budget ledger, not an asset tag]', async () => {
   const state = freshState();
-  // seed $0.95 already spent for this character, as if from prior approved generations
-  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', tags: ['role:support_reference', 'character:support', 'cost_usd:0.95'] });
+  state.assets.push({ id: 'ref-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support'] });
+  // seed $0.95 already reserved for this character, as if from prior approved generations
+  state.appSettings.set('nwv2r_charbudget_support', JSON.stringify({ reserved_usd: 0.95, updated_at: Date.now() }));
   await withMockFetch(state, async () => {
     const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
     const token = signCeoToken();
@@ -1961,9 +1962,10 @@ await t('(5) vendor success followed by a DB write failure: the real spend IS co
 await t('(6) SUPERSEDED by Stage 4B.2: an ambiguous-outcome lock is no longer time-based-reclaimable at all -- see section [34] for the corrected behavior (permanent block until an explicit CEO-authorized clear) and the real reconciliation flow', () => {
   assert.ok(true, 'see section [34] for the current, correct uncertain-reservation tests');
 });
-await t('(7) attempts to exceed $1.00 still correctly rejected with the new lock code path in place', async () => {
+await t('(7) attempts to exceed $1.00 still correctly rejected with the new lock code path in place [Stage 4B.3: seeded via the real budget ledger]', async () => {
   const state = freshState();
-  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', tags: ['role:support_reference', 'character:support', 'cost_usd:0.95'] });
+  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support'] });
+  state.appSettings.set('nwv2r_charbudget_support', JSON.stringify({ reserved_usd: 0.95, updated_at: Date.now() }));
   await withMockFetch(state, async () => {
     const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
     const token = signCeoToken();
@@ -2118,24 +2120,8 @@ await t('(7) retry after an ambiguous outcome: blocked until an explicit CEO-aut
     assert.equal(state.ideogramCalls, 2, 'this second real vendor call only happened after an explicit human decision -- never automatically');
   });
 });
-await t('(8) spending-cap enforcement now also counts possible-unconfirmed spend from uncertain locks: a case the OLD (confirmed-only) accounting would have let through is correctly blocked', async () => {
-  const state = freshState();
-  // $0.90 confirmed + a $0.03 uncertain reservation = $0.93 real possible spend already.
-  // Under Stage 4B.1's confirmed-only accounting, this request's own $0.10 would read
-  // spend_so_far=$0.90, total projected $1.00, which the cap check's strict ">" does NOT
-  // block (not > 1.00) -- an honest miss. Stage 4B.2 must count the $0.03 uncertain
-  // reservation too, making the projected total $1.03, which IS blocked.
-  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', tags: ['character:support', 'cost_usd:0.90'] });
-  state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now(), owner: 'x', state: 'uncertain' }));
-  await withMockFetch(state, async () => {
-    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
-    const token = signCeoToken();
-    const res = mockRes();
-    await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), res);
-    assert.equal(res.statusCode, 402, 'projected spend (confirmed + uncertain + this attempt) must exceed the cap, where confirmed-only accounting alone would not have');
-    assert.equal(res.body.spend_so_far_usd, 0.93, 'spend_so_far must include the $0.03 uncertain reservation on top of the $0.90 confirmed total');
-    assert.equal(state.ideogramCalls, 0);
-  });
+await t('(8) SUPERSEDED by Stage 4B.3: the two-tier confirmed-vs-uncertain accounting this test exercised no longer exists -- the atomic budget ledger counts every reservation (confirmed or uncertain) from the moment it is RESERVED, with no separate scan needed. See section [36] for the current, correct cap-under-concurrency tests', () => {
+  assert.ok(true, 'see section [36] for the real atomic-budget tests that replaced the two-tier accounting this exercised');
 });
 await t('(9) CEO authentication still correctly enforced on both generation actions and the new clear-reservation action', async () => {
   const state = freshState();
@@ -2171,15 +2157,15 @@ await t('(12) no publishing or task side effects: the new clear-reservation acti
 });
 
 console.log('\n[35] Stage 4B Final Release Package — Phase 2 security/cost re-verification');
-await t('(1) cross-role cap-check race: two DIFFERENT roles requested concurrently can both read the same pre-spend total and both pass the cap check before either reservation becomes visible, pushing confirmed spend past $1.00', async () => {
+await t('(1) [Stage 4B.3 FIX VERIFICATION] cross-role cap-check race: the exact $1.05 scenario from test [35].1\'s original run must now be closed -- two DIFFERENT roles requested concurrently can no longer both reserve budget that together exceeds $1.00', async () => {
   const state = freshState();
   // A reference asset must already exist, or both pose requests would be
   // rejected for an unrelated reason (character_reference_not_generated_yet)
-  // before ever reaching the cap check this test targets.
-  state.assets.push({ id: 'ref-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support', 'cost_usd:0.03'] });
-  // $0.85 confirmed spend total already banked (the rest via an arbitrary
-  // prior tag -- the specific role doesn't matter, only the running total).
-  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', tags: ['character:support', 'cost_usd:0.82'] });
+  // before ever reaching the budget reservation this test targets.
+  state.assets.push({ id: 'ref-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support'] });
+  // $0.85 already reserved on the REAL atomic ledger (not a stale asset
+  // tag -- that was the Stage-4B.1/4B.2 mechanism this stage replaces).
+  state.appSettings.set('nwv2r_charbudget_support', JSON.stringify({ reserved_usd: 0.85, updated_at: Date.now() }));
   await withMockFetch(state, async () => {
     const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
     const token = signCeoToken();
@@ -2188,19 +2174,20 @@ await t('(1) cross-role cap-check race: two DIFFERENT roles requested concurrent
       nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), resIdle),
       nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'active', ceo_session_token: token }), resActive),
     ]);
-    const totalConfirmed = state.assets.reduce((sum, r) => { const m = (r.tags || []).find((t) => t.startsWith('cost_usd:')); return sum + (m ? parseFloat(m.split(':')[1]) : 0); }, 0);
-    // This assertion documents the CURRENT, real behavior -- it is not a
-    // claim that this is safe. If both distinct-role requests independently
-    // read spend_so_far=$0.85 before either reservation existed, both pass
-    // (0.85+0.10=0.95 <= 1.00) and total confirmed spend ends at $1.05,
-    // exceeding the $1.00 cap. This is the gap Phase 2 asked to be
-    // specifically tested and, if material, reported as a release blocker.
-    console.log(`       [finding] resIdle=${resIdle.statusCode} resActive=${resActive.statusCode} totalConfirmedAfter=$${totalConfirmed.toFixed(2)}`);
-    if (resIdle.statusCode === 200 && resActive.statusCode === 200) {
-      assert.ok(totalConfirmed > 1.0, 'reproduced: cross-role concurrent requests both passed the cap check and together exceeded $1.00');
-    } else {
-      assert.ok(totalConfirmed <= 1.0, 'at least one request was blocked, so the cap held for this run');
-    }
+    const finalLedger = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    console.log(`       [4B.3 finding] resIdle=${resIdle.statusCode} resActive=${resActive.statusCode} finalLedger=$${finalLedger.toFixed(2)}`);
+    // The atomic CAS reserve serializes the two concurrent attempts: the
+    // first to commit sees $0.85+$0.10=$0.95 <= $1.00 and succeeds; the
+    // second re-reads the NEW total ($0.95) before deciding, sees
+    // $0.95+$0.10=$1.05 > $1.00, and is correctly rejected. Exactly one of
+    // the two must succeed, never both -- and the ledger itself must never
+    // exceed the cap, which is the property that was violated before this
+    // stage (real confirmed spend reached $1.05 in the original run).
+    const codes = [resIdle.statusCode, resActive.statusCode].sort();
+    assert.deepEqual(codes, [200, 402], 'exactly one of the two distinct-role concurrent requests must succeed and the other must be rejected for exceeding the cap -- both succeeding is the bug this stage fixes');
+    assert.ok(finalLedger <= 1.0, `the ledger must never exceed the $1.00 cap -- got $${finalLedger}`);
+    assert.equal(finalLedger, 0.95, 'exactly one $0.10 reservation must have been committed on top of the $0.85 seed');
+    assert.equal(state.ideogramCalls, 1, 'only the one successful request may have made a real vendor call');
   });
 });
 await t('(2) an uncertain reservation cannot be cleared by anything other than the explicit, authenticated reconciliation action -- re-verified against the final code', async () => {
@@ -2243,6 +2230,181 @@ await t('(4) release-diff isolation: the entire Stage 4B lineage (base 7543917 -
   const lastLine = diffStat.trim().split('\n').pop();
   assert.ok(/insertions?\(\+\)/.test(lastLine), `expected an insertions summary line, got: ${lastLine}`);
   assert.ok(!/deletions?\(-\)/.test(lastLine), `expected ZERO deletions across the full release range, got: ${lastLine}`);
+});
+
+console.log('\n[36] Stage 4B.3 — atomic cross-role budget enforcement');
+await t('(1) concurrent requests for different roles: exactly one succeeds when together they would exceed the cap (see also [35].1\'s dedicated fix-verification)', async () => {
+  const state = freshState();
+  state.assets.push({ id: 'ref-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support'] });
+  state.appSettings.set('nwv2r_charbudget_support', JSON.stringify({ reserved_usd: 0.95, updated_at: Date.now() }));
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const r1 = mockRes(), r2 = mockRes();
+    await Promise.all([
+      nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'point', ceo_session_token: token }), r1),
+      nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'react', ceo_session_token: token }), r2),
+    ]);
+    assert.deepEqual([r1.statusCode, r2.statusCode].sort(), [402, 402], 'at $0.95 already reserved, neither of two more $0.10 pose attempts fits -- both must be rejected');
+    assert.equal(state.ideogramCalls, 0);
+  });
+});
+await t('(2) concurrent requests for the SAME role: unaffected by the budget rewrite -- the per-role lock still allows exactly one, and a failed lock acquisition correctly REFUNDS its budget reservation', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const r1 = mockRes(), r2 = mockRes();
+    await Promise.all([
+      nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), r1),
+      nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), r2),
+    ]);
+    assert.deepEqual([r1.statusCode, r2.statusCode].sort(), [200, 409]);
+    assert.equal(state.ideogramCalls, 1);
+    const finalLedger = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    assert.equal(finalLedger, 0.03, 'the LOSER\'s budget reservation must have been refunded -- only the winner\'s $0.03 should remain reserved, not $0.06 for a generation that only happened once');
+  });
+});
+await t('(3) multiple independent serverless instances: the ledger lives entirely in the shared mocked database, never in process-local state, so cross-instance and same-instance concurrency are closed by the identical mechanism', async () => {
+  const state = freshState();
+  // Simulate "instance B" already having committed a reservation before "instance A" even starts.
+  // 0.98 + the reference's 0.03 = 1.01 > 1.00 -- must be rejected.
+  state.appSettings.set('nwv2r_charbudget_support', JSON.stringify({ reserved_usd: 0.98, updated_at: Date.now() }));
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), res);
+    assert.equal(res.statusCode, 402, '"instance A" must see instance B\'s real, already-committed reservation and correctly refuse to exceed the cap');
+    assert.equal(state.ideogramCalls, 0);
+  });
+});
+await t('(4) spending exactly at the cap: a reservation that lands EXACTLY on $1.00 is allowed (not a false rejection)', async () => {
+  const state = freshState();
+  state.assets.push({ id: 'ref-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support'] });
+  state.appSettings.set('nwv2r_charbudget_support', JSON.stringify({ reserved_usd: 0.90, updated_at: Date.now() }));
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), res); // 0.90 + 0.10 = exactly 1.00
+    assert.equal(res.statusCode, 200, 'a reservation landing exactly on the $1.00 cap must be allowed, not falsely rejected');
+    const finalLedger = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    assert.equal(finalLedger, 1.0);
+  });
+});
+await t('(5) spending immediately above the cap: $1.00 plus even $0.01 worth of headroom-breaking reservation is rejected', async () => {
+  const state = freshState();
+  state.assets.push({ id: 'ref-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support'] });
+  state.appSettings.set('nwv2r_charbudget_support', JSON.stringify({ reserved_usd: 0.91, updated_at: Date.now() }));
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), res); // 0.91 + 0.10 = 1.01
+    assert.equal(res.statusCode, 402);
+    assert.equal(res.body.spend_so_far_usd, 0.91);
+  });
+});
+await t('(6)+(7) vendor timeout / vendor-success-then-DB-failure: the budget reservation is KEPT (never refunded) once the vendor has been contacted -- it represents possible or confirmed real spend either way', async () => {
+  const state = freshState();
+  state.insertFail = true;
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    assert.equal(state.ideogramCalls, 1);
+    const finalLedger = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    assert.equal(finalLedger, 0.03, 'the reservation must remain held after a post-vendor-contact failure, not be refunded');
+  });
+});
+await t('(8) stale reservation and owner-token mismatch: unaffected by the budget rewrite -- re-verified end to end with budget accounting active', async () => {
+  const state = freshState();
+  state.ideogramHang = true;
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const callA = nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    await new Promise((r) => setTimeout(r, 20));
+    const foreignValue = JSON.stringify({ reserved_at: Date.now(), owner: 'process-b', state: 'reserving' });
+    state.appSettings.set('nwv2r_charlock_support_reference', foreignValue);
+    state.ideogramCalls++;
+    const n = state.ideogramCalls;
+    state.ideogramHangResolvers.shift()(jsonRes(200, { data: [{ url: `https://mock-ideogram.test/img-${n}.png`, seed: n, resolution: '1024x1024' }] }));
+    await callA;
+    assert.equal(state.appSettings.get('nwv2r_charlock_support_reference'), foreignValue, 'ownership protection still holds with budget accounting layered on top');
+  });
+});
+await t('(9) human-authorized reconciliation and subsequent retry: clearing an uncertain reservation REFUNDS its budget, freeing room for a fresh attempt', async () => {
+  const state = freshState();
+  state.insertFail = true;
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction, nextwaveV2IdeogramClearUncertainReservation } = await import('./api/ops.js');
+    const token = signCeoToken();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    let ledger = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    assert.equal(ledger, 0.03, 'reservation held after the ambiguous outcome');
+
+    const clear = mockRes();
+    await nextwaveV2IdeogramClearUncertainReservation(mockReq({ character_id: 'support', role: 'reference', ceo_session_token: token }), clear);
+    assert.equal(clear.statusCode, 200);
+    assert.ok(!state.appSettings.has('nwv2r_charbudget_support') || JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd === 0, 'the clear action must refund the reservation back to $0');
+
+    state.insertFail = false;
+    const retry = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), retry);
+    assert.equal(retry.statusCode, 200, 'after reconciliation, a fresh attempt must proceed normally');
+    ledger = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    assert.equal(ledger, 0.03, 'the ledger reflects exactly the one successful generation, not a leftover double-reservation');
+  });
+});
+await t('(10) duplicate requests and replay attempts: a repeated request for an already-completed role reuses at $0 and reserves NOTHING additional', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), mockRes());
+    const ledgerAfterFirst = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    const replay = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), replay);
+    assert.equal(replay.statusCode, 200);
+    assert.equal(replay.body.reused, true);
+    const ledgerAfterReplay = JSON.parse(state.appSettings.get('nwv2r_charbudget_support')).reserved_usd;
+    assert.equal(ledgerAfterReplay, ledgerAfterFirst, 'a replayed/duplicate request for an already-completed role must not reserve additional budget');
+    assert.equal(state.ideogramCalls, 1);
+  });
+});
+await t('(11) missing, forged, and expired CEO sessions: unaffected by the budget rewrite, re-verified', async () => {
+  const state = freshState();
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const r1 = mockRes(); await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support' }), r1); assert.equal(r1.statusCode, 401);
+    const r2 = mockRes(); await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: signCeoToken({ secret: 'wrong' }) }), r2); assert.equal(r2.statusCode, 401);
+    const r3 = mockRes(); await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: signCeoToken({ exp: Date.now() - 1000 }) }), r3); assert.equal(r3.statusCode, 401);
+    assert.equal(state.ideogramCalls, 0);
+    assert.ok(!state.appSettings.has('nwv2r_charbudget_support'), 'no budget reservation of any kind for an unauthenticated request');
+  });
+});
+await t('(12) NextWave host preservation: host symbols still appear in zero removed diff lines', () => {
+  const diffLines = execFileSync('git', ['diff', '--unified=0', '--', 'api/ops.js']).toString();
+  const hostSymbols = ['NEXTWAVE_V2_HOST_DEFAULT', 'nextwaveV2IdeogramResolvePose(poseRole', '_nextwaveV2FindExistingPose(poseTag', 'NEXTWAVE_V2_IDEOGRAM_POSE_PROMPTS = {'];
+  const removedLines = diffLines.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---'));
+  for (const sym of hostSymbols) assert.ok(!removedLines.some((l) => l.includes(sym)), `host symbol "${sym}" must not appear in any REMOVED diff line`);
+});
+await t('(13) cross-business isolation: the new budget-ledger functions only ever touch app_settings under nwv2r_charbudget_ and production_assets_library under engine=NextWave', () => {
+  const src = fs.readFileSync('api/ops.js', 'utf8');
+  const start = src.indexOf('Stage 4B.3 — atomic cross-role budget enforcement');
+  const end = src.indexOf('export async function nextwaveV2IdeogramClearUncertainReservation');
+  const block = src.slice(start, end);
+  for (const forbidden of ['SrvFarsi', 'srv_farsi', 'SrvStudio', 'srv_studio']) assert.ok(!block.includes(forbidden), `must not reference other business "${forbidden}"`);
+  assert.ok(block.includes('nwv2r_charbudget_'), 'sanity: must have found the real ledger key template');
+});
+await t('(14) no production-task or publishing side effects: the budget-ledger functions reference no task/package/publishing symbols', () => {
+  const src = fs.readFileSync('api/ops.js', 'utf8');
+  const start = src.indexOf('Stage 4B.3 — atomic cross-role budget enforcement');
+  const end = src.indexOf('export async function nextwaveV2IdeogramClearUncertainReservation');
+  const block = src.slice(start, end);
+  for (const forbidden of ['youtubeUploadVideo', 'PUBLISH_GATED_ACTIONS', 'updateTask(', 'createTask(', 'productionPackageReview']) assert.ok(!block.includes(forbidden), `must not reference "${forbidden}"`);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
