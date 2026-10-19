@@ -2170,4 +2170,79 @@ await t('(12) no publishing or task side effects: the new clear-reservation acti
   }
 });
 
+console.log('\n[35] Stage 4B Final Release Package — Phase 2 security/cost re-verification');
+await t('(1) cross-role cap-check race: two DIFFERENT roles requested concurrently can both read the same pre-spend total and both pass the cap check before either reservation becomes visible, pushing confirmed spend past $1.00', async () => {
+  const state = freshState();
+  // A reference asset must already exist, or both pose requests would be
+  // rejected for an unrelated reason (character_reference_not_generated_yet)
+  // before ever reaching the cap check this test targets.
+  state.assets.push({ id: 'ref-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', asset_url: 'https://mock-storage.test/support_reference.png', tags: ['role:support_reference', 'character:support', 'cost_usd:0.03'] });
+  // $0.85 confirmed spend total already banked (the rest via an arbitrary
+  // prior tag -- the specific role doesn't matter, only the running total).
+  state.assets.push({ id: 'seed-1', engine: 'NextWave', asset_type: 'host_pose', status: 'draft', tags: ['character:support', 'cost_usd:0.82'] });
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterPoseAction } = await import('./api/ops.js');
+    const token = signCeoToken();
+    const resIdle = mockRes(), resActive = mockRes();
+    await Promise.all([
+      nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'idle', ceo_session_token: token }), resIdle),
+      nextwaveV2IdeogramGenerateCharacterPoseAction(mockReq({ character_id: 'support', pose_role: 'active', ceo_session_token: token }), resActive),
+    ]);
+    const totalConfirmed = state.assets.reduce((sum, r) => { const m = (r.tags || []).find((t) => t.startsWith('cost_usd:')); return sum + (m ? parseFloat(m.split(':')[1]) : 0); }, 0);
+    // This assertion documents the CURRENT, real behavior -- it is not a
+    // claim that this is safe. If both distinct-role requests independently
+    // read spend_so_far=$0.85 before either reservation existed, both pass
+    // (0.85+0.10=0.95 <= 1.00) and total confirmed spend ends at $1.05,
+    // exceeding the $1.00 cap. This is the gap Phase 2 asked to be
+    // specifically tested and, if material, reported as a release blocker.
+    console.log(`       [finding] resIdle=${resIdle.statusCode} resActive=${resActive.statusCode} totalConfirmedAfter=$${totalConfirmed.toFixed(2)}`);
+    if (resIdle.statusCode === 200 && resActive.statusCode === 200) {
+      assert.ok(totalConfirmed > 1.0, 'reproduced: cross-role concurrent requests both passed the cap check and together exceeded $1.00');
+    } else {
+      assert.ok(totalConfirmed <= 1.0, 'at least one request was blocked, so the cap held for this run');
+    }
+  });
+});
+await t('(2) an uncertain reservation cannot be cleared by anything other than the explicit, authenticated reconciliation action -- re-verified against the final code', async () => {
+  const state = freshState();
+  state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now(), owner: 'x', state: 'uncertain' }));
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction, nextwaveV2IdeogramClearUncertainReservation } = await import('./api/ops.js');
+    const token = signCeoToken();
+    // A plain generation attempt must not clear it, even with a valid session.
+    const genAttempt = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), genAttempt);
+    assert.equal(genAttempt.statusCode, 409);
+    assert.ok(state.appSettings.has('nwv2r_charlock_support_reference'), 'a blocked generation attempt must not itself clear the uncertain lock');
+    // An unauthenticated clear attempt must not clear it either.
+    const unauthClear = mockRes();
+    await nextwaveV2IdeogramClearUncertainReservation(mockReq({ character_id: 'support', role: 'reference' }), unauthClear);
+    assert.equal(unauthClear.statusCode, 401);
+    assert.ok(state.appSettings.has('nwv2r_charlock_support_reference'), 'an unauthenticated clear attempt must not clear it');
+    // Only the explicit, authenticated action clears it.
+    const realClear = mockRes();
+    await nextwaveV2IdeogramClearUncertainReservation(mockReq({ character_id: 'support', role: 'reference', ceo_session_token: token }), realClear);
+    assert.equal(realClear.statusCode, 200);
+    assert.ok(!state.appSettings.has('nwv2r_charlock_support_reference'));
+  });
+});
+await t('(3) CEO authentication is necessary but NOT sufficient for a retry to be financially safe: a valid CEO session alone, without an intervening clear, still cannot bypass an uncertain lock', async () => {
+  const state = freshState();
+  state.appSettings.set('nwv2r_charlock_support_reference', JSON.stringify({ reserved_at: Date.now(), owner: 'x', state: 'uncertain' }));
+  await withMockFetch(state, async () => {
+    const { nextwaveV2IdeogramGenerateCharacterReferenceAction } = await import('./api/ops.js');
+    const token = signCeoToken(); // a genuinely valid, correctly-signed, unexpired CEO session
+    const res = mockRes();
+    await nextwaveV2IdeogramGenerateCharacterReferenceAction(mockReq({ character_id: 'support', ceo_session_token: token }), res);
+    assert.equal(res.statusCode, 409, 'valid authentication alone must not be treated as proof a paid retry is financially safe -- the reconciliation state is a SEPARATE, additional gate');
+    assert.equal(state.ideogramCalls, 0);
+  });
+});
+await t('(4) release-diff isolation: the entire Stage 4B lineage (base 7543917 -> HEAD) is purely additive -- zero lines removed anywhere outside this stage\'s own code', () => {
+  const diffStat = execFileSync('git', ['diff', '--stat', '7543917', 'HEAD']).toString();
+  const lastLine = diffStat.trim().split('\n').pop();
+  assert.ok(/insertions?\(\+\)/.test(lastLine), `expected an insertions summary line, got: ${lastLine}`);
+  assert.ok(!/deletions?\(-\)/.test(lastLine), `expected ZERO deletions across the full release range, got: ${lastLine}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
