@@ -17907,6 +17907,91 @@ async function _nextwaveV2GeneratePose(taskId,poseRole){
     if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(e.message)+'</span>';
   }
 }
+// ── Stage 4B — second-character generation panel ───────────────────────────
+// Calls the already-deployed, CEO-gated actions
+// (nextwave_v2_ideogram_generate_character_reference /
+// _character_pose) through the same _ceoAuthedFetch helper the host-pose
+// panel above already uses -- no new backend endpoint, no new auth path.
+// Safety per the Stage 4B order: one request in flight at a time across
+// ALL five controls (a single shared busy flag disables every button,
+// not just the one clicked), pose buttons stay disabled until the
+// reference has actually succeeded this session, a 'reconciliation_required'
+// response is shown as a distinct stop state (never retried automatically
+// -- the next click is always a new, explicit action), and a running
+// client-side spend display (mirrors the server's own real cost_usd per
+// response; the $1.00 cap itself is enforced server-side regardless of
+// what this display shows).
+const NEXTWAVE_V2_CHARACTER_POSES=[
+  {role:'idle',label:'Idle / waiting'},
+  {role:'active',label:'Active / engaged'},
+  {role:'point',label:'Pointing / explaining'},
+  {role:'react',label:'Reacting'},
+];
+window._nwv2CharBusy=window._nwv2CharBusy||{};
+window._nwv2CharSpent=window._nwv2CharSpent||{};
+window._nwv2CharRefReady=window._nwv2CharRefReady||{};
+function _nextwaveV2CharacterSetControlsDisabled(taskId,disabled){
+  const ids=['nwv2-charref-btn-'+taskId].concat(NEXTWAVE_V2_CHARACTER_POSES.map(function(p){return 'nwv2-charpose-btn-'+p.role+'-'+taskId;}));
+  ids.forEach(function(id){const el=document.getElementById(id);if(el)el.disabled=disabled||(id!=='nwv2-charref-btn-'+taskId&&!window._nwv2CharRefReady[taskId]);});
+}
+function _nextwaveV2CharacterUpdateBudgetDisplay(taskId){
+  const el=document.getElementById('nwv2-char-budget-'+taskId);
+  if(!el)return;
+  const spent=window._nwv2CharSpent[taskId]||0;
+  el.innerHTML='Spent this session: <b>$'+spent.toFixed(2)+'</b> of $1.00 cap (server-enforced independently of this display)';
+}
+function _nextwaveV2CharacterHandleResult(taskId,statusEl,d){
+  if(d&&d.ok){
+    window._nwv2CharSpent[taskId]=(window._nwv2CharSpent[taskId]||0)+(d.reused?0:(d.cost_usd||0));
+    _nextwaveV2CharacterUpdateBudgetDisplay(taskId);
+    const costNote=d.reused?'reused existing draft asset, $0':'$'+(d.cost_usd||0).toFixed(2);
+    if(statusEl)statusEl.innerHTML='<span style="color:#22c55e">✓ '+costNote+' · status: draft</span><br><img src="'+escHTML(d.asset_url)+'" style="width:80px;height:80px;border-radius:8px;margin-top:6px;object-fit:cover">';
+    return true;
+  }
+  const isReconciliation=d&&(d.error==='reconciliation_required'||d.reconciliation_required);
+  const isCap=d&&d.error==='character_generation_cap_exceeded';
+  let msg=d&&d.error||'failed';
+  let color='#ef4444';
+  if(isReconciliation){msg='⚠ Needs reconciliation before another attempt — contact engineering/PM. Not retried automatically.';color='#f59e0b';}
+  else if(isCap){msg='$1.00 experimental cap reached (spent so far: $'+(d.spend_so_far_usd||0).toFixed(2)+').';color='#f59e0b';}
+  if(statusEl)statusEl.innerHTML='<span style="color:'+color+'">'+escHTML(msg)+'</span>';
+  return false;
+}
+async function _nextwaveV2GenerateCharacterReference(taskId){
+  if(window._nwv2CharBusy[taskId])return;
+  window._nwv2CharBusy[taskId]=true;
+  _nextwaveV2CharacterSetControlsDisabled(taskId,true);
+  const statusEl=document.getElementById('nwv2-charref-status-'+taskId);
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--dim)">Generating (Ideogram, ~10-20s)…</span>';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_ideogram_generate_character_reference',{character_id:'support'});
+    const d=await r.json();
+    const ok=_nextwaveV2CharacterHandleResult(taskId,statusEl,d);
+    if(ok)window._nwv2CharRefReady[taskId]=true;
+  }catch(e){
+    if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(e.message)+'</span>';
+  }finally{
+    window._nwv2CharBusy[taskId]=false;
+    _nextwaveV2CharacterSetControlsDisabled(taskId,false);
+  }
+}
+async function _nextwaveV2GenerateCharacterPose(taskId,poseRole){
+  if(window._nwv2CharBusy[taskId])return;
+  window._nwv2CharBusy[taskId]=true;
+  _nextwaveV2CharacterSetControlsDisabled(taskId,true);
+  const statusEl=document.getElementById('nwv2-charpose-status-'+poseRole+'-'+taskId);
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--dim)">Generating (Ideogram, ~10-20s)…</span>';
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=nextwave_v2_ideogram_generate_character_pose',{character_id:'support',pose_role:poseRole});
+    const d=await r.json();
+    _nextwaveV2CharacterHandleResult(taskId,statusEl,d);
+  }catch(e){
+    if(statusEl)statusEl.innerHTML='<span style="color:#ef4444">'+escHTML(e.message)+'</span>';
+  }finally{
+    window._nwv2CharBusy[taskId]=false;
+    _nextwaveV2CharacterSetControlsDisabled(taskId,false);
+  }
+}
 // Phase 5.3 — GENERATE-stage: produces and persists the full automatic
 // scene/storyboard package (segmentation, evidence binding, chart/host/
 // object plan) BEFORE any render spend, so it's reviewable ahead of Build
@@ -21311,6 +21396,21 @@ function renderNextWaveLifecycleCard(task){
             +'</div>';
         }).join('')}
       </div>`;
+      const _characterPanel=`<div style="border:1px solid rgba(201,158,76,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:8px">SUPPORTING CHARACTER — Stage 4B (experimental, draft assets only)</div>
+        <div id="nwv2-char-budget-${taskId}" style="font-size:11px;color:var(--dim);margin-bottom:10px">Spent this session: $0.00 of $1.00 cap (server-enforced independently of this display)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">
+          <div><div style="font-size:12px;color:#fff">Character reference</div><div id="nwv2-charref-status-${taskId}" style="font-size:11px;color:var(--dim);margin-top:4px"></div></div>
+          <button id="nwv2-charref-btn-${taskId}" style="padding:6px 10px;background:rgba(201,158,76,0.1);border:1px solid rgba(201,158,76,0.35);border-radius:6px;color:#c99e4c;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="_nextwaveV2GenerateCharacterReference('${taskId}')">Generate</button>
+        </div>
+        ${NEXTWAVE_V2_CHARACTER_POSES.map(function(p){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,0.08)">'
+            +'<div><div style="font-size:12px;color:#fff">'+p.label+'</div><div id="nwv2-charpose-status-'+p.role+'-'+taskId+'" style="font-size:11px;color:var(--dim);margin-top:4px"></div></div>'
+            +'<button id="nwv2-charpose-btn-'+p.role+'-'+taskId+'" disabled style="padding:6px 10px;background:rgba(201,158,76,0.1);border:1px solid rgba(201,158,76,0.35);border-radius:6px;color:#c99e4c;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="_nextwaveV2GenerateCharacterPose(\''+taskId+'\',\''+p.role+'\')">Generate</button>'
+            +'</div>';
+        }).join('')}
+        <div style="font-size:10px;color:var(--dim);margin-top:8px">Pose buttons unlock after the reference succeeds this session.</div>
+      </div>`;
       const _buildBtn=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const btn=event.target;btn.disabled=true;btn.textContent='⏳ Rendering (ElevenLabs + ffmpeg, ~1-2 min)…';const r=await nextwaveV2StartBuild(p);btn.disabled=false;if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{btn.textContent=(p.renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)');if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}})()">${renderStatus==='failed'?'↻ Retry Build (NextWave V2)':'⚡ Start Build (NextWave V2)'}</button>`;
       if(renderStatus==='enhanced'&&pkg&&pkg.videoUrl){
         const _isHybrid=!!(pkg&&pkg.nextwaveV2Hybrid);
@@ -21378,7 +21478,8 @@ function renderNextWaveLifecycleCard(task){
         // the first/easiest button to click.
         body+=`<details style="margin-top:14px;margin-bottom:8px">
           <summary style="font-size:10px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;cursor:pointer">LEGACY — Phase 5.3 custom illustrated renderer (rejected, not the frozen architecture)</summary>
-          <div style="margin-top:10px">${_ideogramPanel}</div>`;
+          <div style="margin-top:10px">${_ideogramPanel}</div>
+          <div style="margin-top:10px">${_characterPanel}</div>`;
         if(pkg&&pkg.nextwaveV2ScenePackage){
           const sp=pkg.nextwaveV2ScenePackage;
           const sceneRows=(sp.scenes||[]).map(function(s){
