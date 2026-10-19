@@ -14400,6 +14400,579 @@ async function nextwaveV2IdeogramResolvePose(poseRole, promptText) {
   return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
 }
 
+// ── Stage 4B — SECOND CHARACTER pose generation (additive, NextWave-only) ──
+// nextwaveV2IdeogramCall above already accepts an arbitrary
+// characterReferencePath; the only thing hardcoded to the single existing
+// host was the orchestrator above it (NEXTWAVE_V2_HOST_DEFAULT). These two
+// functions are a parallel, parameterized orchestrator for a SECOND
+// character, so that existing host path stays byte-for-byte untouched.
+// Crossover prevention: every role tag is namespaced `${characterId}_
+// ${poseRole}` (e.g. "support_idle") before being handed to the existing,
+// also-untouched _nextwaveV2FindExistingAsset('host_pose', ...) lookup, so
+// a second character's poses can never exact-match a host role tag
+// (point/card/compare/react/think) or vice versa. New rows are written
+// status:'draft' (the table's own default) rather than 'approved' --
+// per this stage's order, generated assets must be inspected before
+// approval, never auto-approved.
+// Reuse-before-generate for the second-character namespace specifically.
+// Deliberately NOT _nextwaveV2FindExistingAsset (which filters
+// status=eq.approved): Stage 4B writes every new asset status:'draft'
+// pending creative review (requirement 6), so a status=approved-only
+// lookup would never find them and would silently re-spend on every
+// repeated request before a human approves anything -- defeating
+// requirement 5 ("reuse-before-generate"). Draft rows count as "already
+// generated, don't re-spend"; approval is a separate, later, human gate
+// that this lookup does not need to wait on.
+async function _nextwaveV2FindExistingCharacterAsset(characterId, role) {
+  const namespacedRole = `${characterId}_${role}`;
+  const rows = await sbGetSafe(
+    `production_assets_library?engine=eq.NextWave&asset_type=eq.host_pose&tags=cs.{role:${namespacedRole}}&select=id,asset_name,asset_url,tags&order=created_at.desc&limit=1`
+  );
+  return rows && rows[0] ? rows[0] : null;
+}
+
+function _nextwaveV2RoleMaxPrice(role) {
+  return role === 'reference' ? 0.03 : IDEOGRAM_COST_PER_IMAGE_USD;
+}
+
+function _nextwaveV2BudgetLedgerKey(characterId) {
+  return `nwv2r_charbudget_${characterId}`;
+}
+
+// Stage 4B.3: the budget ledger (see below) is now the single, atomically-
+// updated source of truth for "money committed" (reserved, uncertain, or
+// confirmed -- the ledger does not distinguish, by design: see that
+// block's comment for why). This is now a thin read-only accessor for
+// audit/display, not an enforcement mechanism itself -- enforcement lives
+// entirely in _nextwaveV2ReserveCharacterBudget's atomic check-and-reserve.
+async function _nextwaveV2CharacterSpendSoFar(characterId) {
+  const rows = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(_nextwaveV2BudgetLedgerKey(characterId))}&select=value`);
+  const row = rows && rows[0];
+  if (!row) return 0;
+  try { return (JSON.parse(row.value) || {}).reserved_usd || 0; } catch { return 0; }
+}
+
+// ── Stage 4B.2 — ownership-safe reservation + uncertain-outcome handling ──
+// Stage 4B.1 closed the cross-instance double-generation race but left two
+// real gaps, found by this stage's own Phase 1 re-inspection of that code:
+//
+// (a) OWNERSHIP RACE: release and stale-reclaim both did an UNCONDITIONAL
+//     DELETE by key. If process A's lock is reclaimed as stale by process B
+//     while A is still legitimately working (slow but not dead), A later
+//     finishing and calling release() would delete B's NEWER row -- A has
+//     no way to tell "my lock" from "someone else's lock that now happens
+//     to sit at the same key". A third process could then acquire while B
+//     still believes it holds the lock: a real double-generation.
+//
+// (b) AMBIGUOUS-OUTCOME AUTO-RETRY: the old staleness window treated EVERY
+//     held lock the same regardless of whether the vendor had actually
+//     been contacted. A timeout or an unconfirmed failure AFTER Ideogram
+//     was reached would quietly become reclaimable again after 3 minutes
+//     -- an automatic retry of a call whose billing outcome is unknown.
+//     Ideogram gives no client-supplied idempotency key, so a local
+//     timeout is never proof the vendor didn't charge.
+//
+// Fix for (a): every reservation carries a unique, randomly-generated
+// owner token in its value (app_settings.value is a plain text column --
+// no schema change). Release and reclaim are both CONDITIONAL deletes
+// (DELETE ... WHERE key=eq.X AND value=eq.<exact string I last wrote>),
+// which PostgREST applies as a normal AND'd filter on any method. If the
+// row has changed since I last read/wrote it -- reclaimed, renewed, or
+// completed by someone else -- my conditional delete matches zero rows
+// and I correctly back off instead of destroying their newer ownership.
+//
+// Fix for (b): a reservation now carries an explicit state machine:
+//   'reserving' -- acquired, vendor not yet contacted. Safe to
+//                  staleness-reclaim after NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS
+//                  (covers a process that died before ever reaching the
+//                  vendor -- no ambiguity, nothing was ever charged).
+//   'uncertain' -- vendor contact was about to be attempted or was
+//                  attempted and the outcome did not resolve into a
+//                  written asset row. NEVER auto-reclaimed, regardless of
+//                  age. The only way out is an explicit, separate,
+//                  CEO-authorized decision via
+//                  nextwaveV2IdeogramClearUncertainReservation below --
+//                  exactly the "separate authorized decision before
+//                  another paid attempt" this stage's order requires.
+// A lock is released outright (deleted) only once the real asset row has
+// been durably written -- the only point at which the outcome is no
+// longer ambiguous.
+//
+// Honest accounting (Phase 3): because an 'uncertain' lock can represent
+// REAL, unconfirmed spend with no cost_usd tag yet, _nextwaveV2CharacterSpendSoFar
+// (above) now also counts every currently-uncertain lock's role at its
+// known price. The $1.00 cap is therefore enforced against confirmed
+// spend AND possible-unconfirmed spend together, not confirmed spend
+// alone -- closing the gap where repeated clear-and-retry cycles after
+// ambiguous outcomes could otherwise push real spend past the cap without
+// the check ever seeing it. This stage does NOT claim a mathematically
+// guaranteed ceiling independent of that check; Stage 4B.1's "$0.43
+// regardless of concurrency" claim relied on an unconditional release that
+// no longer exists in this form -- see Phase 6 "Remaining risks" for the
+// precise, current bound.
+const NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS = 3 * 60 * 1000; // generous vs. one Ideogram TURBO call + upload
+
+function _nextwaveV2NewLockOwnerToken() {
+  return randomBytes(12).toString('hex');
+}
+
+async function _nextwaveV2AppSettingsConditionalDelete(key, exactValue) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${encodeURIComponent(key)}&value=eq.${encodeURIComponent(exactValue)}`, {
+      method: 'DELETE',
+      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
+    });
+    if (!res.ok) return { ok: false, deleted: 0 };
+    const rows = await res.json().catch(() => []);
+    return { ok: true, deleted: Array.isArray(rows) ? rows.length : 0 };
+  } catch (e) { return { ok: false, deleted: 0 }; }
+}
+
+async function _nextwaveV2AppSettingsConditionalUpdate(key, expectedValue, newValue) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${encodeURIComponent(key)}&value=eq.${encodeURIComponent(expectedValue)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
+      body: JSON.stringify({ value: newValue }),
+    });
+    if (!res.ok) return { ok: false, updated: 0 };
+    const rows = await res.json().catch(() => []);
+    return { ok: true, updated: Array.isArray(rows) ? rows.length : 0 };
+  } catch (e) { return { ok: false, updated: 0 }; }
+}
+
+// ── Stage 4B.3 — atomic cross-role budget enforcement ───────────────────────
+// Phase 1 root cause (confirmed by reproducing test [35].1): the $1.00 cap
+// check and the per-role reservation lock were TWO SEPARATE, non-atomic
+// steps. The lock correctly prevents two requests for the SAME role from
+// both proceeding -- but it was never designed to, and structurally
+// cannot, stop two requests for DIFFERENT roles from both reading the same
+// pre-spend total and both passing the cap check before either has
+// reserved anything. Two concurrent requests for "idle" and "active" could
+// each see $0.85 confirmed, each compute $0.85+$0.10=$0.95 <= $1.00, and
+// both proceed -- real spend landed at $1.05 in the reproduced test. The
+// per-role lock was never a global budget guarantee; this block is.
+//
+// Fix: a single per-character budget LEDGER (one more app_settings row,
+// key nwv2r_charbudget_<characterId>, value {reserved_usd}), updated via
+// the SAME conditional-CAS primitive already used for the per-role lock
+// above (_nextwaveV2AppSettingsConditionalUpdate) -- no schema migration,
+// no new table, no protected infrastructure change. "Check and reserve"
+// is a single atomic unit: read the current total, compute the new total,
+// and if it fits under the cap, write it back with a CAS update keyed to
+// the EXACT value just read. If another request changed the ledger in the
+// gap between the read and the write, the CAS update matches zero rows
+// and this call RE-READS THE NEW TOTAL (which already includes the other
+// request's reservation) before deciding whether it still fits -- closing
+// the race completely, for ANY number of concurrent requests across ANY
+// number of serverless instances, regardless of which roles they target.
+//
+// The ledger intentionally does NOT distinguish confirmed vs. uncertain
+// vs. in-flight reservations -- every one of them represents real or
+// possible spend, and the $1.00 cap must bound all of them together. A
+// reservation is refunded (subtracted back out, via the same CAS
+// mechanism) only when it is KNOWN that no spend will occur for it: lock
+// acquisition failed (someone else already owns the real attempt for that
+// role), a race-losing re-check found the asset already existed (pure
+// reuse, $0 spend), or a human explicitly reconciles an uncertain
+// reservation. It is NEVER refunded merely because of a timeout or a
+// failure after vendor contact -- see nextwaveV2IdeogramResolveCharacterPose
+// /Reference below, which mirror the uncertain-lock's own "stay
+// conservative" discipline from Stage 4B.2.
+const NEXTWAVE_V2_BUDGET_CAS_MAX_RETRIES = 8;
+
+// { ok:true } on a genuine atomic reserve (including after retrying past
+// concurrent contention). { ok:false, reason:'cap_exceeded', reserved_usd }
+// when the amount would push the ledger over NEXTWAVE_V2_CHARACTER_GEN_CAP_USD
+// -- no write occurs in this case; nothing is reserved. { ok:false,
+// reason:'ledger_error' } only for an unrelated infrastructure failure.
+async function _nextwaveV2ReserveCharacterBudget(characterId, amountUsd) {
+  const ledgerKey = _nextwaveV2BudgetLedgerKey(characterId);
+  for (let attempt = 0; attempt < NEXTWAVE_V2_BUDGET_CAS_MAX_RETRIES; attempt++) {
+    const existing = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(ledgerKey)}&select=value`);
+    const row = existing && existing[0];
+    const current = row ? ((JSON.parse(row.value || '{}') || {}).reserved_usd || 0) : 0;
+    const nextTotal = Math.round((current + amountUsd) * 100) / 100; // guard against float drift (e.g. 0.1+0.2)
+    if (nextTotal > NEXTWAVE_V2_CHARACTER_GEN_CAP_USD) {
+      return { ok: false, reason: 'cap_exceeded', reserved_usd: current };
+    }
+    const newValue = JSON.stringify({ reserved_usd: nextTotal, updated_at: Date.now() });
+    if (!row) {
+      // No ledger yet for this character -- create it (PK-guarded atomic insert).
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
+        body: JSON.stringify({ key: ledgerKey, value: newValue }),
+      });
+      if (res.ok) return { ok: true };
+      if (res.status === 409) continue; // someone else created it first -- re-read and retry
+      return { ok: false, reason: 'ledger_error' };
+    }
+    const upd = await _nextwaveV2AppSettingsConditionalUpdate(ledgerKey, row.value, newValue);
+    if (upd.ok && upd.updated > 0) return { ok: true };
+    // Lost the CAS race -- someone else changed the ledger in between our
+    // read and write. Loop back and re-read the NEW total before deciding.
+  }
+  return { ok: false, reason: 'ledger_contention_exhausted' };
+}
+
+// Subtracts a reservation back out, via the same CAS discipline. Best-
+// effort but not fire-and-forget-sloppy: retries through real contention
+// just like reserve does, so a refund racing against another request's
+// own reserve/refund still lands correctly rather than silently losing
+// the update.
+async function _nextwaveV2RefundCharacterBudget(characterId, amountUsd) {
+  const ledgerKey = _nextwaveV2BudgetLedgerKey(characterId);
+  for (let attempt = 0; attempt < NEXTWAVE_V2_BUDGET_CAS_MAX_RETRIES; attempt++) {
+    const existing = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(ledgerKey)}&select=value`);
+    const row = existing && existing[0];
+    if (!row) return; // nothing to refund
+    const current = (JSON.parse(row.value || '{}') || {}).reserved_usd || 0;
+    const nextTotal = Math.max(0, Math.round((current - amountUsd) * 100) / 100);
+    const newValue = JSON.stringify({ reserved_usd: nextTotal, updated_at: Date.now() });
+    const upd = await _nextwaveV2AppSettingsConditionalUpdate(ledgerKey, row.value, newValue);
+    if (upd.ok && upd.updated > 0) return;
+    // lost the race -- retry with the fresh value
+  }
+}
+
+// { ok:true, token:<exact value string just written, state:'reserving'> }
+// on a genuine atomic acquire (including a successful stale reclaim).
+// { ok:false, reason:'in_progress' } for a live 'reserving' lock OR ANY
+// 'uncertain' lock (regardless of age -- see state machine above).
+// { ok:false, reason:'lock_error' } only for an unrelated infrastructure
+// failure (never silently treated as acquired).
+async function _nextwaveV2AcquireCharacterLock(lockKey) {
+  const reservingValue = JSON.stringify({ reserved_at: Date.now(), owner: _nextwaveV2NewLockOwnerToken(), state: 'reserving' });
+  const insertOnce = (val) => fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, Prefer: 'return=representation' },
+    body: JSON.stringify({ key: lockKey, value: val }),
+  });
+
+  let res = await insertOnce(reservingValue);
+  if (res.ok) return { ok: true, token: reservingValue };
+  if (res.status !== 409) return { ok: false, reason: 'lock_error', detail: `app_settings_insert_${res.status}` };
+
+  // 409 = a lock row already exists.
+  const existing = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(lockKey)}&select=value`);
+  const row = existing && existing[0];
+  if (!row) return { ok: false, reason: 'in_progress' }; // vanished between our failed insert and this read -- contended, back off rather than guess
+
+  let parsed = {};
+  try { parsed = JSON.parse(row.value) || {}; } catch { parsed = {}; }
+
+  if (parsed.state === 'uncertain') {
+    return { ok: false, reason: 'reconciliation_required' }; // never auto-reclaimed -- Phase 2
+  }
+  if (Date.now() - (parsed.reserved_at || 0) < NEXTWAVE_V2_CHARACTER_LOCK_STALE_MS) {
+    return { ok: false, reason: 'in_progress' };
+  }
+
+  // Stale 'reserving' lock (vendor was never contacted) -- reclaim via a
+  // CONDITIONAL delete keyed to the EXACT value just read. If someone else
+  // has since reclaimed, renewed, or completed it, this delete matches
+  // zero rows and we correctly back off instead of clobbering their newer
+  // ownership (the Phase 1 bug this stage fixes).
+  const del = await _nextwaveV2AppSettingsConditionalDelete(lockKey, row.value);
+  if (!del.ok || del.deleted === 0) return { ok: false, reason: 'in_progress' };
+
+  res = await insertOnce(reservingValue);
+  return res.ok ? { ok: true, token: reservingValue } : { ok: false, reason: 'in_progress' };
+}
+
+// Marks a held 'reserving' lock as 'uncertain' right before vendor contact
+// -- from this instant on, any failure means the outcome is genuinely
+// unknown, not "safe to assume nothing happened". Conditional on the
+// EXACT token this call itself holds, so it can never touch a lock
+// another process has since reclaimed. Returns the new token on success
+// (the caller must use this one going forward, including to release).
+async function _nextwaveV2MarkCharacterLockUncertain(lockKey, currentToken) {
+  let parsed = {};
+  try { parsed = JSON.parse(currentToken) || {}; } catch { parsed = {}; }
+  const uncertainValue = JSON.stringify({ reserved_at: parsed.reserved_at || Date.now(), owner: parsed.owner, state: 'uncertain', vendor_contact_at: Date.now() });
+  const upd = await _nextwaveV2AppSettingsConditionalUpdate(lockKey, currentToken, uncertainValue);
+  if (!upd.ok || upd.updated === 0) return { ok: false };
+  return { ok: true, token: uncertainValue };
+}
+
+// Conditional release: deletes the row only if it STILL holds exactly the
+// token this call currently owns. If the lock has since been reclaimed by
+// someone else, the conditional delete matches zero rows and the
+// reclaimer's newer reservation is left completely untouched.
+async function _nextwaveV2ReleaseCharacterLock(lockKey, ownerToken) {
+  if (!ownerToken) return;
+  await _nextwaveV2AppSettingsConditionalDelete(lockKey, ownerToken);
+}
+
+// CEO-gated: the explicit, separate, authorized decision Phase 2 requires
+// before any further paid attempt at a role left in 'uncertain' state.
+// Clears the reservation only if it is STILL exactly the uncertain record
+// being inspected (conditional delete, same CAS discipline as everywhere
+// else in this block) -- never blind. Returns what it cleared for audit.
+export async function nextwaveV2IdeogramClearUncertainReservation(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { character_id, role } = req.body || {};
+  if (!character_id || !role) return res.status(400).json({ ok: false, error: 'character_id and role are required' });
+  const lockKey = `nwv2r_charlock_${character_id}_${role}`;
+  const existing = await sbGetSafe(`app_settings?key=eq.${encodeURIComponent(lockKey)}&select=value`);
+  const row = existing && existing[0];
+  if (!row) return res.status(404).json({ ok: false, error: 'no_reservation_found' });
+  let parsed = {};
+  try { parsed = JSON.parse(row.value) || {}; } catch { parsed = {}; }
+  if (parsed.state !== 'uncertain') return res.status(409).json({ ok: false, error: 'reservation_not_in_uncertain_state', current_state: parsed.state || 'unknown' });
+  const del = await _nextwaveV2AppSettingsConditionalDelete(lockKey, row.value);
+  if (!del.ok || del.deleted === 0) return res.status(409).json({ ok: false, error: 'reservation_changed_concurrently_retry' });
+  // The budget this uncertain reservation held is now explicitly
+  // relinquished -- this is the human decision that frees the ledger room,
+  // not an automatic consequence of time passing. It authorizes nothing
+  // further by itself; any NEXT attempt still goes through its own fresh
+  // reserve-and-check cycle.
+  await _nextwaveV2RefundCharacterBudget(character_id, _nextwaveV2RoleMaxPrice(role));
+  return res.status(200).json({ ok: true, cleared: lockKey, was: parsed });
+}
+
+export async function nextwaveV2IdeogramResolveCharacterReference(characterId, promptText) {
+  const existing = await _nextwaveV2FindExistingCharacterAsset(characterId, 'reference');
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const amountUsd = _nextwaveV2RoleMaxPrice('reference');
+  const reserved = await _nextwaveV2ReserveCharacterBudget(characterId, amountUsd);
+  if (!reserved.ok) {
+    if (reserved.reason === 'cap_exceeded') return { ok: false, error: 'character_generation_cap_exceeded', spend_so_far_usd: reserved.reserved_usd, cap_usd: NEXTWAVE_V2_CHARACTER_GEN_CAP_USD };
+    return { ok: false, error: 'budget_reserve_failed' };
+  }
+
+  const namespacedRole = `${characterId}_reference`;
+  const lockKey = `nwv2r_charlock_${namespacedRole}`;
+  const lock = await _nextwaveV2AcquireCharacterLock(lockKey);
+  if (!lock.ok) {
+    await _nextwaveV2RefundCharacterBudget(characterId, amountUsd); // this request won't spend -- someone else's own reservation already covers the real attempt
+    return { ok: false, error: lock.reason === 'reconciliation_required' ? 'reconciliation_required' : lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
+  }
+
+  // Re-check after acquiring the lock: closes the window between the first
+  // reuse-check above and actually holding the lock (another instance may
+  // have finished generating it in between).
+  const existing2 = await _nextwaveV2FindExistingCharacterAsset(characterId, 'reference');
+  if (existing2) {
+    await _nextwaveV2ReleaseCharacterLock(lockKey, lock.token);
+    await _nextwaveV2RefundCharacterBudget(characterId, amountUsd); // pure reuse -- no spend occurred, free the reservation
+    return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 };
+  }
+
+  const marked = await _nextwaveV2MarkCharacterLockUncertain(lockKey, lock.token);
+  if (!marked.ok) { await _nextwaveV2RefundCharacterBudget(characterId, amountUsd); return { ok: false, error: 'lock_ownership_lost' }; } // extremely unlikely -- someone else touched our just-created lock
+  let lockToken = marked.token;
+
+  // From here on the budget reservation is deliberately KEPT on every
+  // failure path -- the vendor has been (or is about to be) contacted, so
+  // the outcome is no longer "nothing happened". Matches the uncertain
+  // lock's own conservative discipline (Stage 4B.2): never silently freed
+  // just because of a timeout or an unconfirmed failure.
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, aspectRatio: '1x1' }); // no reference yet -- this image BECOMES one
+  if (!gen.ok) return { ...gen, reconciliation_required: true, lock_key: lockKey };
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}`, reconciliation_required: true, lock_key: lockKey }; // vendor already contacted -- outcome unresolved
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const assetName = `nextwave_character_reference_${namespacedRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}`, reconciliation_required: true, lock_key: lockKey }; // vendor already charged
+
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'host_pose',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'draft',
+    tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:false', `cost_usd:${gen.cost_usd}`],
+  });
+  await _nextwaveV2ReleaseCharacterLock(lockKey, lockToken); // success -- the new row is now authoritative, outcome no longer ambiguous. Budget stays reserved -- it is the confirmed spend.
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+export async function nextwaveV2IdeogramResolveCharacterPose(characterId, poseRole, promptText, referenceImagePath) {
+  const namespacedRole = `${characterId}_${poseRole}`;
+  const existing = await _nextwaveV2FindExistingCharacterAsset(characterId, poseRole);
+  if (existing) return { ok: true, reused: true, asset_url: existing.asset_url, asset_id: existing.id, cost_usd: 0 };
+
+  const amountUsd = _nextwaveV2RoleMaxPrice(poseRole);
+  const reserved = await _nextwaveV2ReserveCharacterBudget(characterId, amountUsd);
+  if (!reserved.ok) {
+    if (reserved.reason === 'cap_exceeded') return { ok: false, error: 'character_generation_cap_exceeded', spend_so_far_usd: reserved.reserved_usd, cap_usd: NEXTWAVE_V2_CHARACTER_GEN_CAP_USD };
+    return { ok: false, error: 'budget_reserve_failed' };
+  }
+
+  const lockKey = `nwv2r_charlock_${namespacedRole}`;
+  const lock = await _nextwaveV2AcquireCharacterLock(lockKey);
+  if (!lock.ok) {
+    await _nextwaveV2RefundCharacterBudget(characterId, amountUsd);
+    return { ok: false, error: lock.reason === 'reconciliation_required' ? 'reconciliation_required' : lock.reason === 'in_progress' ? 'generation_already_in_progress' : 'lock_acquire_failed', detail: lock.detail };
+  }
+
+  const existing2 = await _nextwaveV2FindExistingCharacterAsset(characterId, poseRole);
+  if (existing2) {
+    await _nextwaveV2ReleaseCharacterLock(lockKey, lock.token);
+    await _nextwaveV2RefundCharacterBudget(characterId, amountUsd);
+    return { ok: true, reused: true, asset_url: existing2.asset_url, asset_id: existing2.id, cost_usd: 0 };
+  }
+
+  const marked = await _nextwaveV2MarkCharacterLockUncertain(lockKey, lock.token);
+  if (!marked.ok) { await _nextwaveV2RefundCharacterBudget(characterId, amountUsd); return { ok: false, error: 'lock_ownership_lost' }; }
+  let lockToken = marked.token;
+
+  const gen = await nextwaveV2IdeogramCall({ prompt: promptText, characterReferencePath: referenceImagePath });
+  if (!gen.ok) return { ...gen, reconciliation_required: true, lock_key: lockKey };
+
+  const imgRes = await fetch(gen.url);
+  if (!imgRes.ok) return { ok: false, error: `ideogram_download_failed_${imgRes.status}`, reconciliation_required: true, lock_key: lockKey };
+  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+  const assetName = `nextwave_character_pose_${namespacedRole}_${Date.now()}`;
+  const storagePath = `nextwave-v2-preview/ideogram/${assetName}.png`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${storagePath}`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+    body: imgBuf,
+  });
+  if (!upRes.ok) return { ok: false, error: `supabase_storage_upload_failed_${upRes.status}`, reconciliation_required: true, lock_key: lockKey };
+
+  const permanentUrl = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${storagePath}`;
+  const row = await sbInsert('production_assets_library', {
+    asset_type: 'host_pose',
+    asset_name: assetName,
+    asset_url: permanentUrl,
+    engine: 'NextWave',
+    source: 'ideogram',
+    status: 'draft',
+    tags: [`role:${namespacedRole}`, `character:${characterId}`, 'model:ideogram-v3-turbo', 'character_reference:true', `cost_usd:${gen.cost_usd}`],
+  });
+  await _nextwaveV2ReleaseCharacterLock(lockKey, lockToken); // success -- the new row is now authoritative, outcome no longer ambiguous. Budget stays reserved -- it is the confirmed spend.
+  return { ok: true, reused: false, asset_url: permanentUrl, asset_id: row && row.id, cost_usd: gen.cost_usd, seed: gen.seed };
+}
+
+// Experimental cap (Stage 4B order: "Maximum $1.00 total"). Stage 4B.3:
+// enforcement is now the atomic check-and-reserve in
+// _nextwaveV2ReserveCharacterBudget, not a separate read-then-compare step
+// in the Action functions below (that older pattern is exactly what
+// produced the confirmed $1.05 cross-role race in test [35].1 -- two
+// different roles could each read the same pre-spend total and both pass
+// before either had reserved anything). This constant is now read ONLY
+// inside the atomic reserve function and by _nextwaveV2CharacterSpendSoFar
+// for display; no other code path compares against it.
+const NEXTWAVE_V2_CHARACTER_GEN_CAP_USD = 1.00;
+
+// Fixed, CEO-reviewed prompt dictionary -- the ONLY prompts this pair of
+// actions will ever send to Ideogram. character_id and pose_role from the
+// request are used exclusively as dictionary KEYS, never concatenated into
+// a prompt string, so no request field ever reaches the vendor as
+// free-text: this is not a general-purpose image-generation endpoint and
+// has no prompt-injection surface. Character design grounded in the real
+// existing host asset (api/assets/nextwave-v2/host_hud_default.png: male,
+// medium-tan skin, brown swept-back hair, navy blazer, white shirt) --
+// deliberately zero palette/silhouette overlap.
+const NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS = {
+  support: {
+    reference:
+      'Flat vector illustration, professional headshot and shoulders portrait of a woman in her ' +
+      'mid-30s with warm brown skin tone, shoulder-length dark wavy hair with a side part, wearing ' +
+      'a mustard-yellow cardigan over a cream blouse, calm warm approachable expression, ' +
+      'front-facing, framed against a soft warm beige background with a thin dark border, clean ' +
+      'minimal corporate flat illustration style matching a financial-education explainer ' +
+      'character, no text, no logos, no watermark',
+    poses: {
+      idle:
+        'Flat vector illustration of the same woman character, standing at ease with hands loosely ' +
+        'clasped in front of her waist, calm patient waiting expression, slight head tilt, ' +
+        'shoulders-up to waist framing, mustard cardigan over cream blouse, isolated on a plain ' +
+        'white background, no text, no logo, clean corporate flat illustration style',
+      active:
+        'Flat vector illustration of the same woman character, leaning slightly forward with an ' +
+        'alert engaged expression, one hand raised near her chest as if actively listening, ' +
+        'shoulders-up to waist framing, mustard cardigan over cream blouse, isolated on a plain ' +
+        'white background, no text, no logo, clean corporate flat illustration style',
+      point:
+        'Flat vector illustration of the same woman character, arm extended pointing to the right ' +
+        'with a confident explaining gesture, friendly open expression, shoulders-up to waist ' +
+        'framing, mustard cardigan over cream blouse, isolated on a plain white background, no ' +
+        'text, no logo, clean corporate flat illustration style',
+      react:
+        'Flat vector illustration of the same woman character, one hand gently on her chest, ' +
+        'pleasantly surprised and reacting expression, other hand slightly open in a reacting ' +
+        'gesture, shoulders-up to waist framing, mustard cardigan over cream blouse, isolated on a ' +
+        'plain white background, no text, no logo, clean corporate flat illustration style',
+    },
+  },
+};
+
+// Maps a resolver result's error to the right HTTP status: the atomic
+// reservation lock (see above) can itself report "someone else is already
+// generating this role" or "this role needs human reconciliation before
+// another attempt" as normal, expected outcomes -- both are a 409, not a
+// 502 vendor-failure.
+function _nextwaveV2CharacterGenStatusFor(result) {
+  if (result.error === 'generation_already_in_progress') return 409;
+  if (result.error === 'reconciliation_required') return 409;
+  if (result.reconciliation_required) return 409;
+  if (result.error === 'character_generation_cap_exceeded') return 402;
+  return 502;
+}
+
+export async function nextwaveV2IdeogramGenerateCharacterReferenceAction(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { character_id } = req.body || {};
+  const dict = NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS[character_id];
+  if (!dict) return res.status(400).json({ ok: false, error: `unsupported character_id -- must be one of: ${Object.keys(NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS).join(', ')}` });
+
+  // Stage 4B.3: the cap is now enforced atomically INSIDE the resolver
+  // (_nextwaveV2ReserveCharacterBudget), not here -- a separate read-then-
+  // compare step at this layer is exactly what allowed two different
+  // roles to both pass before either had reserved anything.
+  try {
+    const result = await nextwaveV2IdeogramResolveCharacterReference(character_id, dict.reference);
+    if (!result.ok) return res.status(_nextwaveV2CharacterGenStatusFor(result)).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+export async function nextwaveV2IdeogramGenerateCharacterPoseAction(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { character_id, pose_role } = req.body || {};
+  const dict = NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS[character_id];
+  if (!dict) return res.status(400).json({ ok: false, error: `unsupported character_id -- must be one of: ${Object.keys(NEXTWAVE_V2_SECOND_CHARACTER_PROMPTS).join(', ')}` });
+  const prompt = dict.poses[pose_role];
+  if (!prompt) return res.status(400).json({ ok: false, error: `unsupported pose_role -- must be one of: ${Object.keys(dict.poses).join(', ')}` });
+
+  // Stage 4B.3: see the reference action above -- the cap is enforced
+  // atomically inside the resolver now, not with a separate pre-check here.
+  const refAsset = await _nextwaveV2FindExistingCharacterAsset(character_id, 'reference');
+  if (!refAsset) return res.status(409).json({ ok: false, error: 'character_reference_not_generated_yet' });
+
+  let localRefPath;
+  try {
+    const refRes = await fetch(refAsset.asset_url);
+    if (!refRes.ok) return res.status(502).json({ ok: false, error: 'reference_download_failed' });
+    const refBuf = Buffer.from(await refRes.arrayBuffer());
+    localRefPath = join(tmpdir(), `nwv2-charref-${character_id}-${Date.now()}.png`);
+    await writeFile(localRefPath, refBuf);
+    const result = await nextwaveV2IdeogramResolveCharacterPose(character_id, pose_role, prompt, localRefPath);
+    if (!result.ok) return res.status(_nextwaveV2CharacterGenStatusFor(result)).json(result);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  } finally {
+    if (localRefPath) unlink(localRefPath).catch(() => {});
+  }
+}
+
 // ── Phase 5 — illustrated OBJECT generation (not character poses) ──────────
 // CEO rejection of Phase 4.7: adding host poses to a card-first renderer
 // didn't change the mechanism. Benchmark forensics (Wealth Logic: folder,
@@ -19741,6 +20314,15 @@ export default async function handler(req, res) {
     if (action === 'nextwave_v2_set_ideogram_key')    return await nextwaveV2SetIdeogramKey(req, res);
     if (action === 'nextwave_v2_ideogram_generate_pose') return await nextwaveV2IdeogramGeneratePose(req, res);
     if (action === 'nextwave_v2_ideogram_generate_object') return await nextwaveV2IdeogramGenerateObject(req, res);
+    // Stage 4B — second-character generation. Same requireCeoSession gate, same
+    // fixed-dictionary-only pattern as the two actions directly above; the host
+    // path they call (nextwaveV2IdeogramGeneratePose/ResolvePose, NEXTWAVE_V2_HOST_DEFAULT)
+    // is untouched by either of these.
+    if (action === 'nextwave_v2_ideogram_generate_character_reference') return await nextwaveV2IdeogramGenerateCharacterReferenceAction(req, res);
+    if (action === 'nextwave_v2_ideogram_generate_character_pose') return await nextwaveV2IdeogramGenerateCharacterPoseAction(req, res);
+    // Stage 4B.2 — the explicit, separate, CEO-authorized decision required
+    // before another paid attempt at a role left in an 'uncertain' state.
+    if (action === 'nextwave_v2_ideogram_clear_uncertain_reservation') return await nextwaveV2IdeogramClearUncertainReservation(req, res);
     if (action === 'nextwave_v2_build_render')        return await nextwaveV2BuildRender(req, res);
     // Visual Composition Correction — persistent-canvas compositor (presenter
     // window + evidence zone), Submagic reduced to captions-only downstream.
