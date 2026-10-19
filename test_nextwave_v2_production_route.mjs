@@ -1836,7 +1836,7 @@ await t('(2) SRV Studio / SRV Farsi / AI Creation Studio / SMM are unreachable: 
 });
 await t('(3) existing NextWave production (route.mjs / compose.mjs real dispatch) is completely untouched by this stage\'s diff', () => {
   const diffFiles = execFileSync('git', ['diff', '--name-only']).toString().trim().split('\n').filter(Boolean);
-  const allowed = new Set(['api/ops.js', 'test_nextwave_v2_production_route.mjs']); // this stage's own code + its own test additions
+  const allowed = new Set(['api/ops.js', 'test_nextwave_v2_production_route.mjs', 'public/index.html']); // this stage's own backend + tests + (as of the Stage 4B dashboard round) its own UI panel
   const unexpected = diffFiles.filter((f) => !allowed.has(f));
   assert.deepEqual(unexpected, [], `this stage must not touch any file outside its own scope: ${JSON.stringify(unexpected)}`);
   assert.ok(!diffFiles.includes('lib/nextwaveV2Renderer/production/route.mjs'), 'route.mjs must be untouched');
@@ -2464,5 +2464,134 @@ await t('(3) real schema evidence: app_settings.key is the table\'s actual PRIMA
   // Level") -- the real guarantee the CAS pattern in this file depends on.
   assert.ok(true, 'see Stage 4B.3 Ledger Release Verification report, Phase 1, for the live query and its result');
 });
+
+console.log('\n[38] Stage 4B Dashboard Completion — public/index.html character-generation panel');
+// Extracts the EXACT Stage 4B UI function block from the real deployed-UI
+// source (not a re-typed copy) and runs it in a sandboxed vm context with a
+// fake DOM and a mocked _ceoAuthedFetch -- no real network calls, no real
+// Ideogram spend, matches the hermetic convention used throughout this file.
+{
+  const htmlSrc = fs.readFileSync('public/index.html', 'utf8');
+  const startMarker = '// ── Stage 4B — second-character generation panel';
+  const endMarker = '// Phase 5.3 — GENERATE-stage: produces and persists the full automatic';
+  const startIdx = htmlSrc.indexOf(startMarker);
+  const endIdx = htmlSrc.indexOf(endMarker);
+  assert.ok(startIdx >= 0 && endIdx > startIdx, 'Stage 4B UI function block markers must be found in public/index.html');
+  const uiSrc = htmlSrc.slice(startIdx, endIdx);
+
+  const vmMod = await import('node:vm');
+  const makeSandbox = (fetchImpl) => {
+    const elements = new Map();
+    const getEl = (id) => { if (!elements.has(id)) elements.set(id, { id, innerHTML: '', disabled: false }); return elements.get(id); };
+    const taskId = 't1';
+    ['idle', 'active', 'point', 'react'].forEach((role) => { getEl('nwv2-charpose-btn-' + role + '-' + taskId).disabled = true; });
+    const sandbox = {
+      window: {},
+      document: { getElementById: getEl },
+      escHTML: (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+      _ceoAuthedFetch: async (url, body) => { const resp = await fetchImpl(url, body); return { json: async () => resp }; },
+      console,
+    };
+    vmMod.createContext(sandbox);
+    new vmMod.Script(uiSrc).runInContext(sandbox);
+    return { sandbox, elements: getEl, taskId };
+  };
+
+  await t('(1) the five controls call the correct existing actions, with correct params', async () => {
+    const seen = [];
+    const { sandbox, taskId } = makeSandbox(async (url, body) => { seen.push({ url, body }); return { ok: true, reused: false, asset_url: 'https://x/a.png', cost_usd: 0.03 }; });
+    await sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    assert.equal(seen[0].url, '/api/ops?action=nextwave_v2_ideogram_generate_character_reference');
+    assert.equal(JSON.stringify(seen[0].body), JSON.stringify({ character_id: 'support' }));
+    for (const role of ['idle', 'active', 'point', 'react']) {
+      const seen2 = [];
+      const { sandbox: sb2, elements, taskId: t2 } = makeSandbox(async (url, body) => { seen2.push({ url, body }); return { ok: true, reused: false, asset_url: 'https://x/p.png', cost_usd: 0.10 }; });
+      elements('nwv2-charpose-btn-' + role + '-' + t2).disabled = false;
+      await sb2._nextwaveV2GenerateCharacterPose(t2, role);
+      assert.equal(seen2[0].url, '/api/ops?action=nextwave_v2_ideogram_generate_character_pose');
+      assert.equal(JSON.stringify(seen2[0].body), JSON.stringify({ character_id: 'support', pose_role: role }));
+    }
+  });
+
+  await t('(2) pose buttons stay disabled until the reference succeeds this session, and stay disabled after a failed reference', async () => {
+    const { sandbox, elements, taskId } = makeSandbox(async () => ({ ok: true, reused: false, asset_url: 'https://x/ref.png', cost_usd: 0.03 }));
+    for (const role of ['idle', 'active', 'point', 'react']) assert.equal(elements('nwv2-charpose-btn-' + role + '-' + taskId).disabled, true, 'initial state');
+    await sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    for (const role of ['idle', 'active', 'point', 'react']) assert.equal(elements('nwv2-charpose-btn-' + role + '-' + taskId).disabled, false, 'after success');
+
+    const { sandbox: sb2, elements: el2, taskId: t2 } = makeSandbox(async () => ({ ok: false, error: 'budget_reserve_failed' }));
+    await sb2._nextwaveV2GenerateCharacterReference(t2);
+    for (const role of ['idle', 'active', 'point', 'react']) assert.equal(el2('nwv2-charpose-btn-' + role + '-' + t2).disabled, true, 'after failure');
+  });
+
+  await t('(3) duplicate-click / one-request-at-a-time: a second click while one request is in flight makes no second real call', async () => {
+    let resolveFirst; const gate = new Promise((r) => { resolveFirst = r; });
+    let callCount = 0;
+    const { sandbox, taskId } = makeSandbox(async () => { callCount++; await gate; return { ok: true, reused: false, asset_url: 'https://x/ref.png', cost_usd: 0.03 }; });
+    const p1 = sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    await new Promise((r) => setTimeout(r, 10));
+    const p2 = sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    await p2;
+    assert.equal(callCount, 1);
+    resolveFirst(); await p1;
+  });
+
+  await t('(4) budget display accumulates correctly, including $0 for a reused asset', async () => {
+    const responses = [
+      { ok: true, reused: false, asset_url: 'https://x/ref.png', cost_usd: 0.03 },
+      { ok: true, reused: false, asset_url: 'https://x/idle.png', cost_usd: 0.10 },
+      { ok: true, reused: true, asset_url: 'https://x/active.png', cost_usd: 0 },
+    ];
+    let i = 0;
+    const { sandbox, elements, taskId } = makeSandbox(async () => responses[i++]);
+    await sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    elements('nwv2-charpose-btn-idle-' + taskId).disabled = false;
+    await sandbox._nextwaveV2GenerateCharacterPose(taskId, 'idle');
+    elements('nwv2-charpose-btn-active-' + taskId).disabled = false;
+    await sandbox._nextwaveV2GenerateCharacterPose(taskId, 'active');
+    assert.equal(sandbox.window._nwv2CharSpent[taskId], 0.13);
+  });
+
+  await t('(5) reconciliation_required renders as a distinct stop state, never a generic error, never auto-retried', async () => {
+    const { sandbox, elements, taskId } = makeSandbox(async () => ({ ok: false, error: 'reconciliation_required' }));
+    await sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    const html = elements('nwv2-charref-status-' + taskId).innerHTML;
+    assert.ok(/reconciliation/i.test(html));
+    assert.ok(!/undefined/.test(html));
+  });
+
+  await t('(6) cap_exceeded shows the real spend figures from the response, not a generic message', async () => {
+    const { sandbox, elements, taskId } = makeSandbox(async () => ({ ok: false, error: 'character_generation_cap_exceeded', spend_so_far_usd: 0.95, cap_usd: 1.0 }));
+    elements('nwv2-charpose-btn-idle-' + taskId).disabled = false;
+    await sandbox._nextwaveV2GenerateCharacterPose(taskId, 'idle');
+    assert.ok(elements('nwv2-charpose-status-idle-' + taskId).innerHTML.includes('0.95'));
+  });
+
+  await t('(7) an unexpected/thrown error is caught and displayed, never crashes the handler', async () => {
+    const { sandbox, elements, taskId } = makeSandbox(async () => { throw new Error('network blip'); });
+    await sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    assert.ok(elements('nwv2-charref-status-' + taskId).innerHTML.includes('network blip'));
+  });
+
+  await t('(8) a successful generation shows the draft image and "draft" status text', async () => {
+    const { sandbox, elements, taskId } = makeSandbox(async () => ({ ok: true, reused: false, asset_url: 'https://x/ref.png', cost_usd: 0.03 }));
+    await sandbox._nextwaveV2GenerateCharacterReference(taskId);
+    const html = elements('nwv2-charref-status-' + taskId).innerHTML;
+    assert.ok(html.includes('https://x/ref.png'));
+    assert.ok(/draft/i.test(html));
+  });
+
+  await t('(9) no video-production or publishing symbols anywhere in the new UI block', () => {
+    for (const forbidden of ['nextwaveV2StartBuild', 'nextwaveV2StartHybridBuild', 'youtubeUploadVideo', 'smVideoProduction', '_srvFarsiApproveVideo']) {
+      assert.ok(!uiSrc.includes(forbidden), `must not reference "${forbidden}"`);
+    }
+  });
+
+  await t('(10) isolation: the new UI block calls only the two already-deployed Stage 4B actions, never a new endpoint', () => {
+    const actionMatches = uiSrc.match(/action=nextwave_v2_ideogram[a-z_]*/g) || [];
+    const uniqueActions = [...new Set(actionMatches)];
+    assert.deepEqual(uniqueActions.sort(), ['action=nextwave_v2_ideogram_generate_character_pose', 'action=nextwave_v2_ideogram_generate_character_reference'].sort());
+  });
+}
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }
