@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { classifyAction } from '../../preservation/stub-server.mjs';
 import { srv2RunPilotUpload, srv2RunProductionUpload } from '../../../lib/srvStudioV2Pilot.mjs';
+import { srv2EnsurePlaylist, srv2RunPlaylistSync } from '../../../lib/srvStudioV2Playlists.mjs';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { makeStudioFixture, sampleGeneratedPackage, sampleCaption, v2SamplePackage } from './fixture.mjs';
@@ -106,7 +107,7 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
     if (problems.length) return { ok: false, dryRun: true, error: 'Preview dry run rejected: ' + problems.join('; ') };
     // Same response shape as the real youtube_upload_video (youtubeVideoId, channelId, privacyStatus) — E3.
     return action === 'youtube_upload_video'
-      ? { ok: true, dryRun: true, youtubeVideoId: 'dryrun-' + n, channelId: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg', channelTitle: 'SRV Studio ', privacyStatus: j.publishAt ? 'private' : (j.privacyStatus || 'private'), uploadedAt: new Date().toISOString() }
+      ? { ok: true, dryRun: true, youtubeVideoId: (ytState.videos['dryrun' + String(n).padStart(5, '0')] = 'private', 'dryrun' + String(n).padStart(5, '0')), /* 030: a valid 11-character id, private in the fake YouTube */ channelId: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg', channelTitle: 'SRV Studio ', privacyStatus: j.publishAt ? 'private' : (j.privacyStatus || 'private'), uploadedAt: new Date().toISOString() }
       : { ok: true, dryRun: true, videoId: j.videoId };
   }
 
@@ -194,6 +195,18 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
         }, json || {}, { supabaseUrl: host + '/__sb' });
         return send(res, out.status, out.json);
       }
+      if (action === 'srv_studio_v2_playlist_sync') { // 030: the real sync runner against the in-memory YouTube
+        if (!json || (json.ceo_session_token !== 'preview.session' && !json.operator_session_token)) return send(res, 401, { ok: false, playlistSync: true, error: 'publisher_session_required' });
+        const out = await srv2RunPlaylistSync({
+          now: () => Date.now(), flagOn: async () => store.settings.srv_studio_v2_enabled === 'true',
+          getSetting: async (k) => (k in store.settings ? { text: store.settings[k] } : null),
+          casSetting: async (k, oldText, newText) => { const cur = k in store.settings ? store.settings[k] : null; if (cur !== oldText) return false; store.settings[k] = newText; persist(); return true; },
+          getPackage: async (id) => { const r = store.packages[id]; try { return r ? JSON.parse(r.full_package) : null; } catch { return null; } },
+          lookupChannel: async () => ({ channel_id: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg' }),
+          yt: async () => fakeYt,
+        }, json || {});
+        return send(res, out.status, out.json);
+      }
       if (action === 'srv_studio_v2_production_upload') { // 028: the real production policy, with this server's settings/state as the store
         if (!json || (json.ceo_session_token !== 'preview.session' && !json.operator_session_token)) return send(res, 401, { ok: false, production: true, error: 'publisher_session_required' });
         const host = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(String(req.headers.host || '')) ? 'http://' + req.headers.host : origin;
@@ -208,6 +221,7 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
           lookupChannel: async () => ({ channel_id: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg' }),
           upload: async (body) => ({ status: 200, json: dryRun('youtube_upload_video', body) }),
           newId: () => 'pr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), by: json.ceo_session_token ? 'ceo' : 'operator',
+          afterUpload: async ({ kind, videoId }) => srv2EnsurePlaylist(fakeYt, kind, videoId), // 030
         }, json || {}, { supabaseUrl: host + '/__sb' });
         return send(res, out.status, out.json);
       }
@@ -221,11 +235,21 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
     return send(res, 200, { ok: true });
   }
 
+  // 030: in-memory SRV Studio YouTube (playlists, membership, video privacy). /__stub/yt?scope=0 simulates today's token
+  // (no playlist scope); every dry-run upload becomes a private video here.
+  const ytState = { scope: true, playlists: { PLXCBPiF9p6SA: { channelId: 'UC0nzWQX6AaUqlF5FozNpWPg', title: 'SRV Studio, the full Collection', privacy: 'public' }, 'PLATi-bbiaU30': { channelId: 'UC0nzWQX6AaUqlF5FozNpWPg', title: 'SRV Studio Full Short Collection', privacy: 'public' } }, items: { PLXCBPiF9p6SA: [], 'PLATi-bbiaU30': [] }, videos: {}, calls: [] };
+  const fakeYt = {
+    getPlaylist: async (id) => { ytState.calls.push(['getPlaylist', id]); const p = ytState.playlists[id]; return p ? { id, snippet: { channelId: p.channelId, title: p.title }, status: { privacyStatus: p.privacy } } : null; },
+    findItem: async (pl, v) => { ytState.calls.push(['findItem', pl, v]); return (ytState.items[pl] || []).includes(v) ? { id: 'item_' + v } : null; },
+    insertItem: async (pl, v) => { ytState.calls.push(['insertItem', pl, v]); if (!ytState.scope) { const e = new Error('HTTP 403 insufficientPermissions'); e.code = 'insufficient_scope'; throw e; } ytState.items[pl].push(v); return { id: 'item_' + v }; },
+    getVideo: async (id) => { ytState.calls.push(['getVideo', id]); const v = ytState.videos[id]; return v ? { id, snippet: { channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' }, status: { privacyStatus: v } } : null; },
+  };
   const server = http.createServer(async (req, res) => {
     try {
       const u = new URL(req.url, 'http://x');
       if (PROD_MARK.test(req.url) || PROD_MARK.test(String(req.headers.referer || ''))) productionHits++;
       if (u.pathname === '/__stub/log') return send(res, 200, { productionHits, count: log.length, log: log.slice(-400) });
+      if (u.pathname === '/__stub/yt') { if (u.searchParams.has('scope')) ytState.scope = u.searchParams.get('scope') !== '0'; if (u.searchParams.get('video')) ytState.videos[u.searchParams.get('video')] = u.searchParams.get('privacy') || 'private'; return send(res, 200, ytState); }
       if (u.pathname === '/__stub/reset') { store = fresh(); persist(); log.length = 0; dryRuns.length = 0; return send(res, 200, { ok: true, reset: true }); }
       if (u.pathname === '/__stub/state') return send(res, 200, { settings: Object.keys(store.settings), packages: Object.values(store.packages).map((r) => ({ id: r.package_id, title: r.title, task: r.task_id })) });
       // Checkpoint C — avatar studio page, the two modules it imports, and the test-task avatar view.

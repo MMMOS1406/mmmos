@@ -20,6 +20,7 @@ import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSec
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
 import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProductionUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
+import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -238,6 +239,7 @@ const PUBLISH_GATED_ACTIONS = new Set([
   'youtube_video_status', 'youtube_check_scope', 'sm_va_task_mark_published',
   'srv_studio_v2_va_upload', // SRV-STUDIO-V2-023 (it also requires a VA/CEO session itself)
   'srv_studio_v2_production_upload', // SRV-STUDIO-V2-028 (it also requires a VA/CEO session itself)
+  'srv_studio_v2_playlist_sync', // SRV-STUDIO-V2-030 (it also requires a VA/CEO session itself)
 ]);
 const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
 const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -3848,10 +3850,33 @@ async function srvStudioV2ProductionUpload(req, res) {
       }),
       newId: () => 'pr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       by: who.role,
+      // SRV-STUDIO-V2-030: after a verified upload, add it to its SRV Studio playlist (verified IDs; failures never undo the upload)
+      afterUpload: async ({ kind, videoId, conn }) => srv2EnsurePlaylist(srv2YouTubeAdapter((await _refreshYoutubeToken(conn.refresh_token)).accessToken), kind, videoId),
     }, req.body || {}, { supabaseUrl: SUPABASE_URL });
     return res.status(out.status).json(out.json);
   } catch (e) {
     return res.status(500).json({ ok: false, production: true, error: 'production_server_error', message: e.message });
+  }
+}
+// SRV-STUDIO-V2-030 — playlist membership check/add for a package production already uploaded, plus Related-video and
+// end-screen eligibility for the VA steps. VA/CEO session; identity comes from the production ledger (see lib).
+async function srvStudioV2PlaylistSync(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, playlistSync: true, error: 'POST only' });
+  const who = await _publisherFromRequest(req);
+  if (!who || (who.role !== 'operator' && who.role !== 'ceo')) return res.status(401).json({ ok: false, playlistSync: true, error: 'publisher_session_required' });
+  try {
+    const out = await srv2RunPlaylistSync({
+      now: () => Date.now(),
+      flagOn: () => srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY }),
+      getSetting: srvStudioV2PilotSetting,
+      casSetting: srvStudioV2PilotCas,
+      getPackage: async (pkgId) => { const rows = await sbGet(`packages?package_id=eq.${encodeURIComponent(pkgId)}&select=full_package`); try { return rows && rows[0] ? JSON.parse(rows[0].full_package) : null; } catch (_) { return null; } },
+      lookupChannel: () => _getYoutubeConnectionByTitle('SRV Studio', { exact: true }),
+      yt: async (conn) => srv2YouTubeAdapter((await _refreshYoutubeToken(conn.refresh_token)).accessToken),
+    }, req.body || {});
+    return res.status(out.status).json(out.json);
+  } catch (e) {
+    return res.status(500).json({ ok: false, playlistSync: true, error: 'playlist_sync_server_error', message: e.message });
   }
 }
 // SRV-STUDIO-V2-023 — runs the one CEO-authorized title correction (app_settings.srv_studio_v2_retitle_job, writable
@@ -20418,6 +20443,7 @@ export default async function handler(req, res) {
     if (action === 'farsi_regen_caption')        return await farsiRegenCaption(req, res); // v15.6.5
     if (action === 'srv_english_regen_caption')  return await srvEnglishRegenCaption(req, res); // SRV Studio V2 (flag-gated client)
     if (action === 'srv_studio_v2_pilot_upload') return await srvStudioV2PilotUpload(req, res); // SRV Studio V2 pilot (server-enforced, off unless authorized)
+    if (action === 'srv_studio_v2_playlist_sync') return await srvStudioV2PlaylistSync(req, res); // SRV-STUDIO-V2-030 playlist check/add + VA-step eligibility (VA/CEO session)
     if (action === 'srv_studio_v2_va_upload')    return await srvStudioV2VaUpload(req, res);    // SRV-STUDIO-V2-023 VA allowance (VA/CEO session; off unless authorized)
     if (action === 'srv_studio_v2_production_upload') return await srvStudioV2ProductionUpload(req, res); // SRV-STUDIO-V2-028 normal VA production (VA/CEO session; private, Long only)
     if (action === 'srv_studio_v2_retitle_job')  return await srvStudioV2RetitleJob(req, res);  // SRV-STUDIO-V2-023 one-time, admin-authorized title correction
