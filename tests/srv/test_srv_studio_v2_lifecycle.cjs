@@ -13,7 +13,7 @@ function slice(src, start, end) { const s = src.indexOf(start); if (s < 0) throw
 function top(src, name) { const m = src.match(new RegExp('\\n(async )?function ' + name + '\\(')); if (!m) throw new Error('missing ' + name); const s = m.index + 1; return src.slice(s, src.indexOf('\n}\n', s) + 2); }
 
 // ── sandbox ───────────────────────────────────────────────────────────────────
-function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, readbackLie = false, settings = {}, upsertDelayMs = 0, src = H } = {}) {
+function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, readbackLie = false, settings = {}, upsertDelayMs = 0, src = H, titleUnique = true } = {}) {
   const els = {};
   const el = (id, value = '') => (els[id] = { id, value, textContent: '', style: {}, disabled: false });
   const calls = { upserts: [], caption: [], generate: 0, renders: 0, alerts: [] };
@@ -27,7 +27,8 @@ function makeEnv({ flag = null, search = '', saveOk = true, captionOk = true, re
       if (upsertDelayMs) await new Promise((r) => setTimeout(r, upsertDelayMs)); // production package writes take seconds
       if (!saveOk) return { ok: false, status: 500, text: async () => 'boom', json: async () => ({}) };
       // production has UNIQUE (engine, title) on packages
-      if (Object.values(table).some((r) => r.package_id !== row.package_id && r.engine === row.engine && r.title === row.title)) return { ok: false, status: 409, text: async () => '{"code":"23505","message":"duplicate key value violates unique constraint \\"packages_engine_title_unique\\""}', json: async () => ({}) };
+      // titleUnique: the pre-029 database rule; false models it after the 029 migration (SRV English exempt)
+      if ((titleUnique || row.engine !== 'SRV English') && Object.values(table).some((r) => r.package_id !== row.package_id && r.engine === row.engine && r.title === row.title)) return { ok: false, status: 409, text: async () => '{"code":"23505","message":"duplicate key value violates unique constraint \\"packages_engine_title_unique\\""}', json: async () => ({}) };
       table[row.package_id] = row; return json(null);
     }
     if (u.includes('/rest/v1/packages?package_id=eq.') || u.includes('/rest/v1/packages?engine=eq.')) {
@@ -178,7 +179,7 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const fields = ['title', 'lyrics', 'shortLyrics', 'sunoPrompt', 'shortSunoPrompt'];
     // SRV-STUDIO-V2-021: a Short shows only its own lyrics + Suno prompt (plus title and the editable caption).
     // 026: SRV Studio is Long-only — an unfinished Short in Review is retired on its first render (nothing editable).
-    ok('Review (026): an unfinished Short task is retired on first render — no editable fields, Long-only message', !/id="srv2f_p1_/.test(html) && /SRV Studio now produces <strong[^>]*>Emotional Deep House Long<\/strong> videos only/.test(html) && ctx.D.tasks[0].status === 'done' && !!ctx.D.tasks[0].srvRetired);
+    ok('Review (026/029): an unfinished pre-029 Short task is retired on first render — no editable fields; a Short is made only from a Long', !/id="srv2f_p1_/.test(html) && /created as a <strong[^>]*>Short<\/strong> before SRV Studio Shorts became promotional extracts/.test(html) && ctx.D.tasks[0].status === 'done' && !!ctx.D.tasks[0].srvRetired);
     const lh = await (async () => { const L = makeEnv({ flag: 'true' }); await L.settle(); L.ctx.D.tasks = [task(5, { contentType: 'Long', contentFormat: 'long', isLong: true })]; L.ctx.D.packages = [pkgOf('p1', 5)]; vm.runInContext("_srvEnglishSetStage('5','review')", L.ctx); return vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', L.ctx); })();
     ok('Review (Long): only title, full lyrics, full-song Suno prompt and the caption are editable boxes', ['title', 'lyrics', 'sunoPrompt', 'captionYT'].every((k) => lh.includes('id="srv2f_p1_' + k + '"')) && !lh.includes('id="srv2f_p1_shortLyrics"') && !lh.includes('id="srv2f_p1_shortSunoPrompt"'));
     ok('Review (Long): Short lyrics and the Short Suno prompt are not displayed at all', !/SHORT LYRICS|SUNO STYLE PROMPT — SHORT/.test(lh) && !lh.includes('short lyric') && !lh.includes('short prompt'));
@@ -419,7 +420,9 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     els['srv2f_' + P + '_title'].value = 'The part you left behind';
     const r = await vm.runInContext(`_srvEnglishV2SaveField('${P}','title')`, ctx); await E.settle();
     ok('022 reproduction: the title save fails and says exactly why (duplicate title held by cancelled task #131)', r === false && /another SRV English package already uses this title \(task #131, cancelled, package pkg_1792112629901\)/.test(els['srv2st_' + P + '_title'].textContent));
-    ok('022 reproduction: nothing was written for the failed title (no 409 round-trip needed — checked first)', !calls.upserts.some((u) => u.package_id === P && u.title === 'The part you left behind'));
+    // 029: titles may repeat, so there is no pre-check any more; while the database still has the old unique rule the
+    // write is refused there, explained, and nothing is stored.
+    ok('022/029 with the old database rule: the refused title is not stored (the package row keeps its saved title)', E.table[P].title === 'Your Hand Found Mine' && /database still has the old one-title-per-business rule/.test(els['srv2st_' + P + '_title'].textContent));
     ok('022 failed save is not silent: the typed title stays in the box and is listed as NOT saved; the package keeps the saved title', els['srv2f_' + P + '_title'].value === 'The part you left behind' && cur.title === 'Your Hand Found Mine' && JSON.stringify(vm.runInContext(`_srvEnglishV2DirtyKeys('${P}')`, ctx)) === '["title"]');
     ok('022 "Up to date" is never shown while the title is unsaved; the screen names the saved title the payload still uses', /Not up to date — SONG TITLE is not saved/.test(els['srv2capact_' + P].innerHTML) && /Your Hand Found Mine/.test(els['srv2capact_' + P].innerHTML) && !/Up to date with/.test(els['srv2capact_' + P].innerHTML));
     await vm.runInContext(`_srvEnglishV2ApprovePackage('133','${P}')`, ctx); await E.settle();
@@ -497,13 +500,13 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ctx.D.tasks = [tl, ts];
     vm.runInContext("_srvEnglishSetStage('150','generate')", ctx); vm.runInContext("_srvEnglishSetStage('151','generate')", ctx);
     const hl = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
-    ok('026 Generate (Long): one fixed line, no mood or format selection', /SRV Studio — Female Emotional Deep House — Long/.test(hl) && !/<select/.test(hl) && !/Romantic|Happy/.test(hl.replace(/Female — Romantic · Long/, '')) && /vaGeneratePackage\('150'\)/.test(hl));
+    ok('026/029 Generate (Long): one fixed line, no mood choice; the 029 LONG/SHORT format selector is shown', /SRV Studio — Female Emotional Deep House — Long/.test(hl) && /id="srv2fmtsel_150"/.test(hl) && !/<select/.test(hl) && !/Romantic|Happy/.test(hl.replace(/Female — Romantic · Long/, '')) && /vaGeneratePackage\('150'\)/.test(hl));
     ok('026 the 023 format dropdown is gone from the app; the kept function name refuses every change', !/srv2fmt_|onchange="_srvEnglishV2SetFormat/.test(H) && vm.runInContext("_srvEnglishV2SetFormat('150','Short')", ctx) === false && tl.isLong === true);
     await vm.runInContext("vaGeneratePackage('150')", ctx); await E.settle();
     ok('026 a Long task created with another mood is generated as Emotional: mood, name and a logged change; format untouched', tl.mood === 'Female — Emotional' && tl.name === 'SRV English — Female — Emotional · Long' && tl.vaOverrides.some((o) => o.field === 'mood' && o.from === 'Female — Romantic') && tl.isLong === true && vm.runInContext("_srvEnglishGetStage('150')", ctx) === 'review');
     const n0 = calls.generate;
     await vm.runInContext("vaGeneratePackage('151')", ctx); await E.settle();
-    ok('026 a Short task is never generated and never relabelled as Long', calls.generate === n0 && ts.isLong !== true && ts.contentType !== 'Long' && calls.alerts.some((a) => /Long videos only/.test(a)));
+    ok('026 a Short task is never generated and never relabelled as Long', calls.generate === n0 && ts.isLong !== true && ts.contentType !== 'Long' && calls.alerts.some((a) => /A Short is never generated/.test(a)));
   }
   {
     // Retire unfinished Shorts once; uploaded/completed Shorts and every Long are untouched; packages kept.
@@ -548,7 +551,7 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const a = await route({ srv_studio_v2_pilot: pilotCfg(uid137) }, true, t137, 'long');
     const b = await route({ srv_studio_v2_pilot: pilotCfg(uid137) }, false, t137, 'long');
     const e = await route({ srv_studio_v2_va_allowance: VA }, false, t140, 'long');
-    ok('026 routing: a Short is never uploaded, whoever publishes and whatever allowance exists', !!sh.blocked && /Long videos only/.test(sh.blocked));
+    ok('026/029 routing: an ordinary (non-promotional) Short is never uploaded, whoever publishes and whatever allowance exists', !!sh.blocked && /only as a promotional extract/.test(sh.blocked));
     ok('026 routing: CEO + pilot Long → CEO pilot; VA on a CEO pilot task without a VA allowance → blocked', !!(a.pilot && a.pilot.kind === 'long') && !!b.blocked);
     ok('026 routing: VA Long under the Long-only VA allowance → VA path', !!(e.va && !e.pilot));
     ok('023 VA path posts with the VA/CEO session to the VA action; pilot path keeps the CEO-only call', /_publishAuthedFetch\('\/api\/ops\?action=srv_studio_v2_va_upload'/.test(top(H, '_srvEnglishV2Publish')) && /_ceoAuthedFetch\('\/api\/ops\?action=srv_studio_v2_pilot_upload'/.test(top(H, '_srvEnglishV2Publish')));
@@ -567,11 +570,11 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const e = await route({}, task(174, LONG), 'long');
     ok('028 routing: with production on, an ordinary new Long goes to the production upload (not the pilot or VA allowance)', !!(a.production && !a.va && !a.pilot));
     ok('028 routing: cancelled or retired tasks are never uploaded', !!b.blocked && /cancelled or retired/.test(b.blocked) && !!c.blocked);
-    ok('028 routing: a Short is still never uploaded', !!d.blocked && /Long videos only/.test(d.blocked));
+    ok('028/029 routing: an ordinary (non-promotional) Short is still never uploaded', !!d.blocked && /only as a promotional extract/.test(d.blocked));
     ok('028 routing: production off → previous behaviour (no production route)', !e.production);
     const pub = top(H, '_srvEnglishV2Publish');
     ok('028 Publish: production posts with the VA/CEO session, forces private + no schedule, records the upload; no [TEST] prompt', /_publishAuthedFetch\('\/api\/ops\?action=srv_studio_v2_production_upload'/.test(pub) && /if\(production\)\{\n\s*pkg\.isTest=true;_srvEnglishV2ReleaseSlot\(pkg\);[^\n]*\n\s*meta=R\.srv2YouTubeMetadata\(kind,pkg,\{test:false,moodKey,publishAt:null\}\);meta\.publishAt=null;meta\.privacyStatus='private';meta\.containsSyntheticMedia=true;/.test(pub) && /if\(production\)pkg\.srvProduction=/.test(pub) && /if\(!pilot&&!va&&!production&&test&&!confirm\(/.test(pub));
-    ok('028 Approve preview names the production upload (private, not scheduled, SRV Studio)', /SRV STUDIO PRODUCTION UPLOAD \(LONG\) — normal title, PRIVATE, not scheduled, SRV Studio channel/.test(top(H, '_srvEnglishV2FillMeta')));
+    ok('028 Approve preview names the production upload (private, not scheduled, SRV Studio)', /SRV STUDIO PRODUCTION UPLOAD \('\+kind\.toUpperCase\(\)\+'\) — normal title, PRIVATE, not scheduled, SRV Studio channel/.test(top(H, '_srvEnglishV2FillMeta')));
   }
 
   // ── 13. SRV-STUDIO-V2-025: overlapping saves (VA, Long #136, 2026-10-16 14:39 UTC) ──
@@ -632,6 +635,106 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const g = top(H, 'generatePackage');
     const restored = g.replace(",taskName:t.name,recentPackages,\n        ...(t.engine==='SRV English'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: request V2 music direction only while the flag is on", ',taskName:t.name,recentPackages})');
     ok('Shared (index.html): generatePackage unchanged apart from the flag-gated srvStudioV2 request field', restored === top(base, 'generatePackage'));
+  }
+
+  // ── SRV-STUDIO-V2-029: Long + promotional Short, full avatar library, repeated titles ──
+  {
+    const LONG = { contentType: 'Long', contentFormat: 'long', isLong: true, name: 'SRV English — Female — Emotional · Long' };
+    const SB = 'https://tldcwvtwjypmwynsklsd.supabase.co/storage/v1/object/public/srv-assets/';
+    const E = makeEnv({ flag: 'true', titleUnique: false }); await E.settle(); const { ctx, calls } = E;
+    const tLong = task(300, LONG), tNew = task(301, LONG), tOther = task(302, { ...LONG, engine: 'SRV Farsi' });
+    const uid = (t) => 'srve_' + t.createdAt + '_' + t.id;
+    const longPkg = pkgOf('pkg_long_300', 300, { title: 'Headlights In The Rain', srvTaskUid: uid(tLong), contentFormat: 'long', _srvLongVideoUrl: SB + 'pkg_long_300/long.mp4', _srvAudioUrl: SB + 'pkg_long_300/audio.mp3', srvRender: { width: 1920, height: 1080, durationSec: 200, audioDurationSec: 200 }, srvAvatar: { id: 'srv2-fm-03', by: 'rotation' }, srvProduction: { youtubeVideoId: 'YT_LONG_1' } });
+    const farsiPkg = pkgOf('pkg_farsi_1', 900, { engine: 'SRV Farsi', title: 'Farsi Long', _srvLongVideoUrl: SB + 'pkg_farsi_1/long.mp4' });
+    const unbuilt = pkgOf('pkg_long_unbuilt', 299, { title: 'Not Built', contentFormat: 'long' });
+    ctx.D.tasks = [tLong, tNew, tOther]; ctx.D.packages = [longPkg, farsiPkg, unbuilt]; E.seed(longPkg); E.seed(farsiPkg);
+    vm.runInContext("_srvEnglishSetStage('301','generate')", ctx);
+    const g0 = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[1])', ctx);
+    ok('029 Generate shows the LONG / SHORT selector (Long selected by default)', /id="srv2fmtsel_301"/.test(g0) && /_srvEnglishV2ChooseFormat\('301','short'\)/.test(g0) && /aria-pressed="true"[^>]*><div[^>]*>LONG/.test(g0));
+    ok('029 SHORT: an explicit, logged choice — task becomes a promotional Short', vm.runInContext("_srvEnglishV2ChooseFormat('301','short')", ctx) === true && tNew.srvPromo === true && tNew.isLong === false && tNew.contentFormat === 'short' && tNew.name === 'SRV English — Female — Emotional · Short' && tNew.vaOverrides.some((o) => o.field === 'format' && o.to.startsWith('short')));
+    const src = vm.runInContext('_srvEnglishV2PromoSources(D.tasks[1]).map(x=>x.pkg.id)', ctx);
+    ok('029 Long picker lists only built SRV Studio Longs — never another business, never an unbuilt Long', JSON.stringify(src) === '["pkg_long_300"]');
+    const g1 = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[1])', ctx);
+    ok('029 Short Generate: Long picker, 25–35 s section, preview and Create (no Claude generation button)', /srv2promo_long_301/.test(g1) && /min="25" max="35"/.test(g1) && /Preview this section/.test(g1) && /_srvEnglishV2CreatePromoShort\('301'\)/.test(g1) && !/vaGeneratePackage\('301'\)/.test(g1));
+    ok('029 LONG again restores exactly what the task was', vm.runInContext("_srvEnglishV2ChooseFormat('301','long')", ctx) === true && tNew.isLong === true && tNew.contentType === 'Long' && tNew.contentFormat === 'long' && !tNew.srvPromo && tNew.name === LONG.name);
+    vm.runInContext("_srvEnglishV2ChooseFormat('301','short')", ctx);
+    const sel = (st, d) => vm.runInContext(`_srvEnglishV2PromoSel['301']={longPkgId:'pkg_long_300',startSec:${st},durationSec:${d}}`, ctx);
+    E.el('srv2promo_st_301');
+    for (const [st, d, why] of [[60, 24, 'under 25 s'], [60, 36, 'over 35 s'], [190, 30, 'past the end of the song']]) {
+      sel(st, d); const r = await vm.runInContext("_srvEnglishV2CreatePromoShort('301')", ctx); await E.settle();
+      ok('029 Short section refused when ' + why, r === false && !vm.runInContext('_srvEnglishV2PkgForTask(D.tasks[1])', ctx));
+    }
+    sel(62, 30); const gen0 = calls.generate;
+    const made = await vm.runInContext("_srvEnglishV2CreatePromoShort('301')", ctx); await E.settle();
+    const sp = vm.runInContext('_srvEnglishV2PkgForTask(D.tasks[1])', ctx);
+    ok('029 Short created from the Long: same song title, the Long\'s lyrics, no new song or lyrics generated', made === true && sp && sp.title === longPkg.title && sp.lyrics === longPkg.lyrics && sp.sunoPrompt === longPkg.sunoPrompt && calls.generate === gen0 && !sp.shortLyrics);
+    ok('029 Short records its Long: package, task, section 62 s + 30 s, audio source, Long YouTube id', sp.srvShortOf.longPkgId === 'pkg_long_300' && sp.srvShortOf.longTaskUid === uid(tLong) && sp.srvShortOf.startSec === 62 && sp.srvShortOf.durationSec === 30 && sp.srvShortOf.audioSource === 'long-mp3' && sp.srvShortOf.longYoutubeVideoId === 'YT_LONG_1');
+    ok('029 Long and Short share the exact title and both rows are stored (own package ids, own task)', E.table[sp.id] && E.table[sp.id].title === E.table['pkg_long_300'].title && sp.id !== 'pkg_long_300' && sp.srvTaskUid === uid(tNew) && vm.runInContext("_srvEnglishGetStage('301')", ctx) === 'review');
+    ok('029 the Short keeps the Long\'s cover image by default', sp.srvAvatar.id === 'srv2-fm-03' && sp.srvAvatar.by === 'from-long');
+    const used = vm.runInContext('JSON.stringify([_srvEnglishV2BuildKeys(D.tasks[1],_srvEnglishV2PkgForTask(D.tasks[1])),_srvEnglishV2FieldsFor(D.tasks[1],_srvEnglishV2PkgForTask(D.tasks[1])).length])', ctx);
+    ok('029 promotional Short builds from the Long\'s song text; the song is not editable at Review (caption only)', used === JSON.stringify([{ isLong: false, promo: true, lyrics: 'lyrics', sunoPrompt: 'sunoPrompt', otherLyrics: 'shortLyrics', otherSunoPrompt: 'shortSunoPrompt' }, 0]));
+    ok('029 the Long is unchanged (its task, format and package untouched)', tLong.isLong === true && !tLong.srvPromo && JSON.parse(E.table['pkg_long_300'].full_package).title === 'Headlights In The Rain' && !JSON.parse(E.table['pkg_long_300'].full_package).srvShortOf);
+    ok('029 the format can no longer change once the Short exists', vm.runInContext("_srvEnglishV2ChooseFormat('301','long')", ctx) === false && tNew.srvPromo === true);
+    ok('029 promotional Shorts are production: the 026 retirement never touches them', vm.runInContext('_srvEnglishV2RetireShorts()', ctx) === 0 && tNew.status === 'assigned' && !tNew.srvRetired);
+    const rv = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[1])', ctx);
+    ok('029 Review (promotional Short): source panel, caption field only — no title / lyrics / prompt editors', /PROMOTIONAL SHORT · FROM AN SRV STUDIO LONG/.test(rv) && /id="srv2f_[^"]*_captionYT"/.test(rv) && !/id="srv2f_[^"]*_(title|lyrics|sunoPrompt|shortLyrics)"/.test(rv));
+  }
+  {
+    // Routing — promotional Shorts upload only through production, and only when the CEO setting includes Shorts.
+    const PROD_L = JSON.stringify({ enabled: true, format: 'long', dailyCap: 5, channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const PROD_LS = JSON.stringify({ enabled: true, formats: ['long', 'short'], dailyCap: 5, channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const VA = JSON.stringify({ enabled: true, maxUploads: 2, perKind: { long: 1, short: 1 }, expires: new Date(Date.now() + 5 * 86400000).toISOString(), channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' });
+    const promoT = (id) => task(id, { isLong: false, contentFormat: 'short', contentType: 'Short', srvPromo: true });
+    const promoP = (id, t) => pkgOf('pkg_promo_' + id, id, { srvTaskUid: 'srve_' + t.createdAt + '_' + id, srvShortOf: { longPkgId: 'pkg_long_x', startSec: 10, durationSec: 30 } });
+    const route = async (settings, t, p, kind) => { const E = makeEnv({ flag: 'true', settings }); await E.settle(); E.ctx.D.tasks = [t]; E.ctx.D.packages = p ? [p] : []; return vm.runInContext(`_srvEnglishV2PublishRoute(D.tasks[0],'${kind}')`, E.ctx); };
+    const t1 = promoT(310), t2 = promoT(311), t3 = task(312), t4 = promoT(313), t5 = task(314, { contentType: 'Long', contentFormat: 'long', isLong: true });
+    const a = await route({ srv_studio_v2_production: PROD_L }, t1, promoP(310, t1), 'short');
+    const b = await route({ srv_studio_v2_production: PROD_LS }, t2, promoP(311, t2), 'short');
+    const c = await route({ srv_studio_v2_production: PROD_LS }, t3, null, 'short');
+    const d = await route({ srv_studio_v2_va_allowance: VA }, t4, promoP(313, t4), 'short');
+    const e = await route({ srv_studio_v2_production: PROD_LS }, t5, null, 'long');
+    ok('029 routing: a promotional Short is blocked while production authorizes Long only (today\'s setting)', !!a.blocked && /not switched on/.test(a.blocked));
+    ok('029 routing: with Shorts authorized, a promotional Short goes through normal production (private)', !!(b.production && b.production.formats.includes('short')));
+    ok('029 routing: an ordinary Short is never uploaded, even with Shorts authorized', !!c.blocked && /only as a promotional extract/.test(c.blocked));
+    ok('029 routing: a Short never uses the VA allowance or pilot (production only)', !!d.blocked && !d.va && !d.pilot);
+    ok('029 routing: Longs unchanged with the new setting', !!(e.production && !e.blocked));
+  }
+  {
+    // Repeated titles: two different Longs may share a title once the database rule is scoped (029 migration);
+    // before it, the write is refused by the database, explained, and nothing is stored.
+    for (const unique of [false, true]) {
+      const E = makeEnv({ flag: 'true', titleUnique: unique }); await E.settle(); const { ctx, els } = E;
+      const L = { contentType: 'Long', contentFormat: 'long', isLong: true };
+      const a = pkgOf('pkg_a', 320, { title: 'Same Song' }), b = pkgOf('pkg_b', 321, { title: 'Other Song' });
+      ctx.D.tasks = [task(320, L), task(321, L)]; ctx.D.packages = [a, b]; E.seed(a); E.seed(b);
+      const P = 'pkg_b'; ['title', 'lyrics', 'sunoPrompt', 'captionYT'].forEach((k) => { E.el('srv2f_' + P + '_' + k, b[k]); E.el('srv2st_' + P + '_' + k); E.el('srv2fa_' + P + '_' + k); });
+      ['srv2capst_', 'srv2capact_', 'srv2approve_st_', 'srv2prev_'].forEach((x) => E.el(x + P));
+      vm.runInContext("_srvEnglishSetStage('321','review')", ctx);
+      els['srv2f_' + P + '_title'].value = 'Same Song';
+      const r = await vm.runInContext(`_srvEnglishV2SaveField('${P}','title')`, ctx); await E.settle();
+      if (!unique) ok('029 duplicate titles save: a second Long saves the same title, verified (no pre-check, no rename)', r === true && E.table[P].title === 'Same Song' && E.table['pkg_a'].title === 'Same Song');
+      else ok('029 before the migration: the database refuses the repeat, the screen says the database rule is not changed yet, nothing stored', r === false && E.table[P].title === 'Other Song' && /database still has the old one-title-per-business rule/.test(els['srv2st_' + P + '_title'].textContent));
+    }
+  }
+  {
+    // Full approved avatar library — the picker offers every approved image with a preview.
+    const E = makeEnv({ flag: 'true' }); await E.settle(); const { ctx } = E;
+    const lib = vm.runInContext('_srvEnglishV2AvatarLibrary().map(a=>({id:a.id,hd:a.quality&&a.quality.hdReady,arch:!!a.archived,col:a.collection}))', ctx);
+    const all = vm.runInContext('SRV_STUDIO_V2_AVATARS.length+"/"+SRV_STUDIO_V2_AVATARS_ARCHIVED.length', ctx);
+    const emo = vm.runInContext("srv2AvatarPool().filter(a=>(a.moods||[]).includes('emotional')).length", ctx);
+    ok('029 library: every approved image (19 of 20 finals; held alternate #09 excluded), all HD-ready finals — more than the ' + emo + ' the rotation shows for Emotional', lib.length === 19 && !lib.some((a) => a.id === 'srv2-fm-09') && lib.every((a) => a.hd === true && !a.arch && a.col === 'final') && lib.length > emo, { all, n: lib.length });
+    ok('029 library: archived concept images are never offered', !lib.some((a) => /^srv2-av-/.test(a.id)));
+    const t = task(330, { contentType: 'Long', contentFormat: 'long', isLong: true }); const p = pkgOf('pkg_av', 330, { srvAvatar: { id: 'srv2-fm-01', by: 'rotation' } });
+    ctx.D.tasks = [t]; ctx.D.packages = [p]; E.seed(p);
+    vm.runInContext("_srvEnglishSetStage('330','review')", ctx);
+    const h = vm.runInContext('renderSRVEnglishLifecycleCard(D.tasks[0])', ctx);
+    const tiles = (h.match(/_srvEnglishV2ChooseAvatar\('330','pkg_av','srv2-fm-\d+'\)/g) || []).length;
+    ok('029 Review shows "Choose from library (19)" with 19 previews (grayscale, the registry crop)', /Choose from library \(19\)/.test(h) && tiles === 19 && /srv2avlib_pkg_av/.test(h) && /APPROVED SRV STUDIO LIBRARY · 19 images/.test(h));
+    const bad = await vm.runInContext("_srvEnglishV2ChooseAvatar('330','pkg_av','srv2-av-01')", ctx);
+    const held = await vm.runInContext("_srvEnglishV2ChooseAvatar('330','pkg_av','srv2-fm-09')", ctx);
+    ok('029 an archived or held image can never be chosen', bad === false && held === false && p.srvAvatar.id === 'srv2-fm-01');
+    const pick = await vm.runInContext("_srvEnglishV2ChooseAvatar('330','pkg_av','srv2-fm-17')", ctx); await E.settle();
+    ok('029 choosing an image saves it (verified) and records it as the operator\'s choice', pick === true && p.srvAvatar.id === 'srv2-fm-17' && p.srvAvatar.by === 'operator-choice' && JSON.parse(E.table['pkg_av'].full_package).srvAvatar.id === 'srv2-fm-17');
   }
 
   console.log(out.join('\n'));

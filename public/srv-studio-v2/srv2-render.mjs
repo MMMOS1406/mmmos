@@ -829,10 +829,12 @@ export async function srv2RenderVideo(opts) {
   const actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
   const buf = await actx.decodeAudioData(ab.slice(0));
   const ch = buf.getChannelData(0);
-  const duration = Math.min(buf.duration, kind === 'short' ? (opts.maxDuration || cfg.targetSec) : (opts.maxDuration || cfg.maxSec), cfg.maxSec);
+  // SRV-STUDIO-V2-029: a Short made from a Long plays a chosen section of the Long's song (opts.startSec, seconds).
+  const startSec = Math.max(0, Math.min(Number(opts.startSec) || 0, Math.max(0, buf.duration - 1)));
+  const duration = Math.min(buf.duration - startSec, kind === 'short' ? (opts.maxDuration || cfg.targetSec) : (opts.maxDuration || cfg.maxSec), cfg.maxSec);
   const verified = srv2VerifiedLyrics(opts.syncedLyrics, duration);
   const analysis = kind === 'short'
-    ? srv2AnalyzeAudio(ch, buf.sampleRate, { lineCount: 0, windowSec: duration, fromStart: true })
+    ? srv2AnalyzeAudio(ch.subarray(Math.floor(startSec * buf.sampleRate)), buf.sampleRate, { lineCount: 0, windowSec: duration, fromStart: true })
     : srv2AnalyzeAudio(ch, buf.sampleRate, { lineCount: 0, windowSec: 30 });
   const timeline = kind === 'short'
     ? { duration, lines: verified }
@@ -871,8 +873,9 @@ export async function srv2RenderVideo(opts) {
   // Wait for the audio clock to actually run (it can stall after resume), so the video has no black lead-in.
   for (let c0 = actx.currentTime, i = 0; actx.currentTime === c0 && i < 300; i++) await new Promise((r) => setTimeout(r, 10));
   const t0 = actx.currentTime + 0.1; const fadeSec = kind === 'short' ? 1.5 : 3;
+  if (startSec > 0) { gain.gain.setValueAtTime(0, t0); gain.gain.linearRampToValueAtTime(1, t0 + 0.4); } // no click at a mid-song cut
   gain.gain.setValueAtTime(1, t0 + Math.max(0, duration - fadeSec)); gain.gain.linearRampToValueAtTime(0, t0 + duration);
-  rec.start(1000); src.start(t0, 0, duration);
+  rec.start(1000); src.start(t0, startSec, duration);
   const started = performance.now(); let frame = 0; let lastSay = -1;
   await new Promise((resolve) => {
     const stop = makeTicker(cfg.fps, () => {
@@ -894,7 +897,7 @@ export async function srv2RenderVideo(opts) {
   const stats = {
     version: SRV2_RENDER_VERSION, kind, mime, container: info.container, videoCodec: info.video, audioCodec: info.audio,
     width: cfg.W, height: cfg.H, fps: cfg.fps, videoBitsPerSecondTarget: cfg.videoBitsPerSecond, audioBitsPerSecondTarget: cfg.audioBitsPerSecond,
-    durationSec: +duration.toFixed(2), audioDurationSec: +buf.duration.toFixed(2), sizeBytes: blob.size,
+    durationSec: +duration.toFixed(2), audioDurationSec: +buf.duration.toFixed(2), startSec: +startSec.toFixed(2), sizeBytes: blob.size,
     measuredKbps: Math.round((blob.size * 8) / duration / 1000), renderSec: +((performance.now() - started) / 1000).toFixed(1),
     captureMode: vtrack ? 'requestFrame' : 'captureStream(fps)', frames: m, hiddenDuringRender: hidden > 0, fontsLoaded: !!fontsOk, maxSourceUpscale: +scene.stats.maxUpscale.toFixed(2),
     analysis, hooks: timeline.hooks || [], lyricLines: (timeline.lines || []).length,

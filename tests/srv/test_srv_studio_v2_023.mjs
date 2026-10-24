@@ -192,4 +192,71 @@ function rworld(job, o = {}) {
   ok('Server: both actions dispatched; CEO-only actions untouched', /action === 'srv_studio_v2_va_upload'\)\s+return await srvStudioV2VaUpload/.test(OPS) && /action === 'srv_studio_v2_retitle_job'\)\s+return await srvStudioV2RetitleJob/.test(OPS) && /if \(!\(await requireCeoSession\(req\)\)\) return res\.status\(401\)\.json\(\{ ok: false, pilot: true, error: 'ceo_session_required' \}\)/.test(OPS));
 }
 
+// ── 029: promotional Shorts through normal production (Long + Short share the song title) ──
+{
+  const LS = JSON.stringify({ enabled: true, formats: ['long', 'short'], dailyCap: 5, channelId: CH });
+  const LONG_ONLY = JSON.stringify({ enabled: true, format: 'long', dailyCap: 5, channelId: CH });
+  const U = (n) => 'srve_1792300000000_' + n;
+  const TITLE = 'Headlights In The Rain';
+  const tasks = {
+    [U(401)]: { id: 401, engine: 'SRV English', isLong: true, contentType: 'Long', contentFormat: 'long', status: 'done' },
+    [U(402)]: { id: 402, engine: 'SRV English', isLong: false, contentType: 'Short', contentFormat: 'short', srvPromo: true, status: 'assigned' },
+    [U(403)]: { id: 403, engine: 'SRV English', isLong: false, contentType: 'Short', contentFormat: 'short', srvPromo: true, status: 'assigned' },
+    [U(404)]: { id: 404, engine: 'SRV English', isLong: false, contentType: 'Short Video', status: 'assigned' },
+    [U(405)]: { id: 405, engine: 'SRV English', isLong: true, contentType: 'Long', contentFormat: 'long', status: 'assigned' },
+  };
+  const vid = (n) => `${SB}/storage/v1/object/public/srv-assets/pkg_${n}/v.mp4`;
+  const basePk = {
+    pkg_401: { id: 'pkg_401', engine: 'SRV English', srvTaskUid: U(401), title: TITLE, _srvLongVideoUrl: vid(401), _srvAudioUrl: `${SB}/storage/v1/object/public/srv-assets/pkg_401/a.mp3` },
+    pkg_farsi: { id: 'pkg_farsi', engine: 'SRV Farsi', srvTaskUid: 'x', title: TITLE, _srvLongVideoUrl: vid(999) },
+    pkg_405: { id: 'pkg_405', engine: 'SRV English', srvTaskUid: U(405), title: TITLE, _srvLongVideoUrl: vid(405) },
+  };
+  const shortPkg = (n, o = {}) => ({ id: 'pkg_' + n, engine: 'SRV English', srvTaskUid: U(n), title: TITLE, _srvShortVideoUrl: vid(n), srvShortOf: { longPkgId: 'pkg_401', startSec: 60, durationSec: 30 }, srvRender: { width: 1080, height: 1920, durationSec: 30 }, ...o });
+  const pw = (cfg, pk) => { const w = world({ [P.SRV2_PROD_KEY]: cfg }); Object.assign(w.deps, { engineState: async () => 'test', taskByUid: async (u) => tasks[u] || null, getPackage: async (id) => (pk[id] ? JSON.parse(JSON.stringify(pk[id])) : null) }); return w; };
+  const rq = (n, kind) => req(U(n), kind, { pkgId: 'pkg_' + n, videoUrl: vid(n), title: TITLE + ' - Emotional Deep House | Night Drive SRV Studio' });
+  const PL = (o) => ({ ...basePk, ...o });
+  // today's production setting (Long only): a Short is refused before anything happens
+  const w0 = pw(LONG_ONLY, PL({ pkg_402: shortPkg(402) }));
+  const r0 = await P.srv2RunProductionUpload(w0.deps, rq(402, 'short'), { supabaseUrl: SB });
+  ok('029 Long-only setting (as deployed today): a Short is refused, nothing uploaded', r0.json.error === 'production_long_only' && w0.uploads.length === 0);
+  ok('029 config: {"formats":["long","short"]} parses; Short-only, unknown or duplicate formats are refused; the 028 form still means Long only',
+    JSON.stringify(P.srv2ParseProductionConfig(LS).config.formats) === '["long","short"]' && JSON.stringify(P.srv2ParseProductionConfig(LONG_ONLY).config.formats) === '["long"]'
+    && ['["short"]', '["long","clip"]', '["long","long"]', '[]'].every((f) => P.srv2ParseProductionConfig(`{"enabled":true,"formats":${f},"dailyCap":5,"channelId":"${CH}"}`).error === 'production_format_invalid'));
+  // Shorts authorized: a valid promotional Short uploads PRIVATE with the Long's exact title
+  const w = pw(LS, PL({ pkg_402: shortPkg(402), pkg_403: shortPkg(403) }));
+  const a = await P.srv2RunProductionUpload(w.deps, rq(402, 'short'), { supabaseUrl: SB });
+  const ent = JSON.parse(w.table[P.SRV2_PROD_LEDGER_KEY]).entries;
+  ok('029 a promotional Short uploads through normal production: PRIVATE, unscheduled, AI disclosure, the Long\'s exact song title', a.status === 200 && w.uploads.length === 1 && w.uploads[0].privacyStatus === 'private' && w.uploads[0].publishAt === null && w.uploads[0].containsSyntheticMedia === true && w.uploads[0].title.startsWith(TITLE + ' - '));
+  ok('029 the ledger records the Short by its own task uid + package id (kind short)', ent.length === 1 && ent[0].taskUid === U(402) && ent[0].pkgId === 'pkg_402' && ent[0].kind === 'short' && ent[0].status === 'uploaded');
+  const b = await P.srv2RunProductionUpload(w.deps, rq(403, 'short'), { supabaseUrl: SB });
+  ok('029 a second Short of the same Long, same title, also uploads — titles are never an identity key', b.status === 200 && w.uploads.length === 2 && w.uploads[1].title === w.uploads[0].title);
+  const dup = await P.srv2RunProductionUpload(w.deps, rq(402, 'short'), { supabaseUrl: SB });
+  ok('029 duplicate-upload protection: the same Short task never uploads twice', dup.json.error === 'task_already_uploaded_or_in_progress' && w.uploads.length === 2);
+  const asLong = await P.srv2RunProductionUpload(w.deps, rq(403, 'long'), { supabaseUrl: SB });
+  const longAsShort = await P.srv2RunProductionUpload(pw(LS, PL({})).deps, rq(405, 'short'), { supabaseUrl: SB });
+  ok('029 Long and Short can never consume each other\'s identity: a Short task cannot upload as Long, a Long task cannot upload as Short', asLong.json.error === 'production_long_only' && longAsShort.json.error === 'short_task_not_promotional');
+  const lw = pw(LS, PL({ pkg_402: shortPkg(402) }));
+  await P.srv2RunProductionUpload(lw.deps, rq(402, 'short'), { supabaseUrl: SB });
+  const lng = await P.srv2RunProductionUpload(lw.deps, rq(405, 'long'), { supabaseUrl: SB });
+  ok('029 a Long with the same title as an uploaded Short still uploads (its own task + package)', lng.status === 200 && lw.uploads.length === 2);
+  // refusals — each case uploads nothing
+  const cases = [
+    ['an ordinary (non-promotional) Short task', 404, null, 'short_task_not_promotional'],
+    ['a Short without a source Long', 402, shortPkg(402, { srvShortOf: null }), 'short_without_source_long'],
+    ['a Short whose Long belongs to another business', 402, shortPkg(402, { srvShortOf: { longPkgId: 'pkg_farsi', startSec: 0, durationSec: 30 } }), 'short_source_long_not_srv_studio'],
+    ['a Short whose "Long" is itself', 402, shortPkg(402, { srvShortOf: { longPkgId: 'pkg_402', startSec: 0, durationSec: 30 } }), 'short_source_long_invalid'],
+    ['a Short whose title is not the Long\'s', 402, shortPkg(402, { title: 'Something Else' }), 'short_title_differs_from_long'],
+    ['a 24-second section', 402, shortPkg(402, { srvShortOf: { longPkgId: 'pkg_401', startSec: 0, durationSec: 24 }, srvRender: { width: 1080, height: 1920, durationSec: 24 } }), 'short_duration_out_of_range'],
+    ['a 36-second section', 402, shortPkg(402, { srvShortOf: { longPkgId: 'pkg_401', startSec: 0, durationSec: 36 }, srvRender: { width: 1080, height: 1920, durationSec: 36 } }), 'short_duration_out_of_range'],
+    ['a render that came out 20 s', 402, shortPkg(402, { srvRender: { width: 1080, height: 1920, durationSec: 20 } }), 'short_render_duration_out_of_range'],
+    ['a horizontal render', 402, shortPkg(402, { srvRender: { width: 1920, height: 1080, durationSec: 30 } }), 'short_not_vertical'],
+    ['a video URL that is not the Short\'s recorded render', 402, shortPkg(402, { _srvShortVideoUrl: `${SB}/storage/v1/object/public/srv-assets/pkg_402/other.mp4` }), 'video_not_from_this_package'],
+  ];
+  for (const [why, n, pk, code] of cases) {
+    const cw = pw(LS, PL(pk ? { ['pkg_' + n]: pk } : {}));
+    const r = await P.srv2RunProductionUpload(cw.deps, rq(n, 'short'), { supabaseUrl: SB });
+    ok('029 refused: ' + why + ' (' + code + ')', r.json.error === code && cw.uploads.length === 0, r.json);
+  }
+}
+
 console.log(out.join('\n')); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
