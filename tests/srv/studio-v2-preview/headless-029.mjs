@@ -69,7 +69,7 @@ await page.evaluate(() => { const el = document.getElementById('srv2promo_start_
 await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Create Short from this Long/.test(b.textContent)).click());
 await page.waitForFunction(() => _srvEnglishV2GetStage('9206') === 'review', { timeout: 30000, polling: 300 });
 const sp = await page.evaluate(() => { const p = _srvEnglishV2PkgForTask(_srvEnglishTaskById('9206')); return { id: p.id, title: p.title, lyrics: p.lyrics, so: p.srvShortOf, av: p.srvAvatar }; });
-ok('Short created from the Long (Create clicked): same song title and lyrics, section 12 s + 30 s, Long MP3 as audio', sp.title === longP.title && sp.so.longPkgId === 'pkg_preview_205' && sp.so.startSec === 12 && sp.so.durationSec === 30 && sp.so.audioSource === 'long-mp3' && sp.so.longYoutubeVideoId === 'dryrun-1', sp.so);
+ok('Short created from the Long (Create clicked): same song title and lyrics, section 12 s + 30 s, Long MP3 as audio', sp.title === longP.title && sp.so.longPkgId === 'pkg_preview_205' && sp.so.startSec === 12 && sp.so.durationSec === 30 && sp.so.audioSource === 'long-mp3' && sp.so.longYoutubeVideoId === 'dryrun00001', sp.so);
 const rows = await (await fetch(srv.origin + '/__stub/state')).json();
 ok('Both packages are stored with the identical title (separate package ids)', rows.packages.filter((r) => r.title === longP.title).map((r) => r.id).sort().join(',') === ['pkg_preview_205', sp.id].sort().join(','), rows.packages.filter((r) => r.title === longP.title));
 await view(S, '#srv2avlib_' + sp.id);

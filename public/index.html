@@ -16961,6 +16961,10 @@ async function _srvEnglishV2Publish(pkgId,taskId){
     if(kind==='long')pkg._srvYtLongId=vid;else pkg._srvYtShortId=vid;
     if(pilot)pkg.srvPilot={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
     if(production)pkg.srvProduction={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
+    if(production){ // 030: playlist result (API-verified by the server) and the planned — not automatic — public release
+      pkg.srvPlaylist=up.playlist||null;
+      pkg.srvSchedulePlan=_srvEnglishV2SchedulePlan(kind,Date.now(),_srvEnglishV2TakenSlots(kind,pkg.id));
+    }
     if(va)pkg.srvVa={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
     let thumb=null;
     if(pkg._srvThumbUrl){
@@ -17036,6 +17040,129 @@ async function _srvEnglishV2PublishRoute(task,kind,pkg){
   if(p)return {blocked:'This task is one of the CEO pilot tasks: only a signed-in CEO can publish it, until the CEO authorizes the VA upload allowance. Nothing was uploaded.'};
   return {};
 }
+// ── SRV-STUDIO-V2-030: playlists, planned release schedule, Related-video and end-screen VA steps ──
+// Verified on the SRV Studio channel (UC0nzWQX6AaUqlF5FozNpWPg) — same IDs as lib/srvStudioV2Playlists.mjs (a test enforces it).
+const SRV2_PLAYLISTS={long:{id:'PLXCBPiF9p6SA',title:'SRV Studio, the full Collection'},short:{id:'PLATi-bbiaU30',title:'SRV Studio Full Short Collection'}};
+// Planned public-release slots (America/New_York). PROVISIONAL PM test times, pending the CEO's final choice. Uploads
+// stay PRIVATE with no publishAt: this only plans and displays the release — nothing is made public automatically.
+const SRV2_SCHEDULE={tz:'America/New_York',status:'provisional',long:{weekday:5,hour:18,minute:0},short:{weekday:0,hour:18,minute:0},minLeadMinutes:60};
+const SRV2_WEEKDAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+function _srv2TzParts(ms,tz){
+  const o={};
+  new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',weekday:'short',timeZoneName:'short'})
+    .formatToParts(new Date(ms)).forEach(function(p){o[p.type]=p.value;});
+  return {y:+o.year,mo:+o.month,d:+o.day,h:(+o.hour)%24,mi:+o.minute,wd:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(o.weekday),tzName:o.timeZoneName};
+}
+// UTC instant of a wall-clock time in tz (DST-correct: the offset is re-read at the candidate instant).
+function _srv2ZonedToUtc(y,mo,d,h,mi,tz){
+  const want=Date.UTC(y,mo-1,d,h,mi);let t=want;
+  for(let i=0;i<4;i++){const p=_srv2TzParts(t,tz);const diff=Date.UTC(p.y,p.mo-1,p.d,p.h,p.mi)-want;if(!diff)break;t-=diff;}
+  return t;
+}
+// Next free slot for this format at least minLeadMinutes after fromMs; taken = UTC ISO strings already planned by
+// other SRV Studio packages of the same format (one release per slot). SRV Studio data only — the shared publishing
+// slot pool (D._publishSlots) used by other businesses is never read or written here.
+function _srvEnglishV2SchedulePlan(kind,fromMs,taken){
+  const S=SRV2_SCHEDULE,slot=S[kind];if(!slot)return null;
+  const tk=new Set(taken||[]);const p=_srv2TzParts(fromMs,S.tz);
+  for(let add=0;add<120;add++){
+    const day=new Date(Date.UTC(p.y,p.mo-1,p.d+add));
+    if(day.getUTCDay()!==slot.weekday)continue;
+    const utc=_srv2ZonedToUtc(day.getUTCFullYear(),day.getUTCMonth()+1,day.getUTCDate(),slot.hour,slot.minute,S.tz);
+    if(utc<fromMs+S.minLeadMinutes*60000)continue;
+    const iso=new Date(utc).toISOString();if(tk.has(iso))continue;
+    const lp=_srv2TzParts(utc,S.tz);
+    const h12=((lp.h+11)%12)+1, ap=lp.h<12?'AM':'PM';
+    const md=new Date(Date.UTC(lp.y,lp.mo-1,lp.d)).toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'});
+    return {kind,tz:S.tz,tzName:lp.tzName,utcIso:iso,localDate:lp.y+'-'+String(lp.mo).padStart(2,'0')+'-'+String(lp.d).padStart(2,'0'),localTime:String(lp.h).padStart(2,'0')+':'+String(lp.mi).padStart(2,'0'),
+      weekday:SRV2_WEEKDAYS[lp.wd],label:SRV2_WEEKDAYS[lp.wd].slice(0,3)+' '+md+' · '+h12+':'+String(lp.mi).padStart(2,'0')+' '+ap+' '+lp.tzName,status:S.status,mode:'planned-manual',plannedAt:new Date(fromMs).toISOString()};
+  }
+  return null;
+}
+function _srvEnglishV2TakenSlots(kind,exceptPkgId){
+  return (D.packages||[]).filter(function(p){return p&&p.engine==='SRV English'&&String(p.id)!==String(exceptPkgId)&&p.srvSchedulePlan&&p.srvSchedulePlan.kind===kind;}).map(function(p){return p.srvSchedulePlan.utcIso;});
+}
+function _srv2Row(k,v,c){return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)"><span style="color:var(--dim)">${k}</span><span style="color:${c||'var(--text)'};text-align:right">${v}</span></div>`;}
+// Approve: what the release will look like (before anything is uploaded).
+function _srvEnglishV2PlanPreviewHtml(task,pkg,kind){
+  const pl=SRV2_PLAYLISTS[kind];const plan=pkg&&pkg.srvSchedulePlan||_srvEnglishV2SchedulePlan(kind,Date.now(),_srvEnglishV2TakenSlots(kind,pkg&&pkg.id));
+  const so=pkg&&pkg.srvShortOf;
+  return `<div style="margin-top:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin:0 0 6px;font-family:'JetBrains Mono',monospace">RELEASE PLAN (PREVIEW)</div>`+
+    _srv2Row('Format',kind==='long'?'Long · 1920×1080':'Short · 1080×1920')+
+    _srv2Row('Playlist',pl?escHTML(pl.title)+' · '+pl.id:'—')+
+    _srv2Row('Planned public release',plan?escHTML(plan.label):'—')+
+    _srv2Row('Date / time / timezone',plan?escHTML(plan.localDate+' '+plan.localTime+' '+plan.tz):'—')+
+    (kind==='short'?_srv2Row('Related Long',so?escHTML((so.longTitle||'')+(so.longYoutubeVideoId?' · '+so.longYoutubeVideoId:' · not uploaded yet')):'—'):_srv2Row('End screen','VA step after upload → playlist "'+escHTML(SRV2_PLAYLISTS.long.title)+'"'))+
+    `<div style="margin-top:6px;color:var(--dim);font-family:inherit;line-height:1.5">The upload stays <b>PRIVATE</b>. The planned time is a ${escHTML(SRV2_SCHEDULE.status)} plan: making the video public at that time is done in YouTube Studio — automatic public release is not switched on.</div></div>`;
+}
+// Done: the publishing checklist for an SRV Studio production upload.
+function _srvEnglishV2PublishChecklistHtml(task,pkg,taskId){
+  const kind=(pkg.srvProduction&&pkg.srvProduction.kind)||(pkg.srvPublish&&pkg.srvPublish.kind)||'long';
+  const vid=(pkg.srvProduction&&pkg.srvProduction.youtubeVideoId)||(pkg.srvPublish&&pkg.srvPublish.videoId)||'';
+  const P=escHTML(String(pkg.id)),T=escHTML(String(taskId)),V=escHTML(String(vid));
+  const pl=SRV2_PLAYLISTS[kind],pr=pkg.srvPlaylist||null,sync=pkg.srvPlaylistSync||null,va=pkg.srvVaSteps||{};
+  const plOk=pr&&(pr.status==='added'||pr.status==='already');
+  const plText=plOk?'✓ in "'+escHTML(pr.playlistTitle||pl.title)+'" (verified via YouTube API)':pr?'⚠ not added — '+escHTML(_srvEnglishV2PlaylistReason(pr.error)):'not checked yet';
+  const plan=pkg.srvSchedulePlan;
+  const btn=function(label,on,col){return `<button onclick="${on}" style="padding:6px 10px;background:transparent;border:1px solid ${col||'rgba(201,168,76,0.45)'};border-radius:7px;color:${col||'#c9a84c'};font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">${label}</button>`;};
+  const link=function(label,href){return `<a href="${escHTML(href)}" target="_blank" rel="noopener" style="padding:6px 10px;border:1px solid rgba(239,68,68,0.35);border-radius:7px;color:#ef4444;font-size:11px;font-weight:700;text-decoration:none">${label}</a>`;};
+  let step='';
+  if(kind==='short'){
+    const so=pkg.srvShortOf||{};const rel=sync&&sync.related;const done=va.relatedVideo&&va.relatedVideo.doneAt;
+    const elig=rel?(rel.eligible?'✓ Long is '+escHTML(rel.privacyStatus)+' — can be linked':'⚠ Long is '+escHTML(rel.privacyStatus||rel.reason||'unknown')+' — make it public or unlisted first'):'press “Check now” to verify the Long’s visibility';
+    step=`<div style="margin-top:10px"><div style="font-weight:700;color:var(--text);margin-bottom:4px">Related video (VA step — YouTube has no API for this)</div>
+      <div style="color:var(--dim);line-height:1.5;margin-bottom:6px">In YouTube Studio open this Short → <b>Related video</b> → choose the Long <b>“${escHTML(so.longTitle||'')}”</b> (${escHTML(so.longYoutubeVideoId||'not uploaded')}) → Save.</div>
+      ${_srv2Row('Long visibility',elig,rel&&!rel.eligible?'#fbbf24':null)}${_srv2Row('Status',done?'✓ VA marked done '+escHTML(String(done).slice(0,16).replace('T',' '))+' UTC (not API-verifiable)':'to do',done?'#22c55e':'#fbbf24')}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${link('Open Short in YouTube Studio','https://studio.youtube.com/video/'+vid+'/edit')}${done?'':btn('✓ I added the related video',`_srvEnglishV2MarkVaStep('${T}','${P}','relatedVideo')`,'rgba(34,197,94,0.45)')}</div></div>`;
+  }else{
+    const es=sync&&sync.endScreen;const done=va.endScreen&&va.endScreen.doneAt;
+    const elig=es?(es.eligible?'✓ playlist is '+escHTML(es.privacyStatus)+' — can be an end-screen element':'⚠ playlist is '+escHTML(es.privacyStatus||es.reason||'unknown')):'press “Check now” to verify the playlist';
+    step=`<div style="margin-top:10px"><div style="font-weight:700;color:var(--text);margin-bottom:4px">End screen (VA step — YouTube has no API for end screens)</div>
+      <div style="color:var(--dim);line-height:1.5;margin-bottom:6px">In YouTube Studio open this Long → <b>Editor</b> → <b>End screen</b> → add a <b>Playlist</b> element → choose <b>“${escHTML(SRV2_PLAYLISTS.long.title)}”</b> (${SRV2_PLAYLISTS.long.id}) → Save.</div>
+      ${_srv2Row('Playlist eligibility',elig,es&&!es.eligible?'#fbbf24':null)}${_srv2Row('Status',done?'✓ VA marked done '+escHTML(String(done).slice(0,16).replace('T',' '))+' UTC (not API-verifiable)':'to do',done?'#22c55e':'#fbbf24')}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${link('Open Long in YouTube Studio Editor','https://studio.youtube.com/video/'+vid+'/editor')}${done?'':btn('✓ I added the end screen',`_srvEnglishV2MarkVaStep('${T}','${P}','endScreen')`,'rgba(34,197,94,0.45)')}</div></div>`;
+  }
+  return `<div id="srv2check_${P}" style="margin-bottom:16px;padding:12px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.25);border-radius:10px;font-size:11px;font-family:'JetBrains Mono',monospace">
+    <div style="font-size:9px;font-weight:800;color:#c9a84c;letter-spacing:1.5px;margin-bottom:8px">PUBLISHING CHECKLIST · ${kind.toUpperCase()}</div>
+    ${_srv2Row('Playlist',plText,plOk?'#22c55e':pr?'#fbbf24':null)}
+    ${_srv2Row('Planned public release',plan?escHTML(plan.label)+' ('+escHTML(plan.status)+')':'—')}
+    ${_srv2Row('Visibility now','PRIVATE — make it public in YouTube Studio at the planned time')}
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${btn('↻ Check now',`_srvEnglishV2PlaylistSync('${T}','${P}')`)}${!plOk?link('Add to playlist in YouTube Studio','https://studio.youtube.com/video/'+vid+'/edit'):''}</div>
+    <div id="srv2checkst_${P}" style="margin-top:6px;color:var(--dim)">${sync&&sync.at?'Last checked '+escHTML(String(sync.at).slice(0,16).replace('T',' '))+' UTC':''}</div>
+    ${step}
+  </div>`;
+}
+function _srvEnglishV2PlaylistReason(code){
+  const m={insufficient_scope:'the SRV Studio YouTube connection does not have playlist permission yet (CEO reconnect with the playlist scope needed) — add it in YouTube Studio for now',
+    playlist_not_srv_studio:'that playlist does not belong to the SRV Studio channel — nothing was changed',playlist_not_found:'the playlist was not found',
+    membership_check_failed:'YouTube could not be asked about the playlist',insert_failed:'YouTube refused the playlist insert',not_verified_after_insert:'the insert could not be verified',
+    playlist_lookup_failed:'the playlist could not be read',playlist_exception:'the playlist step failed',bad_video_id:'no valid YouTube video id'};
+  return m[code]||String(code||'unknown');
+}
+// "Check now": server checks/adds playlist membership (identity from the production ledger) and VA-step eligibility.
+async function _srvEnglishV2PlaylistSync(taskId,pkgId){
+  const st=document.getElementById('srv2checkst_'+pkgId);const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
+  if(!pkg)return false;
+  if(st)st.textContent='Checking with YouTube…';
+  let j=null;
+  try{const r=await _publishAuthedFetch('/api/ops?action=srv_studio_v2_playlist_sync',{pkgId:pkg.id});j=await r.json().catch(function(){return null;});}catch(e){j={ok:false,error:String(e&&e.message||e)};}
+  if(!j||j.ok!==true){if(st)st.textContent='⚠ Check failed — '+((j&&j.error)||'no answer');return false;}
+  pkg.srvPlaylist=j.playlist;pkg.srvPlaylistSync={at:new Date().toISOString(),related:j.related||null,endScreen:j.endScreen||null};
+  await _srvEnglishV2Persist(pkg,['srvPlaylist','srvPlaylistSync']);
+  _srvEnglishV2Show(taskId);
+  return true;
+}
+// VA confirms a Studio-only step (Related video / end screen). Recorded with who and when; never claimed as API-verified.
+async function _srvEnglishV2MarkVaStep(taskId,pkgId,step){
+  if(step!=='relatedVideo'&&step!=='endScreen')return false;
+  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));if(!pkg||!pkg.srvProduction)return false;
+  const prev=pkg.srvVaSteps;
+  pkg.srvVaSteps=Object.assign({},prev||{},{[step]:{doneAt:new Date().toISOString(),by:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||null,verifiedBy:'va-confirmation'}});
+  const res=await _srvEnglishV2Persist(pkg,['srvVaSteps']);
+  if(!res.ok){pkg.srvVaSteps=prev;alert('Not saved ('+_srvEnglishV2FailMsg(res)+'). Try again.');return false;}
+  _srvEnglishV2Show(taskId);
+  return true;
+}
 function _srvEnglishV2PilotReason(code){
   const m={ceo_session_required:'pilot uploads need a signed-in CEO session — sign in again as Mansoor',srv_studio_v2_off:'SRV Studio V2 is switched off on the server',pilot_not_configured:'no pilot is authorized',pilot_disabled:'the pilot authorization is disabled',pilot_expired:'the pilot authorization has expired',
     task_not_allowlisted:'this task is not one of the two pilot tasks',publisher_session_required:'sign in again (VA or CEO) and retry',va_allowance_not_configured:'no VA upload allowance is authorized',va_allowance_disabled:'the VA upload allowance is switched off',va_allowance_expired:'the VA upload allowance has expired',va_allowance_limit_reached:'the VA allowance uploads have all been used',va_allowance_format_used:'the VA allowance for this format (Long or Short) has already been used',va_allowance_format_not_allowed:'this format is not allowed — SRV Studio uploads Long videos only',production_not_configured:'normal production uploads are not switched on',production_disabled:'normal production uploads are switched off',production_long_only:'SRV Studio uploads Long videos only',production_daily_cap_reached:'today\'s production upload limit has been reached — try again tomorrow',task_retired_or_cancelled:'this task was cancelled or retired',task_closed:'this task is already closed',task_not_found:'the task could not be found on the server — reload and try again',package_not_of_this_task:'this package does not belong to this task',engine_not_producing:'the SRV English engine is paused or in maintenance',production_busy_try_again:'another upload was being recorded — try again',va_busy_try_again:'another VA upload was being recorded — try again',format_mismatch:'the task format does not match its pilot authorization',task_already_uploaded_or_in_progress:'this task already has a pilot upload (or one in progress)',
@@ -17094,7 +17221,8 @@ function _srvEnglishV2RenderHtml(task,pkg,taskId,stage){
     return box(lab('V2 PUBLISH RECORD')+row('Video',escHTML(String(p.videoId))+(p.dryRun?' (dry run)':''))+row('Title',escHTML(p.title))+
       row('Privacy',escHTML(p.privacyStatus+(p.publishAt?' · scheduled '+p.publishAt:'')))+row('AI disclosure',p.containsSyntheticMedia?'containsSyntheticMedia: true':'—')+
       row('Thumbnail',escHTML(p.thumbnail),/^failed/.test(p.thumbnail)?'#fbbf24':null)+row('Mode',p.pilot?'PILOT (private, normal title)':(p.test?'TEST':'LIVE'),p.pilot?'#a78bfa':(p.test?'#fbbf24':'#22c55e'))+
-      (p.pilot&&pkg.srvPilot?row('Pilot record',escHTML((pkg.srvPilot.channelId||'')+' · '+(pkg.srvPilot.uploadedAt||'')+' · entry '+(pkg.srvPilot.entryId||''))):''));
+      (p.pilot&&pkg.srvPilot?row('Pilot record',escHTML((pkg.srvPilot.channelId||'')+' · '+(pkg.srvPilot.uploadedAt||'')+' · entry '+(pkg.srvPilot.entryId||''))):''))+
+      (p.production?_srvEnglishV2PublishChecklistHtml(task,pkg,taskId):'');
   }
   // approve
   if(!r)return box(lab('V2 RENDER')+'<div style="color:#fbbf24">No V2 render is recorded for this package. Rebuild to render it.</div>');
@@ -17112,6 +17240,7 @@ function _srvEnglishV2RenderHtml(task,pkg,taskId,stage){
     (r.hiddenDuringRender?row('Warning','the tab was hidden during the render','#fbbf24'):'')+
     (r.fx?row('Motion',Object.keys(r.fx).filter(function(k){return r.fx[k];}).join(' · ')||'static (D4)'):'')+
     row('Source enlargement','×'+r.maxSourceUpscale+(r.maxSourceUpscale>1?' (final masters are below full HD)':''),r.maxSourceUpscale>1.2?'#fbbf24':null)+
+    _srvEnglishV2PlanPreviewHtml(task,pkg,kind)+
     `<div style="margin-top:12px">${lab('PUBLISH METADATA (DRY RUN — WHAT APPROVE WILL SEND)')}<div id="srv2meta_${escHTML(String(pkg.id))}" style="white-space:pre-wrap;color:var(--text);max-height:220px;overflow-y:auto;line-height:1.5">Loading…</div></div>`);
 }
 async function _srvEnglishV2FillMeta(taskId,pkgId){

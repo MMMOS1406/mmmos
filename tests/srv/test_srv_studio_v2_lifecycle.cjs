@@ -737,6 +737,46 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     ok('029 choosing an image saves it (verified) and records it as the operator\'s choice', pick === true && p.srvAvatar.id === 'srv2-fm-17' && p.srvAvatar.by === 'operator-choice' && JSON.parse(E.table['pkg_av'].full_package).srvAvatar.id === 'srv2-fm-17');
   }
 
+  // ── SRV-STUDIO-V2-030: planned release schedule (America/New_York), release preview, publishing checklist ──
+  {
+    const E = makeEnv({ flag: 'true', titleUnique: false }); await E.settle(); const { ctx } = E;
+    const plan = (kind, iso, taken) => vm.runInContext(`_srvEnglishV2SchedulePlan('${kind}', ${Date.parse(iso)}, ${JSON.stringify(taken || [])})`, ctx);
+    const a = plan('long', '2026-10-26T12:00:00Z');
+    ok('030 schedule: Long → next Friday 6:00 PM Eastern (Fri 30 Oct 2026, EDT = 22:00 UTC)', a.utcIso === '2026-10-30T22:00:00.000Z' && a.weekday === 'Friday' && a.localTime === '18:00' && a.tz === 'America/New_York' && a.tzName === 'EDT' && /Fri Oct 30, 2026 · 6:00 PM EDT/.test(a.label), a);
+    const b = plan('long', '2026-10-31T12:00:00Z');
+    ok('030 schedule: across the DST change the wall time stays 6:00 PM (Fri 6 Nov 2026, EST = 23:00 UTC)', b.utcIso === '2026-11-06T23:00:00.000Z' && b.tzName === 'EST' && b.localTime === '18:00', b);
+    const c = plan('short', '2026-10-26T12:00:00Z');
+    ok('030 schedule: Short → next Sunday 6:00 PM Eastern (Sun 1 Nov 2026 — DST ends that morning → EST, 23:00 UTC)', c.utcIso === '2026-11-01T23:00:00.000Z' && c.weekday === 'Sunday' && c.tzName === 'EST', c);
+    const spring = plan('long', '2027-03-08T12:00:00Z');
+    ok('030 schedule: spring DST (Fri 12 Mar 2027, EST = 23:00 UTC; Fri 19 Mar EDT = 22:00 UTC)', spring.utcIso === '2027-03-12T23:00:00.000Z' && plan('long', '2027-03-13T12:00:00Z').utcIso === '2027-03-19T22:00:00.000Z');
+    const lead = plan('long', '2026-10-30T21:30:00Z'); // Friday 5:30 PM EDT — less than the 60-minute lead
+    ok('030 schedule: an upload less than 60 minutes before the slot moves to the following Friday', lead.utcIso === '2026-11-06T23:00:00.000Z', lead);
+    const taken = plan('long', '2026-10-26T12:00:00Z', ['2026-10-30T22:00:00.000Z']);
+    ok('030 schedule: one release per slot — a Friday already planned by another SRV Studio Long moves to the next Friday', taken.utcIso === '2026-11-06T23:00:00.000Z');
+    ok('030 schedule: plans are "provisional" and manual (no automatic public release)', a.status === 'provisional' && a.mode === 'planned-manual');
+    // taken slots read SRV Studio packages only; the shared slot pool is never read or written
+    ctx.D._publishSlots = { 'fri-2026-10-30': 'pkg_farsi_1' };
+    ctx.D.packages = [pkgOf('pkg_l1', 400, { srvSchedulePlan: { kind: 'long', utcIso: '2026-10-30T22:00:00.000Z' } }), pkgOf('pkg_s1', 401, { srvSchedulePlan: { kind: 'short', utcIso: '2026-11-01T23:00:00.000Z' } }), pkgOf('pkg_f1', 402, { engine: 'SRV Farsi', srvSchedulePlan: { kind: 'long', utcIso: '2026-11-06T23:00:00.000Z' } })];
+    const tk = vm.runInContext("JSON.stringify(_srvEnglishV2TakenSlots('long','pkg_x'))", ctx);
+    ok('030 schedule isolation: taken slots come from SRV Studio packages of the same format only; D._publishSlots untouched', tk === '["2026-10-30T22:00:00.000Z"]' && JSON.stringify(ctx.D._publishSlots) === '{"fri-2026-10-30":"pkg_farsi_1"}');
+    // release preview (Approve)
+    const pv = vm.runInContext("_srvEnglishV2PlanPreviewHtml({},{id:'pkg_p',srvShortOf:{longTitle:'Passenger Seat Witness',longYoutubeVideoId:'s34SXDqU0jk'}},'short')", ctx);
+    ok('030 release preview (Short): format, playlist name + ID, planned date/time/timezone, related Long, PRIVATE notice', /Short · 1080×1920/.test(pv) && /SRV Studio Full Short Collection · PLATi-bbiaU30/.test(pv) && /America\/New_York/.test(pv) && /Passenger Seat Witness · s34SXDqU0jk/.test(pv) && /stays <b>PRIVATE<\/b>/.test(pv) && /automatic public release is not switched on/.test(pv));
+    const pvL = vm.runInContext("_srvEnglishV2PlanPreviewHtml({},{id:'pkg_q'},'long')", ctx);
+    ok('030 release preview (Long): Long playlist and the end-screen VA step', /SRV Studio, the full Collection · PLXCBPiF9p6SA/.test(pvL) && /End screen/.test(pvL));
+    // publishing checklist (Done)
+    const T = task(410, { contentType: 'Long', contentFormat: 'long', isLong: true }); const pk = pkgOf('pkg_done_l', 410, { srvProduction: { kind: 'long', youtubeVideoId: 's34SXDqU0jk' }, srvPublish: { kind: 'long', videoId: 's34SXDqU0jk', production: true, privacyStatus: 'private', title: 't', thumbnail: 'set' }, srvPlaylist: { status: 'failed', error: 'insufficient_scope', playlistId: 'PLXCBPiF9p6SA' } });
+    ctx.D.tasks = [T]; ctx.D.packages = [pk]; E.seed(pk);
+    const ch = vm.runInContext("_srvEnglishV2PublishChecklistHtml(D.tasks[0],D.packages[0],'410')", ctx);
+    ok('030 checklist (Long): playlist not added explained (playlist permission), Studio fallback link, end-screen VA step with the playlist ID and the Studio Editor link', /playlist permission/.test(ch) && /studio\.youtube\.com\/video\/s34SXDqU0jk\/edit/.test(ch) && /studio\.youtube\.com\/video\/s34SXDqU0jk\/editor/.test(ch) && /PLXCBPiF9p6SA/.test(ch) && /no API for end screens/.test(ch) && /PRIVATE — make it public in YouTube Studio/.test(ch));
+    const marked = await vm.runInContext("_srvEnglishV2MarkVaStep('410','pkg_done_l','endScreen')", ctx); await E.settle();
+    ok('030 "I added the end screen" saves (verified) who/when, labelled VA-confirmed — never API-verified', marked === true && pk.srvVaSteps.endScreen.doneAt && pk.srvVaSteps.endScreen.verifiedBy === 'va-confirmation' && JSON.parse(E.table['pkg_done_l'].full_package).srvVaSteps.endScreen.doneAt === pk.srvVaSteps.endScreen.doneAt);
+    ok('030 an unknown VA step is refused', (await vm.runInContext("_srvEnglishV2MarkVaStep('410','pkg_done_l','publishNow')", ctx)) === false);
+    const pkS = pkgOf('pkg_done_s', 411, { srvShortOf: { longTitle: 'Passenger Seat Witness', longYoutubeVideoId: 's34SXDqU0jk' }, srvProduction: { kind: 'short', youtubeVideoId: '7LGUuXX1YnI' }, srvPublish: { kind: 'short', production: true }, srvPlaylist: { status: 'added', playlistId: 'PLATi-bbiaU30', playlistTitle: 'SRV Studio Full Short Collection' }, srvPlaylistSync: { at: '2026-10-25T01:00:00Z', related: { eligible: true, privacyStatus: 'public', longVideoId: 's34SXDqU0jk' } } });
+    const chS = vm.runInContext(`_srvEnglishV2PublishChecklistHtml({},${JSON.stringify(pkS)},'411')`, ctx);
+    ok('030 checklist (Short): playlist ✓ verified via API, Related-video VA step naming the Long (title + ID), Long public → can be linked, Studio link for the Short', /✓ in "SRV Studio Full Short Collection" \(verified via YouTube API\)/.test(chS) && /Related video \(VA step — YouTube has no API for this\)/.test(chS) && /Passenger Seat Witness/.test(chS) && /s34SXDqU0jk/.test(chS) && /Long is public — can be linked/.test(chS) && /studio\.youtube\.com\/video\/7LGUuXX1YnI\/edit/.test(chS));
+  }
+
   console.log(out.join('\n'));
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
