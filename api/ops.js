@@ -7639,10 +7639,21 @@ async function srvFarsiPlaylists(req, res) {
     const { accessToken } = await _refreshYoutubeToken(conn.refresh_token);
     const list = await _srvFarsiListPlaylists(accessToken);
     const scope = String(conn.scope || '');
+    // Optional read-only membership check: is this video in each approved playlist? (playlistItems.list, no writes)
+    const vid = String((req.query && req.query.videoId) || '').trim();
+    let membership = null;
+    if (/^[A-Za-z0-9_-]{6,20}$/.test(vid)) {
+      membership = [];
+      for (const t of _srvFarsiResolvePlaylists(Object.keys(SRV_FARSI_PLAYLISTS))) {
+        const r = await fetch('https://www.googleapis.com/youtube/v3/playlistItems?part=id,snippet,status&maxResults=5&playlistId=' + encodeURIComponent(t.id) + '&videoId=' + encodeURIComponent(vid), { headers: { 'Authorization': 'Bearer ' + accessToken } });
+        const d = await r.json().catch(function() { return {}; });
+        membership.push({ playlistId: t.id, playlistName: t.title, inPlaylist: r.ok && Array.isArray(d.items) && d.items.length > 0, playlistItemIds: (d.items || []).map(function(i) { return i.id; }), status: r.status });
+      }
+    }
     return res.status(200).json({ ok: true, channelId: conn.channel_id,
       resolved: _srvFarsiResolvePlaylists(Object.keys(SRV_FARSI_PLAYLISTS)).map(function(t) { const hit = list.find(function(p) { return p.id === t.id; }); return Object.assign({}, t, { onChannel: !!hit, channelTitle: hit ? hit.title : null }); }),
       channelPlaylists: list.map(function(p) { return { id: p.id, title: p.title, privacy: p.privacy, items: p.items }; }),
-      canAddToPlaylists: /youtube\.force-ssl|auth\/youtube(\s|$)/.test(scope) });
+      canAddToPlaylists: /youtube\.force-ssl|auth\/youtube(\s|$)/.test(scope), videoId: vid || null, membership });
   } catch (e) {
     return res.status(502).json({ ok: false, error: 'playlist_check_failed', message: e.message });
   }
