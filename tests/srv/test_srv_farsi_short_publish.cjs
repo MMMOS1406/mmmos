@@ -259,7 +259,7 @@ const mkD=()=>({tasks:[
   ok('hook: the explanation names the reason and the skipped intro/outro',/loudest sustained part/.test(r.why)&&/intro \(first \d+ s\)/.test(r.why)&&/outro \(last \d+ s\)/.test(r.why));
   const flat=new Float32Array(n).fill(0.5); flat.fill(1,0,60); // loudest at the very start
   ok('hook: never the first 20 s / 12% even when the opening is loudest',sug(flat,hop,240,30).startSec>=28);
-  ok('hook: short songs fall back to ~35%, not 0:00',sug(new Float32Array(60).fill(0.5),hop,30,30).startSec===Math.round(30*0.35)||sug(new Float32Array(60).fill(0.5),hop,30,30).startSec>0);
+  ok('hook: a short song (34 s) gets a suggestion that fits inside it (0:04–0:34), label and field agree',sug(new Float32Array(68).fill(0.5),hop,34,30).startSec===4);
   const audio={sampleRate:1000,length:4000,numberOfChannels:1,getChannelData:()=>{const d=new Float32Array(4000);for(let i=2000;i<4000;i++)d[i]=0.5;return d;}};
   const e=envf(audio,0.5); ok('envelope: RMS per 0.5 s window from the decoded audio',e.length===8&&e[0]===0&&Math.abs(e[7]-0.5)<1e-6);
   ok('default start is never 0:00 without a suggestion (fallback ~35%, or wait)',F._srvFarsiShortClamp({},240).startSec===Math.round(240*0.35)&&F._srvFarsiShortClamp({},0).startSec===null);

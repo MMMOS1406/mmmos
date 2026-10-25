@@ -20717,7 +20717,7 @@ function _srvFarsiVaAutoArtistFormat(task){
 const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DEFAULT_SEC=30;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-25-h';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-25-i';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -20793,6 +20793,11 @@ function _srvFarsiEnergyEnvelope(audio,hop){
   return env;
 }
 function _srvFarsiSuggestHook(env,hop,songSec,dur){
+  const r=_srvFarsiSuggestHookRaw(env,hop,songSec,dur);
+  r.startSec=Math.max(0,Math.min(Math.floor(songSec-dur),r.startSec)); // always inside the song
+  return r;
+}
+function _srvFarsiSuggestHookRaw(env,hop,songSec,dur){
   const n=env.length, w=Math.max(1,Math.round(dur/hop)); let mx=0; for(let i=0;i<n;i++)if(env[i]>mx)mx=env[i];
   if(!mx||n<w+4)return {startSec:Math.max(0,Math.round(songSec*0.35)),why:'fallback (no usable audio energy)'};
   const e=Array.from(env,function(v){return v/mx;}), pre=new Float64Array(n+1); for(let i=0;i<n;i++)pre[i+1]=pre[i]+e[i];
