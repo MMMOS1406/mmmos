@@ -250,24 +250,39 @@ const mkD=()=>({tasks:[
   ok('Quick Generate Short (SRV Farsi) opens the lifecycle at Generate — no package is generated',/if\(contentFormat==='short'\)\{ if\(typeof openExec==='function'\)openExec\(String\(newTaskId\)\); return; \}/.test(qg)&&qg.indexOf("if(contentFormat==='short')")<qg.indexOf('vaFarsiGeneratePackage(String(newTaskId))'));
   ok('song generation refuses a SRV Farsi Short task (sends it to the Long picker instead)',/if\(!task\.isLong\)\{[^}]*_srvFarsiSetStage\(taskId,'generate'\)/.test(gen));
   ok('Quick Generate for other engines unchanged (the non-Farsi branch is byte-identical to main)',(()=>{const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});const m=main.slice(main.indexOf('\nfunction _quickGenerateTest('));const tail=x=>{const i=x.indexOf("  const engCfg=(ENGINES_CONFIG||[]).find(e=>e.id===engineId);");return x.slice(i,x.indexOf('\n}',i));};return tail(m)===tail(qg)&&tail(qg).length>100;})()); }
-// ── 7f. Suggested Hook Section (CEO 2026-10-25: never the intro by default) ──
-{ const W=world({D:mkD()}),F=W.__fns; const sug=vm.runInContext('_srvFarsiSuggestHook',W), envf=vm.runInContext('_srvFarsiEnergyEnvelope',W);
-  // synthetic 4:00 song: quiet instrumental intro (0–40 s), verse (40–85 s), loud chorus (85–120 s), verse, chorus (160–195 s), quiet outro
-  const hop=0.5,n=480,env=new Float32Array(n);for(let i=0;i<n;i++){const t=i*hop;env[i]=t<40?0.15:t<85?0.45:t<120?0.95:t<160?0.5:t<195?0.9:0.2;}
-  const r=sug(env,hop,240,30);
-  ok('hook: picks the loud section where it arrives (chorus entry at 1:25), not the intro',r.startSec>=81&&r.startSec<=89,r);
-  ok('hook: the explanation names the reason and the skipped intro/outro',/loudest sustained part/.test(r.why)&&/intro \(first \d+ s\)/.test(r.why)&&/outro \(last \d+ s\)/.test(r.why));
-  const flat=new Float32Array(n).fill(0.5); flat.fill(1,0,60); // loudest at the very start
-  ok('hook: never the first 20 s / 12% even when the opening is loudest',sug(flat,hop,240,30).startSec>=28);
-  ok('hook: a short song (34 s) gets a suggestion that fits inside it (0:04–0:34), label and field agree',sug(new Float32Array(68).fill(0.5),hop,34,30).startSec===4);
-  const audio={sampleRate:1000,length:4000,numberOfChannels:1,getChannelData:()=>{const d=new Float32Array(4000);for(let i=2000;i<4000;i++)d[i]=0.5;return d;}};
-  const e=envf(audio,0.5); ok('envelope: RMS per 0.5 s window from the decoded audio',e.length===8&&e[0]===0&&Math.abs(e[7]-0.5)<1e-6);
+// ── 7f. Suggested vocal section (CEO 2026-10-25: must contain singing; never the intro; not loudness alone) ──
+{ const W=world({D:mkD()}),F=W.__fns; const prof=vm.runInContext('_srvFarsiVocalProfile',W), sug=vm.runInContext('_srvFarsiSuggestHook',W);
+  // synthetic 4:00 stereo song @8 kHz: a LOUD wide instrumental (uncorrelated L/R) everywhere, plus a centred "voice"
+  // (identical in L and R, 300–3400 Hz) only in 1:40–2:20 and 3:00–3:15 (the latter inside the outro guard).
+  const sr=8000, sec=240, n=sr*sec, L=new Float32Array(n), R=new Float32Array(n); let a=1,b=2;
+  const rnd=()=>{a=(a*16807)%2147483647;return a/2147483647-0.5;}, rnd2=()=>{b=(b*48271)%2147483647;return b/2147483647-0.5;};
+  for(let i=0;i<n;i++){const t=i/sr; const inst=(t<60?1.0:0.6); L[i]=inst*rnd(); R[i]=inst*rnd2();
+    if((t>=100&&t<140)||(t>=180&&t<195)){const v=0.35*Math.sin(2*Math.PI*700*t)*(0.6+0.4*Math.sin(2*Math.PI*4*t)); L[i]+=v; R[i]+=v;}}
+  const audio={sampleRate:sr,length:n,numberOfChannels:2,duration:sec,getChannelData:c=>c?R:L};
+  const r=sug(prof(audio,0.5),0.5,sec,30);
+  ok('vocal: picks the section with centred singing (1:40–2:20), not the loud instrumental intro',r.startSec>=95&&r.startSec<=115,r);
+  ok('vocal: reports its vocal estimate and confidence',typeof r.vocal==='number'&&r.vocal>=0.6&&r.confident===true);
+  ok('vocal: explanation says why (vocal centred in the mix, intro/outro skipped) and never claims a detected chorus',/lead vocal centred in the mix/.test(r.why)&&/intro \(first \d+ s\)/.test(r.why)&&!/detected chorus/.test(r.why));
+  // no singing anywhere → fallback to a mid-song section (35–70%) labelled as a vocal section, never the intro
+  const L2=new Float32Array(n),R2=new Float32Array(n);for(let i=0;i<n;i++){L2[i]=rnd();R2[i]=rnd2();}
+  const r2=sug(prof({sampleRate:sr,length:n,numberOfChannels:2,duration:sec,getChannelData:c=>c?R2:L2},0.5),0.5,sec,30);
+  ok('vocal: hard guard — the first 45 s (18% of a 4-min song) is never a candidate',r.startSec>=Math.max(45,240*0.18)&&r2.startSec>=Math.max(45,240*0.18));
+  ok('vocal: when no section is clearly vocal it is NOT presented as confident (fallback "Suggested vocal section", mid-song)',r2.confident===false||r2.vocal>=0.6);
+  const vp=h.slice(h.indexOf('function _srvFarsiVocalProfile('),h.indexOf('\n}\n',h.indexOf('function _srvFarsiVocalProfile(')));
+  ok('vocal: feature = band 300–3400 Hz mid/side energy per 0.5 s (centred vocal), not loudness alone',/_srvFarsiBiquad\(x,'hp',300,fs\),'lp',3400,fs\)/.test(vp)&&/center\[i\]=em\/\(em\+es\+1e-12\)/.test(vp));
+  ok('vocal: a 34 s song still gets a section that fits inside it',sug(prof({sampleRate:sr,length:sr*34,numberOfChannels:2,duration:34,getChannelData:c=>c?R.slice(0,sr*34):L.slice(0,sr*34)},0.5),0.5,34,30).startSec<=4);
   ok('default start is never 0:00 without a suggestion (fallback ~35%, or wait)',F._srvFarsiShortClamp({},240).startSec===Math.round(240*0.35)&&F._srvFarsiShortClamp({},0).startSec===null);
   const c=h.slice(h.indexOf('function _srvFarsiShortFromLongHtml('),h.indexOf('\n}\n',h.indexOf('function _srvFarsiShortFromLongHtml(')));
-  ok('UI: Create is disabled while the suggestion is being computed; the suggestion is labelled as an estimate',/const ready=!!\(cur&&cur\.songSec&&c\.startSec!=null&&!_hookBusy\);/.test(c)&&/Suggested Hook Section/.test(c)&&/An estimate, not a detected chorus/.test(c));
+  ok('UI: Create waits for the suggestion; labels are "Suggested Hook Section (vocal)" / "Suggested vocal section", an estimate',/const ready=!!\(cur&&cur\.songSec&&c\.startSec!=null&&!_hookBusy\);/.test(c)&&/Suggested Hook Section \(vocal\)/.test(c)&&/Suggested vocal section/.test(c)&&/An estimate, not a detected chorus/.test(c));
   ok('manual control kept: moving Start or Length marks the choice as manual; "Use suggestion" restores it',/sel\[key\]=Number\(val\); sel\.manual=true;/.test(top('_srvFarsiShortSet'))&&/sel\.startSec=h\.startSec;/.test(top('_srvFarsiShortUseHook')));
-  ok('the Short records how its section was chosen (suggested-hook or manual)',/section:\(function\(\)\{const h=_srvFarsiHookCache\[L\.id\];return h&&h\.status==='done'&&h\.startSec===start/.test(top('_srvFarsiCreateShortFromLong')));
+  ok('the Short records how its section was chosen (suggested or manual)',/section:\(function\(\)\{const h=_srvFarsiHookCache\[L\.id\];return h&&h\.status==='done'&&h\.startSec===start/.test(top('_srvFarsiCreateShortFromLong')));
   ok('Build reuses the Long decoded for the suggestion (no second 36 MB download)',/const audio=await _srvFarsiDecodeLongAudio\(s\.audioUrl\);/.test(top('_srvFarsiShortAudioFromLong'))); }
+// ── 7g. source Longs must be real full-length media (>= 120 s), measured from the media ──
+{ const D=mkD(); D.packages.push({id:'pkg_T34',engine:'SRV Farsi',srvTaskUid:'srvf_x_188',title:'34 s test long',_srvLongVideoUrl:'u34',_srvYtLongId:'y34',_srvLongDurationSec:33.8,generatedAt:'2026-10-25T12:00:00Z'});
+  const W=world({D}),F=W.__fns; const ids=F._srvFarsiShortSources(D.tasks[1]).map(x=>x.pkg.id);
+  ok('source rule: a 34 s "Long" is never offered (records left untouched)',!ids.includes('pkg_T34')&&D.packages.find(p=>p.id==='pkg_T34')._srvLongDurationSec===33.8);
+  ok('source rule: a full-length (3:42) Long is offered',ids.includes('pkg_L1'));
+  ok('source rule: the selector lists only measured Longs >= 120 s and probes unknown lengths',/const src=all\.filter\(function\(x\)\{return x\.songSec>=SRV_FARSI_SHORT_SOURCE_MIN_SEC;\}\);/.test(h)&&/const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;/.test(h)&&/if\(!x\.songSec\)_srvFarsiProbeLongDuration\(x\.pkg,taskId\)/.test(h)); }
 // ── 8. other businesses untouched ──
 { const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};
