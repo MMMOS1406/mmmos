@@ -21,6 +21,7 @@ const YT_SCOPES = [
 
 // SRV-STUDIO-V2-031 (CEO-authorized, SRV Studio only): the playlist permission is requested and stored for SRV Studio alone.
 import { srvStudioPlaylistRequested, srvStudioScopes, srvStudioState, parseSrvStudioState, srvStudioTokenAllowed } from '../../lib/srvStudioV2OAuth.mjs';
+import { srvFarsiPlaylistRequested, srvFarsiScopes, srvFarsiState, parseSrvFarsiState, srvFarsiTokenAllowed } from '../../lib/srvFarsiOAuth.mjs'; // SRV Farsi playlist permission (Silk Road Voices only)
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -204,8 +205,11 @@ function handleYTAuthInit(req, res) {
   const channelTarget = (req.query && req.query.channel_target) || '';
   // SRV-STUDIO-V2-031: an SRV Studio reconnect also asks for the playlist permission (other channels: unchanged).
   const srvPlaylist = srvStudioPlaylistRequested(req.query);
+  const srvFarsiPlaylist = !srvPlaylist && srvFarsiPlaylistRequested(req.query); // SRV Farsi: Silk Road Voices reconnect only
   const state = srvPlaylist
     ? srvStudioState(channelTarget || 'SRV Studio')
+    : srvFarsiPlaylist
+    ? srvFarsiState(channelTarget || 'Silk Road Voices')
     : channelTarget
     ? 'mmm_youtube_auth__' + Buffer.from(channelTarget).toString('base64url')
     : 'mmm_youtube_auth';
@@ -213,7 +217,7 @@ function handleYTAuthInit(req, res) {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: srvPlaylist ? srvStudioScopes(YT_SCOPES) : YT_SCOPES,
+    scope: srvPlaylist ? srvStudioScopes(YT_SCOPES) : srvFarsiPlaylist ? srvFarsiScopes(YT_SCOPES) : YT_SCOPES,
     access_type: 'offline',
     prompt: 'consent select_account',
     include_granted_scopes: 'false',
@@ -244,8 +248,11 @@ export default async function handler(req, res) {
   // v13.56.0 — state encodes per-channel target: 'mmm_youtube_auth' OR 'mmm_youtube_auth__<base64>'
   let channelTarget = '';
   const srvState = parseSrvStudioState(state); // SRV-STUDIO-V2-031
+  const srvFarsiPl = srvState ? null : parseSrvFarsiState(state); // SRV Farsi playlist reconnect
   if (srvState) {
     channelTarget = srvState.channelTarget;
+  } else if (srvFarsiPl) {
+    channelTarget = srvFarsiPl.channelTarget;
   } else if (state && state.startsWith('mmm_youtube_auth__')) {
     try { channelTarget = Buffer.from(state.replace('mmm_youtube_auth__', ''), 'base64url').toString('utf-8'); } catch(_) {}
   } else if (state !== 'mmm_youtube_auth') {
@@ -281,6 +288,11 @@ export default async function handler(req, res) {
     if (srvState && !srvStudioTokenAllowed(actualChannel && actualChannel.channelId)) {
       console.error('[srv2-031] SRV Studio playlist reconnect refused: consent was for', actualChannel ? actualChannel.title + ' (' + actualChannel.channelId + ')' : '(unknown channel)');
       return res.redirect(302, `${appUrl}/?yt_error=srv_studio_playlist_wrong_channel`);
+    }
+    // SRV Farsi: same rule — the playlist-permission token is stored only for Silk Road Voices itself.
+    if (srvFarsiPl && !srvFarsiTokenAllowed(actualChannel && actualChannel.channelId)) {
+      console.error('[srv-farsi] Silk Road Voices playlist reconnect refused: consent was for', actualChannel ? actualChannel.title + ' (' + actualChannel.channelId + ')' : '(unknown channel)');
+      return res.redirect(302, `${appUrl}/?yt_error=srv_farsi_playlist_wrong_channel`);
     }
 
     // 2. Fetch all 4 brand account channels (for metadata/display — unchanged)
