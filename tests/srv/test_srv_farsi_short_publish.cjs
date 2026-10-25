@@ -273,9 +273,9 @@ const mkD=()=>({tasks:[
   ok('vocal: a 34 s song still gets a section that fits inside it',sug(prof({sampleRate:sr,length:sr*34,numberOfChannels:2,duration:34,getChannelData:c=>c?R.slice(0,sr*34):L.slice(0,sr*34)},0.5),0.5,34,30).startSec<=4);
   ok('default start is never 0:00 without a suggestion (fallback ~35%, or wait)',F._srvFarsiShortClamp({},240).startSec===Math.round(240*0.35)&&F._srvFarsiShortClamp({},0).startSec===null);
   const c=h.slice(h.indexOf('function _srvFarsiShortFromLongHtml('),h.indexOf('\n}\n',h.indexOf('function _srvFarsiShortFromLongHtml(')));
-  ok('UI: Create waits for the suggestion; labels are "Suggested Hook Section (vocal)" / "Suggested vocal section", an estimate',/const ready=!!\(cur&&cur\.songSec&&c\.startSec!=null&&!_hookBusy\);/.test(c)&&/Suggested Hook Section \(vocal\)/.test(c)&&/Suggested vocal section/.test(c)&&/An estimate, not a detected chorus/.test(c));
+  ok('UI: Create waits for the suggestion (unless the operator set the section); labels "Suggested Hook Section (vocal)" / "Suggested vocal section", a recommendation',/const ready=!!\(editable&&\(!_hookBusy\|\|sel\.manual\)\);/.test(c)&&/Suggested Hook Section \(vocal\)/.test(c)&&/Suggested vocal section/.test(c)&&/A recommendation only, not a detected chorus/.test(c));
   ok('manual control kept: moving Start or Length marks the choice as manual; "Use suggestion" restores it',/sel\[key\]=Number\(val\); sel\.manual=true;/.test(top('_srvFarsiShortSet'))&&/sel\.startSec=h\.startSec;/.test(top('_srvFarsiShortUseHook')));
-  ok('the Short records how its section was chosen (suggested or manual)',/section:\(function\(\)\{const h=_srvFarsiHookCache\[L\.id\];return h&&h\.status==='done'&&h\.startSec===start/.test(top('_srvFarsiCreateShortFromLong')));
+  ok('the Short records how its section was chosen (sectionSelectionMode suggested | manual)',/sectionSelectionMode:_secMode,/.test(top('_srvFarsiCreateShortFromLong'))&&/const _secMode=\(!sel\.manual&&/.test(top('_srvFarsiCreateShortFromLong')));
   ok('Build reuses the Long decoded for the suggestion (no second 36 MB download)',/const audio=await _srvFarsiDecodeLongAudio\(s\.audioUrl\);/.test(top('_srvFarsiShortAudioFromLong'))); }
 // ── 7g. source Longs must be real full-length media (>= 120 s), measured from the media ──
 { const D=mkD(); D.packages.push({id:'pkg_T34',engine:'SRV Farsi',srvTaskUid:'srvf_x_188',title:'34 s test long',_srvLongVideoUrl:'u34',_srvYtLongId:'y34',_srvLongDurationSec:33.8,generatedAt:'2026-10-25T12:00:00Z'});
@@ -283,6 +283,47 @@ const mkD=()=>({tasks:[
   ok('source rule: a 34 s "Long" is never offered (records left untouched)',!ids.includes('pkg_T34')&&D.packages.find(p=>p.id==='pkg_T34')._srvLongDurationSec===33.8);
   ok('source rule: a full-length (3:42) Long is offered',ids.includes('pkg_L1'));
   ok('source rule: the selector lists only measured Longs >= 120 s and probes unknown lengths',/const src=all\.filter\(function\(x\)\{return x\.songSec>=SRV_FARSI_SHORT_SOURCE_MIN_SEC;\}\);/.test(h)&&/const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;/.test(h)&&/if\(!x\.songSec\)_srvFarsiProbeLongDuration\(x\.pkg,taskId\)/.test(h)); }
+// ── 7h. SRV English-style section control (CEO 2026-10-25): suggestion = default only; operator values are final ──
+{ const run=(W,js)=>vm.runInContext(js,W);
+  const hookDone=W=>run(W,"_srvFarsiHookCache['pkg_L1']={status:'done',startSec:134,songSec:222,why:'the most vocal part',vocal:0.8,confident:true};");
+  // A. suggested path
+  { const W=world({D:mkD()}),F=W.__fns,T=W.D.tasks; hookDone(W);
+    const html=F._srvFarsiShortFromLongHtml(T[1],'200'); const sel=F._srvFarsiShortSel['200'];
+    ok('controls: Long selector, SECTION (25–35 S), Start, Length, range "of m:ss", slider, Preview, Create — like SRV English',/id="srvf-short-long-200"/.test(html)&&/2 · SECTION \(25–35 S\)/.test(html)&&/id="srvf-short-start-200"[^>]*type="number"/.test(html)&&/id="srvf-short-dur-200"[^>]*min="25" max="35"/.test(html)&&/2:14 – 2:44 of 3:42/.test(html)&&/id="srvf-short-slider-200" type="range"/.test(html)&&/Preview this section/.test(html)&&/Create Short from this Long/.test(html));
+    ok('controls: Start / Length / slider are editable (not disabled) once the Long is read',!/id="srvf-short-start-200"[^>]*disabled/.test(html)&&!/id="srvf-short-dur-200"[^>]*disabled/.test(html));
+    ok('suggestion shown above the controls: "🎯 Suggested Hook Section (vocal): 2:14–2:44" + Use suggestion; badge SUGGESTED',/🎯 Suggested Hook Section \(vocal\): <strong>2:14–2:44<\/strong>/.test(html)&&/data-srvf-use-hook/.test(html)&&/data-srvf-mode="suggested"/.test(html)&&html.indexOf('🎯')<html.indexOf('id="srvf-short-start-200"'));
+    ok('A. suggested: default section = suggestion (134 s, 30 s)',sel.startSec===134&&sel.durationSec===30&&!sel.manual);
+    const r=await F._srvFarsiCreateShortFromLong('200'); const so=W.D.packages[W.D.packages.length-1].srvShortOf;
+    ok('A. suggested: Create uses the suggestion; sectionSelectionMode "suggested", startSec 134, durationSec 30',r===true&&so.sectionSelectionMode==='suggested'&&so.startSec===134&&so.durationSec===30&&so.section.how==='suggested-hook',so); }
+  // B. manual path: same Long, Start 80, Length 30
+  { const W=world({D:mkD()}),F=W.__fns,T=W.D.tasks; hookDone(W);
+    F._srvFarsiShortFromLongHtml(T[1],'200');
+    run(W,"_srvFarsiShortSet('200','startSec','80'); _srvFarsiShortSet('200','durationSec','30');");
+    const html=F._srvFarsiShortFromLongHtml(T[1],'200'); const sel=F._srvFarsiShortSel['200'];
+    ok('B. manual: typed Start 80 / Length 30 kept (not snapped back to the suggestion); range 1:20 – 1:50; badge MANUAL',sel.startSec===80&&sel.durationSec===30&&sel.manual===true&&/1:20 – 1:50 of 3:42/.test(html)&&/data-srvf-mode="manual"/.test(html)&&!/data-srvf-use-hook[^>]*disabled/.test(html));
+    const r=await F._srvFarsiCreateShortFromLong('200'); const so=W.D.packages[W.D.packages.length-1].srvShortOf;
+    ok('B. manual: Create uses exactly 80–110 s; sectionSelectionMode "manual", suggestion kept for reference',r===true&&so.startSec===80&&so.durationSec===30&&so.sectionSelectionMode==='manual'&&so.section.how==='manual'&&so.section.suggestedStartSec===134,so);
+    ok('B. manual: even a manual pick equal to the suggested start is recorded as manual',(()=>{const W2=world({D:mkD()});hookDone(W2);W2.__fns._srvFarsiShortFromLongHtml(W2.D.tasks[1],'200');run(W2,"_srvFarsiShortSet('200','startSec','134')");return W2.__fns._srvFarsiShortSel['200'].manual===true;})()); }
+  // slider moves → manual; Use suggestion → restores start AND length
+  { const W=world({D:mkD()}),F=W.__fns,T=W.D.tasks; hookDone(W);
+    F._srvFarsiShortFromLongHtml(T[1],'200');
+    run(W,"_srvFarsiShortSet('200','startSec','61',true); _srvFarsiShortSet('200','startSec','61'); _srvFarsiShortSet('200','durationSec','27');");
+    const s1=Object.assign({},F._srvFarsiShortSel['200']);
+    run(W,"_srvFarsiShortUseHook('200')"); const html=F._srvFarsiShortFromLongHtml(T[1],'200'); const s2=F._srvFarsiShortSel['200'];
+    ok('slider: moving it sets Start and marks Manual',s1.startSec===61&&s1.durationSec===27&&s1.manual===true);
+    ok('Use suggestion: restores suggested Start (134) and Length (30); badge back to SUGGESTED',s2.startSec===134&&s2.durationSec===30&&s2.manual===false&&/data-srvf-mode="suggested"/.test(html)); }
+  // while the suggestion is still being computed the operator can already choose
+  { const W=world({D:mkD()}),F=W.__fns,T=W.D.tasks; run(W,"_srvFarsiHookCache['pkg_L1']={status:'running'};");
+    const h1=F._srvFarsiShortFromLongHtml(T[1],'200');
+    ok('while analysing: Start/Length editable at a mid-song default (not 0:00); Create waits',!/id="srvf-short-start-200"[^>]*disabled/.test(h1)&&F._srvFarsiShortSel['200'].startSec===Math.round(222*0.35)&&/id="srvf-short-st-200"[\s\S]*?<button[^>]*_srvFarsiCreateShortFromLong\('200'\)" disabled/.test(h1));
+    run(W,"_srvFarsiShortSet('200','startSec','90')"); const h2=F._srvFarsiShortFromLongHtml(T[1],'200');
+    ok('while analysing: once the operator sets Start, Create is enabled and the suggestion will not overwrite it',!/_srvFarsiCreateShortFromLong\('200'\)" disabled/.test(h2)&&(run(W,"_srvFarsiHookCache['pkg_L1']={status:'done',startSec:134,why:'x',vocal:0.8,confident:true};"),F._srvFarsiShortFromLongHtml(T[1],'200'),F._srvFarsiShortSel['200'].startSec===90)); }
+  // validation kept
+  { const W=world({D:mkD()}),F=W.__fns,T=W.D.tasks; hookDone(W); F._srvFarsiShortFromLongHtml(T[1],'200');
+    run(W,"_srvFarsiShortSet('200','durationSec','40')"); F._srvFarsiShortFromLongHtml(T[1],'200');
+    ok('validation: Length is clamped to 25–35 s',F._srvFarsiShortSel['200'].durationSec===35);
+    run(W,"_srvFarsiShortSet('200','startSec','215')"); F._srvFarsiShortFromLongHtml(T[1],'200'); const sl=F._srvFarsiShortSel['200'];
+    ok('validation: the section cannot run past the end of the Long',sl.startSec+sl.durationSec<=222); } }
 // ── 8. other businesses untouched ──
 { const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};

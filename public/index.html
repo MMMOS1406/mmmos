@@ -20720,7 +20720,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-25-j';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-25-k';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -20865,27 +20865,32 @@ function _srvFarsiShortFromLongHtml(task,taskId){
   if(cur&&!cur.songSec)_srvFarsiProbeLongDuration(cur.pkg,taskId);
   const hook=cur?_srvFarsiHookCache[cur.pkg.id]:null;
   if(cur&&!hook)_srvFarsiAnalyzeHook(cur.pkg,taskId);
-  if(cur&&hook&&hook.status==='done'&&!sel.manual&&sel.startSec==null){sel.startSec=hook.startSec;sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC;sel.suggested=true;}
-  const c=_srvFarsiShortClamp(sel,cur?cur.songSec:0); if(c.startSec!=null)sel.startSec=c.startSec; sel.durationSec=c.durationSec;
+  if(cur&&hook&&hook.status==='done'&&!sel.manual&&(sel.startSec==null||sel.placeholder)){sel.startSec=hook.startSec;sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC;sel.suggested=true;sel.placeholder=false;}
+  if(cur&&cur.songSec&&sel.startSec==null&&!(hook&&hook.status==='done')){sel.startSec=Math.round(cur.songSec*0.35);sel.placeholder=true;} // editable while the suggestion is computed; never 0:00
+  const c=_srvFarsiShortClamp(sel,cur?cur.songSec:0); if(c.startSec!=null)sel.startSec=c.startSec; sel.durationSec=c.durationSec; sel.songSec=cur?cur.songSec:0;
   const _hookBusy=!!(cur&&(!hook||hook.status==='running'));
-  const _onHook=!!(hook&&hook.status==='done'&&sel.startSec===hook.startSec);
+  if(hook&&hook.status==='failed'&&sel.placeholder){sel.placeholder=false;} // no suggestion possible: the mid-song start stands as the default
+  const _onHook=!!(hook&&hook.status==='done'&&!sel.manual&&sel.startSec===hook.startSec&&sel.durationSec===SRV_FARSI_SHORT_DEFAULT_SEC);
+  const _mode=_onHook?'suggested':'manual';
   const T=escHTML(String(taskId));
   if(!src.length)return _checking?`<div style="font-size:12px;color:var(--dim);line-height:1.6">Checking the published Longs (${_checking})…</div>`:`<div style="font-size:12px;color:#f59e0b;line-height:1.6">No published full-length SRV Farsi Long yet (at least ${Math.round(SRV_FARSI_SHORT_SOURCE_MIN_SEC/60)} minutes). A Short is cut from a Long that is already on YouTube.</div>`;
   const opts=src.map(function(x){const p=x.pkg;const tn=x.task?('task #'+escHTML(String(x.task.id))):(p.taskId?'task #'+escHTML(String(p.taskId)):'');
     return `<option value="${escHTML(String(p.id))}" ${String(p.id)===String(sel.longPkgId)?'selected':''}>${escHTML(p.title)} · ${tn} · ${x.songSec?_srvFarsiFmtSec(x.songSec):'—'} · ${x.isTest?'[TEST] private on YouTube':'on YouTube'}</option>`;}).join('');
-  const ready=!!(cur&&cur.songSec&&c.startSec!=null&&!_hookBusy);
+  const editable=!!(cur&&cur.songSec&&c.startSec!=null);
+  const ready=!!(editable&&(!_hookBusy||sel.manual)); // Create: once the suggestion is in, or as soon as the operator chose a section
   return `
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">1 · PUBLISHED LONG (SRV FARSI ONLY)</div>
         <select id="srvf-short-long-${T}" onchange="_srvFarsiShortSet('${T}','longPkgId',this.value)" style="width:100%;padding:9px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?'6':'12'}px">${opts}</select>
         ${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?`<div data-srvf-readonly-src style="font-size:10px;color:#a78bfa;margin-bottom:12px">🔒 Using published Long as source only — original Long will not be changed. This Short stays [TEST]: private, unscheduled, outside the weekly plan.</div>`:''}
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">2 · SECTION (${SRV_FARSI_SHORT_MIN_SEC}–${SRV_FARSI_SHORT_MAX_SEC} S)</div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-          <label style="font-size:11px;color:var(--dim)">Start <input id="srvf-short-start-${T}" type="number" min="0" max="${c.maxStart}" step="1" value="${c.startSec==null?'':c.startSec}" ${ready?'':'disabled'} onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:76px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
-          <label style="font-size:11px;color:var(--dim)">Length <input id="srvf-short-dur-${T}" type="number" min="${SRV_FARSI_SHORT_MIN_SEC}" max="${SRV_FARSI_SHORT_MAX_SEC}" step="1" value="${c.durationSec}" onchange="_srvFarsiShortSet('${T}','durationSec',this.value)" style="width:64px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
+        <div data-srvf-hook style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;line-height:1.5;margin-bottom:4px;color:#c9a84c">${_hookBusy?'<span style="color:var(--dim)">🔎 Finding the singing in this Long… (you can already set the section yourself)</span>':hook&&hook.status==='done'?'<span>🎯 '+(hook.confident?'Suggested Hook Section (vocal)':'Suggested vocal section')+': <strong>'+_srvFarsiFmtSec(hook.startSec)+'–'+_srvFarsiFmtSec(hook.startSec+SRV_FARSI_SHORT_DEFAULT_SEC)+'</strong></span>'+`<button type="button" id="srvf-short-usehook-${T}" data-srvf-use-hook onclick="_srvFarsiShortUseHook('${T}')" ${_onHook?'disabled':''} style="padding:2px 8px;background:transparent;border:1px solid rgba(201,168,76,0.45);border-radius:5px;color:#c9a84c;font-size:10px;cursor:${_onHook?'default':'pointer'};opacity:${_onHook?0.5:1}">Use suggestion</button>`:hook&&hook.status==='failed'?'<span style="color:var(--dim)">No suggestion ('+escHTML(hook.why)+') — set the section yourself.</span>':''}${editable?`<span id="srvf-short-mode-${T}" data-srvf-mode="${_mode}" style="margin-left:auto;padding:1px 7px;border-radius:9px;font-size:9px;font-weight:800;letter-spacing:0.8px;font-family:'JetBrains Mono',monospace;${_mode==='manual'?'background:rgba(139,92,246,0.15);color:#a78bfa':'background:rgba(201,168,76,0.15);color:#c9a84c'}">${_mode==='manual'?'MANUAL':'SUGGESTED'}</span>`:''}</div>
+        ${hook&&hook.status==='done'?`<div style="font-size:10px;color:var(--dim);line-height:1.5;margin-bottom:8px">${escHTML(hook.why)}. A recommendation only, not a detected chorus — change Start, Length or the slider freely.</div>`:''}
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <label style="font-size:11px;color:var(--dim)">Start <input id="srvf-short-start-${T}" type="number" min="0" max="${c.maxStart}" step="1" value="${c.startSec==null?'':c.startSec}" ${editable?'':'disabled'} onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:76px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> s</label>
+          <label style="font-size:11px;color:var(--dim)">Length <input id="srvf-short-dur-${T}" type="number" min="${SRV_FARSI_SHORT_MIN_SEC}" max="${SRV_FARSI_SHORT_MAX_SEC}" step="1" value="${c.durationSec}" ${editable?'':'disabled'} onchange="_srvFarsiShortSet('${T}','durationSec',this.value)" style="width:64px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> s</label>
           <span id="srvf-short-range-${T}" style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace">${c.startSec==null?'—':_srvFarsiFmtSec(c.startSec)+' – '+_srvFarsiFmtSec(c.startSec+c.durationSec)}${cur&&cur.songSec?' of '+_srvFarsiFmtSec(cur.songSec):' (reading the song…)'}</span>
         </div>
-        <div data-srvf-hook style="font-size:10px;line-height:1.5;margin-bottom:6px;color:${_onHook?'#c9a84c':'var(--dim)'}">${_hookBusy?'🔎 Finding the singing in this Long…':hook&&hook.status==='done'?(_onHook?(hook.confident?'🎤 <strong>Suggested Hook Section (vocal)</strong> ':'🎤 <strong>Suggested vocal section</strong> ')+_srvFarsiFmtSec(hook.startSec)+'–'+_srvFarsiFmtSec(hook.startSec+SRV_FARSI_SHORT_DEFAULT_SEC)+' — '+escHTML(hook.why)+'. An estimate, not a detected chorus: preview it and move it if needed.':(hook.confident?'Suggested Hook Section (vocal): ':'Suggested vocal section: ')+_srvFarsiFmtSec(hook.startSec)+'–'+_srvFarsiFmtSec(hook.startSec+SRV_FARSI_SHORT_DEFAULT_SEC)+` <button type="button" onclick="_srvFarsiShortUseHook('${T}')" style="margin-left:4px;padding:1px 6px;background:transparent;border:1px solid rgba(201,168,76,0.4);border-radius:4px;color:#c9a84c;font-size:10px;cursor:pointer">Use suggestion</button>`):hook&&hook.status==='failed'?'Could not analyse the Long ('+escHTML(hook.why)+') — starting about a third of the way in; preview and adjust.':''}</div>
-        ${ready?`<input id="srvf-short-slider-${T}" type="range" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" oninput="_srvFarsiShortSet('${T}','startSec',this.value,true)" onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:100%;margin-bottom:8px">`:''}
+        ${editable?`<input id="srvf-short-slider-${T}" type="range" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" oninput="_srvFarsiShortSet('${T}','startSec',this.value,true)" onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:100%;margin-bottom:8px">`:''}
         <audio id="srvf-short-audio-${T}" src="${escHTML(cur.pkg._srvLongVideoUrl)}" preload="none" crossorigin="anonymous" style="display:none"></audio>
         <button type="button" onclick="_srvFarsiShortPreview('${T}')" style="padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;margin-bottom:10px">▶ Preview this section</button>
         <div style="font-size:10px;color:var(--dim);line-height:1.6;margin-bottom:12px">The Short reuses this Long's song — same title, audio, lyrics, artist and mood. Nothing new is generated and no MP3 upload is needed.</div>
@@ -20896,18 +20901,21 @@ function _srvFarsiShortFromLongHtml(task,taskId){
 function _srvFarsiShortSet(taskId,key,val,live){
   const sel=_srvFarsiShortSel[taskId]||(_srvFarsiShortSel[taskId]={});
   if(key==='longPkgId'){sel.longPkgId=String(val);sel.startSec=null;sel.manual=false;sel.suggested=false;}
-  else { sel[key]=Number(val); sel.manual=true; sel.suggested=false; }
+  else { sel[key]=Number(val); sel.manual=true; sel.suggested=false; sel.placeholder=false; }
   if(live){
     const el=document.getElementById('srvf-short-range-'+taskId), st=document.getElementById('srvf-short-start-'+taskId);
-    if(el)el.textContent=_srvFarsiFmtSec(sel.startSec)+' – '+_srvFarsiFmtSec(sel.startSec+(sel.durationSec||SRV_FARSI_SHORT_DEFAULT_SEC));
-    if(st)st.value=sel.startSec; return;
+    if(el)el.textContent=_srvFarsiFmtSec(sel.startSec)+' – '+_srvFarsiFmtSec(sel.startSec+(sel.durationSec||SRV_FARSI_SHORT_DEFAULT_SEC))+(sel.songSec?' of '+_srvFarsiFmtSec(sel.songSec):'');
+    if(st)st.value=sel.startSec;
+    const md=document.getElementById('srvf-short-mode-'+taskId); if(md){md.textContent='MANUAL';md.setAttribute('data-srvf-mode','manual');md.style.background='rgba(139,92,246,0.15)';md.style.color='#a78bfa';}
+    const ub=document.getElementById('srvf-short-usehook-'+taskId); if(ub){ub.disabled=false;ub.style.opacity=1;ub.style.cursor='pointer';}
+    return;
   }
   if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
   else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
 function _srvFarsiShortUseHook(taskId){
   const sel=_srvFarsiShortSel[taskId]; if(!sel)return; const h=_srvFarsiHookCache[sel.longPkgId]; if(!h||h.status!=='done')return;
-  sel.startSec=h.startSec; sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC; sel.manual=false; sel.suggested=true;
+  sel.startSec=h.startSec; sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC; sel.manual=false; sel.suggested=true; sel.placeholder=false;
   if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
 }
 function _srvFarsiShortPreview(taskId){
@@ -20936,12 +20944,14 @@ async function _srvFarsiCreateShortFromLong(taskId){
   const sel=_srvFarsiShortSel[taskId]||{};
   const src=_srvFarsiShortSources(task).find(function(x){return String(x.pkg.id)===String(sel.longPkgId);});
   if(!src){say('⚠ Choose a published SRV Farsi Long first.','#ef4444');return false;}
-  if(sel.startSec==null){say('⚠ Still finding the hook section — try again in a moment.','#ef4444');return false;}
+  if(sel.startSec==null||(sel.placeholder&&!sel.manual)){say('⚠ Still finding the suggested section — wait a moment or set Start yourself.','#ef4444');return false;}
   const dur=Math.round(Number(sel.durationSec)), start=Math.round(Number(sel.startSec));
   if(!(dur>=SRV_FARSI_SHORT_MIN_SEC&&dur<=SRV_FARSI_SHORT_MAX_SEC)){say('⚠ The Short must be '+SRV_FARSI_SHORT_MIN_SEC+'–'+SRV_FARSI_SHORT_MAX_SEC+' seconds.','#ef4444');return false;}
   if(!src.songSec){say('⚠ The Long\'s length is still being read — try again in a moment.','#ef4444');return false;}
   if(!(start>=0)||start+dur>src.songSec+0.01){say('⚠ That section runs past the end of the song.','#ef4444');return false;}
   const L=src.pkg;
+  const _h0=_srvFarsiHookCache[L.id];
+  const _secMode=(!sel.manual&&_h0&&_h0.status==='done'&&_h0.startSec===start&&dur===SRV_FARSI_SHORT_DEFAULT_SEC)?'suggested':'manual';
   const dupe=(D.packages||[]).find(function(p){return _srvFarsiIsShortFromLong(p)&&!String(p.srvTaskUid||'').startsWith('set-aside:')&&String(p.srvShortOf.longPkgId)===String(L.id)&&Number(p.srvShortOf.startSec)===start&&Number(p.srvShortOf.durationSec)===dur;});
   if(dupe&&!confirm('A Short from this Long with exactly this section already exists (package '+dupe.id+'). Create another one anyway?'))return false;
   const uid=_srvFarsiTaskUid(task);
@@ -20956,7 +20966,8 @@ async function _srvFarsiCreateShortFromLong(taskId){
     captionYT:L.captionYT||L.captionYouTube||'',captionYouTube:L.captionYouTube||L.captionYT||'',hashtags:L.hashtags||'',
     srvShortOf:{longPkgId:String(L.id),longTaskUid:L.srvTaskUid||null,longTaskId:lt?lt.id:(L.taskId||null),longTitle:L.title,
       startSec:start,durationSec:dur,longDurationSec:Math.round(src.songSec*10)/10,audioUrl:L._srvLongVideoUrl,longYoutubeVideoId:src.yt||null,at:new Date().toISOString(),
-      section:(function(){const h=_srvFarsiHookCache[L.id];return h&&h.status==='done'&&h.startSec===start&&dur===SRV_FARSI_SHORT_DEFAULT_SEC?{how:'suggested-hook',why:h.why}:{how:'manual',suggestedStartSec:h&&h.status==='done'?h.startSec:null};})()},
+      sectionSelectionMode:_secMode,
+      section:(function(){const h=_srvFarsiHookCache[L.id];return _secMode==='suggested'?{how:'suggested-hook',why:h.why}:{how:'manual',suggestedStartSec:h&&h.status==='done'?h.startSec:null,suggestedDurationSec:h&&h.status==='done'?SRV_FARSI_SHORT_DEFAULT_SEC:null};})()},
   };
   if(uid)pkg.srvTaskUid=uid;
   // The packages table allows one row per (engine, title) for SRV Farsi (index packages_engine_title_unique_non_srv_studio),
