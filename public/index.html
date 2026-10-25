@@ -2486,7 +2486,7 @@ async function fetchPackagesFromTable(){
     const seen=new Set();
     return parsedRows.filter(function(p){
       if(!p)return false;
-      const key=(p.title||'').trim().toLowerCase();
+      const key=(p.dbTitle||p.title||'').trim().toLowerCase(); // dbTitle: set only on SRV Farsi Short-from-Long packages (same song title as their Long)
       if(!key||seen.has(key))return false;
       seen.add(key);
       return true;
@@ -2715,7 +2715,7 @@ async function savePackageToSupabase(pkg){
         package_id:clean.id||'',
         task_id:clean.taskId||null,engine:clean.engine||clean.engineName||'',mood:clean.mood||'',
         platform:clean.platform||'',content_type:clean.contentType||'',
-        title:clean.title||'',lyrics:clean.lyrics||clean.script||'',
+        title:clean.dbTitle||clean.title||'',lyrics:clean.lyrics||clean.script||'', // dbTitle: SRV Farsi Short-from-Long only (see _srvFarsiCreateShortFromLong)
         suno_prompt:clean.sunoPrompt||'',thumbnail_prompt:clean.thumbnailText||'',
         caption_youtube:clean.captionYouTube||'',caption_tiktok:clean.captionTikTok||'',
         caption_instagram:clean.captionInstagram||'',hashtags:'',
@@ -20854,21 +20854,26 @@ async function _srvFarsiCreateShortFromLong(taskId){
       startSec:start,durationSec:dur,longDurationSec:Math.round(src.songSec*10)/10,audioUrl:L._srvLongVideoUrl,longYoutubeVideoId:src.yt||null,at:new Date().toISOString()},
   };
   if(uid)pkg.srvTaskUid=uid;
-  // the Short belongs to the Long's song: same artist and mood (recorded as a VA override; rotation counters untouched)
-  if((task.mode||task.mood)!==mode){
-    task.vaOverrides=Array.isArray(task.vaOverrides)?task.vaOverrides:[];
-    task.vaOverrides.push({field:'artist/mood',from:task.mode||task.mood,to:mode,by:'short-from-long',at:new Date().toISOString()});
-    task.mode=mode; task.mood=mode;
-  }
-  // default cover = the Long's cover when it came from the shared library (the VA can choose another at Build)
-  const lc=L._srvAvatarChoice; const art=_srvFarsiAvatarArtist(task);
-  if(lc&&lc.artist===art&&_srvFarsiAvatarById(art,lc.id)&&!task.srvAvatarId){task.srvAvatarId=lc.id;task.srvAvatarArtist=art;task.srvAvatarChosenAt=Date.now();}
+  // The packages table allows one row per (engine, title) for SRV Farsi (index packages_engine_title_unique_non_srv_studio),
+  // and the Short shares the Long's song title, so its row is stored under a distinct DB-only title. pkg.title — what is
+  // shown, rendered and published — stays the Long's title. (Root cause of "The Short could not be saved": HTTP 409.)
+  pkg.dbTitle=String(L.title||'').trim()+' · Short '+_srvFarsiFmtSec(start)+'–'+_srvFarsiFmtSec(start+dur)+' · '+pkg.id;
   say('Creating the Short…','#c9a84c');
   D.packages=(D.packages||[]).concat([pkg]);
   if(typeof saveAppState==='function')saveAppState();
   let saved=true, why='';
   try{ if(typeof savePackageToSupabase==='function')saved=(await savePackageToSupabase(pkg))!==false; }catch(e){ saved=false; why=String(e&&e.message||e); }
-  if(!saved){ D.packages=D.packages.filter(function(p){return p!==pkg;}); if(typeof saveAppState==='function')saveAppState(); say('⚠ The Short could not be saved'+(why?' ('+why+')':'')+'. Nothing was created.','#ef4444'); return false; }
+  if(!saved){ D.packages=D.packages.filter(function(p){return p!==pkg;}); if(typeof saveAppState==='function')saveAppState(); say('⚠ The Short could not be saved'+(why?' ('+why+')':' (the database refused the package — see the browser console for the status)')+'. Nothing was created.','#ef4444'); return false; }
+  // only after the package is safely stored: the Short takes the Long's artist + mood (recorded as a VA override;
+  // rotation counters untouched) and, by default, the Long's cover from the shared library
+  if((task.mode||task.mood)!==mode){
+    task.vaOverrides=Array.isArray(task.vaOverrides)?task.vaOverrides:[];
+    task.vaOverrides.push({field:'artist/mood',from:task.mode||task.mood,to:mode,by:'short-from-long',at:new Date().toISOString()});
+    task.mode=mode; task.mood=mode;
+  }
+  const lc=L._srvAvatarChoice; const art=_srvFarsiAvatarArtist(task);
+  if(lc&&lc.artist===art&&_srvFarsiAvatarById(art,lc.id)&&!task.srvAvatarId){task.srvAvatarId=lc.id;task.srvAvatarArtist=art;task.srvAvatarChosenAt=Date.now();}
+  if(typeof saveAppState==='function')saveAppState();
   _srvFarsiSetStage(taskId,'review');
   if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
   else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');

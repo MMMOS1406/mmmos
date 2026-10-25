@@ -202,6 +202,40 @@ const mkD=()=>({tasks:[
   await W2.__fns._srvFarsiShortAudioFromLong(sp);
   ok('Build: the Long is only read (one GET of its stored video), no state changes',calls.length===1&&calls[0].m==='GET'&&calls[0].u==='https://x/long1.webm'&&JSON.stringify(W2.D)===b2);
   ok('the Short-from-Long code never writes to the source (no assignment to L.* or the Long task)',!/\bL\.[A-Za-z_$]+\s*=[^=]/.test(top('_srvFarsiCreateShortFromLong'))&&!/\blt\.[A-Za-z_$]+\s*=[^=]/.test(top('_srvFarsiCreateShortFromLong'))&&!/\bp\.[A-Za-z_$]+\s*=[^=]/.test(top('_srvFarsiShortSources'))); }
+// ── 7c. REGRESSION — the live preview failure "The Short could not be saved" (HTTP 409 from the packages table) ──
+// The table has UNIQUE (engine, title) for every engine except SRV English (packages_engine_title_unique_non_srv_studio).
+// A Short shares its Long's song title. The mock below enforces that same index on the real savePackageToSupabase payload.
+{ const saveSrc=top('savePackageToSupabase'), loadSrc=top('fetchPackagesFromTable');
+  const rows=[{engine:'SRV Farsi',title:'لمس اولین دست',package_id:'pkg_L1'}];
+  const W=world({D:mkD()});
+  vm.runInContext(`var SUPABASE_URL='https://db',SUPABASE_KEY='k';var __rows=${JSON.stringify(rows)};
+    fetch=async function(u,o){const b=JSON.parse(o.body);
+      if(__rows.some(r=>r.package_id!==b.package_id&&r.engine!=='SRV English'&&r.engine===b.engine&&r.title===b.title))return {ok:false,status:409,text:async()=>'{"code":"23505","message":"duplicate key value violates unique constraint \\"packages_engine_title_unique_non_srv_studio\\""}'};
+      __rows=__rows.filter(r=>r.package_id!==b.package_id).concat([{engine:b.engine,title:b.title,package_id:b.package_id,full_package:b.full_package}]);return {ok:true,status:201,text:async()=>''};};
+    ${saveSrc}`,W);
+  const F=W.__fns, D=W.D, T=D.tasks;
+  const t201before=JSON.stringify(T.find(t=>t.id===201));
+  // what the old code sent: the Long's title in the title column → rejected exactly like the live preview
+  const old=await vm.runInContext(`savePackageToSupabase({id:'pkg_old',engine:'SRV Farsi',title:'لمس اولین دست',contentType:'Short'})`,W);
+  ok('REGRESSION: the old payload (Short row titled like its Long) is refused with 409, as in the live preview',old===false);
+  F._srvFarsiShortSel['201']={longPkgId:'pkg_L1',startSec:78,durationSec:30};
+  const r=await F._srvFarsiCreateShortFromLong('201');
+  const sp=D.packages[D.packages.length-1];
+  ok('FIX: the Short is created and stored (its row has a distinct DB-only title)',r===true&&W.__rows.some(x=>x.package_id===sp.id&&x.title===sp.dbTitle)&&/^لمس اولین دست · Short 1:18–1:48 · pkg_/.test(sp.dbTitle));
+  ok('FIX: what is shown, rendered and published is still the Long\'s song title',sp.title==='لمس اولین دست'&&JSON.parse(W.__rows.find(x=>x.package_id===sp.id).full_package).title==='لمس اولین دست');
+  ok('FIX: later saves of the Short (Build/Approve/Publish) keep working',await vm.runInContext(`savePackageToSupabase(D.packages[D.packages.length-1])`,W)===true);
+  ok('FIX: a second Short of the same Long is also storable (unique per package)',(F._srvFarsiShortSel['201']=null,true));
+  // a failed save must not leave the task half-changed
+  const W2=world({D:mkD()});vm.runInContext(`var SUPABASE_URL='x',SUPABASE_KEY='k';fetch=async()=>({ok:false,status:409,text:async()=>'dup'});${saveSrc}`,W2);
+  W2.__fns._srvFarsiShortSel['201']={longPkgId:'pkg_L1',startSec:78,durationSec:30};
+  const before2=JSON.stringify(W2.D.tasks.find(t=>t.id===201)), n2=W2.D.packages.length;
+  const r2=await W2.__fns._srvFarsiCreateShortFromLong('201');
+  ok('a refused save leaves NOTHING behind: no package, task artist/mood/cover untouched',r2===false&&W2.D.packages.length===n2&&JSON.stringify(W2.D.tasks.find(t=>t.id===201))===before2);
+  // reload: the shared loader de-duplicates by title — the Short must not hide its Long
+  const loader=new Function('SUPABASE_URL','SUPABASE_KEY','fetch','console',loadSrc+'\nreturn fetchPackagesFromTable;')('u','k',async()=>({ok:true,json:async()=>W.__rows.slice().reverse().map(x=>({package_id:x.package_id,full_package:x.full_package||JSON.stringify({id:x.package_id,title:x.title,engine:x.engine})}))}),{log(){},warn(){},error(){}});
+  const loaded=await loader();
+  ok('reload: both the Short and its source Long come back (the loader keys on dbTitle when present)',loaded.some(p=>p.id===sp.id)&&loaded.some(p=>p.id==='pkg_L1'),loaded.map(p=>p.id));
+  ok('shared save/loader: any package without dbTitle sends/keys exactly as before',/title:clean\.dbTitle\|\|clean\.title\|\|''/.test(saveSrc)&&/const key=\(p\.dbTitle\|\|p\.title\|\|''\)\.trim\(\)\.toLowerCase\(\);/.test(loadSrc)&&!/dbTitle/.test(h.replace(/[^\n]*dbTitle[^\n]*\n/g,(m)=>/savePackageToSupabase|fetchPackagesFromTable|clean\.dbTitle|p\.dbTitle\|\||pkg\.dbTitle=|packages_engine_title|DB-only title|dbTitle: set only/.test(m)?'':m))); }
 // ── 8. other businesses untouched ──
 { const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};
