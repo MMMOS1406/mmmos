@@ -16963,7 +16963,8 @@ async function _srvEnglishV2Publish(pkgId,taskId){
     if(production)pkg.srvProduction={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
     if(production){ // 030: playlist result (API-verified by the server) and the planned — not automatic — public release
       pkg.srvPlaylist=up.playlist||null;
-      pkg.srvSchedulePlan=_srvEnglishV2SchedulePlan(kind,Date.now(),_srvEnglishV2TakenSlots(kind,pkg.id));
+      // 031: the server assigns the slot in the ledger (no duplicates); the local plan is only a fallback for display.
+      pkg.srvSchedulePlan=up.plannedRelease?Object.assign({},up.plannedRelease,{label:_srvEnglishV2PlanLabel(up.plannedRelease),source:'server'}):_srvEnglishV2SchedulePlan(kind,Date.now(),_srvEnglishV2TakenSlots(kind,pkg.id),kind==='short'?_srvEnglishV2LongReleaseMs(pkg):null);
     }
     if(va)pkg.srvVa={youtubeVideoId:vid,uploadedAt:up.uploadedAt||new Date().toISOString(),channelId:up.channelId||null,entryId:up.entryId||null,title:meta.title,kind};
     let thumb=null;
@@ -17043,9 +17044,11 @@ async function _srvEnglishV2PublishRoute(task,kind,pkg){
 // ── SRV-STUDIO-V2-030: playlists, planned release schedule, Related-video and end-screen VA steps ──
 // Verified on the SRV Studio channel (UC0nzWQX6AaUqlF5FozNpWPg) — same IDs as lib/srvStudioV2Playlists.mjs (a test enforces it).
 const SRV2_PLAYLISTS={long:{id:'PLXCBPiF9p6SA',title:'SRV Studio, the full Collection'},short:{id:'PLATi-bbiaU30',title:'SRV Studio Full Short Collection'}};
-// Planned public-release slots (America/New_York). PROVISIONAL PM test times, pending the CEO's final choice. Uploads
-// stay PRIVATE with no publishAt: this only plans and displays the release — nothing is made public automatically.
-const SRV2_SCHEDULE={tz:'America/New_York',status:'provisional',long:{weekday:5,hour:18,minute:0},short:{weekday:0,hour:18,minute:0},minLeadMinutes:60};
+// SRV-STUDIO-V2-031 — CEO-approved weekly release slots (America/New_York): Long Friday 7:00 AM, Short Sunday 6:00 PM
+// (the Sunday after the Long it promotes). Same rules as lib/srvStudioV2Schedule.mjs (a test checks both agree; the server
+// assigns the authoritative slot at upload). Uploads stay PRIVATE with no publishAt — the VA makes the video public in
+// YouTube Studio at the planned time; nothing is ever made public automatically.
+const SRV2_SCHEDULE={tz:'America/New_York',status:'approved',long:{weekday:5,hour:7,minute:0},short:{weekday:0,hour:18,minute:0},minLeadMinutes:60};
 const SRV2_WEEKDAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 function _srv2TzParts(ms,tz){
   const o={};
@@ -17062,22 +17065,38 @@ function _srv2ZonedToUtc(y,mo,d,h,mi,tz){
 // Next free slot for this format at least minLeadMinutes after fromMs; taken = UTC ISO strings already planned by
 // other SRV Studio packages of the same format (one release per slot). SRV Studio data only — the shared publishing
 // slot pool (D._publishSlots) used by other businesses is never read or written here.
-function _srvEnglishV2SchedulePlan(kind,fromMs,taken){
+function _srvEnglishV2SchedulePlan(kind,fromMs,taken,afterMs){
   const S=SRV2_SCHEDULE,slot=S[kind];if(!slot)return null;
-  const tk=new Set(taken||[]);const p=_srv2TzParts(fromMs,S.tz);
-  for(let add=0;add<120;add++){
+  const tk=new Set(taken||[]);const hasAfter=afterMs!=null&&isFinite(afterMs);
+  const earliest=Math.max(fromMs+S.minLeadMinutes*60000,hasAfter?afterMs+60000:-Infinity);
+  const p=_srv2TzParts(Math.max(fromMs,hasAfter?afterMs:fromMs),S.tz);
+  for(let add=0;add<140;add++){
     const day=new Date(Date.UTC(p.y,p.mo-1,p.d+add));
     if(day.getUTCDay()!==slot.weekday)continue;
     const utc=_srv2ZonedToUtc(day.getUTCFullYear(),day.getUTCMonth()+1,day.getUTCDate(),slot.hour,slot.minute,S.tz);
-    if(utc<fromMs+S.minLeadMinutes*60000)continue;
+    if(utc<earliest)continue;
     const iso=new Date(utc).toISOString();if(tk.has(iso))continue;
     const lp=_srv2TzParts(utc,S.tz);
     const h12=((lp.h+11)%12)+1, ap=lp.h<12?'AM':'PM';
     const md=new Date(Date.UTC(lp.y,lp.mo-1,lp.d)).toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'});
     return {kind,tz:S.tz,tzName:lp.tzName,utcIso:iso,localDate:lp.y+'-'+String(lp.mo).padStart(2,'0')+'-'+String(lp.d).padStart(2,'0'),localTime:String(lp.h).padStart(2,'0')+':'+String(lp.mi).padStart(2,'0'),
-      weekday:SRV2_WEEKDAYS[lp.wd],label:SRV2_WEEKDAYS[lp.wd].slice(0,3)+' '+md+' · '+h12+':'+String(lp.mi).padStart(2,'0')+' '+ap+' '+lp.tzName,status:S.status,mode:'planned-manual',plannedAt:new Date(fromMs).toISOString()};
+      weekday:SRV2_WEEKDAYS[lp.wd],label:SRV2_WEEKDAYS[lp.wd].slice(0,3)+' '+md+' · '+h12+':'+String(lp.mi).padStart(2,'0')+' '+ap+' '+lp.tzName,status:S.status,mode:'manual-public',plannedAt:new Date(fromMs).toISOString()};
   }
   return null;
+}
+// A plan object from the server (lib/srvStudioV2Schedule.mjs) gets the same display label as a local plan.
+function _srvEnglishV2PlanLabel(plan){
+  if(!plan||!plan.utcIso)return '';
+  if(plan.label)return plan.label;
+  const lp=_srv2TzParts(Date.parse(plan.utcIso),plan.tz||SRV2_SCHEDULE.tz);const h12=((lp.h+11)%12)+1,ap=lp.h<12?'AM':'PM';
+  const md=new Date(Date.UTC(lp.y,lp.mo-1,lp.d)).toLocaleDateString('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'});
+  return SRV2_WEEKDAYS[lp.wd].slice(0,3)+' '+md+' · '+h12+':'+String(lp.mi).padStart(2,'0')+' '+ap+' '+lp.tzName;
+}
+// The planned release of the Long a promotional Short promotes (the Short goes on the Sunday after it).
+function _srvEnglishV2LongReleaseMs(pkg){
+  const so=pkg&&pkg.srvShortOf;if(!so)return null;
+  const L=(D.packages||[]).find(function(p){return String(p.id)===String(so.longPkgId);});
+  return L&&L.srvSchedulePlan&&L.srvSchedulePlan.utcIso?Date.parse(L.srvSchedulePlan.utcIso):null;
 }
 function _srvEnglishV2TakenSlots(kind,exceptPkgId){
   return (D.packages||[]).filter(function(p){return p&&p.engine==='SRV English'&&String(p.id)!==String(exceptPkgId)&&p.srvSchedulePlan&&p.srvSchedulePlan.kind===kind;}).map(function(p){return p.srvSchedulePlan.utcIso;});
@@ -17085,15 +17104,15 @@ function _srvEnglishV2TakenSlots(kind,exceptPkgId){
 function _srv2Row(k,v,c){return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)"><span style="color:var(--dim)">${k}</span><span style="color:${c||'var(--text)'};text-align:right">${v}</span></div>`;}
 // Approve: what the release will look like (before anything is uploaded).
 function _srvEnglishV2PlanPreviewHtml(task,pkg,kind){
-  const pl=SRV2_PLAYLISTS[kind];const plan=pkg&&pkg.srvSchedulePlan||_srvEnglishV2SchedulePlan(kind,Date.now(),_srvEnglishV2TakenSlots(kind,pkg&&pkg.id));
+  const pl=SRV2_PLAYLISTS[kind];const plan=pkg&&pkg.srvSchedulePlan||_srvEnglishV2SchedulePlan(kind,Date.now(),_srvEnglishV2TakenSlots(kind,pkg&&pkg.id),kind==='short'?_srvEnglishV2LongReleaseMs(pkg):null);
   const so=pkg&&pkg.srvShortOf;
   return `<div style="margin-top:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin:0 0 6px;font-family:'JetBrains Mono',monospace">RELEASE PLAN (PREVIEW)</div>`+
     _srv2Row('Format',kind==='long'?'Long · 1920×1080':'Short · 1080×1920')+
     _srv2Row('Playlist',pl?escHTML(pl.title)+' · '+pl.id:'—')+
-    _srv2Row('Planned public release',plan?escHTML(plan.label):'—')+
+    _srv2Row('Planned public release',plan?escHTML(_srvEnglishV2PlanLabel(plan)):'—')+
     _srv2Row('Date / time / timezone',plan?escHTML(plan.localDate+' '+plan.localTime+' '+plan.tz):'—')+
     (kind==='short'?_srv2Row('Related Long',so?escHTML((so.longTitle||'')+(so.longYoutubeVideoId?' · '+so.longYoutubeVideoId:' · not uploaded yet')):'—'):_srv2Row('End screen','VA step after upload → playlist "'+escHTML(SRV2_PLAYLISTS.long.title)+'"'))+
-    `<div style="margin-top:6px;color:var(--dim);font-family:inherit;line-height:1.5">The upload stays <b>PRIVATE</b>. The planned time is a ${escHTML(SRV2_SCHEDULE.status)} plan: making the video public at that time is done in YouTube Studio — automatic public release is not switched on.</div></div>`;
+    `<div style="margin-top:6px;color:var(--dim);font-family:inherit;line-height:1.5">The upload stays <b>PRIVATE</b>. At the planned time (CEO-approved schedule: Long Friday 7:00 AM, Short Sunday 6:00 PM Eastern) the VA makes it public in YouTube Studio — automatic public release is not switched on.</div></div>`;
 }
 // Done: the publishing checklist for an SRV Studio production upload.
 function _srvEnglishV2PublishChecklistHtml(task,pkg,taskId){
@@ -17125,15 +17144,26 @@ function _srvEnglishV2PublishChecklistHtml(task,pkg,taskId){
   return `<div id="srv2check_${P}" style="margin-bottom:16px;padding:12px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.25);border-radius:10px;font-size:11px;font-family:'JetBrains Mono',monospace">
     <div style="font-size:9px;font-weight:800;color:#c9a84c;letter-spacing:1.5px;margin-bottom:8px">PUBLISHING CHECKLIST · ${kind.toUpperCase()}</div>
     ${_srv2Row('Playlist',plText,plOk?'#22c55e':pr?'#fbbf24':null)}
-    ${_srv2Row('Planned public release',plan?escHTML(plan.label)+' ('+escHTML(plan.status)+')':'—')}
-    ${_srv2Row('Visibility now','PRIVATE — make it public in YouTube Studio at the planned time')}
+    ${_srv2Row('Planned public release',plan?escHTML(_srvEnglishV2PlanLabel(plan))+' ('+escHTML(plan.status||'approved')+')':'—')}
+    ${_srvEnglishV2PublicStepHtml(pkg,T,P,vid,plan,sync,va)}
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${btn('↻ Check now',`_srvEnglishV2PlaylistSync('${T}','${P}')`)}${!plOk?link('Add to playlist in YouTube Studio','https://studio.youtube.com/video/'+vid+'/edit'):''}</div>
     <div id="srv2checkst_${P}" style="margin-top:6px;color:var(--dim)">${sync&&sync.at?'Last checked '+escHTML(String(sync.at).slice(0,16).replace('T',' '))+' UTC':''}</div>
     ${step}
   </div>`;
 }
+// 031: the manual public release — instruction at the planned time, YouTube's current visibility (read-only API check
+// from "Check now"), and the VA's confirmation. The app never changes visibility itself.
+function _srvEnglishV2PublicStepHtml(pkg,T,P,vid,plan,sync,va){
+  const vis=sync&&sync.visibility;const done=va&&va.madePublic&&va.madePublic.doneAt;
+  const now=vis&&vis.privacyStatus?('YouTube reports: '+vis.privacyStatus.toUpperCase()+' (checked '+String(vis.at||sync.at||'').slice(0,16).replace('T',' ')+' UTC)'):'PRIVATE at upload — press “Check now” to read YouTube';
+  const col=vis&&vis.privacyStatus==='public'?'#22c55e':null;
+  return `<div style="margin-top:8px"><div style="font-weight:700;color:var(--text);margin-bottom:4px">Public release (VA step — done by hand in YouTube Studio)</div>
+    <div style="color:var(--dim);line-height:1.5;margin-bottom:6px">At <b>${plan?escHTML(_srvEnglishV2PlanLabel(plan)):'the planned time'}</b> open the video in YouTube Studio → <b>Visibility</b> → <b>Public</b> → Save. Do not use YouTube's own scheduling.</div>
+    ${_srv2Row('Visibility',escHTML(now),col)}${_srv2Row('Status',done?'✓ VA confirmed public '+escHTML(String(done).slice(0,16).replace('T',' '))+' UTC':'to do at the planned time',done?'#22c55e':'#fbbf24')}
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"><a href="https://studio.youtube.com/video/${escHTML(vid)}/edit" target="_blank" rel="noopener" style="padding:6px 10px;border:1px solid rgba(239,68,68,0.35);border-radius:7px;color:#ef4444;font-size:11px;font-weight:700;text-decoration:none">Open in YouTube Studio</a>${done?'':`<button onclick="_srvEnglishV2MarkVaStep('${T}','${P}','madePublic')" style="padding:6px 10px;background:transparent;border:1px solid rgba(34,197,94,0.45);border-radius:7px;color:#22c55e;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">✓ I made it public</button>`}</div></div>`;
+}
 function _srvEnglishV2PlaylistReason(code){
-  const m={insufficient_scope:'the SRV Studio YouTube connection does not have playlist permission yet (CEO reconnect with the playlist scope needed) — add it in YouTube Studio for now',
+  const m={insufficient_scope:'SRV Studio\'s YouTube connection does not have the playlist permission yet (one-time CEO reconnect of SRV Studio) — add it to the playlist in YouTube Studio for now',
     playlist_not_srv_studio:'that playlist does not belong to the SRV Studio channel — nothing was changed',playlist_not_found:'the playlist was not found',
     membership_check_failed:'YouTube could not be asked about the playlist',insert_failed:'YouTube refused the playlist insert',not_verified_after_insert:'the insert could not be verified',
     playlist_lookup_failed:'the playlist could not be read',playlist_exception:'the playlist step failed',bad_video_id:'no valid YouTube video id'};
@@ -17147,14 +17177,15 @@ async function _srvEnglishV2PlaylistSync(taskId,pkgId){
   let j=null;
   try{const r=await _publishAuthedFetch('/api/ops?action=srv_studio_v2_playlist_sync',{pkgId:pkg.id});j=await r.json().catch(function(){return null;});}catch(e){j={ok:false,error:String(e&&e.message||e)};}
   if(!j||j.ok!==true){if(st)st.textContent='⚠ Check failed — '+((j&&j.error)||'no answer');return false;}
-  pkg.srvPlaylist=j.playlist;pkg.srvPlaylistSync={at:new Date().toISOString(),related:j.related||null,endScreen:j.endScreen||null};
-  await _srvEnglishV2Persist(pkg,['srvPlaylist','srvPlaylistSync']);
+  pkg.srvPlaylist=j.playlist;pkg.srvPlaylistSync={at:new Date().toISOString(),related:j.related||null,endScreen:j.endScreen||null,visibility:j.visibility||null};
+  if(j.plannedRelease&&j.plannedRelease.utcIso&&!(pkg.srvSchedulePlan&&pkg.srvSchedulePlan.source==='server'))pkg.srvSchedulePlan=Object.assign({},j.plannedRelease,{label:_srvEnglishV2PlanLabel(j.plannedRelease),source:'server'});
+  await _srvEnglishV2Persist(pkg,['srvPlaylist','srvPlaylistSync','srvSchedulePlan']);
   _srvEnglishV2Show(taskId);
   return true;
 }
 // VA confirms a Studio-only step (Related video / end screen). Recorded with who and when; never claimed as API-verified.
 async function _srvEnglishV2MarkVaStep(taskId,pkgId,step){
-  if(step!=='relatedVideo'&&step!=='endScreen')return false;
+  if(step!=='relatedVideo'&&step!=='endScreen'&&step!=='madePublic')return false;
   const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));if(!pkg||!pkg.srvProduction)return false;
   const prev=pkg.srvVaSteps;
   pkg.srvVaSteps=Object.assign({},prev||{},{[step]:{doneAt:new Date().toISOString(),by:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||null,verifiedBy:'va-confirmation'}});
