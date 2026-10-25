@@ -20712,6 +20712,13 @@ function _srvFarsiVaAutoArtistFormat(task){
 // pick a published Long, pick a 25–35 s section, preview it, create the Short. Nothing new is generated and no MP3 is
 // uploaded: the Short reuses the Long's song (title, lyrics, artist, mood) and cuts its audio from the Long's video.
 const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DEFAULT_SEC=30;
+// Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
+// the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
+const SRV_FARSI_UI_BUILD='srvf-2026-10-25-f';
+async function _srvFarsiPageIsCurrent(){
+  try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
+    return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
+}
 const _srvFarsiShortSel={};          // per task: {longPkgId,startSec,durationSec} — the choice before "Create"
 const _srvFarsiLongDurCache={};      // pkgId -> seconds (probed from the stored Long video when not on the package)
 function _srvFarsiFmtSec(x){x=Math.max(0,Math.round(Number(x)||0));return Math.floor(x/60)+':'+String(x%60).padStart(2,'0');}
@@ -20794,6 +20801,7 @@ function _srvFarsiShortFromLongHtml(task,taskId){
         <button type="button" onclick="_srvFarsiShortPreview('${T}')" style="padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;margin-bottom:10px">▶ Preview this section</button>
         <div style="font-size:10px;color:var(--dim);line-height:1.6;margin-bottom:12px">The Short reuses this Long's song — same title, audio, lyrics, artist and mood. Nothing new is generated and no MP3 upload is needed.</div>
         <div id="srvf-short-st-${T}" style="font-size:11px;margin-bottom:8px;font-family:'JetBrains Mono',monospace"></div>
+        <div style="font-size:9px;color:var(--dim);margin-bottom:6px;font-family:'JetBrains Mono',monospace;opacity:0.7">build ${SRV_FARSI_UI_BUILD}</div>
         <button type="button" onclick="_srvFarsiCreateShortFromLong('${T}')" ${ready?'':'disabled'} style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;opacity:${ready?1:0.5}">✂ Create Short from this Long</button>`;
 }
 function _srvFarsiShortSet(taskId,key,val,live){
@@ -20827,6 +20835,7 @@ function _srvFarsiLongMode(L,lt){
 async function _srvFarsiCreateShortFromLong(taskId){
   const st=document.getElementById('srvf-short-st-'+taskId);
   const say=function(t,c){if(st){st.textContent=t;st.style.color=c||'var(--dim)';}};
+  if(await _srvFarsiPageIsCurrent()===false){say('⚠ This page is running an older version of MMMOS. Reload the page (⌘R / Ctrl+R) and try again — nothing was saved.','#ef4444');return false;}
   const task=_srvFarsiTaskById(taskId);
   if(!task||task.isLong){say('⚠ This task is not a SRV Farsi Short.','#ef4444');return false;}
   if(_srvFarsiPkgForTask(task)){say('⚠ This Short already has its package.','#ef4444');return false;}

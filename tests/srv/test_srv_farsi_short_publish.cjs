@@ -20,6 +20,7 @@ function world(opts){
   ctx.window.AudioContext=opts.AudioContext;
   vm.createContext(ctx);
   vm.runInContext(`
+    var location={pathname:'/'}; async function _srvFarsiPageIsCurrent(){return globalThis.__pageCurrent===undefined?true:globalThis.__pageCurrent;}
     function saveAppState(){_saves.state++;}
     async function savePackageToSupabase(p){_saves.pkg.push(JSON.parse(JSON.stringify(p)));return true;}
     function alert(m){_alerts.push(m);} function confirm(m){_alerts.push('CONFIRM:'+m);return _confirms.length?_confirms.shift():true;}
@@ -31,7 +32,7 @@ function world(opts){
     async function _publishFetch(u){return {status:200,json:async()=>(globalThis.__plcheck||{ok:true,canAddToPlaylists:false})};}
     function _srvFarsiApproveVideo(p,t){(D._approved=D._approved||[]).push(String(p));}
     ${['_srvFarsiIsTask','_srvFarsiTaskUid','_srvFarsiTaskById','_srvFarsiTaskByUid','_srvFarsiIsTestTask','_srvFarsiPkgForTask','_srvFarsiPlaylistCategory','_srvFarsiSplitMood','_srvFarsiVaCurrentArtistFormat','_srvFarsiVaAutoArtistFormat'].map(top).join('\n')}
-    ${block}
+    ${block.replace(/async function _srvFarsiPageIsCurrent\(\)\{[\s\S]*?\n\}\n/,'')}
     globalThis.__fns={_srvFarsiShortSources,_srvFarsiShortClamp,_srvFarsiCreateShortFromLong,_srvFarsiShortAudioFromLong,_srvFarsiShortSourceHtml,_srvFarsiPublishPlaylists,
       _srvFarsiDefaultPlaylistIds,_srvFarsiPlaylistSelection,_srvFarsiScheduleIso,_srvFarsiPublishCheck,_srvFarsiApplySchedule,_srvFarsiPublishPanelHtml,_srvFarsiApproveAndPublish,_srvFarsiShortFromLongHtml,_srvFarsiShortSel};
   `,ctx);
@@ -236,6 +237,14 @@ const mkD=()=>({tasks:[
   const loaded=await loader();
   ok('reload: both the Short and its source Long come back (the loader keys on dbTitle when present)',loaded.some(p=>p.id===sp.id)&&loaded.some(p=>p.id==='pkg_L1'),loaded.map(p=>p.id));
   ok('shared save/loader: any package without dbTitle sends/keys exactly as before',/title:clean\.dbTitle\|\|clean\.title\|\|''/.test(saveSrc)&&/const key=\(p\.dbTitle\|\|p\.title\|\|''\)\.trim\(\)\.toLowerCase\(\);/.test(loadSrc)&&!/dbTitle/.test(h.replace(/[^\n]*dbTitle[^\n]*\n/g,(m)=>/savePackageToSupabase|fetchPackagesFromTable|clean\.dbTitle|p\.dbTitle\|\||pkg\.dbTitle=|packages_engine_title|DB-only title|dbTitle: set only/.test(m)?'':m))); }
+// ── 7d. outdated tab guard (the CEO's tab was still running the pre-fix code) ──
+{ const W=world({D:mkD()}),F=W.__fns; W.__pageCurrent=false; vm.runInContext('globalThis.__pageCurrent=false',W);
+  F._srvFarsiShortSel['201']={longPkgId:'pkg_L1',startSec:0,durationSec:30};
+  const n=W.D.packages.length, r=await F._srvFarsiCreateShortFromLong('201');
+  ok('an outdated tab is refused before anything is written (asks to reload)',r===false&&W.D.packages.length===n&&W._saves.pkg.length===0);
+  const real=h.slice(h.indexOf('async function _srvFarsiPageIsCurrent(){'),h.indexOf('\n}\n',h.indexOf('async function _srvFarsiPageIsCurrent(){'))+2);
+  ok('freshness check compares the deployed page\'s build label with this tab\'s, no-store fetch, never blocks when it cannot check',/cache:'no-store'/.test(real)&&/SRV_FARSI_UI_BUILD/.test(real)&&/return null;/.test(real));
+  ok('the Short panel shows the build label',/build \$\{SRV_FARSI_UI_BUILD\}/.test(h)); }
 // ── 8. other businesses untouched ──
 { const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};
