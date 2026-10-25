@@ -63,7 +63,7 @@ const mkD=()=>({tasks:[
   ok('sources: an explicit Artist choice filters the Longs by artist (Duet → none); Auto shows all',F._srvFarsiShortSources(t2).length===0&&(t2.mode=t2.mood='Female — Happy',F._srvFarsiShortSources(t2).length===1));
   const html=F._srvFarsiShortFromLongHtml(T[1],'200');
   ok('UI: dropdown shows title · task # · duration · on YouTube',/لمس اولین دست · task #151 · 3:42 · on YouTube/.test(html));
-  ok('UI: start, length, slider, range, Preview, Create',/srvf-short-start-200/.test(html)&&/srvf-short-dur-200/.test(html)&&/type="range"/.test(html)&&/of 3:42/.test(html)&&/Preview this section/.test(html)&&/Create Short from this Long/.test(html)); }
+  ok('UI: start, length, slider, range, Preview, Create (once the hook suggestion is ready)',/srvf-short-start-200/.test(html)&&/srvf-short-dur-200/.test(html)&&/Preview this section/.test(html)&&/Create Short from this Long/.test(html)&&/data-srvf-hook/.test(html)); }
 // ── 2. section rules ──
 { const W=world({D:mkD()}),F=W.__fns;
   const c=(sel,song)=>F._srvFarsiShortClamp(sel,song);
@@ -117,13 +117,13 @@ const mkD=()=>({tasks:[
   ok('defaults: Romantic Long → Happy Romantic',d('Female — Romantic',true)===HR);
   ok('defaults: Happy Long → Happy Romantic',d('Duet — Happy',true)===HR);
   ok('defaults: Emotional Long → Emotional',d('Male — Emotional',true)===EM);
-  ok('defaults: Romantic Short → Happy Romantic + Shorts',d('Female — Romantic',false)===HR+','+SH);
-  ok('defaults: Happy Short → Happy Romantic + Shorts',d('Male — Happy',false)===HR+','+SH);
-  ok('defaults: Emotional Short → Emotional + Shorts',d('Duet — Emotional',false)===EM+','+SH);
+  ok('defaults: Romantic Short → Shorts ONLY',d('Female — Romantic',false)===SH);
+  ok('defaults: Happy Short → Shorts ONLY',d('Male — Happy',false)===SH);
+  ok('defaults: Emotional Short → Shorts ONLY',d('Duet — Emotional',false)===SH);
   const pkg={id:'p1',srvPlaylistSel:{ids:[SH,'PLbogus'],none:false}};
   ok('override: the saved selection wins over the recommendation (unknown ids dropped)',F._srvFarsiPlaylistSelection(pkg,{mood:'Female — Romantic'},true).ids.join()===SH);
   const html=F._srvFarsiPublishPanelHtml({id:200,mood:'Male — Emotional'},{id:'p2'},false);
-  ok('panel: three approved playlists as checkboxes, recommended ones pre-ticked and badged',(html.match(/data-srvf-pl="/g)||[]).length===3&&/data-srvf-pl="PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF" checked/.test(html)&&/data-srvf-pl="PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh" checked/.test(html)&&!/data-srvf-pl="PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3" checked/.test(html)&&(html.match(/recommended<\/span>/g)||[]).length===2);
+  ok('panel: three approved playlists as checkboxes; for a Short ONLY |Shorts is pre-ticked and recommended',(html.match(/data-srvf-pl="/g)||[]).length===3&&/data-srvf-pl="PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh" checked/.test(html)&&!/data-srvf-pl="PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF" checked/.test(html)&&!/data-srvf-pl="PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3" checked/.test(html)&&(html.match(/recommended<\/span>/g)||[]).length===1);
   ok('panel: "No playlist" is Admin-only',!/data-srvf-pl-none/.test(html)&&/data-srvf-pl-none/.test(world({D:mkD(),user:{id:'admin'}}).__fns._srvFarsiPublishPanelHtml({id:200,mood:'Male — Emotional'},{id:'p2'},false)));
   const save=top('_srvFarsiSavePublishPrefs');
   ok('saving: selection + schedule go on the package and to the packages table (survive refresh)',/pkg\.srvPlaylistSel=\{ids:/.test(save)&&/pkg\.srvSchedule=\{date,time,tz:_srvFarsiPublishTz\(\),iso:_srvFarsiScheduleIso\(date,time\)/.test(save)&&/savePackageToSupabase\(pkg\)/.test(save));
@@ -250,6 +250,24 @@ const mkD=()=>({tasks:[
   ok('Quick Generate Short (SRV Farsi) opens the lifecycle at Generate — no package is generated',/if\(contentFormat==='short'\)\{ if\(typeof openExec==='function'\)openExec\(String\(newTaskId\)\); return; \}/.test(qg)&&qg.indexOf("if(contentFormat==='short')")<qg.indexOf('vaFarsiGeneratePackage(String(newTaskId))'));
   ok('song generation refuses a SRV Farsi Short task (sends it to the Long picker instead)',/if\(!task\.isLong\)\{[^}]*_srvFarsiSetStage\(taskId,'generate'\)/.test(gen));
   ok('Quick Generate for other engines unchanged (the non-Farsi branch is byte-identical to main)',(()=>{const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});const m=main.slice(main.indexOf('\nfunction _quickGenerateTest('));const tail=x=>{const i=x.indexOf("  const engCfg=(ENGINES_CONFIG||[]).find(e=>e.id===engineId);");return x.slice(i,x.indexOf('\n}',i));};return tail(m)===tail(qg)&&tail(qg).length>100;})()); }
+// ── 7f. Suggested Hook Section (CEO 2026-10-25: never the intro by default) ──
+{ const W=world({D:mkD()}),F=W.__fns; const sug=vm.runInContext('_srvFarsiSuggestHook',W), envf=vm.runInContext('_srvFarsiEnergyEnvelope',W);
+  // synthetic 4:00 song: quiet instrumental intro (0–40 s), verse (40–85 s), loud chorus (85–120 s), verse, chorus (160–195 s), quiet outro
+  const hop=0.5,n=480,env=new Float32Array(n);for(let i=0;i<n;i++){const t=i*hop;env[i]=t<40?0.15:t<85?0.45:t<120?0.95:t<160?0.5:t<195?0.9:0.2;}
+  const r=sug(env,hop,240,30);
+  ok('hook: picks the loud section where it arrives (chorus entry at 1:25), not the intro',r.startSec>=81&&r.startSec<=89,r);
+  ok('hook: the explanation names the reason and the skipped intro/outro',/loudest sustained part/.test(r.why)&&/intro \(first \d+ s\)/.test(r.why)&&/outro \(last \d+ s\)/.test(r.why));
+  const flat=new Float32Array(n).fill(0.5); flat.fill(1,0,60); // loudest at the very start
+  ok('hook: never the first 20 s / 12% even when the opening is loudest',sug(flat,hop,240,30).startSec>=28);
+  ok('hook: short songs fall back to ~35%, not 0:00',sug(new Float32Array(60).fill(0.5),hop,30,30).startSec===Math.round(30*0.35)||sug(new Float32Array(60).fill(0.5),hop,30,30).startSec>0);
+  const audio={sampleRate:1000,length:4000,numberOfChannels:1,getChannelData:()=>{const d=new Float32Array(4000);for(let i=2000;i<4000;i++)d[i]=0.5;return d;}};
+  const e=envf(audio,0.5); ok('envelope: RMS per 0.5 s window from the decoded audio',e.length===8&&e[0]===0&&Math.abs(e[7]-0.5)<1e-6);
+  ok('default start is never 0:00 without a suggestion (fallback ~35%, or wait)',F._srvFarsiShortClamp({},240).startSec===Math.round(240*0.35)&&F._srvFarsiShortClamp({},0).startSec===null);
+  const c=h.slice(h.indexOf('function _srvFarsiShortFromLongHtml('),h.indexOf('\n}\n',h.indexOf('function _srvFarsiShortFromLongHtml(')));
+  ok('UI: Create is disabled while the suggestion is being computed; the suggestion is labelled as an estimate',/const ready=!!\(cur&&cur\.songSec&&c\.startSec!=null&&!_hookBusy\);/.test(c)&&/Suggested Hook Section/.test(c)&&/An estimate, not a detected chorus/.test(c));
+  ok('manual control kept: moving Start or Length marks the choice as manual; "Use suggestion" restores it',/sel\[key\]=Number\(val\); sel\.manual=true;/.test(top('_srvFarsiShortSet'))&&/sel\.startSec=h\.startSec;/.test(top('_srvFarsiShortUseHook')));
+  ok('the Short records how its section was chosen (suggested-hook or manual)',/section:\(function\(\)\{const h=_srvFarsiHookCache\[L\.id\];return h&&h\.status==='done'&&h\.startSec===start/.test(top('_srvFarsiCreateShortFromLong')));
+  ok('Build reuses the Long decoded for the suggestion (no second 36 MB download)',/const audio=await _srvFarsiDecodeLongAudio\(s\.audioUrl\);/.test(top('_srvFarsiShortAudioFromLong'))); }
 // ── 8. other businesses untouched ──
 { const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};

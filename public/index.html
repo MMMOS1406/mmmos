@@ -20717,7 +20717,7 @@ function _srvFarsiVaAutoArtistFormat(task){
 const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DEFAULT_SEC=30;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-25-g';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-25-h';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -20763,9 +20763,59 @@ function _srvFarsiShortSources(task){
 function _srvFarsiShortClamp(sel,songSec){
   const dur=Math.min(SRV_FARSI_SHORT_MAX_SEC,Math.max(SRV_FARSI_SHORT_MIN_SEC,Math.round(Number(sel.durationSec)||SRV_FARSI_SHORT_DEFAULT_SEC)));
   const maxStart=songSec?Math.max(0,Math.floor(songSec-dur)):0;
-  let start=(sel.startSec==null||!isFinite(sel.startSec))?(songSec?Math.min(maxStart,Math.round(songSec*0.35)):0):Math.round(sel.startSec);
+  // never the intro by default: with no suggestion yet the fallback is ~35% into the song, never 0:00
+  let start=(sel.startSec==null||!isFinite(sel.startSec))?(songSec?Math.min(maxStart,Math.round(songSec*0.35)):null):Math.round(sel.startSec);
+  if(start==null)return {startSec:null,durationSec:dur,maxStart:maxStart};
   start=Math.max(0,Math.min(maxStart,start));
   return {startSec:start,durationSec:dur,maxStart:maxStart};
+}
+// ── Suggested Hook Section ──────────────────────────────────────────────────────────────────────────────────────────
+// The Long carries no timed structure (its lyrics are untimed), so the suggestion comes from the Long's own audio: the
+// loudness envelope (RMS, 0.5 s windows), skipping the intro (first max(20 s, 12%)) and the outro (last max(12 s, 8%)),
+// scoring each 30 s window by its sustained loudness plus how much it rises above the 8 s before it (a section that
+// "arrives"), then snapping the start to the strongest energy jump within ±4 s. It is an estimate of the strongest hook
+// section, not a detected chorus; the VA can move it.
+const _srvFarsiHookCache={};       // Long pkgId -> {status:'running'|'done'|'failed', startSec, songSec, why}
+const _srvFarsiLongAudioCache={};  // Long video URL -> decoded AudioBuffer (reused by Build's cut)
+async function _srvFarsiDecodeLongAudio(url){
+  if(_srvFarsiLongAudioCache[url])return _srvFarsiLongAudioCache[url];
+  const r=await fetch(url); if(!r.ok)throw new Error('Could not load the Long ('+r.status+')');
+  const buf=await r.arrayBuffer();
+  const AC=window.AudioContext||window.webkitAudioContext; const ac=new AC();
+  let audio; try{ audio=await ac.decodeAudioData(buf); } finally { try{ac.close();}catch(_){} }
+  _srvFarsiLongAudioCache[url]=audio; return audio;
+}
+function _srvFarsiEnergyEnvelope(audio,hop){
+  const sr=audio.sampleRate, step=Math.max(1,Math.floor(sr*hop)), n=Math.floor(audio.length/step), ch=Math.min(2,audio.numberOfChannels);
+  const data=[]; for(let c=0;c<ch;c++)data.push(audio.getChannelData(c));
+  const env=new Float32Array(n);
+  for(let i=0;i<n;i++){ let acc=0,cnt=0; const o=i*step; for(let k=0;k<step;k+=4){ let v=0; for(let c=0;c<ch;c++)v+=data[c][o+k]; v/=ch; acc+=v*v; cnt++; } env[i]=Math.sqrt(acc/Math.max(1,cnt)); }
+  return env;
+}
+function _srvFarsiSuggestHook(env,hop,songSec,dur){
+  const n=env.length, w=Math.max(1,Math.round(dur/hop)); let mx=0; for(let i=0;i<n;i++)if(env[i]>mx)mx=env[i];
+  if(!mx||n<w+4)return {startSec:Math.max(0,Math.round(songSec*0.35)),why:'fallback (no usable audio energy)'};
+  const e=Array.from(env,function(v){return v/mx;}), pre=new Float64Array(n+1); for(let i=0;i<n;i++)pre[i+1]=pre[i]+e[i];
+  const avg=function(a,b){a=Math.max(0,a);b=Math.min(n,b);return b>a?(pre[b]-pre[a])/(b-a):0;};
+  const lo=Math.round(Math.max(20,songSec*0.12)/hop), hi=Math.min(n-w,n-w-Math.round(Math.max(12,songSec*0.08)/hop));
+  if(hi<=lo)return {startSec:Math.max(0,Math.round(songSec*0.35)),why:'fallback (song too short to skip intro and outro)'};
+  let best=lo,bestScore=-1,bestMean=0,bestRise=0; const back=Math.round(8/hop);
+  for(let s=lo;s<=hi;s++){ const mean=avg(s,s+w), rise=Math.max(0,mean-avg(s-back,s)), score=mean+0.6*rise; if(score>bestScore){bestScore=score;best=s;bestMean=mean;bestRise=rise;} }
+  let snap=best,jump=-1; const r=Math.round(4/hop), d=Math.round(1.5/hop);
+  for(let s=Math.max(lo,best-r);s<=Math.min(hi,best+r);s++){ const j=avg(s,s+d)-avg(s-d,s); if(j>jump){jump=j;snap=s;} }
+  return {startSec:Math.round(snap*hop),why:'the loudest sustained part of the song ('+Math.round(bestMean*100)+'% of peak level'+(bestRise>0.02?', '+Math.round(bestRise*100)+'% above the 8 s before it':'')+'); intro (first '+Math.round(lo*hop)+' s) and outro (last '+Math.round(Math.max(0,songSec-(hi+w)*hop))+' s) skipped'};
+}
+function _srvFarsiAnalyzeHook(p,taskId){
+  if(!p||_srvFarsiHookCache[p.id])return;
+  _srvFarsiHookCache[p.id]={status:'running'};
+  _srvFarsiDecodeLongAudio(p._srvLongVideoUrl).then(function(audio){
+    const songSec=audio.duration; if(!_srvFarsiLongDuration(p))_srvFarsiLongDurCache[p.id]=songSec;
+    const h=_srvFarsiSuggestHook(_srvFarsiEnergyEnvelope(audio,0.5),0.5,songSec,SRV_FARSI_SHORT_DEFAULT_SEC);
+    _srvFarsiHookCache[p.id]={status:'done',startSec:h.startSec,songSec:songSec,why:h.why};
+  }).catch(function(e){ _srvFarsiHookCache[p.id]={status:'failed',why:String(e&&e.message||e)}; })
+  .then(function(){ const sel=_srvFarsiShortSel[taskId]; const h=_srvFarsiHookCache[p.id];
+    if(sel&&String(sel.longPkgId)===String(p.id)&&!sel.manual&&h.status==='done'){ sel.startSec=h.startSec; sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC; sel.suggested=true; }
+    if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId)); });
 }
 // Reads the Long's real length from its stored video (MediaRecorder WebM often reports Infinity until sought to the end).
 function _srvFarsiProbeLongDuration(p,taskId){
@@ -20783,22 +20833,28 @@ function _srvFarsiShortFromLongHtml(task,taskId){
   if(!src.some(function(x){return String(x.pkg.id)===String(sel.longPkgId);}))sel.longPkgId=src[0]?String(src[0].pkg.id):null;
   const cur=src.find(function(x){return String(x.pkg.id)===String(sel.longPkgId);})||null;
   if(cur&&!cur.songSec)_srvFarsiProbeLongDuration(cur.pkg,taskId);
-  const c=_srvFarsiShortClamp(sel,cur?cur.songSec:0); sel.startSec=c.startSec; sel.durationSec=c.durationSec;
+  const hook=cur?_srvFarsiHookCache[cur.pkg.id]:null;
+  if(cur&&!hook)_srvFarsiAnalyzeHook(cur.pkg,taskId);
+  if(cur&&hook&&hook.status==='done'&&!sel.manual&&sel.startSec==null){sel.startSec=hook.startSec;sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC;sel.suggested=true;}
+  const c=_srvFarsiShortClamp(sel,cur?cur.songSec:0); if(c.startSec!=null)sel.startSec=c.startSec; sel.durationSec=c.durationSec;
+  const _hookBusy=!!(cur&&(!hook||hook.status==='running'));
+  const _onHook=!!(hook&&hook.status==='done'&&sel.startSec===hook.startSec);
   const T=escHTML(String(taskId));
   if(!src.length)return `<div style="font-size:12px;color:#f59e0b;line-height:1.6">No published SRV Farsi Long yet. A Short is cut from a Long that is already on YouTube — publish a Long first.</div>`;
   const opts=src.map(function(x){const p=x.pkg;const tn=x.task?('task #'+escHTML(String(x.task.id))):(p.taskId?'task #'+escHTML(String(p.taskId)):'');
     return `<option value="${escHTML(String(p.id))}" ${String(p.id)===String(sel.longPkgId)?'selected':''}>${escHTML(p.title)} · ${tn} · ${x.songSec?_srvFarsiFmtSec(x.songSec):'—'} · ${x.isTest?'[TEST] private on YouTube':'on YouTube'}</option>`;}).join('');
-  const ready=!!(cur&&cur.songSec);
+  const ready=!!(cur&&cur.songSec&&c.startSec!=null&&!_hookBusy);
   return `
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">1 · PUBLISHED LONG (SRV FARSI ONLY)</div>
         <select id="srvf-short-long-${T}" onchange="_srvFarsiShortSet('${T}','longPkgId',this.value)" style="width:100%;padding:9px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?'6':'12'}px">${opts}</select>
         ${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?`<div data-srvf-readonly-src style="font-size:10px;color:#a78bfa;margin-bottom:12px">🔒 Using published Long as source only — original Long will not be changed. This Short stays [TEST]: private, unscheduled, outside the weekly plan.</div>`:''}
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">2 · SECTION (${SRV_FARSI_SHORT_MIN_SEC}–${SRV_FARSI_SHORT_MAX_SEC} S)</div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-          <label style="font-size:11px;color:var(--dim)">Start <input id="srvf-short-start-${T}" type="number" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" ${ready?'':'disabled'} onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:76px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
+          <label style="font-size:11px;color:var(--dim)">Start <input id="srvf-short-start-${T}" type="number" min="0" max="${c.maxStart}" step="1" value="${c.startSec==null?'':c.startSec}" ${ready?'':'disabled'} onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:76px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
           <label style="font-size:11px;color:var(--dim)">Length <input id="srvf-short-dur-${T}" type="number" min="${SRV_FARSI_SHORT_MIN_SEC}" max="${SRV_FARSI_SHORT_MAX_SEC}" step="1" value="${c.durationSec}" onchange="_srvFarsiShortSet('${T}','durationSec',this.value)" style="width:64px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
-          <span id="srvf-short-range-${T}" style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace">${_srvFarsiFmtSec(c.startSec)} – ${_srvFarsiFmtSec(c.startSec+c.durationSec)}${ready?' of '+_srvFarsiFmtSec(cur.songSec):' (reading the song length…)'}</span>
+          <span id="srvf-short-range-${T}" style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace">${c.startSec==null?'—':_srvFarsiFmtSec(c.startSec)+' – '+_srvFarsiFmtSec(c.startSec+c.durationSec)}${cur&&cur.songSec?' of '+_srvFarsiFmtSec(cur.songSec):' (reading the song…)'}</span>
         </div>
+        <div data-srvf-hook style="font-size:10px;line-height:1.5;margin-bottom:6px;color:${_onHook?'#c9a84c':'var(--dim)'}">${_hookBusy?'🔎 Finding the Suggested Hook Section in this Long…':hook&&hook.status==='done'?(_onHook?'🎯 <strong>Suggested Hook Section</strong> '+_srvFarsiFmtSec(hook.startSec)+'–'+_srvFarsiFmtSec(hook.startSec+SRV_FARSI_SHORT_DEFAULT_SEC)+' — '+escHTML(hook.why)+'. An estimate, not a detected chorus: preview it and move it if needed.':'Suggested Hook Section: '+_srvFarsiFmtSec(hook.startSec)+'–'+_srvFarsiFmtSec(hook.startSec+SRV_FARSI_SHORT_DEFAULT_SEC)+` <button type="button" onclick="_srvFarsiShortUseHook('${T}')" style="margin-left:4px;padding:1px 6px;background:transparent;border:1px solid rgba(201,168,76,0.4);border-radius:4px;color:#c9a84c;font-size:10px;cursor:pointer">Use suggestion</button>`):hook&&hook.status==='failed'?'Could not analyse the Long ('+escHTML(hook.why)+') — starting about a third of the way in; preview and adjust.':''}</div>
         ${ready?`<input id="srvf-short-slider-${T}" type="range" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" oninput="_srvFarsiShortSet('${T}','startSec',this.value,true)" onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:100%;margin-bottom:8px">`:''}
         <audio id="srvf-short-audio-${T}" src="${escHTML(cur.pkg._srvLongVideoUrl)}" preload="none" crossorigin="anonymous" style="display:none"></audio>
         <button type="button" onclick="_srvFarsiShortPreview('${T}')" style="padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;margin-bottom:10px">▶ Preview this section</button>
@@ -20809,8 +20865,8 @@ function _srvFarsiShortFromLongHtml(task,taskId){
 }
 function _srvFarsiShortSet(taskId,key,val,live){
   const sel=_srvFarsiShortSel[taskId]||(_srvFarsiShortSel[taskId]={});
-  if(key==='longPkgId'){sel.longPkgId=String(val);sel.startSec=null;}
-  else sel[key]=Number(val);
+  if(key==='longPkgId'){sel.longPkgId=String(val);sel.startSec=null;sel.manual=false;sel.suggested=false;}
+  else { sel[key]=Number(val); sel.manual=true; sel.suggested=false; }
   if(live){
     const el=document.getElementById('srvf-short-range-'+taskId), st=document.getElementById('srvf-short-start-'+taskId);
     if(el)el.textContent=_srvFarsiFmtSec(sel.startSec)+' – '+_srvFarsiFmtSec(sel.startSec+(sel.durationSec||SRV_FARSI_SHORT_DEFAULT_SEC));
@@ -20818,6 +20874,11 @@ function _srvFarsiShortSet(taskId,key,val,live){
   }
   if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
   else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+}
+function _srvFarsiShortUseHook(taskId){
+  const sel=_srvFarsiShortSel[taskId]; if(!sel)return; const h=_srvFarsiHookCache[sel.longPkgId]; if(!h||h.status!=='done')return;
+  sel.startSec=h.startSec; sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC; sel.manual=false; sel.suggested=true;
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
 }
 function _srvFarsiShortPreview(taskId){
   const a=document.getElementById('srvf-short-audio-'+taskId); const sel=_srvFarsiShortSel[taskId]||{};
@@ -20845,6 +20906,7 @@ async function _srvFarsiCreateShortFromLong(taskId){
   const sel=_srvFarsiShortSel[taskId]||{};
   const src=_srvFarsiShortSources(task).find(function(x){return String(x.pkg.id)===String(sel.longPkgId);});
   if(!src){say('⚠ Choose a published SRV Farsi Long first.','#ef4444');return false;}
+  if(sel.startSec==null){say('⚠ Still finding the hook section — try again in a moment.','#ef4444');return false;}
   const dur=Math.round(Number(sel.durationSec)), start=Math.round(Number(sel.startSec));
   if(!(dur>=SRV_FARSI_SHORT_MIN_SEC&&dur<=SRV_FARSI_SHORT_MAX_SEC)){say('⚠ The Short must be '+SRV_FARSI_SHORT_MIN_SEC+'–'+SRV_FARSI_SHORT_MAX_SEC+' seconds.','#ef4444');return false;}
   if(!src.songSec){say('⚠ The Long\'s length is still being read — try again in a moment.','#ef4444');return false;}
@@ -20863,7 +20925,8 @@ async function _srvFarsiCreateShortFromLong(taskId){
     hook:L.hook||'',vocal:L.vocal,mood:L.mood,artist:L.artist,mode:mode,
     captionYT:L.captionYT||L.captionYouTube||'',captionYouTube:L.captionYouTube||L.captionYT||'',hashtags:L.hashtags||'',
     srvShortOf:{longPkgId:String(L.id),longTaskUid:L.srvTaskUid||null,longTaskId:lt?lt.id:(L.taskId||null),longTitle:L.title,
-      startSec:start,durationSec:dur,longDurationSec:Math.round(src.songSec*10)/10,audioUrl:L._srvLongVideoUrl,longYoutubeVideoId:src.yt||null,at:new Date().toISOString()},
+      startSec:start,durationSec:dur,longDurationSec:Math.round(src.songSec*10)/10,audioUrl:L._srvLongVideoUrl,longYoutubeVideoId:src.yt||null,at:new Date().toISOString(),
+      section:(function(){const h=_srvFarsiHookCache[L.id];return h&&h.status==='done'&&h.startSec===start&&dur===SRV_FARSI_SHORT_DEFAULT_SEC?{how:'suggested-hook',why:h.why}:{how:'manual',suggestedStartSec:h&&h.status==='done'?h.startSec:null};})()},
   };
   if(uid)pkg.srvTaskUid=uid;
   // The packages table allows one row per (engine, title) for SRV Farsi (index packages_engine_title_unique_non_srv_studio),
@@ -20894,10 +20957,7 @@ async function _srvFarsiCreateShortFromLong(taskId){
 // Build: the Short's audio is the chosen section of the Long, cut from the Long's stored video (WAV, in memory).
 async function _srvFarsiShortAudioFromLong(pkg){
   const s=pkg.srvShortOf;
-  const r=await fetch(s.audioUrl); if(!r.ok)throw new Error('Could not load the Long ('+r.status+')');
-  const buf=await r.arrayBuffer();
-  const AC=window.AudioContext||window.webkitAudioContext; const ac=new AC();
-  let audio; try{ audio=await ac.decodeAudioData(buf); } finally { try{ac.close();}catch(_){} }
+  const audio=await _srvFarsiDecodeLongAudio(s.audioUrl);
   const sr=audio.sampleRate, ch=Math.min(2,audio.numberOfChannels);
   const from=Math.max(0,Math.floor(s.startSec*sr)), to=Math.min(audio.length,Math.floor((s.startSec+s.durationSec)*sr)), n=Math.max(0,to-from);
   if(n<sr*SRV_FARSI_SHORT_MIN_SEC*0.9)throw new Error('The Long is shorter than the chosen section');
@@ -21094,8 +21154,11 @@ function _srvFarsiAvatarPickerHtml(task){
 // approved existing playlist id (Romantic and Happy share "Silk Road Voices | Happy Romantic 🌹").
 const SRV_FARSI_PLAYLIST_NAMES={romantic:'Silk Road Voices | Happy Romantic 🌹',happy:'Silk Road Voices | Happy Romantic 🌹',emotional:'Silk Road Voices | Emotional ❤️',short:'Silk Road Voices |Shorts'};
 function _srvFarsiPublishPlaylists(task,isLong){
+  // CEO rule (2026-10-25): a SRV Farsi Short goes ONLY to "Silk Road Voices |Shorts", whatever its mood.
+  // A Long goes to its mood playlist (Romantic/Happy → Happy Romantic, Emotional → Emotional).
+  if(!isLong)return ['short'];
   const cat=(task&&task.playlistCategory)||_srvFarsiPlaylistCategory(task&&(task.mood||task.mode));
-  return [cat].concat(isLong?[]:['short']).filter(function(k){return ['romantic','emotional','happy','short'].indexOf(k)>=0;});
+  return [cat].filter(function(k){return ['romantic','emotional','happy'].indexOf(k)>=0;});
 }
 // Approve stage: read-only check of which SRV Farsi playlists exist on the channel (exact names, real ids).
 async function _srvFarsiCheckPlaylists(btn){
@@ -24007,7 +24070,7 @@ async function _srvRenderVideo(opts){
       try{ctx.letterSpacing='0px';}catch(_){}
       ctx.restore();
       // cover card — rises and settles
-      const cX=Math.round(W*0.07), cY=Math.round(H*0.145), cW=W-2*cX, cH=Math.round(H*0.525), cR=Math.round(W*0.032);
+      const cX=Math.round(W*0.07), cY=Math.round(H*0.145), cW=W-2*cX, cH=Math.round(H*0.585), cR=Math.round(W*0.032);
       const pC=_in(0.25,1.10);
       ctx.save();
       ctx.globalAlpha=pC;
@@ -24055,23 +24118,8 @@ async function _srvRenderVideo(opts){
       try{ctx.letterSpacing='0px';}catch(_){}
       ctx.restore();
       ctx.restore(); // card
-      // lyric line — each line slides in from alternating sides, under the card
-      if(lyricLines.length){
-        let idx=0;
-        for(let k=1;k<lyricTimings.length;k++){ if(t>=lyricTimings[k]) idx=k; }
-        const line=lyricLines[idx]||'';
-        const nextT=lyricTimings[idx+1]!==undefined?lyricTimings[idx+1]:targetDur;
-        const lineDur=Math.max(0.5,nextT-lyricTimings[idx]);
-        const inWin=t-lyricTimings[idx];
-        const alpha=skipFade?1:Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35))); // skipFade = cover/thumbnail capture: lyric fully visible
-        const e=skipFade?1:1-Math.pow(1-_c01(inWin/0.5),3);
-        ctx.save(); ctx.globalAlpha=alpha; ctx.translate((1-e)*((idx%2)?-1:1)*W*0.07,0);
-        ctx.direction='rtl'; ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.054)}px 'Noto Nastaliq Urdu', serif`;
-        ctx.fillStyle=cream;
-        ctx.shadowColor='rgba(8,4,2,0.92)'; ctx.shadowBlur=Math.round(W*0.014); ctx.shadowOffsetY=2;
-        _srvWrapLines(ctx,line,W/2,Math.round(H*0.742),W*0.84,Math.round(W*0.072),2);
-        ctx.restore();
-      }
+      // No running lyric line on SRV Farsi Shorts (CEO decision 2026-10-25): a Short is a promotional teaser cut
+      // from a Long, so it shows the cover card, title and branding only — no lyric text of any kind.
       // footer — brand + follow line, slides up
       const pFo=_in(1.30,2.05);
       ctx.save();

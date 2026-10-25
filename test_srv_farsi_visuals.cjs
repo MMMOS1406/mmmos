@@ -26,8 +26,9 @@ ok('Long: title side is a masked veil that dissolves into the photo',/_farsiLong
 ok('photo never shrinks below its edge while animating (zoom floor 1, pan limited to the zoom margin)',/const z=Math\.max\(1,zoom\|\|1\)/.test(panel)&&/\*\(z-1\)\*0\.9/.test(panel));
 ok('Long: romanized line is a restrained sans (no monospace caps block)',/500 \$\{Math\.round\(W\*0\.0195\)\}px 'Vazirmatn'/.test(comp)&&!/IBM Plex Mono', monospace`;\s*\n\s*ctx\.fillStyle='rgba\(253,246,232,0\.82\)'/.test(comp));
 ok('Long/Short: title type is cream, not pure white',(comp.match(/#fdf6e8/g)||[]).length>=2&&!/fillStyle='#fff(fff)?'/.test(comp));
-ok('Short: lyric line larger and cream with a deep soft shadow',/600 \$\{Math\.round\(W\*0\.054\)\}px 'Noto Nastaliq Urdu'/.test(comp)&&/shadowColor='rgba\(8,4,2,0\.92\)'/.test(comp));
-ok('Short: cover frame shows the lyric line (not captured mid fade-in)',/const alpha=skipFade\?1:/.test(comp));
+{ const shortSec=comp.slice(comp.indexOf('// ── SHORT (visual benchmark)'));
+  ok('Short: NO running lyric line (CEO 2026-10-25): no lyric text, no lyric timing, no lyric font in the Short layout',!/lyricLines|lyricTimings|_srvWrapLines\(ctx,line/.test(shortSec)&&/No running lyric line on SRV Farsi Shorts/.test(shortSec)); }
+ok('Long keeps its own design (Long branch untouched by the Short lyric removal)',/_drawFarsiWordmark\(tx,_stackY\+_wordmarkGap,titleSide,_farsiPal\.frame\)/.test(comp));
 ok('grade is light enough for natural skin tones (<= 0.25)',(()=>{const m=h.match(/const SRV_FARSI_WARM_GRADE_ALPHA=([0-9.]+)/);return m&&+m[1]>0&&+m[1]<=0.25;})());
 const lum=hex=>{const n=parseInt(hex.slice(1),16);return 0.299*(n>>16)+0.587*((n>>8)&255)+0.114*(n&255);};
 ok('Emotional is the darkest palette but still warm',lum(pal.emotional.gradient[0])<lum(pal.romantic.gradient[0])&&lum(pal.emotional.gradient[0])<lum(pal.happy.gradient[0])&&warm(pal.emotional.tint));
@@ -140,14 +141,14 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   ok('Long: slide direction follows the title side (left or right)',/const _dir=titleSide==='left'\?-1:1;/.test(long));
   ok('Short: title slides in from the right, Latin title from the left',/ctx\.translate\(\(1-pT\)\*W\*0\.10,0\)/.test(short)&&/ctx\.translate\(-\(1-pF\)\*W\*0\.10,0\)/.test(short));
   ok('Short: header slides down, card rises, footer slides up',/ctx\.translate\(0,-\(1-pH\)\*H\*0\.04\)/.test(short)&&/\(1-pC\)\*H\*0\.025/.test(short)&&/ctx\.translate\(0,\(1-pFo\)\*H\*0\.03\)/.test(short));
-  ok('Short: each lyric line slides in from alternating sides',/\(\(idx%2\)\?-1:1\)\*W\*0\.07/.test(short));
+  ok('Short: the cover card uses the space the lyric line used to take (no new clutter)',/cH=Math\.round\(H\*0\.585\)/.test(short)&&!/lyricLines|lyricTimings/.test(short));
   // ── Fix pass: Short text information ──
   ok('Short: channel header',/fillText\('SILK ROAD VOICES',W\/2/.test(short)&&/fillText\('PERSIAN LOVE SONGS',W\/2/.test(short));
   ok('Short: cover card carries Farsi title, Latin title and genre',/_srvFitFarsiTitle\(ctx,_rawTitle,cW-_cPad\*2/.test(short)&&/String\(titleFinglish\)\.toUpperCase\(\),W\/2,_finY/.test(short)&&/fillText\('PERSIAN LOVE SONG',W\/2,_genreY\)/.test(short));
   ok('Short: brand + follow line',/const _brand='SRV FARSI'/.test(short)&&/آهنگ‌های بیشتر در کانال ما/.test(short));
   const ys=[...short.matchAll(/Math\.round\(H\*(0\.\d+)\)/g)].map(m=>parseFloat(m[1]));
   ok('Short: all text sits inside the platform safe zones (below the top 8%, above the bottom 15%)',Math.min(...ys)>=0.08&&Math.max(...ys)<=0.85,'y range '+Math.min(...ys)+' to '+Math.max(...ys));
-  ok('Short: lyric keeps the benchmark treatment (Nastaliq, cream, deep shadow)',/600 \$\{Math\.round\(W\*0\.054\)\}px 'Noto Nastaliq Urdu'/.test(short)&&/rgba\(8,4,2,0\.92\)/.test(short)); }
+  ok('Short: title, Latin title, genre, header and brand/follow line are kept',/fillText\('SILK ROAD VOICES',W\/2/.test(short)&&/String\(titleFinglish\)\.toUpperCase\(\),W\/2,_finY/.test(short)&&/const _brand='SRV FARSI'/.test(short)); }
 // ── Fix pass: fonts ready before the cover, rotation visible at Approve ──
 ok('fonts are loaded with the real title/lyric text before the cover is captured',/_srvFarsiEnsureFonts\(\[title,titleFinglish,hookText,lyrics\]\.join\(' '\)\)/.test(h)&&/document\.fonts\.load\("600 58px 'Noto Nastaliq Urdu'",_txt\)/.test(h));
 ok('build records which library image it used',/pkg\._srvVisualPoolPos=\{n:_fLibA\.indexOf\(_fPicked\)\+1,of:_fLibA\.length/.test(build0));
@@ -193,8 +194,8 @@ ok('non-Farsi renders still capture Long-only covers',/if\(!isShort\|\|isFarsiCo
 { const ops=fs.readFileSync(path.join(path.dirname(process.argv[2]||'public/index.html'),'..','api','ops.js'),'utf8');
   const runPub=top('_srvFarsiRunPublish'), pubYT=top('_srvFarsiPublishYouTube'), plf=top('_srvFarsiPublishPlaylists');
   const pl=new Function('_srvFarsiPlaylistCategory',plf+'\nreturn _srvFarsiPublishPlaylists;')(new Function(top('_srvFarsiPlaylistCategory')+'\nreturn _srvFarsiPlaylistCategory;')());
-  const cases=[['Female — Romantic',true,'romantic'],['Female — Romantic',false,'romantic,short'],['Male — Emotional',false,'emotional,short'],['Duet — Happy',true,'happy'],['Duet — Emotional',true,'emotional'],['Male — Happy',false,'happy,short']];
-  ok('playlists: mood playlist, plus Shorts for a Short (Female Romantic Long/Short, Male Emotional Short, Duet Happy Long, …)',cases.every(([m,L,want])=>pl({mood:m},L).join()===want),cases.map(([m,L])=>m+(L?' Long':' Short')+'='+pl({mood:m},L).join('+')).join(' | '));
+  const cases=[['Female — Romantic',true,'romantic'],['Female — Romantic',false,'short'],['Male — Emotional',false,'short'],['Duet — Happy',true,'happy'],['Duet — Emotional',true,'emotional'],['Male — Happy',false,'short']];
+  ok('playlists: Long → its mood playlist; Short → Shorts ONLY, whatever its mood',cases.every(([m,L,want])=>pl({mood:m},L).join()===want),cases.map(([m,L])=>m+(L?' Long':' Short')+'='+pl({mood:m},L).join('+')).join(' | '));
   ok('both SRV Farsi uploads send the playlists chosen at Approve and AI Use = YES',/farsiPlaylists:_srvFarsiPlaylistSelection\(pkg,_farsiPubTask,isLong\)\.ids/.test(runPub)&&/containsSyntheticMedia:true/.test(runPub)&&/farsiPlaylists:_srvFarsiPlaylistSelection\(pkg,_farsiPubTask,false\)\.ids/.test(pubYT)&&/containsSyntheticMedia:true/.test(pubYT)&&!/playlistCategory:_farsiPlaylistCat/.test(runPub+pubYT));
   const mapSrc=ops.slice(ops.indexOf('const SRV_FARSI_PLAYLISTS = {'),ops.indexOf('};',ops.indexOf('const SRV_FARSI_PLAYLISTS = {'))+2);
   const MAP=new Function(mapSrc.replace('const SRV_FARSI_PLAYLISTS = ','return '))();
