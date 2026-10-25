@@ -245,6 +245,11 @@ const mkD=()=>({tasks:[
   const real=h.slice(h.indexOf('async function _srvFarsiPageIsCurrent(){'),h.indexOf('\n}\n',h.indexOf('async function _srvFarsiPageIsCurrent(){'))+2);
   ok('freshness check compares the deployed page\'s build label with this tab\'s, no-store fetch, never blocks when it cannot check',/cache:'no-store'/.test(real)&&/SRV_FARSI_UI_BUILD/.test(real)&&/return null;/.test(real));
   ok('the Short panel shows the build label',/build \$\{SRV_FARSI_UI_BUILD\}/.test(h)); }
+// ── 7e. Quick Generate → SRV Farsi Short · TEST must not generate a new song (real CEO path) ──
+{ const qg=top('_quickGenerateTest'), gen=top('vaFarsiGeneratePackage');
+  ok('Quick Generate Short (SRV Farsi) opens the lifecycle at Generate — no package is generated',/if\(contentFormat==='short'\)\{ if\(typeof openExec==='function'\)openExec\(String\(newTaskId\)\); return; \}/.test(qg)&&qg.indexOf("if(contentFormat==='short')")<qg.indexOf('vaFarsiGeneratePackage(String(newTaskId))'));
+  ok('song generation refuses a SRV Farsi Short task (sends it to the Long picker instead)',/if\(!task\.isLong\)\{[^}]*_srvFarsiSetStage\(taskId,'generate'\)/.test(gen));
+  ok('Quick Generate for other engines unchanged (the non-Farsi branch is byte-identical to main)',(()=>{const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});const m=main.slice(main.indexOf('\nfunction _quickGenerateTest('));const tail=x=>x.slice(x.indexOf("  const engCfg=(ENGINES_CONFIG||[]).find(e=>e.id===engineId);"),x.indexOf('\n}\n'));return tail(m)===tail(qg);})()); }
 // ── 8. other businesses untouched ──
 { const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};

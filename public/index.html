@@ -15107,6 +15107,9 @@ function _quickGenerateTest(engineId,engineName,contentFormat){
     // P1-A/P1-B: the task carries its own test identity and immutable srvUid.
     const _qt=_srvFarsiTaskById(newTaskId);
     if(_qt){_qt.isTest=true;const _u=_srvFarsiTaskUid(_qt);if(_u)_qt.srvUid=_u;if(typeof saveAppState==='function')saveAppState();}
+    // A SRV Farsi Short is made from a published Long (Generate stage → choose Long + section), never a new song:
+    // open its lifecycle at Generate instead of generating a package.
+    if(contentFormat==='short'){ if(typeof openExec==='function')openExec(String(newTaskId)); return; }
     if(typeof vaFarsiGeneratePackage==='function'){
       vaFarsiGeneratePackage(String(newTaskId));
     }else{
@@ -20714,7 +20717,7 @@ function _srvFarsiVaAutoArtistFormat(task){
 const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DEFAULT_SEC=30;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-25-f';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-25-g';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -21151,6 +21154,9 @@ function _srvFarsiVaSetArtistFormat(taskId,field,value){
 async function vaFarsiGeneratePackage(taskId){
   const task=_srvFarsiTaskById(taskId);
   if(!task){console.warn('[vaFarsiGeneratePackage] task not found:',taskId);return;}
+  if(!task.isLong){ // Shorts come from a published Long (Generate stage), never from a newly generated song
+    _srvFarsiSetStage(taskId,'generate'); if(typeof openExec==='function')openExec(String(taskId)); return;
+  }
   const genBtn=document.querySelector(`button[onclick="vaFarsiGeneratePackage('${taskId}')"]`);
   if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
   try{
