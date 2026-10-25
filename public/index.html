@@ -19997,6 +19997,8 @@ function renderSRVFarsiLifecycleCard(task){
       ${!isLongApprove?(shortUrl?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">SHORT VIDEO (9:16)</div><video src="${escHTML(shortUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Short video not ready yet.</div>'):''}
       ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Cover ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in the library · ${pkg._srvAvatarChoice&&pkg._srvAvatarChoice.how==='manual'?'chosen at Build — Rebuild keeps it unless you change it':'automatic — Rebuild moves to the next image, or choose one at Build'}</div>`:''}
       ${pubLabel?`<div style="padding:8px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:#22c55e;margin-bottom:10px">📅 Will publish: ${escHTML(pubLabel)}</div>`:''}
+      <div style="margin-bottom:10px;font-size:10px;line-height:1.6;color:var(--text)">🎵 Playlists: <strong>${escHTML(_srvFarsiPublishPlaylists(task,isLongApprove).map(function(k){return {romantic:'Silk Road Voices Romantic',emotional:'Silk Road Voices Emotional',happy:'Silk Road Voices Happy',short:'Silk Road Voices Short'}[k];}).join(' + '))}</strong>
+        <button type="button" onclick="_srvFarsiCheckPlaylists(this)" style="margin-left:6px;padding:3px 8px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer">Check playlists</button><div style="margin-top:4px"></div></div>
       <div style="padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;margin-bottom:12px;line-height:1.5">🤖 <strong>AI Use / Altered content: YES</strong> — MMMOS sets this on YouTube automatically at upload.</div>
       <div style="display:flex;gap:8px">
         <button onclick="_srvFarsiApproveVideo('${pkgId}','${taskId}')" style="flex:1;padding:13px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.45);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Approve & Publish</button>
@@ -20736,6 +20738,19 @@ function _srvFarsiAvatarPickerHtml(task){
 function _srvFarsiPublishPlaylists(task,isLong){
   const cat=(task&&task.playlistCategory)||_srvFarsiPlaylistCategory(task&&(task.mood||task.mode));
   return [cat].concat(isLong?[]:['short']).filter(function(k){return ['romantic','emotional','happy','short'].indexOf(k)>=0;});
+}
+// Approve stage: read-only check of which SRV Farsi playlists exist on the channel (exact names, real ids).
+async function _srvFarsiCheckPlaylists(btn){
+  const box=btn&&btn.nextElementSibling; if(!box)return;
+  box.textContent='Checking the Silk Road Voices channel…';
+  try{
+    const r=await _publishFetch('/api/ops?action=srv_farsi_playlists',{method:'GET'});
+    const d=await r.json().catch(function(){return {};});
+    if(!d||!d.ok){box.textContent='Could not check: '+((d&&(d.message||d.error))||('HTTP '+r.status));return;}
+    box.innerHTML=(d.resolved||[]).map(function(x){return (x.id?'✅ ':'⚠️ ')+escHTML(x.title)+(x.id?' — <span style="font-family:JetBrains Mono,monospace">'+escHTML(x.id)+'</span>':' — not on the channel');}).join('<br>')+
+      '<br>'+(d.canAddToPlaylists?'✅ Connection can add videos to playlists':'⚠️ Connection cannot add videos to playlists yet (needs the YouTube playlist permission)')+
+      '<br><span style="color:var(--dim)">Channel playlists: '+escHTML((d.channelPlaylists||[]).map(function(p){return p.title+' ('+p.privacy+')';}).join(' · '))+'</span>';
+  }catch(e){box.textContent='Could not check: '+(e&&e.message||e);}
 }
 function _srvFarsiPlaylistResultHtml(pkg){
   const r=pkg&&pkg.youtubePlaylists; if(!Array.isArray(r)||!r.length)return '';
