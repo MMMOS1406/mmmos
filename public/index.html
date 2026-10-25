@@ -793,58 +793,54 @@ const ENGINES_CONFIG=[
    longFormDay:"Friday",
    // v13.69.80 — SRV Farsi Lifecycle: Generate→Review→Build→Approve→Publish→Done (mirrors English)
    lifecycle:{musicAdapter:'manual',imageAdapter:'pexels',rendererAdapter:'canvas',requireApprove:true},
-   // SRV Farsi visual pool — ONE source-image pool per ARTIST x MOOD (9 pools), shared by Shorts and
-   // Longs. There is no separate Short/Long library: each format crops the same source image its own
-   // way (see _drawFarsiPanel). An entry is a path, or {src,fx,fy} where fx/fy (0..1) mark where the
-   // subject sits in the source so both crops keep the subject in frame (default: centre, upper area).
-   // Rotation is per pool (artist.mood), A -> B -> C -> ... -> A, persisted in D.srvFarsiAvatarIdx.
-   // Order alternates portrait/landscape sources so consecutive rebuilds differ in framing too.
-   // To add images: drop the file under /assets/srv-farsi-avatars/ and add one entry to its pool.
-   // fx/fy = face centre, fw = face width (fractions of the source image) — the renderer frames every
-   // Short and Long on the face from these, so each new image needs them.
-   avatarPool:{
-     female:{
-       romantic:[{src:'/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_01.png',fx:0.550,fy:0.250,fw:0.280},
-         {src:'/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_01.png',fx:0.450,fy:0.390,fw:0.170},
-         {src:'/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_02.png',fx:0.540,fy:0.240,fw:0.260},
-         {src:'/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_02.png',fx:0.410,fy:0.270,fw:0.130}],
-       emotional:[{src:'/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_01.png',fx:0.532,fy:0.278,fw:0.340},
-         {src:'/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_01.png',fx:0.430,fy:0.350,fw:0.180},
-         {src:'/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_02.png',fx:0.540,fy:0.220,fw:0.200},
-         {src:'/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_02.png',fx:0.450,fy:0.190,fw:0.120}],
-       happy:[{src:'/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_01.png',fx:0.510,fy:0.240,fw:0.280},
-         {src:'/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_01.png',fx:0.380,fy:0.290,fw:0.150},
-         {src:'/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_02.png',fx:0.520,fy:0.285,fw:0.330},
-         {src:'/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_02.png',fx:0.340,fy:0.220,fw:0.140}],
-     },
-     male:{
-       romantic:[{src:'/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_01.png',fx:0.563,fy:0.252,fw:0.277},
-         {src:'/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_01.png',fx:0.410,fy:0.257,fw:0.152},
-         {src:'/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_02.png',fx:0.455,fy:0.297,fw:0.357},
-         {src:'/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_02.png',fx:0.410,fy:0.252,fw:0.154}],
-       emotional:[{src:'/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_01.png',fx:0.495,fy:0.341,fw:0.326},
-         {src:'/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_01.png',fx:0.459,fy:0.259,fw:0.157},
-         {src:'/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_02.png',fx:0.641,fy:0.303,fw:0.334},
-         {src:'/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_02.png',fx:0.475,fy:0.291,fw:0.182}],
-       happy:[{src:'/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_01.png',fx:0.558,fy:0.238,fw:0.293},
-         {src:'/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_01.png',fx:0.383,fy:0.261,fw:0.167},
-         {src:'/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_02.png',fx:0.507,fy:0.206,fw:0.251},
-         {src:'/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_02.png',fx:0.408,fy:0.247,fw:0.140}],
-     },
-     duet:{
-       romantic:[{src:'/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_01.png',fx:0.530,fy:0.350,fw:0.262},
-         {src:'/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_01.png',fx:0.490,fy:0.270,fw:0.156},
-         {src:'/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_02.png',fx:0.410,fy:0.330,fw:0.237},
-         {src:'/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_02.png',fx:0.430,fy:0.290,fw:0.137}],
-       emotional:[{src:'/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_01.png',fx:0.470,fy:0.350,fw:0.281},
-         {src:'/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_01.png',fx:0.500,fy:0.290,fw:0.150},
-         {src:'/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_02.png',fx:0.480,fy:0.400,fw:0.281},
-         {src:'/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_02.png',fx:0.470,fy:0.300,fw:0.169}],
-       happy:[{src:'/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_01.png',fx:0.470,fy:0.330,fw:0.237},
-         {src:'/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_01.png',fx:0.480,fy:0.230,fw:0.150},
-         {src:'/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_02.png',fx:0.520,fy:0.340,fw:0.262},
-         {src:'/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_02.png',fx:0.460,fy:0.270,fw:0.163}],
-     },
+   // SRV Farsi avatar library — ONE library per ARTIST (female / male / duet), shared by Shorts and Longs.
+   // Every source is a 16:9 landscape portrait; the Long uses it as a landscape cover and the Short takes a
+   // face-centred vertical crop of the SAME file (see _drawFarsiPanel). fx/fy = face centre and fw = face width,
+   // as fractions of the source (a duet's fw covers both faces /1.6), so every crop is framed on the face(s).
+   // The build picks automatically (rotation per artist, D.srvFarsiAvatarIdx['lib.<artist>']) unless the operator
+   // chose a cover for that task at the Build stage (task.srvAvatarId). To add an image: put the file and its
+   // thumb under /assets/srv-farsi-avatars/library/<artist>/ and add one entry here.
+   avatarLibrary:{
+     female:[
+       {id:'female_01',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_01.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_01.jpg',fx:0.335,fy:0.170,fw:0.075},
+       {id:'female_02',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_02.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_02.jpg',fx:0.693,fy:0.370,fw:0.190},
+       {id:'female_03',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_03.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_03.jpg',fx:0.320,fy:0.338,fw:0.179},
+       {id:'female_04',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_04.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_04.jpg',fx:0.770,fy:0.347,fw:0.182},
+       {id:'female_05',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_05.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_05.jpg',fx:0.679,fy:0.367,fw:0.173},
+       {id:'female_06',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_06.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_06.jpg',fx:0.270,fy:0.351,fw:0.173},
+       {id:'female_07',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_07.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_07.jpg',fx:0.752,fy:0.200,fw:0.095},
+       {id:'female_08',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_08.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_08.jpg',fx:0.785,fy:0.303,fw:0.150},
+       {id:'female_09',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_09.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_09.jpg',fx:0.306,fy:0.352,fw:0.190},
+       {id:'female_10',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_10.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_10.jpg',fx:0.319,fy:0.360,fw:0.166},
+       {id:'female_11',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_11.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_11.jpg',fx:0.263,fy:0.375,fw:0.173},
+       {id:'female_12',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_12.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_12.jpg',fx:0.649,fy:0.375,fw:0.175},
+       {id:'female_13',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_13.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_13.jpg',fx:0.723,fy:0.348,fw:0.184},
+       {id:'female_14',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_14.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_14.jpg',fx:0.660,fy:0.378,fw:0.169},
+       {id:'female_15',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_15.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_15.jpg',fx:0.758,fy:0.347,fw:0.188},
+       {id:'female_16',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_16.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_16.jpg',fx:0.331,fy:0.357,fw:0.184},
+       {id:'female_17',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_17.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_17.jpg',fx:0.784,fy:0.318,fw:0.156},
+       {id:'female_18',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_18.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_18.jpg',fx:0.712,fy:0.352,fw:0.173},
+       {id:'female_19',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_19.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_19.jpg',fx:0.344,fy:0.346,fw:0.176},
+       {id:'female_20',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_20.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_20.jpg',fx:0.346,fy:0.340,fw:0.176},
+       {id:'female_21',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_21.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_21.jpg',fx:0.303,fy:0.301,fw:0.142}],
+     male:[
+       {id:'male_01',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_01.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_01.jpg',fx:0.661,fy:0.260,fw:0.155},
+       {id:'male_02',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_02.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_02.jpg',fx:0.318,fy:0.290,fw:0.151},
+       {id:'male_03',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_03.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_03.jpg',fx:0.298,fy:0.303,fw:0.176},
+       {id:'male_04',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_04.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_04.jpg',fx:0.713,fy:0.289,fw:0.166},
+       {id:'male_05',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_05.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_05.jpg',fx:0.694,fy:0.287,fw:0.167},
+       {id:'male_06',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_06.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_06.jpg',fx:0.342,fy:0.269,fw:0.161},
+       {id:'male_07',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_07.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_07.jpg',fx:0.704,fy:0.282,fw:0.170},
+       {id:'male_08',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_08.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_08.jpg',fx:0.317,fy:0.291,fw:0.180}],
+     duet:[
+       {id:'duet_01',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_01.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_01.jpg',fx:0.325,fy:0.330,fw:0.180},
+       {id:'duet_02',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_02.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_02.jpg',fx:0.706,fy:0.370,fw:0.240},
+       {id:'duet_03',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_03.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_03.jpg',fx:0.707,fy:0.416,fw:0.270},
+       {id:'duet_04',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_04.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_04.jpg',fx:0.687,fy:0.318,fw:0.190},
+       {id:'duet_05',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_05.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_05.jpg',fx:0.319,fy:0.320,fw:0.180},
+       {id:'duet_06',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_06.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_06.jpg',fx:0.267,fy:0.276,fw:0.240},
+       {id:'duet_07',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_07.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_07.jpg',fx:0.640,fy:0.330,fw:0.210},
+       {id:'duet_08',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_08.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_08.jpg',fx:0.290,fy:0.250,fw:0.220}],
    }},
   {id:"srv_english",name:"SRV English",icon:"🎵",hint:"SRV Studio · Female Emotional Deep House · Long",
    modes:["Female — Emotional"], // SRV-STUDIO-V2-026 (CEO, final): Emotional only, Long only — no Romantic/Happy, no Shorts
@@ -2490,7 +2486,7 @@ async function fetchPackagesFromTable(){
     const seen=new Set();
     return parsedRows.filter(function(p){
       if(!p)return false;
-      const key=(p.title||'').trim().toLowerCase();
+      const key=(p.dbTitle||p.title||'').trim().toLowerCase(); // dbTitle: set only on SRV Farsi Short-from-Long packages (same song title as their Long)
       if(!key||seen.has(key))return false;
       seen.add(key);
       return true;
@@ -2719,7 +2715,7 @@ async function savePackageToSupabase(pkg){
         package_id:clean.id||'',
         task_id:clean.taskId||null,engine:clean.engine||clean.engineName||'',mood:clean.mood||'',
         platform:clean.platform||'',content_type:clean.contentType||'',
-        title:clean.title||'',lyrics:clean.lyrics||clean.script||'',
+        title:clean.dbTitle||clean.title||'',lyrics:clean.lyrics||clean.script||'', // dbTitle: SRV Farsi Short-from-Long only (see _srvFarsiCreateShortFromLong)
         suno_prompt:clean.sunoPrompt||'',thumbnail_prompt:clean.thumbnailText||'',
         caption_youtube:clean.captionYouTube||'',caption_tiktok:clean.captionTikTok||'',
         caption_instagram:clean.captionInstagram||'',hashtags:'',
@@ -15111,6 +15107,9 @@ function _quickGenerateTest(engineId,engineName,contentFormat){
     // P1-A/P1-B: the task carries its own test identity and immutable srvUid.
     const _qt=_srvFarsiTaskById(newTaskId);
     if(_qt){_qt.isTest=true;const _u=_srvFarsiTaskUid(_qt);if(_u)_qt.srvUid=_u;if(typeof saveAppState==='function')saveAppState();}
+    // A SRV Farsi Short is made from a published Long (Generate stage → choose Long + section), never a new song:
+    // open its lifecycle at Generate instead of generating a package.
+    if(contentFormat==='short'){ if(typeof openExec==='function')openExec(String(newTaskId)); return; }
     if(typeof vaFarsiGeneratePackage==='function'){
       vaFarsiGeneratePackage(String(newTaskId));
     }else{
@@ -19826,13 +19825,15 @@ function renderSRVFarsiLifecycleCard(task){
       return `<select onchange="_srvFarsiVaSetArtistFormat('${taskId}','${field}',this.value)" style="margin-left:6px;padding:4px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.35);border-radius:6px;color:var(--text);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">${['Auto'].concat(opts).map(o=>`<option value="${o}"${o===sel?' selected':''}>${o==='Auto'?'Auto'+(auto?' ('+escHTML(auto)+')':''):o}</option>`).join('')}</select>`;};
     stageContent=`
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Artist:${_fSel('artist',_fArtist,['Male','Female','Duet'])}</div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mood: <strong style="color:var(--text)">${escHTML(_fMoodLabel)}</strong></div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Artist:${_fSel('artist',_fArtist,['Male','Female','Duet'])}${!task.isLong?' <span style="font-size:10px">— filters the Long list (Auto = all artists)</span>':''}</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mood: <strong style="color:var(--text)">${!task.isLong?'from the chosen Long':escHTML(_fMoodLabel)}</strong></div>
         <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format:${_fSel('format',_fFormat,['Short','Long'])}</div>
+        ${!task.isLong?_srvFarsiShortFromLongHtml(task,taskId):`
         <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the Persian song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
         <button onclick="vaFarsiGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
           🌹 Generate Package
         </button>
+        `}
       </div>`;
   }
 
@@ -19963,7 +19964,8 @@ function renderSRVFarsiLifecycleCard(task){
     const spEsc=sunoPrompt?sunoPrompt.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     const lyEsc=sunoLyrics?sunoLyrics.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     stageContent=`
-      <div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">Generate the song in Suno, download the MP3, then build the cinematic video.</div>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">${_srvFarsiIsShortFromLong(pkg)?'Choose the cover, then build the 9:16 Short from the Long\'s section.':'Generate the song in Suno, download the MP3, then build the cinematic video.'}</div>
+      ${_srvFarsiIsShortFromLong(pkg)?`<div style="margin-bottom:14px;padding:10px 12px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.25);border-radius:8px;font-size:11px;line-height:1.6;color:var(--text)">🎵 <strong>Audio:</strong> section ${_srvFarsiFmtSec(pkg.srvShortOf.startSec)}–${_srvFarsiFmtSec(pkg.srvShortOf.startSec+pkg.srvShortOf.durationSec)} of the Long “${escHTML(pkg.srvShortOf.longTitle||'')}”. No Suno step and no MP3 upload — Build cuts it from the Long.</div>`:`
       <div style="margin-bottom:14px">
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 1 — GENERATE IN SUNO</div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -19981,7 +19983,9 @@ function renderSRVFarsiLifecycleCard(task){
           <span id="srv-farsi-mp3-status-${pkgId}" style="font-size:10px;color:${mp3Ready?'#22c55e':'rgba(255,255,255,0.35)'};font-family:'JetBrains Mono',monospace;white-space:nowrap">${mp3Ready?'MP3 loaded ✓':'no MP3 yet'}</span>
         </div>
       </div>
+      `}
       ${bgUrl?`<div style="margin-bottom:10px;border-radius:8px;overflow:hidden;max-height:90px"><img src="${escHTML(bgUrl)}" style="width:100%;object-fit:cover;max-height:90px" alt="bg"><div style="font-size:9px;color:var(--dim);padding:2px 0">📷 Pexels background auto-selected</div></div>`:''}
+      ${_srvFarsiAvatarPickerHtml(task)}
       <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 3 — BUILD PACKAGE</div>
       <button id="srv-farsi-build-btn-${pkgId}" onclick="_srvFarsiBuildTrigger('${pkgId}','${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">🌹 Build Package — Fetch Background + Render Video</button>
       <div id="srv-farsi-build-status-${pkgId}" style="margin-top:8px;font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace"></div>
@@ -19998,11 +20002,13 @@ function renderSRVFarsiLifecycleCard(task){
       <div style="font-size:11px;color:var(--dim);margin-bottom:12px">Review the final video before it publishes. Approve to upload to YouTube, or rebuild if something's wrong.</div>
       ${isLongApprove?(longUrl?`<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">LONG VIDEO (16:9)</div><video src="${escHTML(longUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Long video not ready yet.</div>'):''}
       ${!isLongApprove?(shortUrl?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">SHORT VIDEO (9:16)</div><video src="${escHTML(shortUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Short video not ready yet.</div>'):''}
-      ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Image ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in this pool · Rebuild moves to the next image</div>`:''}
+      ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Cover ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in the library · ${pkg._srvAvatarChoice&&pkg._srvAvatarChoice.how==='manual'?'chosen at Build — Rebuild keeps it unless you change it':'automatic — Rebuild moves to the next image, or choose one at Build'}</div>`:''}
       ${pubLabel?`<div style="padding:8px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:#22c55e;margin-bottom:10px">📅 Will publish: ${escHTML(pubLabel)}</div>`:''}
-      <div style="padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;margin-bottom:12px;line-height:1.5">⚠️ <strong>After upload:</strong> YouTube Studio → Edit → Content → "Altered or synthetic content" → Set YES</div>
+      ${_srvFarsiPublishPanelHtml(task,pkg,isLongApprove)}
+      <div style="margin:-4px 0 10px;font-size:10px"><button type="button" onclick="_srvFarsiCheckPlaylists(this)" style="padding:3px 8px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer">Check YouTube playlists + permission</button><div style="margin-top:4px"></div></div>
+      <div style="padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;margin-bottom:12px;line-height:1.5">🤖 <strong>AI Use / Altered content: YES</strong> — MMMOS sets this on YouTube automatically at upload.</div>
       <div style="display:flex;gap:8px">
-        <button onclick="_srvFarsiApproveVideo('${pkgId}','${taskId}')" style="flex:1;padding:13px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.45);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Approve & Publish</button>
+        <button onclick="_srvFarsiApproveAndPublish('${pkgId}','${taskId}')" style="flex:1;padding:13px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.45);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Approve & Publish</button>
         <button onclick="_srvFarsiSetStage('${taskId}','build');renderTab('tasks')" style="padding:12px 14px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.30);border-radius:10px;color:#c9a84c;font-weight:700;font-size:12px;cursor:pointer;font-family:'Syne',sans-serif">↻ Rebuild</button>
       </div>`;
   }
@@ -20046,7 +20052,8 @@ function renderSRVFarsiLifecycleCard(task){
         <div style="font-size:14px;font-weight:800;color:#22c55e;margin-bottom:8px">Published</div>
         ${ytId?`<a href="https://studio.youtube.com/video/${escHTML(ytId)}/edit" target="_blank" style="display:block;margin-top:6px;padding:8px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;text-decoration:none">▶ Open Long in YouTube Studio</a>`:''}
         ${ytShortId?`<a href="https://studio.youtube.com/video/${escHTML(ytShortId)}/edit" target="_blank" style="display:block;margin-top:6px;padding:8px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;text-decoration:none">▶ Open Short in YouTube Studio</a>`:''}
-        <div style="margin-top:10px;padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;text-align:left;line-height:1.6">⚠️ <strong>AI Disclosure required:</strong> YouTube Studio → Edit each video → Content → "Altered or synthetic content" → <strong>YES</strong></div>
+        <div style="margin-top:10px;padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;text-align:left;line-height:1.6">🤖 <strong>AI Use / Altered content: YES</strong> — set automatically at upload. Confirm once in YouTube Studio → Content.</div>
+        ${_srvFarsiPlaylistResultHtml(pkg)}
         ${!_isLongDone?`<div style="margin-top:12px;padding:12px;background:rgba(0,0,0,0.15);border:1px solid rgba(255,255,255,0.08);border-radius:10px;text-align:left;opacity:0.8">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ TikTok — Manual Publish</span><span style="font-size:9px;font-weight:800;padding:2px 8px;border-radius:12px;background:#6b728022;color:#9ca3af;border:1px solid #6b728044;letter-spacing:0.5px">⏸ PRODUCTION FROZEN</span>
@@ -20072,6 +20079,7 @@ function renderSRVFarsiLifecycleCard(task){
       <span style="font-size:10px;font-weight:800;color:${stageCol};font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;padding:3px 8px;background:${stageCol}18;border-radius:5px">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
     </div>
     ${_srvLifecycleProgressBar(stage)}
+    ${_srvFarsiShortSourceHtml(pkg)}
     ${stageContent}
   </div>`;
 }
@@ -20095,6 +20103,16 @@ function _srvFarsiCancelTask(taskId){
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
 async function _srvFarsiRegeneratePackage(taskId,pkgId){
+  const _rp=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(_srvFarsiIsShortFromLong(_rp)){
+    if(_rp._srvYtShortId||_rp.youtubeVideoId){alert('This Short was already uploaded — it cannot be redone.');return;}
+    if(!confirm('Choose the Long and section again? This Short\'s current package is set aside (kept in the database).'))return;
+    _rp._srvSetAside={at:new Date().toISOString(),from:_rp.srvTaskUid||null}; _rp.srvTaskUid='set-aside:'+String(_rp.srvTaskUid||'');
+    if(typeof savePackageToSupabase==='function')await savePackageToSupabase(_rp);
+    _srvFarsiSetStage(taskId,'generate'); if(typeof saveAppState==='function')saveAppState();
+    if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId)); else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+    return;
+  }
   if(!confirm('Regenerate package? The current package will be removed and a new one will be generated.'))return;
   if(pkgId&&Array.isArray(D.packages)){
     D.packages=D.packages.filter(function(p){return String(p.id||'')!==String(pkgId);});
@@ -20124,7 +20142,15 @@ async function _srvFarsiRegeneratePackage(taskId,pkgId){
 async function _srvFarsiBuildTrigger(pkgId,taskId){
   const btn=document.getElementById('srv-farsi-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-farsi-build-status-'+pkgId);
-  const audio=_srvAudioData[pkgId];
+  let audio=_srvAudioData[pkgId];
+  const _shortPkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(!audio&&_srvFarsiIsShortFromLong(_shortPkg)){
+    // Short from a published Long: no MP3 — cut the chosen section from the Long's stored video (cached for Rebuild)
+    if(btn){btn.disabled=true;btn.style.opacity='0.6';btn.textContent='⏳ Loading the Long…';}
+    if(statusEl){statusEl.style.color='var(--dim)';statusEl.textContent='Cutting '+_srvFarsiFmtSec(_shortPkg.srvShortOf.startSec)+'–'+_srvFarsiFmtSec(_shortPkg.srvShortOf.startSec+_shortPkg.srvShortOf.durationSec)+' from the Long…';}
+    try{ const f=await _srvFarsiShortAudioFromLong(_shortPkg); audio=_srvAudioData[pkgId]={file:f,name:f.name,sizeMB:(f.size/1048576).toFixed(1),fromLong:true}; }
+    catch(e){ if(statusEl){statusEl.style.color='#ef4444';statusEl.textContent='⚠ Could not read the Long\'s audio: '+(e&&e.message||e);} if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent='🌹 Build Package — Fetch Background + Render Video';} return; }
+  }
   if(!audio){
     if(statusEl){statusEl.style.color='#ef4444';statusEl.textContent='⚠ Upload MP3 first (Step 2).';}
     return;
@@ -20218,23 +20244,17 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     const _fBgArchetype=_farsiPickBgArchetype(), _fIntensity=_farsiPickIntensity();
     const _fSeed=Math.floor(Math.random()*1e9); // fresh atmo/particle layout every render, no repetition concept needed
     (function(){
-      const _fCfg=_srvFarsiEngineConfig();
-      const _fLib=_fCfg&&_fCfg.avatarPool;
-      if(!_fLib)return;
-      // One pool per artist x mood, shared by Short and Long (each format crops the same source its
-      // own way). The rotation pointer is per pool, so every rebuild of either format moves that
-      // pool to its next source image, and the whole pool is used before any image repeats.
-      const _fMoodKey=String(_fMoodOnly||'').toLowerCase().trim();
-      const _fArtistPools=_fLib[_fGroup];
-      const _fPool=(_fArtistPools&&_fArtistPools[_fMoodKey])||[];
-      if(!_fPool.length){
-        console.warn('[SRV Farsi] visual pool: no images for '+_fGroup+'/'+_fMoodKey+' — check avatarPool manifest');
-      }
-      const _fPicked=_farsiPickAvatar(_fPool,_fGroup+'.'+_fMoodKey);
-      _fAvUrlForRender=_fPicked&&(typeof _fPicked==='string'?_fPicked:_fPicked.src)||null;
-      _fAvFocus=(_fPicked&&typeof _fPicked==='object')?{x:_fPicked.fx,y:_fPicked.fy,w:_fPicked.fw}:{};
-      // Which pool image this build used (shown at Approve so a Rebuild's rotation is visible, not guessed).
-      if(_fPicked)pkg._srvVisualPoolPos={n:_fPool.indexOf(_fPicked)+1,of:_fPool.length,pool:_fGroup+'.'+_fMoodKey,file:String(_fAvUrlForRender||'').split('/').pop()};
+      // One library per artist, shared by Short and Long. The operator's Build-stage choice for this task wins;
+      // otherwise the artist rotation picks (and only then advances), so a manual cover never moves the rotation.
+      const _fLibA=_srvFarsiAvatarLibrary(_fGroup);
+      if(!_fLibA.length){ console.warn('[SRV Farsi] avatar library: no images for '+_fGroup+' — check avatarLibrary manifest'); return; }
+      const _fManual=task&&task.srvAvatarId&&task.srvAvatarArtist===_fGroup?_srvFarsiAvatarById(_fGroup,task.srvAvatarId):null;
+      const _fPicked=_fManual||_farsiPickAvatar(_fLibA,'lib.'+_fGroup);
+      _fAvUrlForRender=_fPicked.src;
+      _fAvFocus={x:_fPicked.fx,y:_fPicked.fy,w:_fPicked.fw};
+      // Recorded on the package: which image, and whether the operator chose it (shown at Approve).
+      pkg._srvVisualPoolPos={n:_fLibA.indexOf(_fPicked)+1,of:_fLibA.length,pool:_fGroup,file:String(_fPicked.src).split('/').pop()};
+      pkg._srvAvatarChoice={id:_fPicked.id,artist:_fGroup,how:_fManual?'manual':'auto'};
     })();
 
     // Step 2: SHORT render (9:16) — only for Short tasks
@@ -20284,6 +20304,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const longFile=new File([longResult.blob],'srv_farsi_long.webm',{type:longResult.blob.type});
       const longUrl=await _srvUploadToStorage(pkgId,longFile,'long');
       pkg._srvLongVideoUrl=longUrl;
+      try{ const _a=new Audio(URL.createObjectURL(audio.file)); await new Promise(function(r){_a.onloadedmetadata=r;_a.onerror=r;setTimeout(r,4000);}); if(isFinite(_a.duration)&&_a.duration>0)pkg._srvLongDurationSec=Math.round(_a.duration*10)/10; URL.revokeObjectURL(_a.src); }catch(_){}
       if(longResult.thumbDataUrl){pkg._srvThumbDataUrl=longResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
@@ -20358,6 +20379,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
       }
       return;
     }
+    _srvFarsiApplySchedule(pkg,taskId); // the date/time chosen at Approve (production tasks only)
     if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
     const pkgChannel='SRV Farsi';
     const _buildEngineState=_getEngineState(pkgChannel);
@@ -20384,13 +20406,15 @@ async function _srvFarsiRunPublish(pkgId,taskId){
           tags:_farsiTags,
           categoryId:'10',privacyStatus:'private',madeForKids:false,
           publishAt:_srvPublishAt,
-          playlistCategory:_farsiPlaylistCat, // v13.72.0 — auto-add to Romantic/Emotional/Happy playlist
+          farsiPlaylists:_srvFarsiPlaylistSelection(pkg,_farsiPubTask,isLong).ids, // exactly the playlists chosen at Approve
+          containsSyntheticMedia:true, // AI Use / altered content = YES (YouTube status.containsSyntheticMedia)
         }),
       });
       return r.json().catch(()=>({}));
     }
 
     const _pubTask=_srvFarsiTaskById(taskId);
+    void _farsiPlaylistCat;
     const _isLongPub=!!(_pubTask&&_pubTask.isLong);
     const [longUp,shortUp]=await Promise.all([
       _isLongPub?doUpload(longUrl,'LONG',true):Promise.resolve(null),
@@ -20411,6 +20435,8 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     // Package format is Long here, so youtubeVideoId (-> packages.youtube_video_id) tracks the
     // Long's own id, matching how _srvFarsiPublishYouTube already sets it for pure-Short packages.
     if(_longYtId)pkg.youtubeVideoId=_longYtId;
+    if(longUp&&Array.isArray(longUp.playlists))pkg.youtubePlaylists=longUp.playlists;
+    else if(shortUp&&Array.isArray(shortUp.playlists))pkg.youtubePlaylists=shortUp.playlists;
     if(_longYtId)await _srvFarsiSetYouTubeThumbnail(pkg,_longYtId); // SRV Farsi thumbnails (Long)
     // v15.20.0 — TikTok is no longer auto-fired here (Engineering Task 1c0e3090): it's now
     // an independent, operator-visible action (_srvFarsiPublishTikTok) triggered from the
@@ -20451,6 +20477,7 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
   if(!pkg){alert('Package not found');return;}
   const shortUrl=pkg._srvShortVideoUrl||null;
   if(!shortUrl){alert('No Short video URL — go back to Build.');return;}
+  _srvFarsiApplySchedule(pkg,taskId); // the date/time chosen at Approve (production tasks only)
   if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
   const pkgChannel='SRV Farsi';
   const _buildEngineState=_getEngineState(pkgChannel);
@@ -20472,10 +20499,13 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
         tags:_srvFarsiYouTubeHashtags(pkg,_farsiPubTask&&_farsiPubTask.mood).map(function(t){return t.replace(/^#/,'');}),
         categoryId:'10',privacyStatus:'private',madeForKids:false,
         publishAt:_srvPublishAt,
-        playlistCategory:_farsiPlaylistCat,
+        farsiPlaylists:_srvFarsiPlaylistSelection(pkg,_farsiPubTask,false).ids, // exactly the playlists chosen at Approve
+        containsSyntheticMedia:true, // AI Use / altered content = YES (YouTube status.containsSyntheticMedia)
       }),
     });
     const d=await r.json().catch(()=>({}));
+    void _farsiPlaylistCat;
+    if(d&&Array.isArray(d.playlists))pkg.youtubePlaylists=d.playlists;
     // v15.20.5 — fix-forward (Engineering Task 1c0e3090, CEO escalation #2): the server
     // (youtubeUploadVideo in api/ops.js) returns the id under `youtubeVideoId`, never
     // `videoId`. This check was always false on success, so every successful YouTube
@@ -20680,6 +20710,516 @@ function _srvFarsiVaCurrentArtistFormat(task){
 function _srvFarsiVaAutoArtistFormat(task){
   return task.vaOriginal||_srvFarsiVaCurrentArtistFormat(task);
 }
+// ── SRV Farsi Short = promotional extract of a PUBLISHED SRV Farsi Long (order: SHORT-FROM-LONG + PLAYLISTS +
+// SCHEDULING). Same business workflow as SRV Studio's promotional Short, implemented independently for SRV Farsi:
+// pick a published Long, pick a 25–35 s section, preview it, create the Short. Nothing new is generated and no MP3 is
+// uploaded: the Short reuses the Long's song (title, lyrics, artist, mood) and cuts its audio from the Long's video.
+const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DEFAULT_SEC=30;
+// A Short's source must be a real full-length Long: its STORED media must be at least this long (real SRV Farsi Longs
+// are ~3–4 minutes; ~34 s "Longs" were workflow tests). Measured from the media, never taken from the task label.
+const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
+// Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
+// the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
+const SRV_FARSI_UI_BUILD='srvf-2026-10-25-k';
+async function _srvFarsiPageIsCurrent(){
+  try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
+    return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
+}
+const _srvFarsiShortSel={};          // per task: {longPkgId,startSec,durationSec} — the choice before "Create"
+const _srvFarsiLongDurCache={};      // pkgId -> seconds (probed from the stored Long video when not on the package)
+function _srvFarsiFmtSec(x){x=Math.max(0,Math.round(Number(x)||0));return Math.floor(x/60)+':'+String(x%60).padStart(2,'0');}
+function _srvFarsiPkgYtId(p){return (p&&(p._srvYtLongId||p.youtubeVideoId||p.youtube_video_id))||null;}
+function _srvFarsiIsShortFromLong(p){return !!(p&&p.srvShortOf&&p.srvShortOf.longPkgId);}
+function _srvFarsiLongDuration(p){const d=Number(p&&(p._srvLongDurationSec||_srvFarsiLongDurCache[p.id]));return d>0&&isFinite(d)?d:0;}
+// Eligible sources (rule locked by the CEO, 2026-10-25): always SRV Farsi only, a built Long video, published to
+// YouTube, not a Short, not set aside, never another business.
+//   • production Short → production Longs ONLY (never a [TEST] Long)
+//   • [TEST] Short     → production published Longs (read-only source media) AND published [TEST] Longs
+// A source Long is only ever READ: its video/audio and song metadata are copied; its task, package, lifecycle,
+// schedule, playlists, analytics and YouTube video are never written.
+// The Long's artist (package field, else its task's "Artist — Mood").
+function _srvFarsiLongArtist(p,lt){
+  const a=String((p&&p.artist)||'').toLowerCase(); if(/^(female|male|duet)$/.test(a))return a;
+  return lt?_srvFarsiAvatarArtist(lt):'';
+}
+function _srvFarsiShortSources(task){
+  const forTest=_srvFarsiIsTestTask(task);
+  // the VA's explicit Artist choice on this Short filters the list; Auto (the rotation value) shows every artist
+  const _cur=_srvFarsiVaCurrentArtistFormat(task), _auto=_srvFarsiVaAutoArtistFormat(task);
+  const artistFilter=(_cur.artist&&_auto.artist&&_cur.artist!==_auto.artist)?_cur.artist.toLowerCase():'';
+  return (D.packages||[]).filter(function(p){
+    if(!p||p.engine!=='SRV Farsi'||_srvFarsiIsShortFromLong(p))return false;
+    if(String(p.srvTaskUid||'').startsWith('set-aside:'))return false;
+    if(!p._srvLongVideoUrl||!_srvFarsiPkgYtId(p)||!String(p.title||'').trim())return false;
+    const lt=p.srvTaskUid?_srvFarsiTaskByUid(p.srvTaskUid):null;
+    if(lt&&!lt.isLong)return false;
+    if(p.contentType==='Short'||p.contentFormat==='short')return false;
+    if(!!p.isTest&&!forTest)return false; // a production Short never comes from a [TEST] Long
+    if(artistFilter&&_srvFarsiLongArtist(p,lt)!==artistFilter)return false;
+    const d=_srvFarsiLongDuration(p); if(d&&d<SRV_FARSI_SHORT_SOURCE_MIN_SEC)return false; // test-length "Long": never a source
+    return true;
+  }).map(function(p){
+    const lt=p.srvTaskUid?_srvFarsiTaskByUid(p.srvTaskUid):null;
+    return {pkg:p,task:lt,yt:_srvFarsiPkgYtId(p),songSec:_srvFarsiLongDuration(p),isTest:!!p.isTest};
+  }).sort(function(a,b){return String(b.pkg.generatedAt||'').localeCompare(String(a.pkg.generatedAt||''));});
+}
+// Section maths shared by the UI and Create: length clamped to 25–35 s, start kept inside the song.
+function _srvFarsiShortClamp(sel,songSec){
+  const dur=Math.min(SRV_FARSI_SHORT_MAX_SEC,Math.max(SRV_FARSI_SHORT_MIN_SEC,Math.round(Number(sel.durationSec)||SRV_FARSI_SHORT_DEFAULT_SEC)));
+  const maxStart=songSec?Math.max(0,Math.floor(songSec-dur)):0;
+  // never the intro by default: with no suggestion yet the fallback is ~35% into the song, never 0:00
+  let start=(sel.startSec==null||!isFinite(sel.startSec))?(songSec?Math.min(maxStart,Math.round(songSec*0.35)):null):Math.round(sel.startSec);
+  if(start==null)return {startSec:null,durationSec:dur,maxStart:maxStart};
+  start=Math.max(0,Math.min(maxStart,start));
+  return {startSec:start,durationSec:dur,maxStart:maxStart};
+}
+// ── Suggested Hook Section: see _srvFarsiVocalProfile / _srvFarsiSuggestHook below (vocal-aware, not loudness). ──
+const _srvFarsiHookCache={};       // Long pkgId -> {status:'running'|'done'|'failed', startSec, songSec, why}
+const _srvFarsiLongAudioCache={};  // Long video URL -> decoded AudioBuffer (reused by Build's cut)
+async function _srvFarsiDecodeLongAudio(url){
+  if(_srvFarsiLongAudioCache[url])return _srvFarsiLongAudioCache[url];
+  const r=await fetch(url); if(!r.ok)throw new Error('Could not load the Long ('+r.status+')');
+  const buf=await r.arrayBuffer();
+  const AC=window.AudioContext||window.webkitAudioContext; const ac=new AC();
+  let audio; try{ audio=await ac.decodeAudioData(buf); } finally { try{ac.close();}catch(_){} }
+  _srvFarsiLongAudioCache[url]=audio; return audio;
+}
+// ── Suggested vocal / hook section ──────────────────────────────────────────────────────────────────────────────────
+// Loudness alone does not find singing (measured on 8 real SRV Farsi Longs against a vocal-separation reference: RMS
+// correlates −0.29…+0.19 with where the singing is, and picked windows with 0–30% singing). What does track the singing
+// is how CENTRED the vocal band (300–3400 Hz) is in the stereo mix — the lead vocal sits in the middle, the
+// instruments spread wide (correlation +0.37…+0.69). On those 8 Longs the chosen 30 s held 57–100% singing (mean 88%). Per 0.5 s: centre = E(mid)/(E(mid)+E(side)) in that band. A frame
+// is "vocal-like" when its centre is at or above the song's median (after the first 10 s) and it is not near-silent.
+// The suggestion is the 30 s window with the most vocal-like frames (+ a small loudness term), searching only the song
+// body: the intro (first max(45 s, 18%)) and the outro (last max(15 s, 8%) + the window) are never candidates. If the
+// best window is not clearly vocal (< 60% vocal-like) it falls back to the most vocal-like window between 35% and 70% of
+// the song and says so. An estimate — never presented as a detected chorus.
+function _srvFarsiBiquad(x,kind,f0,fs){
+  const w=2*Math.PI*f0/fs, al=Math.sin(w)/(2*0.707), c=Math.cos(w), a0=1+al;
+  const b=kind==='hp'?[(1+c)/2,-(1+c),(1+c)/2]:[(1-c)/2,1-c,(1-c)/2];
+  const b0=b[0]/a0,b1=b[1]/a0,b2=b[2]/a0,a1=-2*c/a0,a2=(1-al)/a0;
+  const y=new Float64Array(x.length); let x1=0,x2=0,y1=0,y2=0;
+  for(let i=0;i<x.length;i++){ const xi=x[i]; const yi=b0*xi+b1*x1+b2*x2-a1*y1-a2*y2; x2=x1;x1=xi;y2=y1;y1=yi; y[i]=yi; }
+  return y;
+}
+function _srvFarsiVocalProfile(audio,hop){
+  const sr=audio.sampleRate, k=Math.max(1,Math.round(sr/8000)), fs=sr/k, n=Math.floor(audio.length/k);
+  const L0=audio.getChannelData(0), R0=audio.numberOfChannels>1?audio.getChannelData(1):L0;
+  const mid=new Float64Array(n), side=new Float64Array(n);
+  for(let i=0;i<n;i++){ let l=0,r=0; const o=i*k; for(let j=0;j<k;j++){l+=L0[o+j];r+=R0[o+j];} l/=k; r/=k; mid[i]=(l+r)/2; side[i]=(l-r)/2; }
+  const band=function(x){return _srvFarsiBiquad(_srvFarsiBiquad(x,'hp',300,fs),'lp',3400,fs);};
+  const M=band(mid), Sd=band(side), m=Math.round(fs*hop), f=Math.floor(n/m);
+  const center=new Float64Array(f), rms=new Float64Array(f);
+  for(let i=0;i<f;i++){ let em=0,es=0,ef=0; for(let j=i*m;j<(i+1)*m;j++){em+=M[j]*M[j];es+=Sd[j]*Sd[j];ef+=mid[j]*mid[j];} em/=m;es/=m;ef/=m; center[i]=em/(em+es+1e-12); rms[i]=Math.sqrt(ef+1e-12); }
+  return {center:center,rms:rms};
+}
+function _srvFarsiSuggestHook(prof,hop,songSec,dur){
+  const c=prof.center, r=prof.rms, n=c.length, w=Math.max(1,Math.round(dur/hop));
+  const pct=function(a,p){const s=Array.from(a).sort(function(x,y){return x-y;});return s.length?s[Math.min(s.length-1,Math.max(0,Math.floor(p/100*(s.length-1))))]:0;};
+  const r95=pct(r,95)||1, t=pct(c.slice(Math.min(n-1,Math.round(10/hop))),50);
+  const v=new Float64Array(n), rn=new Float64Array(n); for(let i=0;i<n;i++){ rn[i]=r[i]/r95; v[i]=(c[i]>=t&&rn[i]>0.25)?1:0; }
+  const pv=new Float64Array(n+1), pr=new Float64Array(n+1); for(let i=0;i<n;i++){pv[i+1]=pv[i]+v[i];pr[i+1]=pr[i]+rn[i];}
+  const vf=function(s){return (pv[Math.min(n,s+w)]-pv[s])/w;}, lf=function(s){return (pr[Math.min(n,s+w)]-pr[s])/w;};
+  const clampS=function(s){return Math.max(0,Math.min(Math.floor(songSec-dur),Math.round(s*hop)));};
+  const best=function(lo,hi){let b=lo,bs=-1;for(let s=lo;s<=hi;s++){const sc=vf(s)+0.15*lf(s);if(sc>bs){bs=sc;b=s;}}return b;};
+  let lo=Math.round(Math.max(45,songSec*0.18)/hop), hi=Math.round((songSec-dur-Math.max(15,songSec*0.08))/hop);
+  if(hi<lo||n<w+4){ const s=Math.round(songSec*0.4/hop); return {startSec:clampS(s),vocal:+vf(Math.max(0,Math.min(n-w,s))).toFixed(2),confident:false,why:'song too short for the full search — a mid-song section'}; }
+  hi=Math.min(hi,n-w);
+  let s=best(lo,hi), conf=vf(s)>=0.6;
+  if(!conf){ const s2=best(Math.max(lo,Math.round(songSec*0.35/hop)),Math.min(hi,Math.round(songSec*0.70/hop))); if(vf(s2)>=vf(s))s=s2; }
+  return {startSec:clampS(s),vocal:+vf(s).toFixed(2),confident:conf,
+    why:(conf?'the most vocal part of the song body: ':'no clearly vocal section found — the most vocal-like part between 35% and 70% of the song: ')+Math.round(vf(s)*100)+'% of it has the lead vocal centred in the mix; intro (first '+Math.round(lo*hop)+' s) and outro skipped'};
+}
+function _srvFarsiAnalyzeHook(p,taskId){
+  if(!p||_srvFarsiHookCache[p.id])return;
+  _srvFarsiHookCache[p.id]={status:'running'};
+  _srvFarsiDecodeLongAudio(p._srvLongVideoUrl).then(function(audio){
+    const songSec=audio.duration; if(!_srvFarsiLongDuration(p))_srvFarsiLongDurCache[p.id]=songSec;
+    const h=_srvFarsiSuggestHook(_srvFarsiVocalProfile(audio,0.5),0.5,songSec,SRV_FARSI_SHORT_DEFAULT_SEC);
+    _srvFarsiHookCache[p.id]={status:'done',startSec:h.startSec,songSec:songSec,why:h.why,vocal:h.vocal,confident:h.confident};
+  }).catch(function(e){ _srvFarsiHookCache[p.id]={status:'failed',why:String(e&&e.message||e)}; })
+  .then(function(){ const sel=_srvFarsiShortSel[taskId]; const h=_srvFarsiHookCache[p.id];
+    if(sel&&String(sel.longPkgId)===String(p.id)&&!sel.manual&&h.status==='done'){ sel.startSec=h.startSec; sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC; sel.suggested=true; }
+    if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId)); });
+}
+// Reads the Long's real length from its stored video (MediaRecorder WebM often reports Infinity until sought to the end).
+function _srvFarsiProbeLongDuration(p,taskId){
+  if(!p||_srvFarsiLongDuration(p)||_srvFarsiLongDurCache['_p'+p.id])return;
+  _srvFarsiLongDurCache['_p'+p.id]=1;
+  const a=document.createElement('audio'); a.preload='metadata'; a.crossOrigin='anonymous'; a.muted=true;
+  const done=function(){const d=a.duration; if(d>0&&isFinite(d)){_srvFarsiLongDurCache[p.id]=d; a.removeAttribute('src'); try{a.load();}catch(_){}
+      if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));}};
+  a.onloadedmetadata=function(){ if(isFinite(a.duration)&&a.duration>0)done(); else { a.ondurationchange=function(){if(isFinite(a.duration)&&a.duration>0){a.ondurationchange=null;done();}}; try{a.currentTime=1e101;}catch(_){} } };
+  a.onerror=function(){ _srvFarsiLongDurCache[p.id]=0.001; // unreadable media: treated as not a usable source
+    if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId)); };
+  a.src=p._srvLongVideoUrl;
+}
+function _srvFarsiShortFromLongHtml(task,taskId){
+  const all=_srvFarsiShortSources(task);
+  all.forEach(function(x){ if(!x.songSec)_srvFarsiProbeLongDuration(x.pkg,taskId); }); // read each Long's real length
+  const _checking=all.filter(function(x){return !x.songSec;}).length;
+  const src=all.filter(function(x){return x.songSec>=SRV_FARSI_SHORT_SOURCE_MIN_SEC;});
+  const sel=_srvFarsiShortSel[taskId]||(_srvFarsiShortSel[taskId]={});
+  if(!src.some(function(x){return String(x.pkg.id)===String(sel.longPkgId);}))sel.longPkgId=src[0]?String(src[0].pkg.id):null;
+  const cur=src.find(function(x){return String(x.pkg.id)===String(sel.longPkgId);})||null;
+  if(cur&&!cur.songSec)_srvFarsiProbeLongDuration(cur.pkg,taskId);
+  const hook=cur?_srvFarsiHookCache[cur.pkg.id]:null;
+  if(cur&&!hook)_srvFarsiAnalyzeHook(cur.pkg,taskId);
+  if(cur&&hook&&hook.status==='done'&&!sel.manual&&(sel.startSec==null||sel.placeholder)){sel.startSec=hook.startSec;sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC;sel.suggested=true;sel.placeholder=false;}
+  if(cur&&cur.songSec&&sel.startSec==null&&!(hook&&hook.status==='done')){sel.startSec=Math.round(cur.songSec*0.35);sel.placeholder=true;} // editable while the suggestion is computed; never 0:00
+  const c=_srvFarsiShortClamp(sel,cur?cur.songSec:0); if(c.startSec!=null)sel.startSec=c.startSec; sel.durationSec=c.durationSec; sel.songSec=cur?cur.songSec:0;
+  const _hookBusy=!!(cur&&(!hook||hook.status==='running'));
+  if(hook&&hook.status==='failed'&&sel.placeholder){sel.placeholder=false;} // no suggestion possible: the mid-song start stands as the default
+  const _onHook=!!(hook&&hook.status==='done'&&!sel.manual&&sel.startSec===hook.startSec&&sel.durationSec===SRV_FARSI_SHORT_DEFAULT_SEC);
+  const _mode=_onHook?'suggested':'manual';
+  const T=escHTML(String(taskId));
+  if(!src.length)return _checking?`<div style="font-size:12px;color:var(--dim);line-height:1.6">Checking the published Longs (${_checking})…</div>`:`<div style="font-size:12px;color:#f59e0b;line-height:1.6">No published full-length SRV Farsi Long yet (at least ${Math.round(SRV_FARSI_SHORT_SOURCE_MIN_SEC/60)} minutes). A Short is cut from a Long that is already on YouTube.</div>`;
+  const opts=src.map(function(x){const p=x.pkg;const tn=x.task?('task #'+escHTML(String(x.task.id))):(p.taskId?'task #'+escHTML(String(p.taskId)):'');
+    return `<option value="${escHTML(String(p.id))}" ${String(p.id)===String(sel.longPkgId)?'selected':''}>${escHTML(p.title)} · ${tn} · ${x.songSec?_srvFarsiFmtSec(x.songSec):'—'} · ${x.isTest?'[TEST] private on YouTube':'on YouTube'}</option>`;}).join('');
+  const editable=!!(cur&&cur.songSec&&c.startSec!=null);
+  const ready=!!(editable&&(!_hookBusy||sel.manual)); // Create: once the suggestion is in, or as soon as the operator chose a section
+  return `
+        <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">1 · PUBLISHED LONG (SRV FARSI ONLY)</div>
+        <select id="srvf-short-long-${T}" onchange="_srvFarsiShortSet('${T}','longPkgId',this.value)" style="width:100%;padding:9px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?'6':'12'}px">${opts}</select>
+        ${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?`<div data-srvf-readonly-src style="font-size:10px;color:#a78bfa;margin-bottom:12px">🔒 Using published Long as source only — original Long will not be changed. This Short stays [TEST]: private, unscheduled, outside the weekly plan.</div>`:''}
+        <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">2 · SECTION (${SRV_FARSI_SHORT_MIN_SEC}–${SRV_FARSI_SHORT_MAX_SEC} S)</div>
+        <div data-srvf-hook style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;line-height:1.5;margin-bottom:4px;color:#c9a84c">${_hookBusy?'<span style="color:var(--dim)">🔎 Finding the singing in this Long… (you can already set the section yourself)</span>':hook&&hook.status==='done'?'<span>🎯 '+(hook.confident?'Suggested Hook Section (vocal)':'Suggested vocal section')+': <strong>'+_srvFarsiFmtSec(hook.startSec)+'–'+_srvFarsiFmtSec(hook.startSec+SRV_FARSI_SHORT_DEFAULT_SEC)+'</strong></span>'+`<button type="button" id="srvf-short-usehook-${T}" data-srvf-use-hook onclick="_srvFarsiShortUseHook('${T}')" ${_onHook?'disabled':''} style="padding:2px 8px;background:transparent;border:1px solid rgba(201,168,76,0.45);border-radius:5px;color:#c9a84c;font-size:10px;cursor:${_onHook?'default':'pointer'};opacity:${_onHook?0.5:1}">Use suggestion</button>`:hook&&hook.status==='failed'?'<span style="color:var(--dim)">No suggestion ('+escHTML(hook.why)+') — set the section yourself.</span>':''}${editable?`<span id="srvf-short-mode-${T}" data-srvf-mode="${_mode}" style="margin-left:auto;padding:1px 7px;border-radius:9px;font-size:9px;font-weight:800;letter-spacing:0.8px;font-family:'JetBrains Mono',monospace;${_mode==='manual'?'background:rgba(139,92,246,0.15);color:#a78bfa':'background:rgba(201,168,76,0.15);color:#c9a84c'}">${_mode==='manual'?'MANUAL':'SUGGESTED'}</span>`:''}</div>
+        ${hook&&hook.status==='done'?`<div style="font-size:10px;color:var(--dim);line-height:1.5;margin-bottom:8px">${escHTML(hook.why)}. A recommendation only, not a detected chorus — change Start, Length or the slider freely.</div>`:''}
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <label style="font-size:11px;color:var(--dim)">Start <input id="srvf-short-start-${T}" type="number" min="0" max="${c.maxStart}" step="1" value="${c.startSec==null?'':c.startSec}" ${editable?'':'disabled'} onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:76px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> s</label>
+          <label style="font-size:11px;color:var(--dim)">Length <input id="srvf-short-dur-${T}" type="number" min="${SRV_FARSI_SHORT_MIN_SEC}" max="${SRV_FARSI_SHORT_MAX_SEC}" step="1" value="${c.durationSec}" ${editable?'':'disabled'} onchange="_srvFarsiShortSet('${T}','durationSec',this.value)" style="width:64px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> s</label>
+          <span id="srvf-short-range-${T}" style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace">${c.startSec==null?'—':_srvFarsiFmtSec(c.startSec)+' – '+_srvFarsiFmtSec(c.startSec+c.durationSec)}${cur&&cur.songSec?' of '+_srvFarsiFmtSec(cur.songSec):' (reading the song…)'}</span>
+        </div>
+        ${editable?`<input id="srvf-short-slider-${T}" type="range" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" oninput="_srvFarsiShortSet('${T}','startSec',this.value,true)" onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:100%;margin-bottom:8px">`:''}
+        <audio id="srvf-short-audio-${T}" src="${escHTML(cur.pkg._srvLongVideoUrl)}" preload="none" crossorigin="anonymous" style="display:none"></audio>
+        <button type="button" onclick="_srvFarsiShortPreview('${T}')" style="padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;margin-bottom:10px">▶ Preview this section</button>
+        <div style="font-size:10px;color:var(--dim);line-height:1.6;margin-bottom:12px">The Short reuses this Long's song — same title, audio, lyrics, artist and mood. Nothing new is generated and no MP3 upload is needed.</div>
+        <div id="srvf-short-st-${T}" style="font-size:11px;margin-bottom:8px;font-family:'JetBrains Mono',monospace"></div>
+        <div style="font-size:9px;color:var(--dim);margin-bottom:6px;font-family:'JetBrains Mono',monospace;opacity:0.7">build ${SRV_FARSI_UI_BUILD}</div>
+        <button type="button" onclick="_srvFarsiCreateShortFromLong('${T}')" ${ready?'':'disabled'} style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;opacity:${ready?1:0.5}">✂ Create Short from this Long</button>`;
+}
+function _srvFarsiShortSet(taskId,key,val,live){
+  const sel=_srvFarsiShortSel[taskId]||(_srvFarsiShortSel[taskId]={});
+  if(key==='longPkgId'){sel.longPkgId=String(val);sel.startSec=null;sel.manual=false;sel.suggested=false;}
+  else { sel[key]=Number(val); sel.manual=true; sel.suggested=false; sel.placeholder=false; }
+  if(live){
+    const el=document.getElementById('srvf-short-range-'+taskId), st=document.getElementById('srvf-short-start-'+taskId);
+    if(el)el.textContent=_srvFarsiFmtSec(sel.startSec)+' – '+_srvFarsiFmtSec(sel.startSec+(sel.durationSec||SRV_FARSI_SHORT_DEFAULT_SEC))+(sel.songSec?' of '+_srvFarsiFmtSec(sel.songSec):'');
+    if(st)st.value=sel.startSec;
+    const md=document.getElementById('srvf-short-mode-'+taskId); if(md){md.textContent='MANUAL';md.setAttribute('data-srvf-mode','manual');md.style.background='rgba(139,92,246,0.15)';md.style.color='#a78bfa';}
+    const ub=document.getElementById('srvf-short-usehook-'+taskId); if(ub){ub.disabled=false;ub.style.opacity=1;ub.style.cursor='pointer';}
+    return;
+  }
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+}
+function _srvFarsiShortUseHook(taskId){
+  const sel=_srvFarsiShortSel[taskId]; if(!sel)return; const h=_srvFarsiHookCache[sel.longPkgId]; if(!h||h.status!=='done')return;
+  sel.startSec=h.startSec; sel.durationSec=SRV_FARSI_SHORT_DEFAULT_SEC; sel.manual=false; sel.suggested=true; sel.placeholder=false;
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+}
+function _srvFarsiShortPreview(taskId){
+  const a=document.getElementById('srvf-short-audio-'+taskId); const sel=_srvFarsiShortSel[taskId]||{};
+  if(!a)return;
+  if(!a.paused){a.pause();return;}
+  const start=Number(sel.startSec||0), end=start+Number(sel.durationSec||SRV_FARSI_SHORT_DEFAULT_SEC);
+  a.ontimeupdate=function(){if(a.currentTime>=end)a.pause();};
+  const go=function(){try{a.currentTime=start;}catch(_){}a.play().catch(function(){});};
+  if(a.readyState>=1)go(); else {a.preload='auto';a.onloadedmetadata=function(){a.onloadedmetadata=null;go();};a.load();}
+}
+function _srvFarsiLongMode(L,lt){
+  if(lt&&(lt.mode||lt.mood)&&/ — /.test(String(lt.mode||lt.mood)))return String(lt.mode||lt.mood);
+  const art=L.artist||(/duet/i.test(L.vocal||'')?'Duet':/male/i.test(L.vocal||'')&&!/female/i.test(L.vocal||'')?'Male':'Female');
+  const m=String(L.mood||'romantic'); return art+' — '+m.charAt(0).toUpperCase()+m.slice(1).toLowerCase();
+}
+// Creates the Short's package from the chosen Long — copies, never generates. The Short keeps its own task/package
+// identity and records exactly where it came from (srvShortOf). The Long is never marked as used up.
+async function _srvFarsiCreateShortFromLong(taskId){
+  const st=document.getElementById('srvf-short-st-'+taskId);
+  const say=function(t,c){if(st){st.textContent=t;st.style.color=c||'var(--dim)';}};
+  if(await _srvFarsiPageIsCurrent()===false){say('⚠ This page is running an older version of MMMOS. Reload the page (⌘R / Ctrl+R) and try again — nothing was saved.','#ef4444');return false;}
+  const task=_srvFarsiTaskById(taskId);
+  if(!task||task.isLong){say('⚠ This task is not a SRV Farsi Short.','#ef4444');return false;}
+  if(_srvFarsiPkgForTask(task)){say('⚠ This Short already has its package.','#ef4444');return false;}
+  const sel=_srvFarsiShortSel[taskId]||{};
+  const src=_srvFarsiShortSources(task).find(function(x){return String(x.pkg.id)===String(sel.longPkgId);});
+  if(!src){say('⚠ Choose a published SRV Farsi Long first.','#ef4444');return false;}
+  if(sel.startSec==null||(sel.placeholder&&!sel.manual)){say('⚠ Still finding the suggested section — wait a moment or set Start yourself.','#ef4444');return false;}
+  const dur=Math.round(Number(sel.durationSec)), start=Math.round(Number(sel.startSec));
+  if(!(dur>=SRV_FARSI_SHORT_MIN_SEC&&dur<=SRV_FARSI_SHORT_MAX_SEC)){say('⚠ The Short must be '+SRV_FARSI_SHORT_MIN_SEC+'–'+SRV_FARSI_SHORT_MAX_SEC+' seconds.','#ef4444');return false;}
+  if(!src.songSec){say('⚠ The Long\'s length is still being read — try again in a moment.','#ef4444');return false;}
+  if(!(start>=0)||start+dur>src.songSec+0.01){say('⚠ That section runs past the end of the song.','#ef4444');return false;}
+  const L=src.pkg;
+  const _h0=_srvFarsiHookCache[L.id];
+  const _secMode=(!sel.manual&&_h0&&_h0.status==='done'&&_h0.startSec===start&&dur===SRV_FARSI_SHORT_DEFAULT_SEC)?'suggested':'manual';
+  const dupe=(D.packages||[]).find(function(p){return _srvFarsiIsShortFromLong(p)&&!String(p.srvTaskUid||'').startsWith('set-aside:')&&String(p.srvShortOf.longPkgId)===String(L.id)&&Number(p.srvShortOf.startSec)===start&&Number(p.srvShortOf.durationSec)===dur;});
+  if(dupe&&!confirm('A Short from this Long with exactly this section already exists (package '+dupe.id+'). Create another one anyway?'))return false;
+  const uid=_srvFarsiTaskUid(task);
+  const lt=src.task;
+  const mode=_srvFarsiLongMode(L,lt);
+  const pkg={
+    id:'pkg_'+Date.now(),taskId:task.id,engine:'SRV Farsi',contentType:'Short',contentFormat:'short',
+    generatedAt:new Date().toISOString(),checklist:{},_pendingSync:false,performance_status:'generated',youtube_video_id:null,published_at:null,linked_channel:null,tools:[],
+    isTest:_srvFarsiIsTestTask(task),
+    title:L.title,titleFinglish:L.titleFinglish||'',lyrics:L.lyrics||'',shortLyrics:L.shortLyrics||L.short_lyrics||'',short_lyrics:L.shortLyrics||L.short_lyrics||'',
+    hook:L.hook||'',vocal:L.vocal,mood:L.mood,artist:L.artist,mode:mode,
+    captionYT:L.captionYT||L.captionYouTube||'',captionYouTube:L.captionYouTube||L.captionYT||'',hashtags:L.hashtags||'',
+    srvShortOf:{longPkgId:String(L.id),longTaskUid:L.srvTaskUid||null,longTaskId:lt?lt.id:(L.taskId||null),longTitle:L.title,
+      startSec:start,durationSec:dur,longDurationSec:Math.round(src.songSec*10)/10,audioUrl:L._srvLongVideoUrl,longYoutubeVideoId:src.yt||null,at:new Date().toISOString(),
+      sectionSelectionMode:_secMode,
+      section:(function(){const h=_srvFarsiHookCache[L.id];return _secMode==='suggested'?{how:'suggested-hook',why:h.why}:{how:'manual',suggestedStartSec:h&&h.status==='done'?h.startSec:null,suggestedDurationSec:h&&h.status==='done'?SRV_FARSI_SHORT_DEFAULT_SEC:null};})()},
+  };
+  if(uid)pkg.srvTaskUid=uid;
+  // The packages table allows one row per (engine, title) for SRV Farsi (index packages_engine_title_unique_non_srv_studio),
+  // and the Short shares the Long's song title, so its row is stored under a distinct DB-only title. pkg.title — what is
+  // shown, rendered and published — stays the Long's title. (Root cause of "The Short could not be saved": HTTP 409.)
+  pkg.dbTitle=String(L.title||'').trim()+' · Short '+_srvFarsiFmtSec(start)+'–'+_srvFarsiFmtSec(start+dur)+' · '+pkg.id;
+  say('Creating the Short…','#c9a84c');
+  D.packages=(D.packages||[]).concat([pkg]);
+  if(typeof saveAppState==='function')saveAppState();
+  let saved=true, why='';
+  try{ if(typeof savePackageToSupabase==='function')saved=(await savePackageToSupabase(pkg))!==false; }catch(e){ saved=false; why=String(e&&e.message||e); }
+  if(!saved){ D.packages=D.packages.filter(function(p){return p!==pkg;}); if(typeof saveAppState==='function')saveAppState(); say('⚠ The Short could not be saved'+(why?' ('+why+')':' (the database refused the package — see the browser console for the status)')+'. Nothing was created.','#ef4444'); return false; }
+  // only after the package is safely stored: the Short takes the Long's artist + mood (recorded as a VA override;
+  // rotation counters untouched) and, by default, the Long's cover from the shared library
+  if((task.mode||task.mood)!==mode){
+    task.vaOverrides=Array.isArray(task.vaOverrides)?task.vaOverrides:[];
+    task.vaOverrides.push({field:'artist/mood',from:task.mode||task.mood,to:mode,by:'short-from-long',at:new Date().toISOString()});
+    task.mode=mode; task.mood=mode;
+  }
+  const lc=L._srvAvatarChoice; const art=_srvFarsiAvatarArtist(task);
+  if(lc&&lc.artist===art&&_srvFarsiAvatarById(art,lc.id)&&!task.srvAvatarId){task.srvAvatarId=lc.id;task.srvAvatarArtist=art;task.srvAvatarChosenAt=Date.now();}
+  if(typeof saveAppState==='function')saveAppState();
+  _srvFarsiSetStage(taskId,'review');
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+  return true;
+}
+// Build: the Short's audio is the chosen section of the Long, cut from the Long's stored video (WAV, in memory).
+async function _srvFarsiShortAudioFromLong(pkg){
+  const s=pkg.srvShortOf;
+  const audio=await _srvFarsiDecodeLongAudio(s.audioUrl);
+  const sr=audio.sampleRate, ch=Math.min(2,audio.numberOfChannels);
+  const from=Math.max(0,Math.floor(s.startSec*sr)), to=Math.min(audio.length,Math.floor((s.startSec+s.durationSec)*sr)), n=Math.max(0,to-from);
+  if(n<sr*SRV_FARSI_SHORT_MIN_SEC*0.9)throw new Error('The Long is shorter than the chosen section');
+  const ab=new ArrayBuffer(44+n*ch*2), v=new DataView(ab);
+  const w=function(o,t){for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+n*ch*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,ch,true);
+  v.setUint32(24,sr,true);v.setUint32(28,sr*ch*2,true);v.setUint16(32,ch*2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*ch*2,true);
+  const data=[]; for(let c=0;c<ch;c++)data.push(audio.getChannelData(c));
+  const fadeN=Math.floor(sr*0.6); let o=44;
+  for(let i=0;i<n;i++){ const g=Math.min(1,i/fadeN,(n-1-i)/fadeN); for(let c=0;c<ch;c++){ const x=Math.max(-1,Math.min(1,data[c][from+i]*g)); v.setInt16(o,x<0?x*0x8000:x*0x7FFF,true); o+=2; } }
+  return new File([ab],'srv_farsi_short_from_long.wav',{type:'audio/wav'});
+}
+// Lifecycle banner for a Short: where it came from.
+function _srvFarsiShortSourceHtml(pkg){
+  if(!_srvFarsiIsShortFromLong(pkg))return '';
+  const s=pkg.srvShortOf;
+  return `<div style="margin-bottom:12px;padding:8px 12px;background:rgba(139,92,246,0.07);border:1px solid rgba(139,92,246,0.25);border-radius:8px;font-size:11px;line-height:1.6;color:var(--text)">✂ <strong>Short from Long:</strong> ${escHTML(s.longTitle||'')}${s.longTaskId?' · task #'+escHTML(String(s.longTaskId)):''} · section ${_srvFarsiFmtSec(s.startSec)}–${_srvFarsiFmtSec(s.startSec+s.durationSec)}${s.longDurationSec?' of '+_srvFarsiFmtSec(s.longDurationSec):''}${s.longYoutubeVideoId?` · <a href="https://www.youtube.com/watch?v=${escHTML(s.longYoutubeVideoId)}" target="_blank" style="color:#a78bfa">Long on YouTube</a>`:''}</div>`;
+}
+
+// ── SRV Farsi Approve-stage PUBLISHING panel: playlists (multi-select), date, time, timezone. Saved on the package
+// (shared state + the Supabase packages row), so a refresh keeps it; Publish uses exactly what is saved here.
+const SRV_FARSI_PLAYLIST_CHOICES=[
+  {key:'happyromantic',id:'PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3',name:'Silk Road Voices | Happy Romantic 🌹'},
+  {key:'emotional',id:'PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF',name:'Silk Road Voices | Emotional ❤️'},
+  {key:'short',id:'PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh',name:'Silk Road Voices |Shorts'},
+];
+// Recommended by mood + format: Romantic/Happy → Happy Romantic, Emotional → Emotional; a Short also → Shorts.
+function _srvFarsiDefaultPlaylistIds(task,isLong){
+  const keys=_srvFarsiPublishPlaylists(task,isLong);
+  const ids=[];
+  keys.forEach(function(k){const id=k==='emotional'?'PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF':k==='short'?'PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh':'PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3';if(ids.indexOf(id)<0)ids.push(id);});
+  return ids;
+}
+// Publish: the operator's saved date/time becomes the YouTube publishAt for a production task. A [TEST] task never
+// gets a schedule (it uploads private) — the existing P1 test rule in the publish functions stays authoritative.
+function _srvFarsiApplySchedule(pkg,taskId){
+  if(!pkg||!pkg.srvSchedule||!pkg.srvSchedule.iso)return;
+  if(pkg.isTest||_srvFarsiIsTestTask(_srvFarsiTaskById(taskId))||_getEngineState('SRV Farsi')==='test')return;
+  pkg.publishAt=pkg.srvSchedule.iso;
+  pkg.publishLabel=pkg.srvSchedule.date+' '+pkg.srvSchedule.time+' ('+pkg.srvSchedule.tz+')';
+  if(!D._publishSlots)D._publishSlots={};
+  if(!D._publishSlots[pkg.publishAt])D._publishSlots[pkg.publishAt]=pkg.id;
+}
+function _srvFarsiPublishTz(){ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone||'local'; }catch(_){ return 'local'; } }
+// The selections in force for a package: what the operator saved, else the recommendation.
+function _srvFarsiPlaylistSelection(pkg,task,isLong){
+  const s=pkg&&pkg.srvPlaylistSel;
+  if(s&&Array.isArray(s.ids))return {ids:s.ids.filter(function(id){return SRV_FARSI_PLAYLIST_CHOICES.some(function(c){return c.id===id;});}),none:!!s.none,saved:true};
+  return {ids:_srvFarsiDefaultPlaylistIds(task,isLong),none:false,saved:false};
+}
+// local wall-clock date+time in the operator's timezone → the exact UTC instant YouTube needs (RFC 3339)
+function _srvFarsiScheduleIso(date,time){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||''))||!/^\d{2}:\d{2}$/.test(String(time||'')))return null;
+  const [y,m,d]=date.split('-').map(Number), [hh,mm]=time.split(':').map(Number);
+  const dt=new Date(y,m-1,d,hh,mm,0,0);
+  if(dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==d||dt.getHours()!==hh||dt.getMinutes()!==mm)return null; // not a real wall-clock time (e.g. DST gap)
+  return dt.toISOString();
+}
+function _srvFarsiScheduleDefault(pkg){
+  const s=pkg&&pkg.srvSchedule; if(s&&s.date&&s.time)return {date:s.date,time:s.time,tz:s.tz||_srvFarsiPublishTz(),saved:true};
+  const src=pkg&&pkg.publishAt?new Date(pkg.publishAt):null;
+  const c=src&&!isNaN(src)?src:(function(){const x=(typeof _nextPublishSlotCandidates==='function'?_nextPublishSlotCandidates(1)[0]:null);return x?new Date(x.iso):null;})();
+  if(!c)return {date:'',time:'',tz:_srvFarsiPublishTz(),saved:false};
+  const p=function(n){return String(n).padStart(2,'0');};
+  return {date:c.getFullYear()+'-'+p(c.getMonth()+1)+'-'+p(c.getDate()),time:p(c.getHours())+':'+p(c.getMinutes()),tz:_srvFarsiPublishTz(),saved:false};
+}
+async function _srvFarsiSavePublishPrefs(pkgId,taskId){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);}); if(!pkg)return;
+  const box=document.getElementById('srvf-pub-'+pkgId); if(!box)return;
+  const ids=[].slice.call(box.querySelectorAll('input[data-srvf-pl]')).filter(function(x){return x.checked;}).map(function(x){return x.getAttribute('data-srvf-pl');});
+  const noneEl=box.querySelector('input[data-srvf-pl-none]');
+  const date=(box.querySelector('input[data-srvf-date]')||{}).value||'', time=(box.querySelector('input[data-srvf-time]')||{}).value||'';
+  pkg.srvPlaylistSel={ids:noneEl&&noneEl.checked?[]:ids,none:!!(noneEl&&noneEl.checked),by:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||'operator',at:new Date().toISOString()};
+  pkg.srvSchedule={date,time,tz:_srvFarsiPublishTz(),iso:_srvFarsiScheduleIso(date,time),by:pkg.srvPlaylistSel.by,at:pkg.srvPlaylistSel.at};
+  if(typeof saveAppState==='function')saveAppState();
+  const st=document.getElementById('srvf-pub-st-'+pkgId);
+  let ok=true, why='';
+  try{ if(typeof savePackageToSupabase==='function')ok=(await savePackageToSupabase(pkg))!==false; }catch(e){ ok=false; why=String(e&&e.message||e); }
+  if(st){ st.textContent=ok?'✓ Saved':'⚠ Not saved to the server'+(why?': '+why:''); st.style.color=ok?'#22c55e':'#ef4444'; }
+}
+function _srvFarsiPublishPanelHtml(task,pkg,isLong){
+  if(!pkg)return '';
+  const pid=escHTML(String(pkg.id)), tid=escHTML(String(task.taskId||task.id||''));
+  const isTest=_srvFarsiIsTestTask(task)||!!pkg.isTest;
+  const sel=_srvFarsiPlaylistSelection(pkg,task,isLong), rec=_srvFarsiDefaultPlaylistIds(task,isLong);
+  const sch=_srvFarsiScheduleDefault(pkg);
+  const isAdmin=typeof currentUser!=='undefined'&&currentUser&&currentUser.id==='admin';
+  const row=function(c){const on=!sel.none&&sel.ids.indexOf(c.id)>=0;return `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px;color:var(--text);cursor:pointer"><input type="checkbox" data-srvf-pl="${c.id}" ${on?'checked':''} onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')"> ${escHTML(c.name)}${rec.indexOf(c.id)>=0?' <span style="font-size:9px;color:#c9a84c;border:1px solid rgba(201,168,76,0.4);border-radius:4px;padding:0 5px">recommended</span>':''}</label>`;};
+  const inp='padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text);font-size:12px;color-scheme:dark';
+  return `<div id="srvf-pub-${pid}" style="margin-bottom:12px;padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(201,168,76,0.25);border-radius:10px">
+      <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">PUBLISHING</div>
+      ${isTest?`<div style="margin-bottom:8px;padding:6px 10px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.3);border-radius:6px;font-size:10px;color:#a78bfa">[TEST] task — uploads PRIVATE with no schedule, whatever date/time is chosen here.</div>`:''}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <label style="font-size:11px;color:var(--dim)">Date <input type="date" data-srvf-date value="${escHTML(sch.date)}" onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')" style="${inp}"></label>
+        <label style="font-size:11px;color:var(--dim)">Time <input type="time" data-srvf-time value="${escHTML(sch.time)}" onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')" style="${inp}"></label>
+      </div>
+      <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Timezone: <strong style="color:var(--text)">${escHTML(sch.tz)}</strong> (this computer)${sch.saved?'':' · suggested slot — change it or keep it'}</div>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:2px">Playlists</div>
+      ${SRV_FARSI_PLAYLIST_CHOICES.map(row).join('')}
+      ${isAdmin?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px;color:var(--dim);cursor:pointer"><input type="checkbox" data-srvf-pl-none ${sel.none?'checked':''} onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')"> No playlist (Admin only)</label>`:''}
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">AI Use: <strong style="color:#22c55e">YES — automatic</strong></div>
+      <div id="srvf-pub-st-${pid}" style="font-size:10px;margin-top:4px;font-family:'JetBrains Mono',monospace;color:var(--dim)">${sel.saved?'✓ Saved':'Recommended selection — it is saved when you change anything or press Approve & Publish.'}</div>
+    </div>`;
+}
+// Approve & Publish gate. Returns {ok, errors[], warnings[]}. The caller blocks on errors and asks about warnings.
+function _srvFarsiPublishCheck(task,pkg,isLong,now){
+  const errors=[], warnings=[]; now=now||Date.now();
+  const isTest=_srvFarsiIsTestTask(task)||!!(pkg&&pkg.isTest)||_getEngineState('SRV Farsi')==='test';
+  if(!pkg){errors.push('Package not found.');return {ok:false,errors,warnings,isTest};}
+  const sel=_srvFarsiPlaylistSelection(pkg,task,isLong);
+  const sch=pkg.srvSchedule||{};
+  if(!isTest){
+    if(!sch.iso)errors.push('Choose a publishing date and time.');
+    else if(Date.parse(sch.iso)<=now+10*60*1000)errors.push('The publishing date/time is in the past (or less than 10 minutes away). Choose a later time.');
+    if(!sel.none&&!sel.ids.length)errors.push('Choose at least one playlist (Admin can choose "No playlist").');
+  }
+  if(!(pkg._srvThumbDataUrl||pkg._srvThumbUrl))errors.push('No cover/thumbnail — rebuild the video.');
+  if(!(isLong?pkg._srvLongVideoUrl:pkg._srvShortVideoUrl))errors.push('The video is not ready — rebuild it.');
+  return {ok:!errors.length,errors,warnings,isTest};
+}
+async function _srvFarsiApproveAndPublish(pkgId,taskId){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  const task=_srvFarsiTaskById(taskId); const isLong=!!(task&&task.isLong);
+  if(pkg&&!pkg.srvPlaylistSel)await _srvFarsiSavePublishPrefs(pkgId,taskId); // freeze the shown recommendation as the choice
+  if(pkg&&!pkg.srvSchedule)await _srvFarsiSavePublishPrefs(pkgId,taskId);
+  const chk=_srvFarsiPublishCheck(task,pkg,isLong);
+  if(!chk.ok){alert('Cannot publish yet:\n\n• '+chk.errors.join('\n• '));return false;}
+  // YouTube connection + playlist permission (read-only check); never pretend playlists will work
+  const sel=_srvFarsiPlaylistSelection(pkg,task,isLong);
+  try{
+    const r=await _publishFetch('/api/ops?action=srv_farsi_playlists',{method:'GET'});
+    const d=await r.json().catch(function(){return {};});
+    if(!d||!d.ok){alert('Cannot publish: the Silk Road Voices YouTube connection is not working ('+((d&&(d.message||d.error))||('HTTP '+r.status))+'). Reconnect it in System → Integrations.');return false;}
+    if(!sel.none&&sel.ids.length&&!d.canAddToPlaylists&&!confirm('Silk Road Voices reconnect required for playlist publishing.\n\nThe video will upload, but it will NOT be added to the selected playlists until Silk Road Voices is reconnected. Publish anyway?'))return false;
+  }catch(e){alert('Cannot publish: could not check the YouTube connection ('+(e&&e.message||e)+').');return false;}
+  _srvFarsiApproveVideo(pkgId,taskId);
+  return true;
+}
+
+// ── SRV Farsi avatar library: artist resolution, lookup, and the Build-stage manual cover choice ──
+function _srvFarsiAvatarArtist(task){
+  const m=String((task&&(task.mode||task.mood))||'');
+  return /^Duet/i.test(m)?'duet':/^Male/i.test(m)?'male':'female';
+}
+function _srvFarsiAvatarLibrary(artist){
+  const c=_srvFarsiEngineConfig(); const L=c&&c.avatarLibrary;
+  return (L&&Array.isArray(L[artist]))?L[artist]:[];
+}
+function _srvFarsiAvatarById(artist,id){ return _srvFarsiAvatarLibrary(artist).find(function(a){return a.id===id;})||null; }
+// The operator's cover for this task, if it still belongs to the task's artist (an artist change voids it).
+function _srvFarsiManualAvatar(task){
+  if(!task||!task.srvAvatarId)return null;
+  const art=_srvFarsiAvatarArtist(task);
+  return task.srvAvatarArtist===art?_srvFarsiAvatarById(art,task.srvAvatarId):null;
+}
+// The image the next build will use: the operator's choice, else the next one in the artist rotation.
+function _srvFarsiNextAvatar(task){
+  const man=_srvFarsiManualAvatar(task); if(man)return {av:man,how:'manual'};
+  const art=_srvFarsiAvatarArtist(task), lib=_srvFarsiAvatarLibrary(art); if(!lib.length)return null;
+  const idx=(D.srvFarsiAvatarIdx&&typeof D.srvFarsiAvatarIdx['lib.'+art]==='number')?D.srvFarsiAvatarIdx['lib.'+art]%lib.length:0;
+  return {av:lib[idx],how:'auto'};
+}
+// Build stage: pick a cover for THIS task only (id) or go back to automatic (null). Saved on the task, so it survives
+// refresh/reload through the normal shared-state save. Never touches artist/mood/cadence rotation or other tasks.
+function _srvFarsiSelectAvatar(taskId,id){
+  const t=_srvFarsiTaskById(taskId); if(!t)return;
+  const art=_srvFarsiAvatarArtist(t);
+  if(id){ if(!_srvFarsiAvatarById(art,id))return; t.srvAvatarId=id; t.srvAvatarArtist=art; t.srvAvatarChosenAt=Date.now(); }
+  else { delete t.srvAvatarId; delete t.srvAvatarArtist; delete t.srvAvatarChosenAt; }
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+}
+function _srvFarsiAvatarPickerHtml(task){
+  const art=_srvFarsiAvatarArtist(task), lib=_srvFarsiAvatarLibrary(art), next=_srvFarsiNextAvatar(task);
+  if(!lib.length||!next)return '';
+  const tid=escHTML(String(task.taskId||task.id||''));
+  const artLabel=art==='duet'?'Duet':art==='male'?'Male':'Female';
+  const tiles=lib.map(function(a,i){
+    const sel=next.how==='manual'&&a.id===next.av.id;
+    return `<button type="button" data-srv-avatar="${escHTML(a.id)}" onclick="_srvFarsiSelectAvatar('${tid}','${escHTML(a.id)}')" title="Use this cover" style="position:relative;padding:0;border:2px solid ${sel?'#c9a84c':'rgba(255,255,255,0.08)'};border-radius:7px;overflow:hidden;cursor:pointer;background:#000;aspect-ratio:16/9"><img src="${escHTML(a.thumb||a.src)}" loading="lazy" alt="${artLabel} cover ${i+1}" style="width:100%;height:100%;object-fit:cover;display:block;opacity:${sel?1:0.82}">${sel?'<span style="position:absolute;top:3px;right:3px;background:#c9a84c;color:#000;font-size:9px;font-weight:800;border-radius:4px;padding:1px 5px">✓</span>':''}</button>`;
+  }).join('');
+  return `<div id="srv-farsi-cover-picker-${tid}" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;font-family:'JetBrains Mono',monospace">COVER PHOTO — ${artLabel.toUpperCase()} LIBRARY (${lib.length})</div>
+        ${next.how==='manual'?`<button type="button" onclick="_srvFarsiSelectAvatar('${tid}',null)" style="padding:4px 9px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer">↺ Back to automatic</button>`:''}</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+          <img src="${escHTML(next.av.thumb||next.av.src)}" alt="Selected cover" style="width:132px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;border:2px solid #c9a84c">
+          <div style="font-size:11px;line-height:1.5;color:var(--text)"><strong>${next.how==='manual'?'Your choice':'Automatic'}</strong><br><span style="color:var(--dim);font-size:10px">${next.how==='manual'?'Build and Rebuild use this cover until you change it.':'Next in the '+artLabel+' rotation. Tap any photo below to choose it for this task.'}</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px;max-height:230px;overflow:auto;padding-right:2px">${tiles}</div>
+      </div>`;
+}
+// SRV Farsi publishing: mood playlist, plus the Shorts playlist for a Short. The server maps each key to the
+// approved existing playlist id (Romantic and Happy share "Silk Road Voices | Happy Romantic 🌹").
+const SRV_FARSI_PLAYLIST_NAMES={romantic:'Silk Road Voices | Happy Romantic 🌹',happy:'Silk Road Voices | Happy Romantic 🌹',emotional:'Silk Road Voices | Emotional ❤️',short:'Silk Road Voices |Shorts'};
+function _srvFarsiPublishPlaylists(task,isLong){
+  // CEO rule (2026-10-25): a SRV Farsi Short goes ONLY to "Silk Road Voices |Shorts", whatever its mood.
+  // A Long goes to its mood playlist (Romantic/Happy → Happy Romantic, Emotional → Emotional).
+  if(!isLong)return ['short'];
+  const cat=(task&&task.playlistCategory)||_srvFarsiPlaylistCategory(task&&(task.mood||task.mode));
+  return [cat].filter(function(k){return ['romantic','emotional','happy'].indexOf(k)>=0;});
+}
+// Approve stage: read-only check of which SRV Farsi playlists exist on the channel (exact names, real ids).
+async function _srvFarsiCheckPlaylists(btn){
+  const box=btn&&btn.nextElementSibling; if(!box)return;
+  box.textContent='Checking the Silk Road Voices channel…';
+  try{
+    const r=await _publishFetch('/api/ops?action=srv_farsi_playlists',{method:'GET'});
+    const d=await r.json().catch(function(){return {};});
+    if(!d||!d.ok){box.textContent='Could not check: '+((d&&(d.message||d.error))||('HTTP '+r.status));return;}
+    box.innerHTML=(d.resolved||[]).map(function(x){return (x.onChannel?'✅ ':'⚠️ ')+escHTML(x.key)+' → '+escHTML(x.channelTitle||x.title)+' — <span style="font-family:JetBrains Mono,monospace">'+escHTML(x.id)+'</span>'+(x.onChannel?'':' — NOT found on the channel');}).join('<br>')+
+      '<br>'+(d.canAddToPlaylists?'✅ Connection can add videos to playlists':'⚠️ Connection cannot add videos to playlists yet (needs the YouTube playlist permission)')+
+      '<br><span style="color:var(--dim)">Channel playlists: '+escHTML((d.channelPlaylists||[]).map(function(p){return p.title+' ('+p.privacy+')';}).join(' · '))+'</span>';
+  }catch(e){box.textContent='Could not check: '+(e&&e.message||e);}
+}
+function _srvFarsiPlaylistResultHtml(pkg){
+  const r=pkg&&pkg.youtubePlaylists; if(!Array.isArray(r)||!r.length)return '';
+  const why={needs_playlist_permission:'reconnect required',playlist_add_failed:'could not add to the playlist',unknown_playlist:'not an approved SRV Farsi playlist'};
+  return `<div style="margin-top:8px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:10px;text-align:left;line-height:1.7">`+
+    r.map(function(x){return (x.ok?'✓ ':'✗ ')+escHTML(x.playlistName||x.title||'Playlists')+(x.ok?'':' — '+escHTML(why[x.error]||x.error||'not added'));}).join('<br>')+`</div>`;
+}
 function _srvFarsiVaSetArtistFormat(taskId,field,value){
   const task=_srvFarsiTaskById(taskId);
   if(!task||task.engine!=='SRV Farsi')return;
@@ -20718,6 +21258,9 @@ function _srvFarsiVaSetArtistFormat(taskId,field,value){
 async function vaFarsiGeneratePackage(taskId){
   const task=_srvFarsiTaskById(taskId);
   if(!task){console.warn('[vaFarsiGeneratePackage] task not found:',taskId);return;}
+  if(!task.isLong){ // Shorts come from a published Long (Generate stage), never from a newly generated song
+    _srvFarsiSetStage(taskId,'generate'); if(typeof openExec==='function')openExec(String(taskId)); return;
+  }
   const genBtn=document.querySelector(`button[onclick="vaFarsiGeneratePackage('${taskId}')"]`);
   if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
   try{
@@ -23180,9 +23723,9 @@ async function _srvRenderVideo(opts){
     _farsiPal=SRV_FARSI_MOOD_PALETTES[_srvFarsiMoodKey(mood)];
     _farsiT_ATMO=isShort?15:20;
     const _seed=(typeof seed==='number'&&isFinite(seed))?seed:1;
-    const _baseN=_srvFarsiMoodKey(mood)==='happy'?46:42; // denser field: the frame should feel alive
+    const _baseN=_srvFarsiMoodKey(mood)==='happy'?26:24; // restrained field: atmosphere, never a distraction
     if(_srvFarsiMoodKey(mood)==='emotional'){
-      _farsiAtmo=_srvFarsiGenRain(_seed,Math.round(70*_farsiIntensityMul)); _farsiAtmoKind='rain';
+      _farsiAtmo=_srvFarsiGenRain(_seed,Math.round(50*_farsiIntensityMul)); _farsiAtmoKind='rain';
     } else {
       _farsiAtmo=_srvFarsiGenParticles(_srvFarsiMoodKey(mood),_seed,Math.round(_baseN*_farsiIntensityMul)); _farsiAtmoKind='particle';
     }
@@ -23210,22 +23753,22 @@ async function _srvRenderVideo(opts){
     const wrap=function(v,m){return ((v%m)+m)%m;};
     ctx.save();
     ctx.globalCompositeOperation='screen';
-    for(let i=0;i<7;i++){
+    for(let i=0;i<5;i++){
       const r=W*(0.11+0.045*(i%4));
       const dir=(i%2)?1:-1;
-      const x=wrap((i*0.371+0.13)+dir*(0.016+0.005*(i%3))*t,1.3)-0.15;
-      const y=wrap((i*0.529+0.21)-(0.011+0.004*(i%4))*t,1.3)-0.15;
-      ctx.globalAlpha=0.055+0.03*(0.5+0.5*Math.sin(t*0.9+i*1.7));
+      const x=wrap((i*0.371+0.13)+dir*(0.004+0.002*(i%3))*t,1.3)-0.15;
+      const y=wrap((i*0.529+0.21)-(0.003+0.001*(i%4))*t,1.3)-0.15;
+      ctx.globalAlpha=0.04+0.02*(0.5+0.5*Math.sin(t*0.25+i*1.7));
       ctx.drawImage(sp,x*W-r,y*H-r,r*2,r*2);
     }
     if(_farsiAtmoKind==='particle'){
       const k=W/1280;
       for(const p of _farsiAtmo){
         const d=Math.min(1,p.baseOp*1.6);                       // 0..1 depth: nearer = faster, bigger, brighter
-        const yf=wrap(p.y0-(0.085+0.15*d)*t,1.15)-0.075;
-        const xf=wrap(p.x0+(0.012+0.02*d)*(p.wrapsX?-1:1)*t+0.022*Math.sin(t*(0.7+0.5*d)+p.phase),1.1)-0.05;
+        const yf=wrap(p.y0-(0.018+0.03*d)*t,1.15)-0.075;          // slow, soft fall-away upward drift
+        const xf=wrap(p.x0+(0.003+0.004*d)*(p.wrapsX?-1:1)*t+0.008*Math.sin(t*(0.18+0.12*d)+p.phase),1.1)-0.05;
         const s=Math.min(W*0.022,p.size*k*(1.5+1.9*d));
-        ctx.globalAlpha=Math.max(0.08,p.baseOp*(0.6+0.4*Math.sin(t*(1.6+p.harmonic)+p.phase)));
+        ctx.globalAlpha=Math.max(0.08,p.baseOp*(0.7+0.3*Math.sin(t*(0.35+0.15*p.harmonic)+p.phase)));
         ctx.drawImage(sp,xf*W-s,yf*H-s,s*2,s*2);
       }
       ctx.globalCompositeOperation='source-over';
@@ -23233,7 +23776,7 @@ async function _srvRenderVideo(opts){
       ctx.globalCompositeOperation='source-over';
       ctx.strokeStyle=_farsiPal.particle; ctx.lineWidth=1.5;
       for(const d of _farsiAtmo){
-        const yf=wrap(d.y0+0.46*t,1.4)-0.2;
+        const yf=wrap(d.y0+0.20*t,1.4)-0.2;
         ctx.globalAlpha=d.op;
         ctx.beginPath(); ctx.moveTo(d.x0*W,yf*H); ctx.lineTo(d.x0*W+d.length*0.28,yf*H+d.length*1.7); ctx.stroke();
       }
@@ -23262,7 +23805,7 @@ async function _srvRenderVideo(opts){
       const cover=Math.max(pw/iw,ph/ih);
       let sc=cover;
       // scale so the face reaches the target size; never below "cover", never so far the photo goes soft
-      if(fw>0&&aim.face>0) sc=Math.min(cover*1.7,Math.max(cover,(aim.face*pw)/(fw*iw)));
+      if(fw>0&&aim.face>0) sc=Math.min(Math.max(cover,Math.min(cover*1.7,1.5)),Math.max(cover,(aim.face*pw)/(fw*iw))); // ≤1.5x native unless the frame itself needs more
       const sw=pw/sc, sh=ph/sc;
       const sx=Math.min(iw-sw,Math.max(0,iw*fx-sw*aim.x));
       const sy=Math.min(ih-sh,Math.max(0,ih*fy-sh*aim.y));
@@ -23438,10 +23981,11 @@ async function _srvRenderVideo(opts){
     const _in=function(a,b){ if(skipFade)return 1; const x=_c01((t-a)/(b-a)); return 1-Math.pow(1-x,3); }; // ease-out
     const _live=skipFade?0:1;
     const _cyc=function(period,phase){return Math.sin(2*Math.PI*t/period+(phase||0));};
-    // camera: a slow push-in/out plus a faster small breath, and a drifting pan (all about the face)
-    const zoom=1.09+_live*((0.05*_farsiIntensityMul)*_cyc(11,0)+0.012*_cyc(4.3,1));
-    const panX=_live*_cyc(13,0.6), panY=_live*_cyc(9,2.1);
-    const sweep=_live?(((t+2)%9)/9)*1.8-0.4:undefined; // a light band crosses the photo every 9s
+    // camera — "a still portrait brought gently to life": one slow push/pull (26s), a barely-there drift, no
+    // breath, no shake, no light sweep. The pivot is the face (see _drawFarsiPanel), so the face stays still.
+    const zoom=1.045+_live*((0.025*_farsiIntensityMul)*_cyc(26,0));
+    const panX=_live*0.35*_cyc(37,0.6), panY=_live*0.25*_cyc(43,2.1);
+    const sweep=undefined;
     const isMirror=!!mirror;
     const _rawTitle=(title||hookText||'').replace(/\s*[|·—–].*$/,'').replace(/\s+(?:Emotional|Romantic|Happy)\b.*/i,'').trim();
     const _titleFontStr=function(px){ return `600 ${px}px 'Noto Nastaliq Urdu', serif`; };
@@ -23492,7 +24036,7 @@ async function _srvRenderVideo(opts){
       const _wordmarkH=Math.round(W*0.028);
       const _stackH=(_nTitleLines*_titleLineH)+_ruleGap+3+_finglishH+_wordmarkGap+_wordmarkH;
       const titleTopY=Math.max(Math.round(H*0.16),Math.round(H*0.5-_stackH/2));
-      const _drift=_live*W*0.003*_cyc(7,0.4);                  // the settled title keeps a slight float (parallax against the photo)
+      const _drift=0;                                          // the title holds still once it has slid in
       const pT=_in(0.35,1.30);
       ctx.save();
       ctx.globalAlpha=pT; ctx.translate((1-pT)*_dir*W*0.09+_drift,0);
@@ -23540,14 +24084,14 @@ async function _srvRenderVideo(opts){
         bx.drawImage(_avatarImg,(54-iw*sc)/2,(96-ih*sc)/2,iw*sc,ih*sc);
       }
       if(_farsiShortBg){
-        const bz=1.30+_live*0.07*_cyc(17,0);
+        const bz=1.30+_live*0.03*_cyc(41,0);
         ctx.save(); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-        ctx.translate(W/2+_live*W*0.04*_cyc(23,1),H/2+_live*H*0.02*_cyc(19,2)); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
+        ctx.translate(W/2+_live*W*0.012*_cyc(47,1),H/2+_live*H*0.008*_cyc(53,2)); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
         ctx.drawImage(_farsiShortBg,0,0,W,H);
         ctx.restore();
       }
       const _g0=_srvFarsiHexRgb(_farsiPal.gradient[0]), _g1=_srvFarsiHexRgb(_farsiPal.gradient[1]), _g2=_srvFarsiHexRgb(_farsiPal.gradient[2]);
-      const bgG=ctx.createLinearGradient(W*(0.2+_live*0.15*_cyc(21,0)),0,W*0.8,H);
+      const bgG=ctx.createLinearGradient(W*(0.2+_live*0.05*_cyc(45,0)),0,W*0.8,H);
       bgG.addColorStop(0,'rgba('+_g0+',0.58)'); bgG.addColorStop(0.5,'rgba('+_g1+',0.70)'); bgG.addColorStop(1,'rgba('+_g2+',0.92)');
       ctx.fillStyle=bgG; ctx.fillRect(0,0,W,H);
       _drawFarsiAtmo(t);
@@ -23567,7 +24111,7 @@ async function _srvRenderVideo(opts){
       try{ctx.letterSpacing='0px';}catch(_){}
       ctx.restore();
       // cover card — rises and settles
-      const cX=Math.round(W*0.07), cY=Math.round(H*0.145), cW=W-2*cX, cH=Math.round(H*0.525), cR=Math.round(W*0.032);
+      const cX=Math.round(W*0.07), cY=Math.round(H*0.145), cW=W-2*cX, cH=Math.round(H*0.585), cR=Math.round(W*0.032);
       const pC=_in(0.25,1.10);
       ctx.save();
       ctx.globalAlpha=pC;
@@ -23615,23 +24159,8 @@ async function _srvRenderVideo(opts){
       try{ctx.letterSpacing='0px';}catch(_){}
       ctx.restore();
       ctx.restore(); // card
-      // lyric line — each line slides in from alternating sides, under the card
-      if(lyricLines.length){
-        let idx=0;
-        for(let k=1;k<lyricTimings.length;k++){ if(t>=lyricTimings[k]) idx=k; }
-        const line=lyricLines[idx]||'';
-        const nextT=lyricTimings[idx+1]!==undefined?lyricTimings[idx+1]:targetDur;
-        const lineDur=Math.max(0.5,nextT-lyricTimings[idx]);
-        const inWin=t-lyricTimings[idx];
-        const alpha=skipFade?1:Math.min(Math.min(1,inWin/0.35),Math.min(1,Math.max(0,(lineDur-inWin)/0.35))); // skipFade = cover/thumbnail capture: lyric fully visible
-        const e=skipFade?1:1-Math.pow(1-_c01(inWin/0.5),3);
-        ctx.save(); ctx.globalAlpha=alpha; ctx.translate((1-e)*((idx%2)?-1:1)*W*0.07,0);
-        ctx.direction='rtl'; ctx.textAlign='center'; ctx.font=`600 ${Math.round(W*0.054)}px 'Noto Nastaliq Urdu', serif`;
-        ctx.fillStyle=cream;
-        ctx.shadowColor='rgba(8,4,2,0.92)'; ctx.shadowBlur=Math.round(W*0.014); ctx.shadowOffsetY=2;
-        _srvWrapLines(ctx,line,W/2,Math.round(H*0.742),W*0.84,Math.round(W*0.072),2);
-        ctx.restore();
-      }
+      // No running lyric line on SRV Farsi Shorts (CEO decision 2026-10-25): a Short is a promotional teaser cut
+      // from a Long, so it shows the cover card, title and branding only — no lyric text of any kind.
       // footer — brand + follow line, slides up
       const pFo=_in(1.30,2.05);
       ctx.save();
