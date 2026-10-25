@@ -7600,18 +7600,17 @@ const _FARSI_PLAYLIST_MAP = {
   happy:     'SRV Farsi - Happy',
 };
 
-// SRV Farsi playlist routing (order: SRV FARSI — AVATAR + MOTION + BUILD COVER + PUBLISHING). Each video goes to its
-// mood playlist, and a Short also to the Shorts playlist. Playlists are looked up on the connected Silk Road Voices
-// channel by exact title (private and unlisted included, via playlists?mine=true) and are never created or guessed:
-// a missing title is reported back as missing. Adding to a playlist needs the youtube.force-ssl permission
-// (playlistItems.insert), so until Silk Road Voices is reconnected with it the add is reported as failed, non-fatal.
-const SRV_FARSI_PLAYLIST_TITLES = {
-  romantic:  'Silk Road Voices Romantic',
-  emotional: 'Silk Road Voices Emotional',
-  happy:     'Silk Road Voices Happy',
-  short:     'Silk Road Voices Short',
+// SRV Farsi playlist routing (CEO/PM decision, 2026-10-24): the EXISTING Silk Road Voices playlists, by id — never
+// created, renamed or looked up by name. Romantic and Happy share one playlist. A Long goes to its mood playlist only;
+// a Short to its mood playlist plus the Shorts playlist. Adding to a playlist (playlistItems.insert) needs the
+// youtube.force-ssl permission on the Silk Road Voices connection (see lib/srvFarsiOAuth.mjs); until it is granted the
+// add is reported as failed, non-fatal.
+const SRV_FARSI_PLAYLISTS = {
+  romantic:  { id: 'PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3', title: 'Silk Road Voices | Happy Romantic 🌹' },
+  happy:     { id: 'PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3', title: 'Silk Road Voices | Happy Romantic 🌹' },
+  emotional: { id: 'PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF', title: 'Silk Road Voices | Emotional ❤️' },
+  short:     { id: 'PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh', title: 'Silk Road Voices |Shorts' },
 };
-const _plNorm = (t) => String(t || '').normalize('NFKC').trim().toLowerCase();
 async function _srvFarsiListPlaylists(accessToken) {
   const all = []; let pageToken = '';
   for (let i = 0; i < 10; i++) {
@@ -7624,13 +7623,12 @@ async function _srvFarsiListPlaylists(accessToken) {
   }
   return all;
 }
-// keys -> [{ key, title, id|null }] by exact (normalised) title on the channel
-function _srvFarsiResolvePlaylists(keys, channelPlaylists) {
-  return (keys || []).filter(function(k, i, a) { return SRV_FARSI_PLAYLIST_TITLES[k] && a.indexOf(k) === i; }).map(function(k) {
-    const want = SRV_FARSI_PLAYLIST_TITLES[k];
-    const hit = (channelPlaylists || []).find(function(p) { return _plNorm(p.title) === _plNorm(want); });
-    return { key: k, title: want, id: hit ? hit.id : null };
-  });
+// keys -> [{ key, title, id }] from the approved id map; unknown keys dropped; one entry per playlist id
+function _srvFarsiResolvePlaylists(keys) {
+  const seen = {};
+  return (keys || []).filter(function(k) { return SRV_FARSI_PLAYLISTS[k]; }).map(function(k) {
+    return { key: k, title: SRV_FARSI_PLAYLISTS[k].title, id: SRV_FARSI_PLAYLISTS[k].id };
+  }).filter(function(t) { if (seen[t.id]) return false; seen[t.id] = true; return true; });
 }
 // Read-only check for the SRV Farsi Publish stage: which of the four playlists exist on the channel, with their ids.
 async function srvFarsiPlaylists(req, res) {
@@ -7641,7 +7639,7 @@ async function srvFarsiPlaylists(req, res) {
     const list = await _srvFarsiListPlaylists(accessToken);
     const scope = String(conn.scope || '');
     return res.status(200).json({ ok: true, channelId: conn.channel_id,
-      resolved: _srvFarsiResolvePlaylists(Object.keys(SRV_FARSI_PLAYLIST_TITLES), list),
+      resolved: _srvFarsiResolvePlaylists(Object.keys(SRV_FARSI_PLAYLISTS)).map(function(t) { const hit = list.find(function(p) { return p.id === t.id; }); return Object.assign({}, t, { onChannel: !!hit, channelTitle: hit ? hit.title : null }); }),
       channelPlaylists: list.map(function(p) { return { id: p.id, title: p.title, privacy: p.privacy, items: p.items }; }),
       canAddToPlaylists: /youtube\.force-ssl|auth\/youtube(\s|$)/.test(scope) });
   } catch (e) {
@@ -7811,15 +7809,14 @@ async function youtubeUploadVideo(req, res) {
     let playlistsResult = null;
     if (engine === 'SRV Farsi' && Array.isArray(farsiPlaylists) && youtubeVideoId) {
       try {
-        const targets = _srvFarsiResolvePlaylists(farsiPlaylists, await _srvFarsiListPlaylists(accessToken));
+        const targets = _srvFarsiResolvePlaylists(farsiPlaylists);
         playlistsResult = [];
         for (const t of targets) {
-          if (!t.id) { playlistsResult.push(Object.assign({}, t, { ok: false, error: 'playlist_not_found_on_channel' })); continue; }
           try { await _ytAddVideoToPlaylist(youtubeVideoId, t.id, accessToken); playlistsResult.push(Object.assign({}, t, { ok: true })); }
           catch (e) { playlistsResult.push(Object.assign({}, t, { ok: false, error: /insufficient|scope|403/i.test(e.message) ? 'needs_playlist_permission' : String(e.message).slice(0, 160) })); }
         }
       } catch (e) {
-        playlistsResult = [{ ok: false, error: 'playlist_list_failed', message: String(e.message).slice(0, 160) }];
+        playlistsResult = [{ ok: false, error: 'playlist_add_failed', message: String(e.message).slice(0, 160) }];
       }
     } else if (playlistCategory && youtubeVideoId && engine !== 'SRV Farsi') {
       try {
