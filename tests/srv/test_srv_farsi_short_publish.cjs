@@ -167,6 +167,41 @@ const mkD=()=>({tasks:[
   W.D.packages.push(P({id:'pY',srvSchedule:{iso:new Date(now+864e5).toISOString(),date:'x',time:'y'}}));W.D.tasks.push({id:302,engine:'SRV Farsi',mood:'Female — Romantic',isLong:true,createdAt:now});
   W._confirms.push(false);
   ok('Approve & Publish: without playlist permission it says "Silk Road Voices reconnect required for playlist publishing." and does not pretend',await F._srvFarsiApproveAndPublish('pY',302)===false&&W._alerts.some(a=>/Silk Road Voices reconnect required for playlist publishing\./.test(a))&&!(W.D._approved||[]).includes('pY')); }
+// ── 7b. LOCKED eligibility matrix + production source Long stays read-only (CEO safety correction 2026-10-25) ──
+{ const W=world({D:mkD()}),F=W.__fns,T=W.D.tasks;
+  const prodSrc=F._srvFarsiShortSources(T[1]).map(x=>x.pkg.id), testSrc=F._srvFarsiShortSources(T[2]).map(x=>x.pkg.id);
+  ok('matrix: production Short sees production published Longs only',prodSrc.join()==='pkg_L1');
+  ok('matrix: production Short never sees a [TEST] Long',!prodSrc.includes('pkg_LT'));
+  ok('matrix: [TEST] Short may use a production published Long (read-only source)',testSrc.includes('pkg_L1'));
+  ok('matrix: [TEST] Short may use a published [TEST] Long',testSrc.includes('pkg_LT'));
+  ok('matrix: neither sees a Short, an unpublished Long, or another business',[prodSrc,testSrc].every(a=>!a.includes('pkg_S0')&&!a.includes('pkg_L2')&&!a.includes('pkg_E')&&!a.includes('pkg_N')));
+  const W3=world({D:mkD()}); W3.D.packages.push({id:'pkg_SA',engine:'SRV Farsi',srvTaskUid:'set-aside:x',title:'set aside',_srvLongVideoUrl:'u',_srvYtLongId:'y',_srvLongDurationSec:200});
+  ok('matrix: a set-aside Long is never offered',!W3.__fns._srvFarsiShortSources(W3.D.tasks[2]).some(x=>x.pkg.id==='pkg_SA'));
+  ok('UI: [TEST] Short on a production Long shows the read-only note',/Using published Long as source only — original Long will not be changed\./.test(F._srvFarsiShortFromLongHtml(T[2],'201')));
+  ok('UI: no read-only note for a production Short',!/data-srvf-readonly-src/.test(F._srvFarsiShortFromLongHtml(T[1],'200')));
+  // full [TEST] Short from the production Long, then Build's audio cut — the source must be byte-for-byte unchanged
+  const snap=()=>JSON.stringify({pkg:W.D.packages.find(p=>p.id==='pkg_L1'),task:W.D.tasks.find(t=>t.id===151),stages:W.D._stages&&W.D._stages['151'],slots:W.D._publishSlots||null,avatarIdx:W.D.srvFarsiAvatarIdx||null});
+  const before=snap(), pkgsBefore=W.D.packages.length, tasksBefore=W.D.tasks.length;
+  F._srvFarsiShortSel['201']={longPkgId:'pkg_L1',startSec:78,durationSec:30};
+  const r=await F._srvFarsiCreateShortFromLong('201');
+  const sp=W.D.packages[W.D.packages.length-1], st=W.D.tasks.find(t=>t.id===201);
+  ok('[TEST] Short created from the production Long',r===true&&sp.srvShortOf.longPkgId==='pkg_L1');
+  ok('source Long package, task, lifecycle stage, slots and rotation pointers byte-for-byte unchanged',snap()===before,{before:before.slice(0,120),after:snap().slice(0,120)});
+  ok('no replacement work: exactly one new package, no new task',W.D.packages.length===pkgsBefore+1&&W.D.tasks.length===tasksBefore);
+  ok('only the Short itself was written to the packages table (never the Long)',W._saves.pkg.length===1&&W._saves.pkg[0].id===sp.id);
+  ok('the Short stays [TEST]',sp.isTest===true&&F._srvFarsiPublishCheck(st,Object.assign({},sp,{_srvShortVideoUrl:'v',_srvThumbUrl:'t'}),false).isTest===true);
+  sp.srvSchedule={date:'2026-11-07',time:'09:00',tz:'X',iso:'2026-11-07T14:00:00.000Z'};
+  F._srvFarsiApplySchedule(sp,201);
+  ok('[TEST] Short: no schedule and no weekly slot even with a date chosen',sp.publishAt===undefined&&!(W.D._publishSlots&&W.D._publishSlots['2026-11-07T14:00:00.000Z']));
+  ok('[TEST] Short uploads private (the publish function forces private + no publishAt for test)',/privacyStatus:'private'/.test(top('_srvFarsiPublishYouTube'))&&/const _inTestMode=[^\n]*_srvFarsiIsTestTask\(_srvFarsiTaskById\(taskId\)\)/.test(top('_srvFarsiPublishYouTube')));
+  ok('the publish path for a Short never names the source Long\'s video or package',!/srvShortOf\.(longPkgId|longYoutubeVideoId)/.test(top('_srvFarsiPublishYouTube')+top('_srvFarsiRunPublish')));
+  // Build: reading the Long's audio is a plain GET; nothing is written
+  let calls=[];const sr=1000,len=sr*222,data=new Float32Array(len);
+  const W2=world({D:mkD(),fetch:async(u,o)=>{calls.push({u,m:(o&&o.method)||'GET'});return {ok:true,status:200,arrayBuffer:async()=>new ArrayBuffer(8)};},AudioContext:class{decodeAudioData(){return Promise.resolve({sampleRate:sr,numberOfChannels:1,length:len,getChannelData:()=>data});}close(){}}});
+  const b2=JSON.stringify(W2.D);
+  await W2.__fns._srvFarsiShortAudioFromLong(sp);
+  ok('Build: the Long is only read (one GET of its stored video), no state changes',calls.length===1&&calls[0].m==='GET'&&calls[0].u==='https://x/long1.webm'&&JSON.stringify(W2.D)===b2);
+  ok('the Short-from-Long code never writes to the source (no assignment to L.* or the Long task)',!/\bL\.[A-Za-z_$]+\s*=[^=]/.test(top('_srvFarsiCreateShortFromLong'))&&!/\blt\.[A-Za-z_$]+\s*=[^=]/.test(top('_srvFarsiCreateShortFromLong'))&&!/\bp\.[A-Za-z_$]+\s*=[^=]/.test(top('_srvFarsiShortSources'))); }
 // ── 8. other businesses untouched ──
 { const main=require('child_process').execFileSync('git',['-C',repo,'show','origin/main:public/index.html'],{encoding:'utf8',maxBuffer:1<<28});
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};

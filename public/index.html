@@ -20718,8 +20718,12 @@ function _srvFarsiFmtSec(x){x=Math.max(0,Math.round(Number(x)||0));return Math.f
 function _srvFarsiPkgYtId(p){return (p&&(p._srvYtLongId||p.youtubeVideoId||p.youtube_video_id))||null;}
 function _srvFarsiIsShortFromLong(p){return !!(p&&p.srvShortOf&&p.srvShortOf.longPkgId);}
 function _srvFarsiLongDuration(p){const d=Number(p&&(p._srvLongDurationSec||_srvFarsiLongDurCache[p.id]));return d>0&&isFinite(d)?d:0;}
-// Eligible sources: SRV Farsi only, a built Long video, published to YouTube, not itself a Short, not set aside.
-// [TEST] Longs are offered only to a [TEST] Short (so production Shorts never come from test uploads).
+// Eligible sources (rule locked by the CEO, 2026-10-25): always SRV Farsi only, a built Long video, published to
+// YouTube, not a Short, not set aside, never another business.
+//   • production Short → production Longs ONLY (never a [TEST] Long)
+//   • [TEST] Short     → production published Longs (read-only source media) AND published [TEST] Longs
+// A source Long is only ever READ: its video/audio and song metadata are copied; its task, package, lifecycle,
+// schedule, playlists, analytics and YouTube video are never written.
 // The Long's artist (package field, else its task's "Artist — Mood").
 function _srvFarsiLongArtist(p,lt){
   const a=String((p&&p.artist)||'').toLowerCase(); if(/^(female|male|duet)$/.test(a))return a;
@@ -20737,7 +20741,7 @@ function _srvFarsiShortSources(task){
     const lt=p.srvTaskUid?_srvFarsiTaskByUid(p.srvTaskUid):null;
     if(lt&&!lt.isLong)return false;
     if(p.contentType==='Short'||p.contentFormat==='short')return false;
-    if(!!p.isTest&&!forTest)return false;
+    if(!!p.isTest&&!forTest)return false; // a production Short never comes from a [TEST] Long
     if(artistFilter&&_srvFarsiLongArtist(p,lt)!==artistFilter)return false;
     return true;
   }).map(function(p){
@@ -20777,7 +20781,8 @@ function _srvFarsiShortFromLongHtml(task,taskId){
   const ready=!!(cur&&cur.songSec);
   return `
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">1 · PUBLISHED LONG (SRV FARSI ONLY)</div>
-        <select id="srvf-short-long-${T}" onchange="_srvFarsiShortSet('${T}','longPkgId',this.value)" style="width:100%;padding:9px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:12px">${opts}</select>
+        <select id="srvf-short-long-${T}" onchange="_srvFarsiShortSet('${T}','longPkgId',this.value)" style="width:100%;padding:9px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?'6':'12'}px">${opts}</select>
+        ${_srvFarsiIsTestTask(task)&&cur&&!cur.isTest?`<div data-srvf-readonly-src style="font-size:10px;color:#a78bfa;margin-bottom:12px">🔒 Using published Long as source only — original Long will not be changed. This Short stays [TEST]: private, unscheduled, outside the weekly plan.</div>`:''}
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">2 · SECTION (${SRV_FARSI_SHORT_MIN_SEC}–${SRV_FARSI_SHORT_MAX_SEC} S)</div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
           <label style="font-size:11px;color:var(--dim)">Start <input id="srvf-short-start-${T}" type="number" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" ${ready?'':'disabled'} onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:76px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
