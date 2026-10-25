@@ -54,7 +54,9 @@ const quiet = () => { const o = { log: console.log, warn: console.warn, error: c
 // ── 1. sign-in start ──
 {
   const restore = quiet();
-  for (const q of [{}, { channel_target: 'Silk Road Voices' }, { channel_target: 'NextWave Systems' }, { channel_target: 'AI Creation Studio' }, { channel_target: 'InsideObjects AI' }]) {
+  // Silk Road Voices is no longer in this list: the CEO approved the playlist permission for it on 2026-10-24 — its
+  // reconnect is covered by tests/srv/test_srv_farsi_playlist_oauth.mjs. Every other channel stays identical to pre-031.
+  for (const q of [{}, { channel_target: 'NextWave Systems' }, { channel_target: 'AI Creation Studio' }, { channel_target: 'InsideObjects AI' }]) {
     install({});
     const a = authParams(await call(NEW, q)), b = authParams(await call(OLD, q));
     ok('sign-in start unchanged for ' + (q.channel_target || 'the legacy all-channel button') + ': scopes, state, prompt identical to pre-031', JSON.stringify(a) === JSON.stringify(b) && a.scope === BASE && !a.scope.includes('force-ssl'), { a, b });
@@ -103,7 +105,8 @@ const GRANT_SRV = BASE + ' https://www.googleapis.com/auth/youtube.force-ssl';
   ok('the shared base scope list (YT_SCOPES) is unchanged', before.match(/const YT_SCOPES = \[[\s\S]*?\]\.join\(' '\);/)[0] === after.match(/const YT_SCOPES = \[[\s\S]*?\]\.join\(' '\);/)[0]);
   ok('youtube.force-ssl appears only in the SRV Studio module, never in the shared scope list', !/force-ssl/.test(after) && /force-ssl/.test(fs.readFileSync(path.join(repo, 'lib/srvStudioV2OAuth.mjs'), 'utf8')));
   const added = after.split('\n').filter((l) => !before.split('\n').includes(l));
-  ok('every added line in the shared callback is part of the SRV Studio change (≤ 25 lines)', added.length <= 25 && added.every((l) => /srv|SRV|^\s*$|^\s*[:?]|^\s*\}|state =|scope:|channelTarget = srvState|import \{|\/\/ SRV-STUDIO-V2-031|\/\/ to SRV Studio itself|console\.error\('\[srv2-031\]/i.test(l)), added);
+  // + the SRV Farsi (Silk Road Voices) playlist permission lines, CEO-approved 2026-10-24 (all mention srvFarsi)
+  ok('every added line in the shared callback is part of the SRV Studio or SRV Farsi playlist change (≤ 40 lines)', added.length <= 40 && added.every((l) => /srv|SRV|^\s*$|^\s*[:?]|^\s*\}|state =|scope:|channelTarget = srvState|import \{|\/\/ SRV-STUDIO-V2-031|\/\/ to SRV Studio itself|console\.error\('\[srv2-031\]/i.test(l)), added);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
