@@ -742,23 +742,28 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const E = makeEnv({ flag: 'true', titleUnique: false }); await E.settle(); const { ctx } = E;
     const plan = (kind, iso, taken) => vm.runInContext(`_srvEnglishV2SchedulePlan('${kind}', ${Date.parse(iso)}, ${JSON.stringify(taken || [])})`, ctx);
     const a = plan('long', '2026-10-26T12:00:00Z');
-    ok('030 schedule: Long → next Friday 6:00 PM Eastern (Fri 30 Oct 2026, EDT = 22:00 UTC)', a.utcIso === '2026-10-30T22:00:00.000Z' && a.weekday === 'Friday' && a.localTime === '18:00' && a.tz === 'America/New_York' && a.tzName === 'EDT' && /Fri Oct 30, 2026 · 6:00 PM EDT/.test(a.label), a);
+    ok('031 schedule (CEO-approved): Long → next Friday 7:00 AM Eastern (Fri 30 Oct 2026, EDT = 11:00 UTC)', a.utcIso === '2026-10-30T11:00:00.000Z' && a.weekday === 'Friday' && a.localTime === '07:00' && a.tz === 'America/New_York' && a.tzName === 'EDT' && /Fri Oct 30, 2026 · 7:00 AM EDT/.test(a.label), a);
     const b = plan('long', '2026-10-31T12:00:00Z');
-    ok('030 schedule: across the DST change the wall time stays 6:00 PM (Fri 6 Nov 2026, EST = 23:00 UTC)', b.utcIso === '2026-11-06T23:00:00.000Z' && b.tzName === 'EST' && b.localTime === '18:00', b);
+    ok('031 schedule: across the autumn DST change the wall time stays 7:00 AM (Fri 6 Nov 2026, EST = 12:00 UTC)', b.utcIso === '2026-11-06T12:00:00.000Z' && b.tzName === 'EST' && b.localTime === '07:00', b);
     const c = plan('short', '2026-10-26T12:00:00Z');
     ok('030 schedule: Short → next Sunday 6:00 PM Eastern (Sun 1 Nov 2026 — DST ends that morning → EST, 23:00 UTC)', c.utcIso === '2026-11-01T23:00:00.000Z' && c.weekday === 'Sunday' && c.tzName === 'EST', c);
     const spring = plan('long', '2027-03-08T12:00:00Z');
-    ok('030 schedule: spring DST (Fri 12 Mar 2027, EST = 23:00 UTC; Fri 19 Mar EDT = 22:00 UTC)', spring.utcIso === '2027-03-12T23:00:00.000Z' && plan('long', '2027-03-13T12:00:00Z').utcIso === '2027-03-19T22:00:00.000Z');
-    const lead = plan('long', '2026-10-30T21:30:00Z'); // Friday 5:30 PM EDT — less than the 60-minute lead
-    ok('030 schedule: an upload less than 60 minutes before the slot moves to the following Friday', lead.utcIso === '2026-11-06T23:00:00.000Z', lead);
-    const taken = plan('long', '2026-10-26T12:00:00Z', ['2026-10-30T22:00:00.000Z']);
-    ok('030 schedule: one release per slot — a Friday already planned by another SRV Studio Long moves to the next Friday', taken.utcIso === '2026-11-06T23:00:00.000Z');
-    ok('030 schedule: plans are "provisional" and manual (no automatic public release)', a.status === 'provisional' && a.mode === 'planned-manual');
+    ok('031 schedule: spring DST (Fri 12 Mar 2027 7:00 AM EST = 12:00 UTC; Fri 19 Mar EDT = 11:00 UTC)', spring.utcIso === '2027-03-12T12:00:00.000Z' && plan('long', '2027-03-13T12:00:00Z').utcIso === '2027-03-19T11:00:00.000Z');
+    const lead = plan('long', '2026-10-30T10:30:00Z'); // Friday 6:30 AM EDT — less than the 60-minute lead
+    ok('031 schedule: an upload less than 60 minutes before the slot moves to the following Friday', lead.utcIso === '2026-11-06T12:00:00.000Z', lead);
+    const taken = plan('long', '2026-10-26T12:00:00Z', ['2026-10-30T11:00:00.000Z']);
+    ok('031 schedule: one release per slot — a Friday already planned by another SRV Studio Long moves to the next Friday', taken.utcIso === '2026-11-06T12:00:00.000Z');
+    ok('031 schedule: plans are CEO-approved and manual (no automatic public release)', a.status === 'approved' && a.mode === 'manual-public');
+    const afterLong = (iso, longIso) => vm.runInContext(`_srvEnglishV2SchedulePlan('short', ${Date.parse(iso)}, [], ${Date.parse(longIso)})`, ctx);
+    ok('031 the Short promotes the preceding Long: Long Fri 30 Oct 7:00 AM → Short Sun 1 Nov 6:00 PM; Long Fri 6 Nov → Short Sun 8 Nov', afterLong('2026-10-26T12:00:00Z', '2026-10-30T11:00:00.000Z').utcIso === '2026-11-01T23:00:00.000Z' && afterLong('2026-10-26T12:00:00Z', '2026-11-06T12:00:00.000Z').utcIso === '2026-11-08T23:00:00.000Z');
+    const S = await import(require('url').pathToFileURL(require('path').resolve(__dirname, '../../lib/srvStudioV2Schedule.mjs')).href);
+    let mism = []; for (let i = 0; i < 400; i++) { const t = Date.UTC(2026, 0, 1) + i * 37 * 3600000 + i * 61000; for (const k of ['long', 'short']) { const c = vm.runInContext(`_srvEnglishV2SchedulePlan('${k}', ${t}, [], ${i % 3 ? 'null' : t + 86400000 * 3})`, ctx); const l = S.srv2PlanRelease(k, t, [], i % 3 ? null : t + 86400000 * 3); if (!c || !l || c.utcIso !== l.utcIso) mism.push([k, new Date(t).toISOString()]); } }
+    ok('031 app and server planners agree on every slot (800 cases across 2026–2027, both DST changes)', mism.length === 0, mism.slice(0, 3));
     // taken slots read SRV Studio packages only; the shared slot pool is never read or written
     ctx.D._publishSlots = { 'fri-2026-10-30': 'pkg_farsi_1' };
-    ctx.D.packages = [pkgOf('pkg_l1', 400, { srvSchedulePlan: { kind: 'long', utcIso: '2026-10-30T22:00:00.000Z' } }), pkgOf('pkg_s1', 401, { srvSchedulePlan: { kind: 'short', utcIso: '2026-11-01T23:00:00.000Z' } }), pkgOf('pkg_f1', 402, { engine: 'SRV Farsi', srvSchedulePlan: { kind: 'long', utcIso: '2026-11-06T23:00:00.000Z' } })];
+    ctx.D.packages = [pkgOf('pkg_l1', 400, { srvSchedulePlan: { kind: 'long', utcIso: '2026-10-30T11:00:00.000Z' } }), pkgOf('pkg_s1', 401, { srvSchedulePlan: { kind: 'short', utcIso: '2026-11-01T23:00:00.000Z' } }), pkgOf('pkg_f1', 402, { engine: 'SRV Farsi', srvSchedulePlan: { kind: 'long', utcIso: '2026-11-06T12:00:00.000Z' } })];
     const tk = vm.runInContext("JSON.stringify(_srvEnglishV2TakenSlots('long','pkg_x'))", ctx);
-    ok('030 schedule isolation: taken slots come from SRV Studio packages of the same format only; D._publishSlots untouched', tk === '["2026-10-30T22:00:00.000Z"]' && JSON.stringify(ctx.D._publishSlots) === '{"fri-2026-10-30":"pkg_farsi_1"}');
+    ok('030/031 schedule isolation: taken slots come from SRV Studio packages of the same format only; D._publishSlots untouched', tk === '["2026-10-30T11:00:00.000Z"]' && JSON.stringify(ctx.D._publishSlots) === '{"fri-2026-10-30":"pkg_farsi_1"}');
     // release preview (Approve)
     const pv = vm.runInContext("_srvEnglishV2PlanPreviewHtml({},{id:'pkg_p',srvShortOf:{longTitle:'Passenger Seat Witness',longYoutubeVideoId:'s34SXDqU0jk'}},'short')", ctx);
     ok('030 release preview (Short): format, playlist name + ID, planned date/time/timezone, related Long, PRIVATE notice', /Short · 1080×1920/.test(pv) && /SRV Studio Full Short Collection · PLATi-bbiaU30/.test(pv) && /America\/New_York/.test(pv) && /Passenger Seat Witness · s34SXDqU0jk/.test(pv) && /stays <b>PRIVATE<\/b>/.test(pv) && /automatic public release is not switched on/.test(pv));
@@ -768,7 +773,10 @@ const pkgOf = (id, taskId, extra = {}) => ({ id, taskId, engine: 'SRV English', 
     const T = task(410, { contentType: 'Long', contentFormat: 'long', isLong: true }); const pk = pkgOf('pkg_done_l', 410, { srvProduction: { kind: 'long', youtubeVideoId: 's34SXDqU0jk' }, srvPublish: { kind: 'long', videoId: 's34SXDqU0jk', production: true, privacyStatus: 'private', title: 't', thumbnail: 'set' }, srvPlaylist: { status: 'failed', error: 'insufficient_scope', playlistId: 'PLXCBPiF9p6SA' } });
     ctx.D.tasks = [T]; ctx.D.packages = [pk]; E.seed(pk);
     const ch = vm.runInContext("_srvEnglishV2PublishChecklistHtml(D.tasks[0],D.packages[0],'410')", ctx);
-    ok('030 checklist (Long): playlist not added explained (playlist permission), Studio fallback link, end-screen VA step with the playlist ID and the Studio Editor link', /playlist permission/.test(ch) && /studio\.youtube\.com\/video\/s34SXDqU0jk\/edit/.test(ch) && /studio\.youtube\.com\/video\/s34SXDqU0jk\/editor/.test(ch) && /PLXCBPiF9p6SA/.test(ch) && /no API for end screens/.test(ch) && /PRIVATE — make it public in YouTube Studio/.test(ch));
+    ok('031 checklist: public-release VA step with the planned time, "Visibility → Public" instruction, no YouTube scheduling, confirm button', /Public release \(VA step — done by hand in YouTube Studio\)/.test(ch) && /Visibility<\/b> → <b>Public/.test(ch) && /Do not use YouTube's own scheduling/.test(ch) && /I made it public/.test(ch));
+    ok('030 checklist (Long): playlist not added explained (playlist permission), Studio fallback link, end-screen VA step with the playlist ID and the Studio Editor link', /playlist permission/.test(ch) && /studio\.youtube\.com\/video\/s34SXDqU0jk\/edit/.test(ch) && /studio\.youtube\.com\/video\/s34SXDqU0jk\/editor/.test(ch) && /PLXCBPiF9p6SA/.test(ch) && /no API for end screens/.test(ch));
+    const mp = await vm.runInContext("_srvEnglishV2MarkVaStep('410','pkg_done_l','madePublic')", ctx); await E.settle();
+    ok('031 "I made it public" records the VA confirmation (who/when); the app itself never changes visibility', mp === true && pk.srvVaSteps.madePublic.doneAt && pk.srvVaSteps.madePublic.verifiedBy === 'va-confirmation');
     const marked = await vm.runInContext("_srvEnglishV2MarkVaStep('410','pkg_done_l','endScreen')", ctx); await E.settle();
     ok('030 "I added the end screen" saves (verified) who/when, labelled VA-confirmed — never API-verified', marked === true && pk.srvVaSteps.endScreen.doneAt && pk.srvVaSteps.endScreen.verifiedBy === 'va-confirmation' && JSON.parse(E.table['pkg_done_l'].full_package).srvVaSteps.endScreen.doneAt === pk.srvVaSteps.endScreen.doneAt);
     ok('030 an unknown VA step is refused', (await vm.runInContext("_srvEnglishV2MarkVaStep('410','pkg_done_l','publishNow')", ctx)) === false);

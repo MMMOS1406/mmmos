@@ -19,6 +19,9 @@ const YT_SCOPES = [
   'https://www.googleapis.com/auth/yt-analytics.readonly',
 ].join(' ');
 
+// SRV-STUDIO-V2-031 (CEO-authorized, SRV Studio only): the playlist permission is requested and stored for SRV Studio alone.
+import { srvStudioPlaylistRequested, srvStudioScopes, srvStudioState, parseSrvStudioState, srvStudioTokenAllowed } from '../../lib/srvStudioV2OAuth.mjs';
+
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -199,14 +202,18 @@ function handleYTAuthInit(req, res) {
   // v13.56.0 — per-channel target. Accepted as ?channel_target=<title> query param;
   // encoded into OAuth state so the callback knows WHICH brand channel was authorized.
   const channelTarget = (req.query && req.query.channel_target) || '';
-  const state = channelTarget
+  // SRV-STUDIO-V2-031: an SRV Studio reconnect also asks for the playlist permission (other channels: unchanged).
+  const srvPlaylist = srvStudioPlaylistRequested(req.query);
+  const state = srvPlaylist
+    ? srvStudioState(channelTarget || 'SRV Studio')
+    : channelTarget
     ? 'mmm_youtube_auth__' + Buffer.from(channelTarget).toString('base64url')
     : 'mmm_youtube_auth';
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: YT_SCOPES,
+    scope: srvPlaylist ? srvStudioScopes(YT_SCOPES) : YT_SCOPES,
     access_type: 'offline',
     prompt: 'consent select_account',
     include_granted_scopes: 'false',
@@ -236,7 +243,10 @@ export default async function handler(req, res) {
 
   // v13.56.0 — state encodes per-channel target: 'mmm_youtube_auth' OR 'mmm_youtube_auth__<base64>'
   let channelTarget = '';
-  if (state && state.startsWith('mmm_youtube_auth__')) {
+  const srvState = parseSrvStudioState(state); // SRV-STUDIO-V2-031
+  if (srvState) {
+    channelTarget = srvState.channelTarget;
+  } else if (state && state.startsWith('mmm_youtube_auth__')) {
     try { channelTarget = Buffer.from(state.replace('mmm_youtube_auth__', ''), 'base64url').toString('utf-8'); } catch(_) {}
   } else if (state !== 'mmm_youtube_auth') {
     console.error('[v13.56.0] OAuth state mismatch · state:', state);
@@ -264,6 +274,13 @@ export default async function handler(req, res) {
       if (mineData.items && mineData.items[0]) actualChannel = parseChannel(mineData.items[0]);
     } catch (e) {
       console.warn('[v13.56.0] mine=true lookup failed:', e.message);
+    }
+
+    // SRV-STUDIO-V2-031: a token carrying the SRV Studio playlist permission is stored only when Google says it belongs
+    // to SRV Studio itself. Any other account picked on the consent screen → nothing is stored, no channel is changed.
+    if (srvState && !srvStudioTokenAllowed(actualChannel && actualChannel.channelId)) {
+      console.error('[srv2-031] SRV Studio playlist reconnect refused: consent was for', actualChannel ? actualChannel.title + ' (' + actualChannel.channelId + ')' : '(unknown channel)');
+      return res.redirect(302, `${appUrl}/?yt_error=srv_studio_playlist_wrong_channel`);
     }
 
     // 2. Fetch all 4 brand account channels (for metadata/display — unchanged)
