@@ -7623,12 +7623,13 @@ async function _srvFarsiListPlaylists(accessToken) {
   }
   return all;
 }
-// keys -> [{ key, title, id }] from the approved id map; unknown keys dropped; one entry per playlist id
-function _srvFarsiResolvePlaylists(keys) {
+// The operator's selection (playlist ids chosen at Approve; mood keys also accepted) -> [{ key, title, id }].
+// Only the approved SRV Farsi playlists can be targeted: anything else is dropped. One entry per playlist id.
+function _srvFarsiResolvePlaylists(keysOrIds) {
   const seen = {};
-  return (keys || []).filter(function(k) { return SRV_FARSI_PLAYLISTS[k]; }).map(function(k) {
-    return { key: k, title: SRV_FARSI_PLAYLISTS[k].title, id: SRV_FARSI_PLAYLISTS[k].id };
-  }).filter(function(t) { if (seen[t.id]) return false; seen[t.id] = true; return true; });
+  const byId = {}; Object.keys(SRV_FARSI_PLAYLISTS).forEach(function(k) { if (!byId[SRV_FARSI_PLAYLISTS[k].id]) byId[SRV_FARSI_PLAYLISTS[k].id] = k; });
+  return (keysOrIds || []).map(function(x) { const k = SRV_FARSI_PLAYLISTS[x] ? x : byId[x]; return k ? { key: k, title: SRV_FARSI_PLAYLISTS[k].title, id: SRV_FARSI_PLAYLISTS[k].id } : null; })
+    .filter(function(t) { if (!t || seen[t.id]) return false; seen[t.id] = true; return true; });
 }
 // Read-only check for the SRV Farsi Publish stage: which of the four playlists exist on the channel, with their ids.
 async function srvFarsiPlaylists(req, res) {
@@ -7811,9 +7812,16 @@ async function youtubeUploadVideo(req, res) {
       try {
         const targets = _srvFarsiResolvePlaylists(farsiPlaylists);
         playlistsResult = [];
+        // One playlistItems.insert per selected playlist; each result is recorded on its own. Success only when YouTube
+        // accepts the insert (it returns the new playlistItem id). A failed add never touches the uploaded video.
         for (const t of targets) {
-          try { await _ytAddVideoToPlaylist(youtubeVideoId, t.id, accessToken); playlistsResult.push(Object.assign({}, t, { ok: true })); }
-          catch (e) { playlistsResult.push(Object.assign({}, t, { ok: false, error: /insufficient|scope|403/i.test(e.message) ? 'needs_playlist_permission' : String(e.message).slice(0, 160) })); }
+          try {
+            const item = await _ytAddVideoToPlaylist(youtubeVideoId, t.id, accessToken);
+            playlistsResult.push({ playlistId: t.id, playlistName: t.title, key: t.key, ok: !!(item && item.id), playlistItemId: item && item.id || null, error: item && item.id ? null : 'no_playlist_item_returned' });
+          } catch (e) {
+            const msg = String(e && e.message || e);
+            playlistsResult.push({ playlistId: t.id, playlistName: t.title, key: t.key, ok: false, error: /insufficient|scope|403/i.test(msg) ? 'needs_playlist_permission' : 'playlist_add_failed', detail: msg.slice(0, 300) });
+          }
         }
       } catch (e) {
         playlistsResult = [{ ok: false, error: 'playlist_add_failed', message: String(e.message).slice(0, 160) }];

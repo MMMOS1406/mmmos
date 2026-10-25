@@ -19822,13 +19822,15 @@ function renderSRVFarsiLifecycleCard(task){
       return `<select onchange="_srvFarsiVaSetArtistFormat('${taskId}','${field}',this.value)" style="margin-left:6px;padding:4px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.35);border-radius:6px;color:var(--text);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">${['Auto'].concat(opts).map(o=>`<option value="${o}"${o===sel?' selected':''}>${o==='Auto'?'Auto'+(auto?' ('+escHTML(auto)+')':''):o}</option>`).join('')}</select>`;};
     stageContent=`
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Artist:${_fSel('artist',_fArtist,['Male','Female','Duet'])}</div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mood: <strong style="color:var(--text)">${escHTML(_fMoodLabel)}</strong></div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Artist:${_fSel('artist',_fArtist,['Male','Female','Duet'])}${!task.isLong?' <span style="font-size:10px">— filters the Long list (Auto = all artists)</span>':''}</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mood: <strong style="color:var(--text)">${!task.isLong?'from the chosen Long':escHTML(_fMoodLabel)}</strong></div>
         <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format:${_fSel('format',_fFormat,['Short','Long'])}</div>
+        ${!task.isLong?_srvFarsiShortFromLongHtml(task,taskId):`
         <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the Persian song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
         <button onclick="vaFarsiGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
           🌹 Generate Package
         </button>
+        `}
       </div>`;
   }
 
@@ -19959,7 +19961,8 @@ function renderSRVFarsiLifecycleCard(task){
     const spEsc=sunoPrompt?sunoPrompt.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     const lyEsc=sunoLyrics?sunoLyrics.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     stageContent=`
-      <div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">Generate the song in Suno, download the MP3, then build the cinematic video.</div>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">${_srvFarsiIsShortFromLong(pkg)?'Choose the cover, then build the 9:16 Short from the Long\'s section.':'Generate the song in Suno, download the MP3, then build the cinematic video.'}</div>
+      ${_srvFarsiIsShortFromLong(pkg)?`<div style="margin-bottom:14px;padding:10px 12px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.25);border-radius:8px;font-size:11px;line-height:1.6;color:var(--text)">🎵 <strong>Audio:</strong> section ${_srvFarsiFmtSec(pkg.srvShortOf.startSec)}–${_srvFarsiFmtSec(pkg.srvShortOf.startSec+pkg.srvShortOf.durationSec)} of the Long “${escHTML(pkg.srvShortOf.longTitle||'')}”. No Suno step and no MP3 upload — Build cuts it from the Long.</div>`:`
       <div style="margin-bottom:14px">
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 1 — GENERATE IN SUNO</div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -19977,6 +19980,7 @@ function renderSRVFarsiLifecycleCard(task){
           <span id="srv-farsi-mp3-status-${pkgId}" style="font-size:10px;color:${mp3Ready?'#22c55e':'rgba(255,255,255,0.35)'};font-family:'JetBrains Mono',monospace;white-space:nowrap">${mp3Ready?'MP3 loaded ✓':'no MP3 yet'}</span>
         </div>
       </div>
+      `}
       ${bgUrl?`<div style="margin-bottom:10px;border-radius:8px;overflow:hidden;max-height:90px"><img src="${escHTML(bgUrl)}" style="width:100%;object-fit:cover;max-height:90px" alt="bg"><div style="font-size:9px;color:var(--dim);padding:2px 0">📷 Pexels background auto-selected</div></div>`:''}
       ${_srvFarsiAvatarPickerHtml(task)}
       <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 3 — BUILD PACKAGE</div>
@@ -19997,11 +20001,11 @@ function renderSRVFarsiLifecycleCard(task){
       ${!isLongApprove?(shortUrl?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">SHORT VIDEO (9:16)</div><video src="${escHTML(shortUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Short video not ready yet.</div>'):''}
       ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Cover ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in the library · ${pkg._srvAvatarChoice&&pkg._srvAvatarChoice.how==='manual'?'chosen at Build — Rebuild keeps it unless you change it':'automatic — Rebuild moves to the next image, or choose one at Build'}</div>`:''}
       ${pubLabel?`<div style="padding:8px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:#22c55e;margin-bottom:10px">📅 Will publish: ${escHTML(pubLabel)}</div>`:''}
-      <div style="margin-bottom:10px;font-size:10px;line-height:1.6;color:var(--text)">🎵 Playlists: <strong>${escHTML(_srvFarsiPublishPlaylists(task,isLongApprove).map(function(k){return SRV_FARSI_PLAYLIST_NAMES[k];}).join(' + '))}</strong>
-        <button type="button" onclick="_srvFarsiCheckPlaylists(this)" style="margin-left:6px;padding:3px 8px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer">Check playlists</button><div style="margin-top:4px"></div></div>
+      ${_srvFarsiPublishPanelHtml(task,pkg,isLongApprove)}
+      <div style="margin:-4px 0 10px;font-size:10px"><button type="button" onclick="_srvFarsiCheckPlaylists(this)" style="padding:3px 8px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer">Check YouTube playlists + permission</button><div style="margin-top:4px"></div></div>
       <div style="padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;margin-bottom:12px;line-height:1.5">🤖 <strong>AI Use / Altered content: YES</strong> — MMMOS sets this on YouTube automatically at upload.</div>
       <div style="display:flex;gap:8px">
-        <button onclick="_srvFarsiApproveVideo('${pkgId}','${taskId}')" style="flex:1;padding:13px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.45);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Approve & Publish</button>
+        <button onclick="_srvFarsiApproveAndPublish('${pkgId}','${taskId}')" style="flex:1;padding:13px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.45);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Approve & Publish</button>
         <button onclick="_srvFarsiSetStage('${taskId}','build');renderTab('tasks')" style="padding:12px 14px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.30);border-radius:10px;color:#c9a84c;font-weight:700;font-size:12px;cursor:pointer;font-family:'Syne',sans-serif">↻ Rebuild</button>
       </div>`;
   }
@@ -20072,6 +20076,7 @@ function renderSRVFarsiLifecycleCard(task){
       <span style="font-size:10px;font-weight:800;color:${stageCol};font-family:'JetBrains Mono',monospace;letter-spacing:1.5px;padding:3px 8px;background:${stageCol}18;border-radius:5px">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
     </div>
     ${_srvLifecycleProgressBar(stage)}
+    ${_srvFarsiShortSourceHtml(pkg)}
     ${stageContent}
   </div>`;
 }
@@ -20095,6 +20100,16 @@ function _srvFarsiCancelTask(taskId){
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
 async function _srvFarsiRegeneratePackage(taskId,pkgId){
+  const _rp=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(_srvFarsiIsShortFromLong(_rp)){
+    if(_rp._srvYtShortId||_rp.youtubeVideoId){alert('This Short was already uploaded — it cannot be redone.');return;}
+    if(!confirm('Choose the Long and section again? This Short\'s current package is set aside (kept in the database).'))return;
+    _rp._srvSetAside={at:new Date().toISOString(),from:_rp.srvTaskUid||null}; _rp.srvTaskUid='set-aside:'+String(_rp.srvTaskUid||'');
+    if(typeof savePackageToSupabase==='function')await savePackageToSupabase(_rp);
+    _srvFarsiSetStage(taskId,'generate'); if(typeof saveAppState==='function')saveAppState();
+    if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId)); else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+    return;
+  }
   if(!confirm('Regenerate package? The current package will be removed and a new one will be generated.'))return;
   if(pkgId&&Array.isArray(D.packages)){
     D.packages=D.packages.filter(function(p){return String(p.id||'')!==String(pkgId);});
@@ -20124,7 +20139,15 @@ async function _srvFarsiRegeneratePackage(taskId,pkgId){
 async function _srvFarsiBuildTrigger(pkgId,taskId){
   const btn=document.getElementById('srv-farsi-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-farsi-build-status-'+pkgId);
-  const audio=_srvAudioData[pkgId];
+  let audio=_srvAudioData[pkgId];
+  const _shortPkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  if(!audio&&_srvFarsiIsShortFromLong(_shortPkg)){
+    // Short from a published Long: no MP3 — cut the chosen section from the Long's stored video (cached for Rebuild)
+    if(btn){btn.disabled=true;btn.style.opacity='0.6';btn.textContent='⏳ Loading the Long…';}
+    if(statusEl){statusEl.style.color='var(--dim)';statusEl.textContent='Cutting '+_srvFarsiFmtSec(_shortPkg.srvShortOf.startSec)+'–'+_srvFarsiFmtSec(_shortPkg.srvShortOf.startSec+_shortPkg.srvShortOf.durationSec)+' from the Long…';}
+    try{ const f=await _srvFarsiShortAudioFromLong(_shortPkg); audio=_srvAudioData[pkgId]={file:f,name:f.name,sizeMB:(f.size/1048576).toFixed(1),fromLong:true}; }
+    catch(e){ if(statusEl){statusEl.style.color='#ef4444';statusEl.textContent='⚠ Could not read the Long\'s audio: '+(e&&e.message||e);} if(btn){btn.disabled=false;btn.style.opacity='1';btn.textContent='🌹 Build Package — Fetch Background + Render Video';} return; }
+  }
   if(!audio){
     if(statusEl){statusEl.style.color='#ef4444';statusEl.textContent='⚠ Upload MP3 first (Step 2).';}
     return;
@@ -20278,6 +20301,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const longFile=new File([longResult.blob],'srv_farsi_long.webm',{type:longResult.blob.type});
       const longUrl=await _srvUploadToStorage(pkgId,longFile,'long');
       pkg._srvLongVideoUrl=longUrl;
+      try{ const _a=new Audio(URL.createObjectURL(audio.file)); await new Promise(function(r){_a.onloadedmetadata=r;_a.onerror=r;setTimeout(r,4000);}); if(isFinite(_a.duration)&&_a.duration>0)pkg._srvLongDurationSec=Math.round(_a.duration*10)/10; URL.revokeObjectURL(_a.src); }catch(_){}
       if(longResult.thumbDataUrl){pkg._srvThumbDataUrl=longResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
@@ -20352,6 +20376,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
       }
       return;
     }
+    _srvFarsiApplySchedule(pkg,taskId); // the date/time chosen at Approve (production tasks only)
     if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
     const pkgChannel='SRV Farsi';
     const _buildEngineState=_getEngineState(pkgChannel);
@@ -20378,7 +20403,7 @@ async function _srvFarsiRunPublish(pkgId,taskId){
           tags:_farsiTags,
           categoryId:'10',privacyStatus:'private',madeForKids:false,
           publishAt:_srvPublishAt,
-          farsiPlaylists:_srvFarsiPublishPlaylists(_farsiPubTask,isLong), // mood playlist (+ Shorts playlist for a Short)
+          farsiPlaylists:_srvFarsiPlaylistSelection(pkg,_farsiPubTask,isLong).ids, // exactly the playlists chosen at Approve
           containsSyntheticMedia:true, // AI Use / altered content = YES (YouTube status.containsSyntheticMedia)
         }),
       });
@@ -20449,6 +20474,7 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
   if(!pkg){alert('Package not found');return;}
   const shortUrl=pkg._srvShortVideoUrl||null;
   if(!shortUrl){alert('No Short video URL — go back to Build.');return;}
+  _srvFarsiApplySchedule(pkg,taskId); // the date/time chosen at Approve (production tasks only)
   if(typeof _assignPublishSlot==='function')_assignPublishSlot(pkg);
   const pkgChannel='SRV Farsi';
   const _buildEngineState=_getEngineState(pkgChannel);
@@ -20470,7 +20496,7 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
         tags:_srvFarsiYouTubeHashtags(pkg,_farsiPubTask&&_farsiPubTask.mood).map(function(t){return t.replace(/^#/,'');}),
         categoryId:'10',privacyStatus:'private',madeForKids:false,
         publishAt:_srvPublishAt,
-        farsiPlaylists:_srvFarsiPublishPlaylists(_farsiPubTask,false), // mood playlist + Shorts playlist
+        farsiPlaylists:_srvFarsiPlaylistSelection(pkg,_farsiPubTask,false).ids, // exactly the playlists chosen at Approve
         containsSyntheticMedia:true, // AI Use / altered content = YES (YouTube status.containsSyntheticMedia)
       }),
     });
@@ -20681,6 +20707,314 @@ function _srvFarsiVaCurrentArtistFormat(task){
 function _srvFarsiVaAutoArtistFormat(task){
   return task.vaOriginal||_srvFarsiVaCurrentArtistFormat(task);
 }
+// ── SRV Farsi Short = promotional extract of a PUBLISHED SRV Farsi Long (order: SHORT-FROM-LONG + PLAYLISTS +
+// SCHEDULING). Same business workflow as SRV Studio's promotional Short, implemented independently for SRV Farsi:
+// pick a published Long, pick a 25–35 s section, preview it, create the Short. Nothing new is generated and no MP3 is
+// uploaded: the Short reuses the Long's song (title, lyrics, artist, mood) and cuts its audio from the Long's video.
+const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DEFAULT_SEC=30;
+const _srvFarsiShortSel={};          // per task: {longPkgId,startSec,durationSec} — the choice before "Create"
+const _srvFarsiLongDurCache={};      // pkgId -> seconds (probed from the stored Long video when not on the package)
+function _srvFarsiFmtSec(x){x=Math.max(0,Math.round(Number(x)||0));return Math.floor(x/60)+':'+String(x%60).padStart(2,'0');}
+function _srvFarsiPkgYtId(p){return (p&&(p._srvYtLongId||p.youtubeVideoId||p.youtube_video_id))||null;}
+function _srvFarsiIsShortFromLong(p){return !!(p&&p.srvShortOf&&p.srvShortOf.longPkgId);}
+function _srvFarsiLongDuration(p){const d=Number(p&&(p._srvLongDurationSec||_srvFarsiLongDurCache[p.id]));return d>0&&isFinite(d)?d:0;}
+// Eligible sources: SRV Farsi only, a built Long video, published to YouTube, not itself a Short, not set aside.
+// [TEST] Longs are offered only to a [TEST] Short (so production Shorts never come from test uploads).
+// The Long's artist (package field, else its task's "Artist — Mood").
+function _srvFarsiLongArtist(p,lt){
+  const a=String((p&&p.artist)||'').toLowerCase(); if(/^(female|male|duet)$/.test(a))return a;
+  return lt?_srvFarsiAvatarArtist(lt):'';
+}
+function _srvFarsiShortSources(task){
+  const forTest=_srvFarsiIsTestTask(task);
+  // the VA's explicit Artist choice on this Short filters the list; Auto (the rotation value) shows every artist
+  const _cur=_srvFarsiVaCurrentArtistFormat(task), _auto=_srvFarsiVaAutoArtistFormat(task);
+  const artistFilter=(_cur.artist&&_auto.artist&&_cur.artist!==_auto.artist)?_cur.artist.toLowerCase():'';
+  return (D.packages||[]).filter(function(p){
+    if(!p||p.engine!=='SRV Farsi'||_srvFarsiIsShortFromLong(p))return false;
+    if(String(p.srvTaskUid||'').startsWith('set-aside:'))return false;
+    if(!p._srvLongVideoUrl||!_srvFarsiPkgYtId(p)||!String(p.title||'').trim())return false;
+    const lt=p.srvTaskUid?_srvFarsiTaskByUid(p.srvTaskUid):null;
+    if(lt&&!lt.isLong)return false;
+    if(p.contentType==='Short'||p.contentFormat==='short')return false;
+    if(!!p.isTest&&!forTest)return false;
+    if(artistFilter&&_srvFarsiLongArtist(p,lt)!==artistFilter)return false;
+    return true;
+  }).map(function(p){
+    const lt=p.srvTaskUid?_srvFarsiTaskByUid(p.srvTaskUid):null;
+    return {pkg:p,task:lt,yt:_srvFarsiPkgYtId(p),songSec:_srvFarsiLongDuration(p),isTest:!!p.isTest};
+  }).sort(function(a,b){return String(b.pkg.generatedAt||'').localeCompare(String(a.pkg.generatedAt||''));});
+}
+// Section maths shared by the UI and Create: length clamped to 25–35 s, start kept inside the song.
+function _srvFarsiShortClamp(sel,songSec){
+  const dur=Math.min(SRV_FARSI_SHORT_MAX_SEC,Math.max(SRV_FARSI_SHORT_MIN_SEC,Math.round(Number(sel.durationSec)||SRV_FARSI_SHORT_DEFAULT_SEC)));
+  const maxStart=songSec?Math.max(0,Math.floor(songSec-dur)):0;
+  let start=(sel.startSec==null||!isFinite(sel.startSec))?(songSec?Math.min(maxStart,Math.round(songSec*0.35)):0):Math.round(sel.startSec);
+  start=Math.max(0,Math.min(maxStart,start));
+  return {startSec:start,durationSec:dur,maxStart:maxStart};
+}
+// Reads the Long's real length from its stored video (MediaRecorder WebM often reports Infinity until sought to the end).
+function _srvFarsiProbeLongDuration(p,taskId){
+  if(!p||_srvFarsiLongDuration(p)||_srvFarsiLongDurCache['_p'+p.id])return;
+  _srvFarsiLongDurCache['_p'+p.id]=1;
+  const a=document.createElement('audio'); a.preload='metadata'; a.crossOrigin='anonymous'; a.muted=true;
+  const done=function(){const d=a.duration; if(d>0&&isFinite(d)){_srvFarsiLongDurCache[p.id]=d; a.removeAttribute('src'); try{a.load();}catch(_){}
+      if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));}};
+  a.onloadedmetadata=function(){ if(isFinite(a.duration)&&a.duration>0)done(); else { a.ondurationchange=function(){if(isFinite(a.duration)&&a.duration>0){a.ondurationchange=null;done();}}; try{a.currentTime=1e101;}catch(_){} } };
+  a.src=p._srvLongVideoUrl;
+}
+function _srvFarsiShortFromLongHtml(task,taskId){
+  const src=_srvFarsiShortSources(task);
+  const sel=_srvFarsiShortSel[taskId]||(_srvFarsiShortSel[taskId]={});
+  if(!src.some(function(x){return String(x.pkg.id)===String(sel.longPkgId);}))sel.longPkgId=src[0]?String(src[0].pkg.id):null;
+  const cur=src.find(function(x){return String(x.pkg.id)===String(sel.longPkgId);})||null;
+  if(cur&&!cur.songSec)_srvFarsiProbeLongDuration(cur.pkg,taskId);
+  const c=_srvFarsiShortClamp(sel,cur?cur.songSec:0); sel.startSec=c.startSec; sel.durationSec=c.durationSec;
+  const T=escHTML(String(taskId));
+  if(!src.length)return `<div style="font-size:12px;color:#f59e0b;line-height:1.6">No published SRV Farsi Long yet. A Short is cut from a Long that is already on YouTube — publish a Long first.</div>`;
+  const opts=src.map(function(x){const p=x.pkg;const tn=x.task?('task #'+escHTML(String(x.task.id))):(p.taskId?'task #'+escHTML(String(p.taskId)):'');
+    return `<option value="${escHTML(String(p.id))}" ${String(p.id)===String(sel.longPkgId)?'selected':''}>${escHTML(p.title)} · ${tn} · ${x.songSec?_srvFarsiFmtSec(x.songSec):'—'} · ${x.isTest?'[TEST] private on YouTube':'on YouTube'}</option>`;}).join('');
+  const ready=!!(cur&&cur.songSec);
+  return `
+        <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">1 · PUBLISHED LONG (SRV FARSI ONLY)</div>
+        <select id="srvf-short-long-${T}" onchange="_srvFarsiShortSet('${T}','longPkgId',this.value)" style="width:100%;padding:9px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:12px">${opts}</select>
+        <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">2 · SECTION (${SRV_FARSI_SHORT_MIN_SEC}–${SRV_FARSI_SHORT_MAX_SEC} S)</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <label style="font-size:11px;color:var(--dim)">Start <input id="srvf-short-start-${T}" type="number" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" ${ready?'':'disabled'} onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:76px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
+          <label style="font-size:11px;color:var(--dim)">Length <input id="srvf-short-dur-${T}" type="number" min="${SRV_FARSI_SHORT_MIN_SEC}" max="${SRV_FARSI_SHORT_MAX_SEC}" step="1" value="${c.durationSec}" onchange="_srvFarsiShortSet('${T}','durationSec',this.value)" style="width:64px;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--text)"> sec</label>
+          <span id="srvf-short-range-${T}" style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace">${_srvFarsiFmtSec(c.startSec)} – ${_srvFarsiFmtSec(c.startSec+c.durationSec)}${ready?' of '+_srvFarsiFmtSec(cur.songSec):' (reading the song length…)'}</span>
+        </div>
+        ${ready?`<input id="srvf-short-slider-${T}" type="range" min="0" max="${c.maxStart}" step="1" value="${c.startSec}" oninput="_srvFarsiShortSet('${T}','startSec',this.value,true)" onchange="_srvFarsiShortSet('${T}','startSec',this.value)" style="width:100%;margin-bottom:8px">`:''}
+        <audio id="srvf-short-audio-${T}" src="${escHTML(cur.pkg._srvLongVideoUrl)}" preload="none" crossorigin="anonymous" style="display:none"></audio>
+        <button type="button" onclick="_srvFarsiShortPreview('${T}')" style="padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;margin-bottom:10px">▶ Preview this section</button>
+        <div style="font-size:10px;color:var(--dim);line-height:1.6;margin-bottom:12px">The Short reuses this Long's song — same title, audio, lyrics, artist and mood. Nothing new is generated and no MP3 upload is needed.</div>
+        <div id="srvf-short-st-${T}" style="font-size:11px;margin-bottom:8px;font-family:'JetBrains Mono',monospace"></div>
+        <button type="button" onclick="_srvFarsiCreateShortFromLong('${T}')" ${ready?'':'disabled'} style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;opacity:${ready?1:0.5}">✂ Create Short from this Long</button>`;
+}
+function _srvFarsiShortSet(taskId,key,val,live){
+  const sel=_srvFarsiShortSel[taskId]||(_srvFarsiShortSel[taskId]={});
+  if(key==='longPkgId'){sel.longPkgId=String(val);sel.startSec=null;}
+  else sel[key]=Number(val);
+  if(live){
+    const el=document.getElementById('srvf-short-range-'+taskId), st=document.getElementById('srvf-short-start-'+taskId);
+    if(el)el.textContent=_srvFarsiFmtSec(sel.startSec)+' – '+_srvFarsiFmtSec(sel.startSec+(sel.durationSec||SRV_FARSI_SHORT_DEFAULT_SEC));
+    if(st)st.value=sel.startSec; return;
+  }
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+}
+function _srvFarsiShortPreview(taskId){
+  const a=document.getElementById('srvf-short-audio-'+taskId); const sel=_srvFarsiShortSel[taskId]||{};
+  if(!a)return;
+  if(!a.paused){a.pause();return;}
+  const start=Number(sel.startSec||0), end=start+Number(sel.durationSec||SRV_FARSI_SHORT_DEFAULT_SEC);
+  a.ontimeupdate=function(){if(a.currentTime>=end)a.pause();};
+  const go=function(){try{a.currentTime=start;}catch(_){}a.play().catch(function(){});};
+  if(a.readyState>=1)go(); else {a.preload='auto';a.onloadedmetadata=function(){a.onloadedmetadata=null;go();};a.load();}
+}
+function _srvFarsiLongMode(L,lt){
+  if(lt&&(lt.mode||lt.mood)&&/ — /.test(String(lt.mode||lt.mood)))return String(lt.mode||lt.mood);
+  const art=L.artist||(/duet/i.test(L.vocal||'')?'Duet':/male/i.test(L.vocal||'')&&!/female/i.test(L.vocal||'')?'Male':'Female');
+  const m=String(L.mood||'romantic'); return art+' — '+m.charAt(0).toUpperCase()+m.slice(1).toLowerCase();
+}
+// Creates the Short's package from the chosen Long — copies, never generates. The Short keeps its own task/package
+// identity and records exactly where it came from (srvShortOf). The Long is never marked as used up.
+async function _srvFarsiCreateShortFromLong(taskId){
+  const st=document.getElementById('srvf-short-st-'+taskId);
+  const say=function(t,c){if(st){st.textContent=t;st.style.color=c||'var(--dim)';}};
+  const task=_srvFarsiTaskById(taskId);
+  if(!task||task.isLong){say('⚠ This task is not a SRV Farsi Short.','#ef4444');return false;}
+  if(_srvFarsiPkgForTask(task)){say('⚠ This Short already has its package.','#ef4444');return false;}
+  const sel=_srvFarsiShortSel[taskId]||{};
+  const src=_srvFarsiShortSources(task).find(function(x){return String(x.pkg.id)===String(sel.longPkgId);});
+  if(!src){say('⚠ Choose a published SRV Farsi Long first.','#ef4444');return false;}
+  const dur=Math.round(Number(sel.durationSec)), start=Math.round(Number(sel.startSec));
+  if(!(dur>=SRV_FARSI_SHORT_MIN_SEC&&dur<=SRV_FARSI_SHORT_MAX_SEC)){say('⚠ The Short must be '+SRV_FARSI_SHORT_MIN_SEC+'–'+SRV_FARSI_SHORT_MAX_SEC+' seconds.','#ef4444');return false;}
+  if(!src.songSec){say('⚠ The Long\'s length is still being read — try again in a moment.','#ef4444');return false;}
+  if(!(start>=0)||start+dur>src.songSec+0.01){say('⚠ That section runs past the end of the song.','#ef4444');return false;}
+  const L=src.pkg;
+  const dupe=(D.packages||[]).find(function(p){return _srvFarsiIsShortFromLong(p)&&!String(p.srvTaskUid||'').startsWith('set-aside:')&&String(p.srvShortOf.longPkgId)===String(L.id)&&Number(p.srvShortOf.startSec)===start&&Number(p.srvShortOf.durationSec)===dur;});
+  if(dupe&&!confirm('A Short from this Long with exactly this section already exists (package '+dupe.id+'). Create another one anyway?'))return false;
+  const uid=_srvFarsiTaskUid(task);
+  const lt=src.task;
+  const mode=_srvFarsiLongMode(L,lt);
+  const pkg={
+    id:'pkg_'+Date.now(),taskId:task.id,engine:'SRV Farsi',contentType:'Short',contentFormat:'short',
+    generatedAt:new Date().toISOString(),checklist:{},_pendingSync:false,performance_status:'generated',youtube_video_id:null,published_at:null,linked_channel:null,tools:[],
+    isTest:_srvFarsiIsTestTask(task),
+    title:L.title,titleFinglish:L.titleFinglish||'',lyrics:L.lyrics||'',shortLyrics:L.shortLyrics||L.short_lyrics||'',short_lyrics:L.shortLyrics||L.short_lyrics||'',
+    hook:L.hook||'',vocal:L.vocal,mood:L.mood,artist:L.artist,mode:mode,
+    captionYT:L.captionYT||L.captionYouTube||'',captionYouTube:L.captionYouTube||L.captionYT||'',hashtags:L.hashtags||'',
+    srvShortOf:{longPkgId:String(L.id),longTaskUid:L.srvTaskUid||null,longTaskId:lt?lt.id:(L.taskId||null),longTitle:L.title,
+      startSec:start,durationSec:dur,longDurationSec:Math.round(src.songSec*10)/10,audioUrl:L._srvLongVideoUrl,longYoutubeVideoId:src.yt||null,at:new Date().toISOString()},
+  };
+  if(uid)pkg.srvTaskUid=uid;
+  // the Short belongs to the Long's song: same artist and mood (recorded as a VA override; rotation counters untouched)
+  if((task.mode||task.mood)!==mode){
+    task.vaOverrides=Array.isArray(task.vaOverrides)?task.vaOverrides:[];
+    task.vaOverrides.push({field:'artist/mood',from:task.mode||task.mood,to:mode,by:'short-from-long',at:new Date().toISOString()});
+    task.mode=mode; task.mood=mode;
+  }
+  // default cover = the Long's cover when it came from the shared library (the VA can choose another at Build)
+  const lc=L._srvAvatarChoice; const art=_srvFarsiAvatarArtist(task);
+  if(lc&&lc.artist===art&&_srvFarsiAvatarById(art,lc.id)&&!task.srvAvatarId){task.srvAvatarId=lc.id;task.srvAvatarArtist=art;task.srvAvatarChosenAt=Date.now();}
+  say('Creating the Short…','#c9a84c');
+  D.packages=(D.packages||[]).concat([pkg]);
+  if(typeof saveAppState==='function')saveAppState();
+  let saved=true, why='';
+  try{ if(typeof savePackageToSupabase==='function')saved=(await savePackageToSupabase(pkg))!==false; }catch(e){ saved=false; why=String(e&&e.message||e); }
+  if(!saved){ D.packages=D.packages.filter(function(p){return p!==pkg;}); if(typeof saveAppState==='function')saveAppState(); say('⚠ The Short could not be saved'+(why?' ('+why+')':'')+'. Nothing was created.','#ef4444'); return false; }
+  _srvFarsiSetStage(taskId,'review');
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+  return true;
+}
+// Build: the Short's audio is the chosen section of the Long, cut from the Long's stored video (WAV, in memory).
+async function _srvFarsiShortAudioFromLong(pkg){
+  const s=pkg.srvShortOf;
+  const r=await fetch(s.audioUrl); if(!r.ok)throw new Error('Could not load the Long ('+r.status+')');
+  const buf=await r.arrayBuffer();
+  const AC=window.AudioContext||window.webkitAudioContext; const ac=new AC();
+  let audio; try{ audio=await ac.decodeAudioData(buf); } finally { try{ac.close();}catch(_){} }
+  const sr=audio.sampleRate, ch=Math.min(2,audio.numberOfChannels);
+  const from=Math.max(0,Math.floor(s.startSec*sr)), to=Math.min(audio.length,Math.floor((s.startSec+s.durationSec)*sr)), n=Math.max(0,to-from);
+  if(n<sr*SRV_FARSI_SHORT_MIN_SEC*0.9)throw new Error('The Long is shorter than the chosen section');
+  const ab=new ArrayBuffer(44+n*ch*2), v=new DataView(ab);
+  const w=function(o,t){for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+n*ch*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,ch,true);
+  v.setUint32(24,sr,true);v.setUint32(28,sr*ch*2,true);v.setUint16(32,ch*2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*ch*2,true);
+  const data=[]; for(let c=0;c<ch;c++)data.push(audio.getChannelData(c));
+  const fadeN=Math.floor(sr*0.6); let o=44;
+  for(let i=0;i<n;i++){ const g=Math.min(1,i/fadeN,(n-1-i)/fadeN); for(let c=0;c<ch;c++){ const x=Math.max(-1,Math.min(1,data[c][from+i]*g)); v.setInt16(o,x<0?x*0x8000:x*0x7FFF,true); o+=2; } }
+  return new File([ab],'srv_farsi_short_from_long.wav',{type:'audio/wav'});
+}
+// Lifecycle banner for a Short: where it came from.
+function _srvFarsiShortSourceHtml(pkg){
+  if(!_srvFarsiIsShortFromLong(pkg))return '';
+  const s=pkg.srvShortOf;
+  return `<div style="margin-bottom:12px;padding:8px 12px;background:rgba(139,92,246,0.07);border:1px solid rgba(139,92,246,0.25);border-radius:8px;font-size:11px;line-height:1.6;color:var(--text)">✂ <strong>Short from Long:</strong> ${escHTML(s.longTitle||'')}${s.longTaskId?' · task #'+escHTML(String(s.longTaskId)):''} · section ${_srvFarsiFmtSec(s.startSec)}–${_srvFarsiFmtSec(s.startSec+s.durationSec)}${s.longDurationSec?' of '+_srvFarsiFmtSec(s.longDurationSec):''}${s.longYoutubeVideoId?` · <a href="https://www.youtube.com/watch?v=${escHTML(s.longYoutubeVideoId)}" target="_blank" style="color:#a78bfa">Long on YouTube</a>`:''}</div>`;
+}
+
+// ── SRV Farsi Approve-stage PUBLISHING panel: playlists (multi-select), date, time, timezone. Saved on the package
+// (shared state + the Supabase packages row), so a refresh keeps it; Publish uses exactly what is saved here.
+const SRV_FARSI_PLAYLIST_CHOICES=[
+  {key:'happyromantic',id:'PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3',name:'Silk Road Voices | Happy Romantic 🌹'},
+  {key:'emotional',id:'PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF',name:'Silk Road Voices | Emotional ❤️'},
+  {key:'short',id:'PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh',name:'Silk Road Voices |Shorts'},
+];
+// Recommended by mood + format: Romantic/Happy → Happy Romantic, Emotional → Emotional; a Short also → Shorts.
+function _srvFarsiDefaultPlaylistIds(task,isLong){
+  const keys=_srvFarsiPublishPlaylists(task,isLong);
+  const ids=[];
+  keys.forEach(function(k){const id=k==='emotional'?'PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF':k==='short'?'PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh':'PL64rNOGmVdtKzlinRGxx3xxyKTxXqCku3';if(ids.indexOf(id)<0)ids.push(id);});
+  return ids;
+}
+// Publish: the operator's saved date/time becomes the YouTube publishAt for a production task. A [TEST] task never
+// gets a schedule (it uploads private) — the existing P1 test rule in the publish functions stays authoritative.
+function _srvFarsiApplySchedule(pkg,taskId){
+  if(!pkg||!pkg.srvSchedule||!pkg.srvSchedule.iso)return;
+  if(pkg.isTest||_srvFarsiIsTestTask(_srvFarsiTaskById(taskId))||_getEngineState('SRV Farsi')==='test')return;
+  pkg.publishAt=pkg.srvSchedule.iso;
+  pkg.publishLabel=pkg.srvSchedule.date+' '+pkg.srvSchedule.time+' ('+pkg.srvSchedule.tz+')';
+  if(!D._publishSlots)D._publishSlots={};
+  if(!D._publishSlots[pkg.publishAt])D._publishSlots[pkg.publishAt]=pkg.id;
+}
+function _srvFarsiPublishTz(){ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone||'local'; }catch(_){ return 'local'; } }
+// The selections in force for a package: what the operator saved, else the recommendation.
+function _srvFarsiPlaylistSelection(pkg,task,isLong){
+  const s=pkg&&pkg.srvPlaylistSel;
+  if(s&&Array.isArray(s.ids))return {ids:s.ids.filter(function(id){return SRV_FARSI_PLAYLIST_CHOICES.some(function(c){return c.id===id;});}),none:!!s.none,saved:true};
+  return {ids:_srvFarsiDefaultPlaylistIds(task,isLong),none:false,saved:false};
+}
+// local wall-clock date+time in the operator's timezone → the exact UTC instant YouTube needs (RFC 3339)
+function _srvFarsiScheduleIso(date,time){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||''))||!/^\d{2}:\d{2}$/.test(String(time||'')))return null;
+  const [y,m,d]=date.split('-').map(Number), [hh,mm]=time.split(':').map(Number);
+  const dt=new Date(y,m-1,d,hh,mm,0,0);
+  if(dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==d||dt.getHours()!==hh||dt.getMinutes()!==mm)return null; // not a real wall-clock time (e.g. DST gap)
+  return dt.toISOString();
+}
+function _srvFarsiScheduleDefault(pkg){
+  const s=pkg&&pkg.srvSchedule; if(s&&s.date&&s.time)return {date:s.date,time:s.time,tz:s.tz||_srvFarsiPublishTz(),saved:true};
+  const src=pkg&&pkg.publishAt?new Date(pkg.publishAt):null;
+  const c=src&&!isNaN(src)?src:(function(){const x=(typeof _nextPublishSlotCandidates==='function'?_nextPublishSlotCandidates(1)[0]:null);return x?new Date(x.iso):null;})();
+  if(!c)return {date:'',time:'',tz:_srvFarsiPublishTz(),saved:false};
+  const p=function(n){return String(n).padStart(2,'0');};
+  return {date:c.getFullYear()+'-'+p(c.getMonth()+1)+'-'+p(c.getDate()),time:p(c.getHours())+':'+p(c.getMinutes()),tz:_srvFarsiPublishTz(),saved:false};
+}
+async function _srvFarsiSavePublishPrefs(pkgId,taskId){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);}); if(!pkg)return;
+  const box=document.getElementById('srvf-pub-'+pkgId); if(!box)return;
+  const ids=[].slice.call(box.querySelectorAll('input[data-srvf-pl]')).filter(function(x){return x.checked;}).map(function(x){return x.getAttribute('data-srvf-pl');});
+  const noneEl=box.querySelector('input[data-srvf-pl-none]');
+  const date=(box.querySelector('input[data-srvf-date]')||{}).value||'', time=(box.querySelector('input[data-srvf-time]')||{}).value||'';
+  pkg.srvPlaylistSel={ids:noneEl&&noneEl.checked?[]:ids,none:!!(noneEl&&noneEl.checked),by:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||'operator',at:new Date().toISOString()};
+  pkg.srvSchedule={date,time,tz:_srvFarsiPublishTz(),iso:_srvFarsiScheduleIso(date,time),by:pkg.srvPlaylistSel.by,at:pkg.srvPlaylistSel.at};
+  if(typeof saveAppState==='function')saveAppState();
+  const st=document.getElementById('srvf-pub-st-'+pkgId);
+  let ok=true, why='';
+  try{ if(typeof savePackageToSupabase==='function')ok=(await savePackageToSupabase(pkg))!==false; }catch(e){ ok=false; why=String(e&&e.message||e); }
+  if(st){ st.textContent=ok?'✓ Saved':'⚠ Not saved to the server'+(why?': '+why:''); st.style.color=ok?'#22c55e':'#ef4444'; }
+}
+function _srvFarsiPublishPanelHtml(task,pkg,isLong){
+  if(!pkg)return '';
+  const pid=escHTML(String(pkg.id)), tid=escHTML(String(task.taskId||task.id||''));
+  const isTest=_srvFarsiIsTestTask(task)||!!pkg.isTest;
+  const sel=_srvFarsiPlaylistSelection(pkg,task,isLong), rec=_srvFarsiDefaultPlaylistIds(task,isLong);
+  const sch=_srvFarsiScheduleDefault(pkg);
+  const isAdmin=typeof currentUser!=='undefined'&&currentUser&&currentUser.id==='admin';
+  const row=function(c){const on=!sel.none&&sel.ids.indexOf(c.id)>=0;return `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px;color:var(--text);cursor:pointer"><input type="checkbox" data-srvf-pl="${c.id}" ${on?'checked':''} onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')"> ${escHTML(c.name)}${rec.indexOf(c.id)>=0?' <span style="font-size:9px;color:#c9a84c;border:1px solid rgba(201,168,76,0.4);border-radius:4px;padding:0 5px">recommended</span>':''}</label>`;};
+  const inp='padding:6px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--text);font-size:12px;color-scheme:dark';
+  return `<div id="srvf-pub-${pid}" style="margin-bottom:12px;padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(201,168,76,0.25);border-radius:10px">
+      <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">PUBLISHING</div>
+      ${isTest?`<div style="margin-bottom:8px;padding:6px 10px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.3);border-radius:6px;font-size:10px;color:#a78bfa">[TEST] task — uploads PRIVATE with no schedule, whatever date/time is chosen here.</div>`:''}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <label style="font-size:11px;color:var(--dim)">Date <input type="date" data-srvf-date value="${escHTML(sch.date)}" onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')" style="${inp}"></label>
+        <label style="font-size:11px;color:var(--dim)">Time <input type="time" data-srvf-time value="${escHTML(sch.time)}" onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')" style="${inp}"></label>
+      </div>
+      <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Timezone: <strong style="color:var(--text)">${escHTML(sch.tz)}</strong> (this computer)${sch.saved?'':' · suggested slot — change it or keep it'}</div>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:2px">Playlists</div>
+      ${SRV_FARSI_PLAYLIST_CHOICES.map(row).join('')}
+      ${isAdmin?`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px;color:var(--dim);cursor:pointer"><input type="checkbox" data-srvf-pl-none ${sel.none?'checked':''} onchange="_srvFarsiSavePublishPrefs('${pid}','${tid}')"> No playlist (Admin only)</label>`:''}
+      <div style="font-size:11px;color:var(--dim);margin-top:6px">AI Use: <strong style="color:#22c55e">YES — automatic</strong></div>
+      <div id="srvf-pub-st-${pid}" style="font-size:10px;margin-top:4px;font-family:'JetBrains Mono',monospace;color:var(--dim)">${sel.saved?'✓ Saved':'Recommended selection — it is saved when you change anything or press Approve & Publish.'}</div>
+    </div>`;
+}
+// Approve & Publish gate. Returns {ok, errors[], warnings[]}. The caller blocks on errors and asks about warnings.
+function _srvFarsiPublishCheck(task,pkg,isLong,now){
+  const errors=[], warnings=[]; now=now||Date.now();
+  const isTest=_srvFarsiIsTestTask(task)||!!(pkg&&pkg.isTest)||_getEngineState('SRV Farsi')==='test';
+  if(!pkg){errors.push('Package not found.');return {ok:false,errors,warnings,isTest};}
+  const sel=_srvFarsiPlaylistSelection(pkg,task,isLong);
+  const sch=pkg.srvSchedule||{};
+  if(!isTest){
+    if(!sch.iso)errors.push('Choose a publishing date and time.');
+    else if(Date.parse(sch.iso)<=now+10*60*1000)errors.push('The publishing date/time is in the past (or less than 10 minutes away). Choose a later time.');
+    if(!sel.none&&!sel.ids.length)errors.push('Choose at least one playlist (Admin can choose "No playlist").');
+  }
+  if(!(pkg._srvThumbDataUrl||pkg._srvThumbUrl))errors.push('No cover/thumbnail — rebuild the video.');
+  if(!(isLong?pkg._srvLongVideoUrl:pkg._srvShortVideoUrl))errors.push('The video is not ready — rebuild it.');
+  return {ok:!errors.length,errors,warnings,isTest};
+}
+async function _srvFarsiApproveAndPublish(pkgId,taskId){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  const task=_srvFarsiTaskById(taskId); const isLong=!!(task&&task.isLong);
+  if(pkg&&!pkg.srvPlaylistSel)await _srvFarsiSavePublishPrefs(pkgId,taskId); // freeze the shown recommendation as the choice
+  if(pkg&&!pkg.srvSchedule)await _srvFarsiSavePublishPrefs(pkgId,taskId);
+  const chk=_srvFarsiPublishCheck(task,pkg,isLong);
+  if(!chk.ok){alert('Cannot publish yet:\n\n• '+chk.errors.join('\n• '));return false;}
+  // YouTube connection + playlist permission (read-only check); never pretend playlists will work
+  const sel=_srvFarsiPlaylistSelection(pkg,task,isLong);
+  try{
+    const r=await _publishFetch('/api/ops?action=srv_farsi_playlists',{method:'GET'});
+    const d=await r.json().catch(function(){return {};});
+    if(!d||!d.ok){alert('Cannot publish: the Silk Road Voices YouTube connection is not working ('+((d&&(d.message||d.error))||('HTTP '+r.status))+'). Reconnect it in System → Integrations.');return false;}
+    if(!sel.none&&sel.ids.length&&!d.canAddToPlaylists&&!confirm('Silk Road Voices reconnect required for playlist publishing.\n\nThe video will upload, but it will NOT be added to the selected playlists until Silk Road Voices is reconnected. Publish anyway?'))return false;
+  }catch(e){alert('Cannot publish: could not check the YouTube connection ('+(e&&e.message||e)+').');return false;}
+  _srvFarsiApproveVideo(pkgId,taskId);
+  return true;
+}
+
 // ── SRV Farsi avatar library: artist resolution, lookup, and the Build-stage manual cover choice ──
 function _srvFarsiAvatarArtist(task){
   const m=String((task&&(task.mode||task.mood))||'');
@@ -20756,9 +21090,9 @@ async function _srvFarsiCheckPlaylists(btn){
 }
 function _srvFarsiPlaylistResultHtml(pkg){
   const r=pkg&&pkg.youtubePlaylists; if(!Array.isArray(r)||!r.length)return '';
-  const why={needs_playlist_permission:'channel connection lacks the playlist permission — reconnect Silk Road Voices',playlist_add_failed:'could not add to the playlist'};
+  const why={needs_playlist_permission:'reconnect required',playlist_add_failed:'could not add to the playlist',unknown_playlist:'not an approved SRV Farsi playlist'};
   return `<div style="margin-top:8px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:10px;text-align:left;line-height:1.7">`+
-    r.map(function(x){return (x.ok?'✅ ':'⚠️ ')+escHTML(x.title||'Playlists')+(x.ok?'':' — '+escHTML(why[x.error]||x.error||'not added'));}).join('<br>')+`</div>`;
+    r.map(function(x){return (x.ok?'✓ ':'✗ ')+escHTML(x.playlistName||x.title||'Playlists')+(x.ok?'':' — '+escHTML(why[x.error]||x.error||'not added'));}).join('<br>')+`</div>`;
 }
 function _srvFarsiVaSetArtistFormat(taskId,field,value){
   const task=_srvFarsiTaskById(taskId);
