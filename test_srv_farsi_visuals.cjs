@@ -44,31 +44,56 @@ ok('buckets rotate independently (per format.artist.mood)',pick(p4,'short.duet.h
 const D2=JSON.parse(JSON.stringify(D));const pick2=new Function('D',nested('    function _farsiPickAvatar(pool,bucketKey){')+'\nreturn _farsiPickAvatar;')(D2);
 ok('rotation position survives reload (persisted pointer)',pick2(p4,'long.duet.romantic')===pick(p4,'long.duet.romantic'));
 
-// ── 3. Shared visual pool: ONE pool per artist x mood, used by Shorts and Longs ──
+// ── 3. Shared avatar library: ONE library per artist (female / male / duet), used by Shorts and Longs ──
 const path=require('path');const pubDir=path.dirname(process.argv[2]||'public/index.html');
 const farsiCfg=(()=>{const s=h.indexOf('{id:"srv_farsi"');const e=h.indexOf('\n  {id:"srv_english"',s);return h.slice(s,e);})();
-ok('no separate Short/Long library remains for SRV Farsi',!/avatarLibrary/.test(farsiCfg)&&/avatarPool:\{/.test(farsiCfg));
-const pools=(()=>{const s=farsiCfg.indexOf('avatarPool:{');const e=farsiCfg.lastIndexOf('}},');return new Function('return {'+farsiCfg.slice(s,e)+'}}')().avatarPool;})();
-const src=e=>typeof e==='string'?e:e.src;
-const plist=[];for(const a of Object.keys(pools))for(const m of Object.keys(pools[a]))plist.push([a+'.'+m,pools[a][m]]);
-ok('9 pools: 3 artists x 3 moods, no format level',plist.length===9&&Object.keys(pools).sort().join()==='duet,female,male'&&Object.values(pools).every(x=>Object.keys(x).sort().join()==='emotional,happy,romantic'));
-const missing=plist.flatMap(([k,arr])=>arr.map(src).filter(u=>fs.existsSync(pubDir)&&!fs.existsSync(path.join(pubDir,u))));
-ok('every pool image exists on disk',missing.length===0,missing.slice(0,2).join(','));
+ok('no separate Short/Long library and no per-mood pool remains for SRV Farsi',/avatarLibrary:\{/.test(farsiCfg)&&!/avatarPool/.test(farsiCfg)&&!/srv-farsi-avatars\/(long|short)\//.test(farsiCfg));
+const pools=(()=>{const s=farsiCfg.indexOf('avatarLibrary:{');let d=0,i=s+'avatarLibrary:'.length;for(;;i++){if(farsiCfg[i]==='{')d++;else if(farsiCfg[i]==='}'){d--;if(!d)break;}}return new Function('return '+farsiCfg.slice(s+'avatarLibrary:'.length,i+1))();})();
+const src=e=>e.src;
+const plist=Object.keys(pools).map(a=>[a,pools[a]]);
+ok('3 artist libraries (female, male, duet)',Object.keys(pools).sort().join()==='duet,female,male');
+ok('library sizes match the approved folder: 21 female, 8 male, 8 duet (37)',pools.female.length===21&&pools.male.length===8&&pools.duet.length===8);
+const missing=plist.flatMap(([k,arr])=>arr.flatMap(e=>[e.src,e.thumb]).filter(u=>fs.existsSync(pubDir)&&!fs.existsSync(path.join(pubDir,u))));
+ok('every library image and its selector thumbnail exist on disk',missing.length===0,missing.slice(0,2).join(','));
 ok('no image is listed twice anywhere',new Set(plist.flatMap(([k,arr])=>arr.map(src))).size===plist.reduce((n,[k,arr])=>n+arr.length,0));
-ok('every image belongs to its pool (artist + mood in the file name)',plist.every(([k,arr])=>{const [a,m]=k.split('.');return arr.every(e=>src(e).includes('_'+a+'_'+m+'_'));}));
-ok('every pool has more than two images',plist.every(([k,arr])=>arr.length>2),plist.map(([k,arr])=>k+'='+arr.length).join(' '));
-ok('landscape sources carry a subject focal point for the 9:16 crop',plist.every(([k,arr])=>arr.every(e=>!/\/long\//.test(src(e))||(typeof e==='object'&&e.fx>0&&e.fx<1))));
-out.push('INFO usable images per pool: '+plist.map(([k,arr])=>k+'='+arr.length).join(' ')+' | total '+plist.reduce((n,[k,arr])=>n+arr.length,0));
-out.push('INFO missing to reach 6 per pool: '+plist.map(([k,arr])=>k+'='+Math.max(0,6-arr.length)).join(' ')+' | total '+plist.reduce((n,[k,arr])=>n+Math.max(0,6-arr.length),0));
-// real picker on the REAL pools: every rebuild moves to the next source, whole pool before any repeat
+ok('every image sits in its own artist folder and has a unique id',plist.every(([a,arr])=>arr.every(e=>e.src.includes('/library/'+a+'/')&&e.id.startsWith(a+'_')))&&new Set(plist.flatMap(([k,arr])=>arr.map(e=>e.id))).size===37);
+{ let land=true; try{ const sz=f=>{const b=fs.readFileSync(path.join(pubDir,f));for(let i=2;i<b.length;){if(b[i]!==0xFF){i++;continue;}const m=b[i+1];if(m>=0xC0&&m<=0xC2)return [b.readUInt16BE(i+7),b.readUInt16BE(i+5)];i+=2+b.readUInt16BE(i+2);}return [0,0];};
+    for(const [a,arr] of plist)for(const e of arr){const [w,h2]=sz(e.src);if(!(w===1672&&h2===941))land=false;} }catch(_){land=false;}
+  ok('every source is one 16:9 landscape master (1672x941) — the Short crops the same file',land); }
+// real picker on the REAL libraries: automatic choice cycles the whole artist library before any repeat
 { const Dr={};const pk=new Function('D',nested('    function _farsiPickAvatar(pool,bucketKey){')+'\nreturn _farsiPickAvatar;')(Dr);
-  let allOk=true;for(const [k,arr] of plist){const got=Array.from({length:arr.length+1},()=>src(pk(arr,k)));
+  let allOk=true;for(const [k,arr] of plist){const got=Array.from({length:arr.length+1},()=>src(pk(arr,'lib.'+k)));
     if(new Set(got.slice(0,arr.length)).size!==arr.length||got[arr.length]!==got[0])allOk=false;}
-  ok('REAL pools: A -> B -> C -> D -> A in every one of the 9 pools',allOk);
-  ok('REAL pools: each pool keeps its own pointer',Object.keys(Dr.srvFarsiAvatarIdx).sort().join()===plist.map(x=>x[0]).sort().join()&&Object.values(Dr.srvFarsiAvatarIdx).every(v=>v===1)); }
+  ok('REAL libraries: automatic Rebuild walks every image of the artist before repeating',allOk);
+  ok('REAL libraries: each artist keeps its own pointer',Object.keys(Dr.srvFarsiAvatarIdx).sort().join()==='lib.duet,lib.female,lib.male'); }
 const build0=top('_srvFarsiBuildTrigger');
-ok('build picks by artist.mood (no format in the pointer key), so Short and Long share the rotation',/_farsiPickAvatar\(_fPool,_fGroup\+'\.'\+_fMoodKey\)/.test(build0)&&!/_fFormatKey/.test(build0));
-ok('build passes the focal point to both the Short and the Long render',(build0.match(/avatarFocusX:_fAvFocus\.x, avatarFocusY:_fAvFocus\.y/g)||[]).length===2);
+ok('build: the operator\'s cover for this task wins; otherwise the artist rotation picks',/const _fManual=task&&task\.srvAvatarId&&task\.srvAvatarArtist===_fGroup\?_srvFarsiAvatarById\(_fGroup,task\.srvAvatarId\):null;/.test(build0)&&/const _fPicked=_fManual\|\|_farsiPickAvatar\(_fLibA,'lib\.'\+_fGroup\);/.test(build0));
+ok('build: a manual cover never advances the rotation pointer (picker is only called when there is no manual choice)',/_fManual\|\|_farsiPickAvatar/.test(build0));
+ok('build passes the face box to both the Short and the Long render',(build0.match(/avatarFocusX:_fAvFocus\.x, avatarFocusY:_fAvFocus\.y, avatarFaceW:_fAvFocus\.w/g)||[]).length===2);
+ok('build records the cover used and whether it was chosen by hand',/pkg\._srvAvatarChoice=\{id:_fPicked\.id,artist:_fGroup,how:_fManual\?'manual':'auto'\}/.test(build0));
+// Build-stage selector + per-task persistence (real functions, fake state)
+{ const helpers=['_srvFarsiAvatarArtist','_srvFarsiAvatarLibrary','_srvFarsiAvatarById','_srvFarsiManualAvatar','_srvFarsiNextAvatar','_srvFarsiSelectAvatar'].map(top).join('\n');
+  const mk=new Function('D','cfg','tasks','saves',helpers+`
+    function _srvFarsiEngineConfig(){return cfg;} function _srvFarsiTaskById(id){return tasks.find(t=>String(t.id)===String(id));}
+    function saveAppState(){saves.n++;} return {sel:_srvFarsiSelectAvatar,next:_srvFarsiNextAvatar,man:_srvFarsiManualAvatar,lib:_srvFarsiAvatarLibrary};`);
+  const Dx={srvFarsiAvatarIdx:{'lib.female':3}}, tasks=[{id:1,mode:'Female — Romantic'},{id:2,mode:'Female — Happy'},{id:3,mode:'Duet — Happy'}], saves={n:0};
+  const A=mk(Dx,{avatarLibrary:pools},tasks,saves);
+  ok('Female task sees exactly the Female library (21), Duet task the Duet library (8)',A.lib('female').length===21&&A.lib('duet').length===8);
+  ok('automatic preview = next image in the artist rotation',A.next(tasks[0]).how==='auto'&&A.next(tasks[0]).av.id===pools.female[3].id);
+  A.sel(1,'female_07');
+  ok('choosing a cover saves it on THAT task only and persists through the shared-state save',tasks[0].srvAvatarId==='female_07'&&tasks[0].srvAvatarArtist==='female'&&!tasks[1].srvAvatarId&&saves.n===1);
+  ok('choosing a cover does not touch the rotation pointer',JSON.stringify(Dx.srvFarsiAvatarIdx)==='{"lib.female":3}');
+  const reloaded=JSON.parse(JSON.stringify(tasks));const B=mk(Dx,{avatarLibrary:pools},reloaded,saves);
+  ok('the choice survives a reload (it lives on the persisted task)',B.next(reloaded[0]).how==='manual'&&B.next(reloaded[0]).av.id==='female_07');
+  A.sel(3,'female_02');
+  ok('a Female cover cannot be put on a Duet task',!tasks[2].srvAvatarId);
+  tasks[0].mode='Male — Romantic';
+  ok('if the task\'s artist changes, the old artist\'s cover is ignored (back to automatic for the new artist)',A.man(tasks[0])===null&&A.next(tasks[0]).av.id.startsWith('male_'));
+  tasks[0].mode='Female — Romantic'; A.sel(1,null);
+  ok('"Back to automatic" clears the choice',!tasks[0].srvAvatarId&&A.next(tasks[0]).how==='auto'); }
+const picker=top('_srvFarsiAvatarPickerHtml');
+ok('Build stage shows the cover picker above the build button (VA and Admin share this lifecycle view)',/\$\{_srvFarsiAvatarPickerHtml\(task\)\}\n\s*<div[^\n]*STEP 3 — BUILD PACKAGE/.test(h));
+ok('picker shows visual thumbnails (no filenames) for the whole artist library',/<img src="\$\{escHTML\(a\.thumb\|\|a\.src\)\}"/.test(picker)&&/lib\.map\(/.test(picker)&&!/\.jpg/.test(picker));
 // ── Fix pass: face-first framing (the real expressions from the painter) ──
 { const a=panel.indexOf('const fx='),b=panel.indexOf('const z=Math.max');
   const frame=new Function('iw','ih','px','py','pw','ph','aim','avatarFocusX','avatarFocusY','avatarFaceW','let faceX=px+pw*aim.x, faceY=py+ph*aim.y, faceR=pw*0.2;'+panel.slice(a,b)+'\nreturn {sx,sy,sw,sh,sc,cover,faceX,faceY,faceW:fw*iw*sc};');
@@ -76,7 +101,7 @@ ok('build passes the focal point to both the Short and the Long render',(build0.
   const inside=(r,iw,ih)=>r.sx>=-1e-6&&r.sy>=-1e-6&&r.sx+r.sw<=iw+1e-6&&r.sy+r.sh<=ih+1e-6;
   let allIn=true,faceIn=true,faceBig=true,notSoft=true,n=0; const worst=[];
   for(const [key,pool] of plist) for(const e of pool){
-    const land=/\/long\//.test(e.src), iw=land?1672:941, ih=land?941:1672;
+    const iw=1672, ih=941;
     for(const [nm,pw,ph,aim] of [['long',1267,1080,LONG],['card',929,1008,CARD]]){
       const r=frame(iw,ih,0,0,pw,ph,aim,e.fx,e.fy,e.fw); n++;
       if(!inside(r,iw,ih))allIn=false;
@@ -95,15 +120,18 @@ ok('build passes the focal point to both the Short and the Long render',(build0.
 // ── Fix pass: motion ──
 { const atmo=(()=>{const s2=h.indexOf('  function _drawFarsiAtmo(');return h.slice(s2,h.indexOf('\n  }\n',s2));})();
   const sp=atmo.match(/p\.y0-\(([\d.]+)\+([\d.]+)\*d\)\*t/);
-  ok('particles rise faster than before (was 0.077 of the frame height per second)',sp&&parseFloat(sp[1])>0.077&&parseFloat(sp[1])+parseFloat(sp[2])>=0.2,sp&&('now '+sp[1]+' to '+(parseFloat(sp[1])+parseFloat(sp[2])).toFixed(3)));
-  ok('particle field is denser (was 20-22)',/_srvFarsiMoodKey\(mood\)==='happy'\?46:42/.test(h));
-  ok('three depth layers: drifting bokeh + particles + (Emotional) rain',/for\(let i=0;i<7;i\+\+\)/.test(atmo)&&/_farsiAtmoKind==='particle'/.test(atmo)&&/d\.y0\+0\.46\*t/.test(atmo));
-  ok('no per-particle blur filter (sprite stamping keeps the denser field real-time)',!/ctx\.filter=`blur/.test(atmo)&&/drawImage\(sp,/.test(atmo));
-  const z=comp.match(/const zoom=1\.09\+_live\*\(\(([\d.]+)\*_farsiIntensityMul\)\*_cyc\((\d+),0\)\+([\d.]+)\*_cyc\(([\d.]+),1\)\)/);
-  ok('camera push is stronger and quicker (was +/-2.8% over 15-20s)',z&&parseFloat(z[1])>0.028&&parseInt(z[2])<15,z&&('now +/-'+(z[1]*100)+'% over '+z[2]+'s plus a '+z[4]+'s breath'));
-  ok('camera zoom can never drop below 1 at any intensity (no photo edge revealed)',z&&1.09-parseFloat(z[1])*1.3-parseFloat(z[3])>=1);
-  ok('camera also pans, and a light sweep crosses the photo',/panX:panX,panY:panY,sweep:sweep/.test(comp)&&(comp.match(/panX:panX,panY:panY,sweep:sweep/g)||[]).length===2);
-  ok('Short backdrop drifts (blurred photo + moving gradient)',/_farsiShortBg/.test(comp)&&/_cyc\(17,0\)/.test(comp)&&/_cyc\(21,0\)/.test(comp)); }
+  const lo=sp&&parseFloat(sp[1]), hi=sp&&parseFloat(sp[1])+parseFloat(sp[2]);
+  ok('calm: particles drift slowly (at most 5% of the frame height per second; fix pass was 8.5-23.5%)',sp&&hi<=0.05&&lo>0,sp&&('now '+lo+' to '+hi.toFixed(3)));
+  ok('calm: restrained particle density (24-26; fix pass was 42-46)',/_srvFarsiMoodKey\(mood\)==='happy'\?26:24/.test(h));
+  ok('calm: 5 slow bokeh orbs (fix pass 7) moving at most 0.6% of the width per second',/for\(let i=0;i<5;i\+\+\)/.test(atmo)&&/dir\*\(0\.004\+0\.002\*\(i%3\)\)\*t/.test(atmo));
+  ok('calm: rain falls at 0.20 of the height per second (fix pass 0.46)',/d\.y0\+0\.20\*t/.test(atmo));
+  ok('calm: slow twinkle, no per-particle blur filter',/t\*\(0\.35\+0\.15\*p\.harmonic\)/.test(atmo)&&!/ctx\.filter=`blur/.test(atmo));
+  const z=comp.match(/const zoom=1\.045\+_live\*\(\(([\d.]+)\*_farsiIntensityMul\)\*_cyc\((\d+),0\)\);/);
+  ok('calm: one slow push/pull (±2.5% over 26s), no fast breath',z&&parseFloat(z[1])===0.025&&parseInt(z[2])===26&&!/_cyc\(4\.3/.test(comp),z&&('±'+(z[1]*100)+'% / '+z[2]+'s'));
+  ok('calm: zoom never drops below 1 at any intensity (no photo edge revealed)',z&&1.045-parseFloat(z[1])*1.3>=1);
+  ok('calm: barely-there drift (pan ≤35% of the zoom margin, 37-43s periods), no light sweep',/const panX=_live\*0\.35\*_cyc\(37,0\.6\), panY=_live\*0\.25\*_cyc\(43,2\.1\);/.test(comp)&&/const sweep=undefined;/.test(comp));
+  ok('calm: the Long title holds still once it has slid in',/const _drift=0;/.test(comp));
+  ok('calm: Short backdrop moves slowly (41-53s periods)',/_cyc\(41,0\)/.test(comp)&&/_cyc\(47,1\)/.test(comp)&&/_cyc\(45,0\)/.test(comp)); }
 // ── Fix pass: text animation ──
 { ok('ease-out slide helper; the cover/thumbnail capture is always the settled frame',/const _in=function\(a,b\)\{ if\(skipFade\)return 1;/.test(comp)&&/const _live=skipFade\?0:1;/.test(comp));
   const long=comp.slice(comp.indexOf('if(!isShort){'),comp.indexOf('// ── SHORT (visual benchmark)'));
@@ -122,8 +150,8 @@ ok('build passes the focal point to both the Short and the Long render',(build0.
   ok('Short: lyric keeps the benchmark treatment (Nastaliq, cream, deep shadow)',/600 \$\{Math\.round\(W\*0\.054\)\}px 'Noto Nastaliq Urdu'/.test(short)&&/rgba\(8,4,2,0\.92\)/.test(short)); }
 // ── Fix pass: fonts ready before the cover, rotation visible at Approve ──
 ok('fonts are loaded with the real title/lyric text before the cover is captured',/_srvFarsiEnsureFonts\(\[title,titleFinglish,hookText,lyrics\]\.join\(' '\)\)/.test(h)&&/document\.fonts\.load\("600 58px 'Noto Nastaliq Urdu'",_txt\)/.test(h));
-ok('build records which pool image it used',/pkg\._srvVisualPoolPos=\{n:_fPool\.indexOf\(_fPicked\)\+1,of:_fPool\.length/.test(build0));
-ok('Approve stage shows "Image N of M" so a Rebuild\'s rotation is visible',/Image \$\{Number\(pkg\._srvVisualPoolPos\.n\)\|\|'\?'\} of \$\{Number\(pkg\._srvVisualPoolPos\.of\)/.test(h));
+ok('build records which library image it used',/pkg\._srvVisualPoolPos=\{n:_fLibA\.indexOf\(_fPicked\)\+1,of:_fLibA\.length/.test(build0));
+ok('Approve stage shows "Cover N of M" and whether it was chosen at Build',/Cover \$\{Number\(pkg\._srvVisualPoolPos\.n\)\|\|'\?'\} of \$\{Number\(pkg\._srvVisualPoolPos\.of\)/.test(h)&&/pkg\._srvAvatarChoice\.how==='manual'/.test(h));
 ok('build passes the face box to both the Short and the Long render',(build0.match(/avatarFaceW:_fAvFocus\.w/g)||[]).length===2);
 
 
@@ -161,5 +189,24 @@ ok('renderer captures a clean cover for SRV Farsi Shorts too',/_thumbCaptureMode
 ok('SRV English build keeps its own (unchanged) thumbnail line',/if\(longResult\.thumbDataUrl\)pkg\._srvThumbDataUrl=longResult\.thumbDataUrl;/.test(top('_srvEnglishBuildTrigger')));
 ok('non-Farsi renders still capture Long-only covers',/if\(!isShort\|\|isFarsiComposed\)/.test(rv));
 
+// ── Publishing: playlists, AI Use, description ──
+{ const ops=fs.readFileSync(path.join(path.dirname(process.argv[2]||'public/index.html'),'..','api','ops.js'),'utf8');
+  const runPub=top('_srvFarsiRunPublish'), pubYT=top('_srvFarsiPublishYouTube'), plf=top('_srvFarsiPublishPlaylists');
+  const pl=new Function('_srvFarsiPlaylistCategory',plf+'\nreturn _srvFarsiPublishPlaylists;')(new Function(top('_srvFarsiPlaylistCategory')+'\nreturn _srvFarsiPlaylistCategory;')());
+  const cases=[['Female — Romantic',true,'romantic'],['Female — Romantic',false,'romantic,short'],['Male — Emotional',false,'emotional,short'],['Duet — Happy',true,'happy'],['Duet — Emotional',true,'emotional'],['Male — Happy',false,'happy,short']];
+  ok('playlists: mood playlist, plus Shorts for a Short (Female Romantic Long/Short, Male Emotional Short, Duet Happy Long, …)',cases.every(([m,L,want])=>pl({mood:m},L).join()===want),cases.map(([m,L])=>m+(L?' Long':' Short')+'='+pl({mood:m},L).join('+')).join(' | '));
+  ok('both SRV Farsi uploads send the playlist keys and AI Use = YES',/farsiPlaylists:_srvFarsiPublishPlaylists\(_farsiPubTask,isLong\)/.test(runPub)&&/containsSyntheticMedia:true/.test(runPub)&&/farsiPlaylists:_srvFarsiPublishPlaylists\(_farsiPubTask,false\)/.test(pubYT)&&/containsSyntheticMedia:true/.test(pubYT)&&!/playlistCategory:_farsiPlaylistCat/.test(runPub+pubYT));
+  const titles=ops.slice(ops.indexOf('const SRV_FARSI_PLAYLIST_TITLES = {'),ops.indexOf('};',ops.indexOf('const SRV_FARSI_PLAYLIST_TITLES = {'))+2);
+  ok('server: the four playlist names from the order',/romantic:\s+'Silk Road Voices Romantic'/.test(titles)&&/emotional:\s+'Silk Road Voices Emotional'/.test(titles)&&/happy:\s+'Silk Road Voices Happy'/.test(titles)&&/short:\s+'Silk Road Voices Short'/.test(titles));
+  const resolve=new Function('SRV_FARSI_PLAYLIST_TITLES','_plNorm',ops.slice(ops.indexOf('function _srvFarsiResolvePlaylists('),ops.indexOf('\n}\n',ops.indexOf('function _srvFarsiResolvePlaylists('))+2)+'\nreturn _srvFarsiResolvePlaylists;')(new Function(titles.replace('const ','return ').replace(/^return SRV_FARSI_PLAYLIST_TITLES = /,'return '))(),t=>String(t||'').normalize('NFKC').trim().toLowerCase());
+  const chan=[{id:'PLr',title:'Silk Road Voices Romantic'},{id:'PLs',title:'silk road voices short '},{id:'PLx',title:'Silk Road Voices | Happy Romantic 🌹'}];
+  const r=resolve(['romantic','short','happy','happy','bogus'],chan);
+  ok('server: playlists resolved by exact title on the channel; a missing one is reported, never guessed or created',r.length===3&&r[0].id==='PLr'&&r[1].id==='PLs'&&r[2].id===null);
+  const up=ops.slice(ops.indexOf('async function youtubeUploadVideo('),ops.indexOf('\n}\n',ops.indexOf('async function youtubeUploadVideo(')));
+  ok('server: SRV Farsi never uses the legacy create-if-missing playlist path',/else if \(playlistCategory && youtubeVideoId && engine !== 'SRV Farsi'\)/.test(up)&&!/_ytGetOrCreatePlaylist[^\n]*farsiPlaylists/.test(up));
+  ok('server: AI Use is the structured YouTube field status.containsSyntheticMedia',/metadata\.status\.containsSyntheticMedia = true;/.test(up));
+  ok('server: the Persian AI line is no longer appended for SRV Farsi (other engines unchanged)',/const _isSrvFarsi = engine === 'SRV Farsi';/.test(up)&&/if \(!_isSrvFarsi && hasFarsiChars && !\/هوش مصنوعی\/\.test\(descClean\)\)/.test(up)&&/if \(!_isSrvFarsi && !hasFarsiChars/.test(up));
+  ok('client: the SRV Farsi description builder contains no AI sentence',!/هوش مصنوعی/.test(top('_srvFarsiYouTubeDescription')));
+  ok('VA screens show AI Use / Altered content: YES (set automatically), no manual Studio step left',(h.match(/AI Use \/ Altered content: YES<\/strong>/g)||[]).length===2&&!/AI Disclosure required:/.test(h)); }
 console.log(out.join('\n'));console.log(`${pass} passed, ${fail} failed`);process.exit(fail?1:0);
 })();

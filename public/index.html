@@ -793,58 +793,54 @@ const ENGINES_CONFIG=[
    longFormDay:"Friday",
    // v13.69.80 — SRV Farsi Lifecycle: Generate→Review→Build→Approve→Publish→Done (mirrors English)
    lifecycle:{musicAdapter:'manual',imageAdapter:'pexels',rendererAdapter:'canvas',requireApprove:true},
-   // SRV Farsi visual pool — ONE source-image pool per ARTIST x MOOD (9 pools), shared by Shorts and
-   // Longs. There is no separate Short/Long library: each format crops the same source image its own
-   // way (see _drawFarsiPanel). An entry is a path, or {src,fx,fy} where fx/fy (0..1) mark where the
-   // subject sits in the source so both crops keep the subject in frame (default: centre, upper area).
-   // Rotation is per pool (artist.mood), A -> B -> C -> ... -> A, persisted in D.srvFarsiAvatarIdx.
-   // Order alternates portrait/landscape sources so consecutive rebuilds differ in framing too.
-   // To add images: drop the file under /assets/srv-farsi-avatars/ and add one entry to its pool.
-   // fx/fy = face centre, fw = face width (fractions of the source image) — the renderer frames every
-   // Short and Long on the face from these, so each new image needs them.
-   avatarPool:{
-     female:{
-       romantic:[{src:'/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_01.png',fx:0.550,fy:0.250,fw:0.280},
-         {src:'/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_01.png',fx:0.450,fy:0.390,fw:0.170},
-         {src:'/assets/srv-farsi-avatars/short/female/romantic/srv_farsi_short_female_romantic_02.png',fx:0.540,fy:0.240,fw:0.260},
-         {src:'/assets/srv-farsi-avatars/long/female/romantic/srv_farsi_long_female_romantic_02.png',fx:0.410,fy:0.270,fw:0.130}],
-       emotional:[{src:'/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_01.png',fx:0.532,fy:0.278,fw:0.340},
-         {src:'/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_01.png',fx:0.430,fy:0.350,fw:0.180},
-         {src:'/assets/srv-farsi-avatars/short/female/emotional/srv_farsi_short_female_emotional_02.png',fx:0.540,fy:0.220,fw:0.200},
-         {src:'/assets/srv-farsi-avatars/long/female/emotional/srv_farsi_long_female_emotional_02.png',fx:0.450,fy:0.190,fw:0.120}],
-       happy:[{src:'/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_01.png',fx:0.510,fy:0.240,fw:0.280},
-         {src:'/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_01.png',fx:0.380,fy:0.290,fw:0.150},
-         {src:'/assets/srv-farsi-avatars/short/female/happy/srv_farsi_short_female_happy_02.png',fx:0.520,fy:0.285,fw:0.330},
-         {src:'/assets/srv-farsi-avatars/long/female/happy/srv_farsi_long_female_happy_02.png',fx:0.340,fy:0.220,fw:0.140}],
-     },
-     male:{
-       romantic:[{src:'/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_01.png',fx:0.563,fy:0.252,fw:0.277},
-         {src:'/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_01.png',fx:0.410,fy:0.257,fw:0.152},
-         {src:'/assets/srv-farsi-avatars/short/male/romantic/srv_farsi_short_male_romantic_02.png',fx:0.455,fy:0.297,fw:0.357},
-         {src:'/assets/srv-farsi-avatars/long/male/romantic/srv_farsi_long_male_romantic_02.png',fx:0.410,fy:0.252,fw:0.154}],
-       emotional:[{src:'/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_01.png',fx:0.495,fy:0.341,fw:0.326},
-         {src:'/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_01.png',fx:0.459,fy:0.259,fw:0.157},
-         {src:'/assets/srv-farsi-avatars/short/male/emotional/srv_farsi_short_male_emotional_02.png',fx:0.641,fy:0.303,fw:0.334},
-         {src:'/assets/srv-farsi-avatars/long/male/emotional/srv_farsi_long_male_emotional_02.png',fx:0.475,fy:0.291,fw:0.182}],
-       happy:[{src:'/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_01.png',fx:0.558,fy:0.238,fw:0.293},
-         {src:'/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_01.png',fx:0.383,fy:0.261,fw:0.167},
-         {src:'/assets/srv-farsi-avatars/short/male/happy/srv_farsi_short_male_happy_02.png',fx:0.507,fy:0.206,fw:0.251},
-         {src:'/assets/srv-farsi-avatars/long/male/happy/srv_farsi_long_male_happy_02.png',fx:0.408,fy:0.247,fw:0.140}],
-     },
-     duet:{
-       romantic:[{src:'/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_01.png',fx:0.530,fy:0.350,fw:0.262},
-         {src:'/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_01.png',fx:0.490,fy:0.270,fw:0.156},
-         {src:'/assets/srv-farsi-avatars/short/duet/romantic/srv_farsi_short_duet_romantic_02.png',fx:0.410,fy:0.330,fw:0.237},
-         {src:'/assets/srv-farsi-avatars/long/duet/romantic/srv_farsi_long_duet_romantic_02.png',fx:0.430,fy:0.290,fw:0.137}],
-       emotional:[{src:'/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_01.png',fx:0.470,fy:0.350,fw:0.281},
-         {src:'/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_01.png',fx:0.500,fy:0.290,fw:0.150},
-         {src:'/assets/srv-farsi-avatars/short/duet/emotional/srv_farsi_short_duet_emotional_02.png',fx:0.480,fy:0.400,fw:0.281},
-         {src:'/assets/srv-farsi-avatars/long/duet/emotional/srv_farsi_long_duet_emotional_02.png',fx:0.470,fy:0.300,fw:0.169}],
-       happy:[{src:'/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_01.png',fx:0.470,fy:0.330,fw:0.237},
-         {src:'/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_01.png',fx:0.480,fy:0.230,fw:0.150},
-         {src:'/assets/srv-farsi-avatars/short/duet/happy/srv_farsi_short_duet_happy_02.png',fx:0.520,fy:0.340,fw:0.262},
-         {src:'/assets/srv-farsi-avatars/long/duet/happy/srv_farsi_long_duet_happy_02.png',fx:0.460,fy:0.270,fw:0.163}],
-     },
+   // SRV Farsi avatar library — ONE library per ARTIST (female / male / duet), shared by Shorts and Longs.
+   // Every source is a 16:9 landscape portrait; the Long uses it as a landscape cover and the Short takes a
+   // face-centred vertical crop of the SAME file (see _drawFarsiPanel). fx/fy = face centre and fw = face width,
+   // as fractions of the source (a duet's fw covers both faces /1.6), so every crop is framed on the face(s).
+   // The build picks automatically (rotation per artist, D.srvFarsiAvatarIdx['lib.<artist>']) unless the operator
+   // chose a cover for that task at the Build stage (task.srvAvatarId). To add an image: put the file and its
+   // thumb under /assets/srv-farsi-avatars/library/<artist>/ and add one entry here.
+   avatarLibrary:{
+     female:[
+       {id:'female_01',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_01.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_01.jpg',fx:0.335,fy:0.170,fw:0.075},
+       {id:'female_02',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_02.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_02.jpg',fx:0.693,fy:0.370,fw:0.190},
+       {id:'female_03',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_03.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_03.jpg',fx:0.320,fy:0.338,fw:0.179},
+       {id:'female_04',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_04.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_04.jpg',fx:0.770,fy:0.347,fw:0.182},
+       {id:'female_05',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_05.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_05.jpg',fx:0.679,fy:0.367,fw:0.173},
+       {id:'female_06',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_06.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_06.jpg',fx:0.270,fy:0.351,fw:0.173},
+       {id:'female_07',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_07.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_07.jpg',fx:0.752,fy:0.200,fw:0.095},
+       {id:'female_08',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_08.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_08.jpg',fx:0.785,fy:0.303,fw:0.150},
+       {id:'female_09',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_09.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_09.jpg',fx:0.306,fy:0.352,fw:0.190},
+       {id:'female_10',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_10.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_10.jpg',fx:0.319,fy:0.360,fw:0.166},
+       {id:'female_11',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_11.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_11.jpg',fx:0.263,fy:0.375,fw:0.173},
+       {id:'female_12',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_12.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_12.jpg',fx:0.649,fy:0.375,fw:0.175},
+       {id:'female_13',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_13.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_13.jpg',fx:0.723,fy:0.348,fw:0.184},
+       {id:'female_14',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_14.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_14.jpg',fx:0.660,fy:0.378,fw:0.169},
+       {id:'female_15',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_15.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_15.jpg',fx:0.758,fy:0.347,fw:0.188},
+       {id:'female_16',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_16.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_16.jpg',fx:0.331,fy:0.357,fw:0.184},
+       {id:'female_17',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_17.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_17.jpg',fx:0.784,fy:0.318,fw:0.156},
+       {id:'female_18',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_18.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_18.jpg',fx:0.712,fy:0.352,fw:0.173},
+       {id:'female_19',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_19.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_19.jpg',fx:0.344,fy:0.346,fw:0.176},
+       {id:'female_20',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_20.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_20.jpg',fx:0.346,fy:0.340,fw:0.176},
+       {id:'female_21',src:'/assets/srv-farsi-avatars/library/female/srv_farsi_female_21.jpg',thumb:'/assets/srv-farsi-avatars/library/female/thumb/srv_farsi_female_21.jpg',fx:0.303,fy:0.301,fw:0.142}],
+     male:[
+       {id:'male_01',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_01.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_01.jpg',fx:0.661,fy:0.260,fw:0.155},
+       {id:'male_02',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_02.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_02.jpg',fx:0.318,fy:0.290,fw:0.151},
+       {id:'male_03',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_03.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_03.jpg',fx:0.298,fy:0.303,fw:0.176},
+       {id:'male_04',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_04.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_04.jpg',fx:0.713,fy:0.289,fw:0.166},
+       {id:'male_05',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_05.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_05.jpg',fx:0.694,fy:0.287,fw:0.167},
+       {id:'male_06',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_06.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_06.jpg',fx:0.342,fy:0.269,fw:0.161},
+       {id:'male_07',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_07.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_07.jpg',fx:0.704,fy:0.282,fw:0.170},
+       {id:'male_08',src:'/assets/srv-farsi-avatars/library/male/srv_farsi_male_08.jpg',thumb:'/assets/srv-farsi-avatars/library/male/thumb/srv_farsi_male_08.jpg',fx:0.317,fy:0.291,fw:0.180}],
+     duet:[
+       {id:'duet_01',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_01.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_01.jpg',fx:0.325,fy:0.330,fw:0.180},
+       {id:'duet_02',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_02.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_02.jpg',fx:0.706,fy:0.370,fw:0.240},
+       {id:'duet_03',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_03.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_03.jpg',fx:0.707,fy:0.416,fw:0.270},
+       {id:'duet_04',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_04.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_04.jpg',fx:0.687,fy:0.318,fw:0.190},
+       {id:'duet_05',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_05.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_05.jpg',fx:0.319,fy:0.320,fw:0.180},
+       {id:'duet_06',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_06.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_06.jpg',fx:0.267,fy:0.276,fw:0.240},
+       {id:'duet_07',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_07.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_07.jpg',fx:0.640,fy:0.330,fw:0.210},
+       {id:'duet_08',src:'/assets/srv-farsi-avatars/library/duet/srv_farsi_duet_08.jpg',thumb:'/assets/srv-farsi-avatars/library/duet/thumb/srv_farsi_duet_08.jpg',fx:0.290,fy:0.250,fw:0.220}],
    }},
   {id:"srv_english",name:"SRV English",icon:"🎵",hint:"SRV Studio · Female Emotional Deep House · Long",
    modes:["Female — Emotional"], // SRV-STUDIO-V2-026 (CEO, final): Emotional only, Long only — no Romantic/Happy, no Shorts
@@ -19982,6 +19978,7 @@ function renderSRVFarsiLifecycleCard(task){
         </div>
       </div>
       ${bgUrl?`<div style="margin-bottom:10px;border-radius:8px;overflow:hidden;max-height:90px"><img src="${escHTML(bgUrl)}" style="width:100%;object-fit:cover;max-height:90px" alt="bg"><div style="font-size:9px;color:var(--dim);padding:2px 0">📷 Pexels background auto-selected</div></div>`:''}
+      ${_srvFarsiAvatarPickerHtml(task)}
       <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 3 — BUILD PACKAGE</div>
       <button id="srv-farsi-build-btn-${pkgId}" onclick="_srvFarsiBuildTrigger('${pkgId}','${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">🌹 Build Package — Fetch Background + Render Video</button>
       <div id="srv-farsi-build-status-${pkgId}" style="margin-top:8px;font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace"></div>
@@ -19998,9 +19995,9 @@ function renderSRVFarsiLifecycleCard(task){
       <div style="font-size:11px;color:var(--dim);margin-bottom:12px">Review the final video before it publishes. Approve to upload to YouTube, or rebuild if something's wrong.</div>
       ${isLongApprove?(longUrl?`<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">LONG VIDEO (16:9)</div><video src="${escHTML(longUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Long video not ready yet.</div>'):''}
       ${!isLongApprove?(shortUrl?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">SHORT VIDEO (9:16)</div><video src="${escHTML(shortUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Short video not ready yet.</div>'):''}
-      ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Image ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in this pool · Rebuild moves to the next image</div>`:''}
+      ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Cover ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in the library · ${pkg._srvAvatarChoice&&pkg._srvAvatarChoice.how==='manual'?'chosen at Build — Rebuild keeps it unless you change it':'automatic — Rebuild moves to the next image, or choose one at Build'}</div>`:''}
       ${pubLabel?`<div style="padding:8px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:#22c55e;margin-bottom:10px">📅 Will publish: ${escHTML(pubLabel)}</div>`:''}
-      <div style="padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;margin-bottom:12px;line-height:1.5">⚠️ <strong>After upload:</strong> YouTube Studio → Edit → Content → "Altered or synthetic content" → Set YES</div>
+      <div style="padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;margin-bottom:12px;line-height:1.5">🤖 <strong>AI Use / Altered content: YES</strong> — MMMOS sets this on YouTube automatically at upload.</div>
       <div style="display:flex;gap:8px">
         <button onclick="_srvFarsiApproveVideo('${pkgId}','${taskId}')" style="flex:1;padding:13px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.45);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Approve & Publish</button>
         <button onclick="_srvFarsiSetStage('${taskId}','build');renderTab('tasks')" style="padding:12px 14px;background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.30);border-radius:10px;color:#c9a84c;font-weight:700;font-size:12px;cursor:pointer;font-family:'Syne',sans-serif">↻ Rebuild</button>
@@ -20046,7 +20043,8 @@ function renderSRVFarsiLifecycleCard(task){
         <div style="font-size:14px;font-weight:800;color:#22c55e;margin-bottom:8px">Published</div>
         ${ytId?`<a href="https://studio.youtube.com/video/${escHTML(ytId)}/edit" target="_blank" style="display:block;margin-top:6px;padding:8px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;text-decoration:none">▶ Open Long in YouTube Studio</a>`:''}
         ${ytShortId?`<a href="https://studio.youtube.com/video/${escHTML(ytShortId)}/edit" target="_blank" style="display:block;margin-top:6px;padding:8px;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;text-decoration:none">▶ Open Short in YouTube Studio</a>`:''}
-        <div style="margin-top:10px;padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;text-align:left;line-height:1.6">⚠️ <strong>AI Disclosure required:</strong> YouTube Studio → Edit each video → Content → "Altered or synthetic content" → <strong>YES</strong></div>
+        <div style="margin-top:10px;padding:8px 12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:8px;font-size:10px;color:#fbbf24;text-align:left;line-height:1.6">🤖 <strong>AI Use / Altered content: YES</strong> — set automatically at upload. Confirm once in YouTube Studio → Content.</div>
+        ${_srvFarsiPlaylistResultHtml(pkg)}
         ${!_isLongDone?`<div style="margin-top:12px;padding:12px;background:rgba(0,0,0,0.15);border:1px solid rgba(255,255,255,0.08);border-radius:10px;text-align:left;opacity:0.8">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ TikTok — Manual Publish</span><span style="font-size:9px;font-weight:800;padding:2px 8px;border-radius:12px;background:#6b728022;color:#9ca3af;border:1px solid #6b728044;letter-spacing:0.5px">⏸ PRODUCTION FROZEN</span>
@@ -20218,23 +20216,17 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
     const _fBgArchetype=_farsiPickBgArchetype(), _fIntensity=_farsiPickIntensity();
     const _fSeed=Math.floor(Math.random()*1e9); // fresh atmo/particle layout every render, no repetition concept needed
     (function(){
-      const _fCfg=_srvFarsiEngineConfig();
-      const _fLib=_fCfg&&_fCfg.avatarPool;
-      if(!_fLib)return;
-      // One pool per artist x mood, shared by Short and Long (each format crops the same source its
-      // own way). The rotation pointer is per pool, so every rebuild of either format moves that
-      // pool to its next source image, and the whole pool is used before any image repeats.
-      const _fMoodKey=String(_fMoodOnly||'').toLowerCase().trim();
-      const _fArtistPools=_fLib[_fGroup];
-      const _fPool=(_fArtistPools&&_fArtistPools[_fMoodKey])||[];
-      if(!_fPool.length){
-        console.warn('[SRV Farsi] visual pool: no images for '+_fGroup+'/'+_fMoodKey+' — check avatarPool manifest');
-      }
-      const _fPicked=_farsiPickAvatar(_fPool,_fGroup+'.'+_fMoodKey);
-      _fAvUrlForRender=_fPicked&&(typeof _fPicked==='string'?_fPicked:_fPicked.src)||null;
-      _fAvFocus=(_fPicked&&typeof _fPicked==='object')?{x:_fPicked.fx,y:_fPicked.fy,w:_fPicked.fw}:{};
-      // Which pool image this build used (shown at Approve so a Rebuild's rotation is visible, not guessed).
-      if(_fPicked)pkg._srvVisualPoolPos={n:_fPool.indexOf(_fPicked)+1,of:_fPool.length,pool:_fGroup+'.'+_fMoodKey,file:String(_fAvUrlForRender||'').split('/').pop()};
+      // One library per artist, shared by Short and Long. The operator's Build-stage choice for this task wins;
+      // otherwise the artist rotation picks (and only then advances), so a manual cover never moves the rotation.
+      const _fLibA=_srvFarsiAvatarLibrary(_fGroup);
+      if(!_fLibA.length){ console.warn('[SRV Farsi] avatar library: no images for '+_fGroup+' — check avatarLibrary manifest'); return; }
+      const _fManual=task&&task.srvAvatarId&&task.srvAvatarArtist===_fGroup?_srvFarsiAvatarById(_fGroup,task.srvAvatarId):null;
+      const _fPicked=_fManual||_farsiPickAvatar(_fLibA,'lib.'+_fGroup);
+      _fAvUrlForRender=_fPicked.src;
+      _fAvFocus={x:_fPicked.fx,y:_fPicked.fy,w:_fPicked.fw};
+      // Recorded on the package: which image, and whether the operator chose it (shown at Approve).
+      pkg._srvVisualPoolPos={n:_fLibA.indexOf(_fPicked)+1,of:_fLibA.length,pool:_fGroup,file:String(_fPicked.src).split('/').pop()};
+      pkg._srvAvatarChoice={id:_fPicked.id,artist:_fGroup,how:_fManual?'manual':'auto'};
     })();
 
     // Step 2: SHORT render (9:16) — only for Short tasks
@@ -20384,13 +20376,15 @@ async function _srvFarsiRunPublish(pkgId,taskId){
           tags:_farsiTags,
           categoryId:'10',privacyStatus:'private',madeForKids:false,
           publishAt:_srvPublishAt,
-          playlistCategory:_farsiPlaylistCat, // v13.72.0 — auto-add to Romantic/Emotional/Happy playlist
+          farsiPlaylists:_srvFarsiPublishPlaylists(_farsiPubTask,isLong), // mood playlist (+ Shorts playlist for a Short)
+          containsSyntheticMedia:true, // AI Use / altered content = YES (YouTube status.containsSyntheticMedia)
         }),
       });
       return r.json().catch(()=>({}));
     }
 
     const _pubTask=_srvFarsiTaskById(taskId);
+    void _farsiPlaylistCat;
     const _isLongPub=!!(_pubTask&&_pubTask.isLong);
     const [longUp,shortUp]=await Promise.all([
       _isLongPub?doUpload(longUrl,'LONG',true):Promise.resolve(null),
@@ -20411,6 +20405,8 @@ async function _srvFarsiRunPublish(pkgId,taskId){
     // Package format is Long here, so youtubeVideoId (-> packages.youtube_video_id) tracks the
     // Long's own id, matching how _srvFarsiPublishYouTube already sets it for pure-Short packages.
     if(_longYtId)pkg.youtubeVideoId=_longYtId;
+    if(longUp&&Array.isArray(longUp.playlists))pkg.youtubePlaylists=longUp.playlists;
+    else if(shortUp&&Array.isArray(shortUp.playlists))pkg.youtubePlaylists=shortUp.playlists;
     if(_longYtId)await _srvFarsiSetYouTubeThumbnail(pkg,_longYtId); // SRV Farsi thumbnails (Long)
     // v15.20.0 — TikTok is no longer auto-fired here (Engineering Task 1c0e3090): it's now
     // an independent, operator-visible action (_srvFarsiPublishTikTok) triggered from the
@@ -20472,10 +20468,13 @@ async function _srvFarsiPublishYouTube(pkgId,taskId){
         tags:_srvFarsiYouTubeHashtags(pkg,_farsiPubTask&&_farsiPubTask.mood).map(function(t){return t.replace(/^#/,'');}),
         categoryId:'10',privacyStatus:'private',madeForKids:false,
         publishAt:_srvPublishAt,
-        playlistCategory:_farsiPlaylistCat,
+        farsiPlaylists:_srvFarsiPublishPlaylists(_farsiPubTask,false), // mood playlist + Shorts playlist
+        containsSyntheticMedia:true, // AI Use / altered content = YES (YouTube status.containsSyntheticMedia)
       }),
     });
     const d=await r.json().catch(()=>({}));
+    void _farsiPlaylistCat;
+    if(d&&Array.isArray(d.playlists))pkg.youtubePlaylists=d.playlists;
     // v15.20.5 — fix-forward (Engineering Task 1c0e3090, CEO escalation #2): the server
     // (youtubeUploadVideo in api/ops.js) returns the id under `youtubeVideoId`, never
     // `videoId`. This check was always false on success, so every successful YouTube
@@ -20679,6 +20678,70 @@ function _srvFarsiVaCurrentArtistFormat(task){
 }
 function _srvFarsiVaAutoArtistFormat(task){
   return task.vaOriginal||_srvFarsiVaCurrentArtistFormat(task);
+}
+// ── SRV Farsi avatar library: artist resolution, lookup, and the Build-stage manual cover choice ──
+function _srvFarsiAvatarArtist(task){
+  const m=String((task&&(task.mode||task.mood))||'');
+  return /^Duet/i.test(m)?'duet':/^Male/i.test(m)?'male':'female';
+}
+function _srvFarsiAvatarLibrary(artist){
+  const c=_srvFarsiEngineConfig(); const L=c&&c.avatarLibrary;
+  return (L&&Array.isArray(L[artist]))?L[artist]:[];
+}
+function _srvFarsiAvatarById(artist,id){ return _srvFarsiAvatarLibrary(artist).find(function(a){return a.id===id;})||null; }
+// The operator's cover for this task, if it still belongs to the task's artist (an artist change voids it).
+function _srvFarsiManualAvatar(task){
+  if(!task||!task.srvAvatarId)return null;
+  const art=_srvFarsiAvatarArtist(task);
+  return task.srvAvatarArtist===art?_srvFarsiAvatarById(art,task.srvAvatarId):null;
+}
+// The image the next build will use: the operator's choice, else the next one in the artist rotation.
+function _srvFarsiNextAvatar(task){
+  const man=_srvFarsiManualAvatar(task); if(man)return {av:man,how:'manual'};
+  const art=_srvFarsiAvatarArtist(task), lib=_srvFarsiAvatarLibrary(art); if(!lib.length)return null;
+  const idx=(D.srvFarsiAvatarIdx&&typeof D.srvFarsiAvatarIdx['lib.'+art]==='number')?D.srvFarsiAvatarIdx['lib.'+art]%lib.length:0;
+  return {av:lib[idx],how:'auto'};
+}
+// Build stage: pick a cover for THIS task only (id) or go back to automatic (null). Saved on the task, so it survives
+// refresh/reload through the normal shared-state save. Never touches artist/mood/cadence rotation or other tasks.
+function _srvFarsiSelectAvatar(taskId,id){
+  const t=_srvFarsiTaskById(taskId); if(!t)return;
+  const art=_srvFarsiAvatarArtist(t);
+  if(id){ if(!_srvFarsiAvatarById(art,id))return; t.srvAvatarId=id; t.srvAvatarArtist=art; t.srvAvatarChosenAt=Date.now(); }
+  else { delete t.srvAvatarId; delete t.srvAvatarArtist; delete t.srvAvatarChosenAt; }
+  if(typeof saveAppState==='function')saveAppState();
+  if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
+}
+function _srvFarsiAvatarPickerHtml(task){
+  const art=_srvFarsiAvatarArtist(task), lib=_srvFarsiAvatarLibrary(art), next=_srvFarsiNextAvatar(task);
+  if(!lib.length||!next)return '';
+  const tid=escHTML(String(task.taskId||task.id||''));
+  const artLabel=art==='duet'?'Duet':art==='male'?'Male':'Female';
+  const tiles=lib.map(function(a,i){
+    const sel=next.how==='manual'&&a.id===next.av.id;
+    return `<button type="button" data-srv-avatar="${escHTML(a.id)}" onclick="_srvFarsiSelectAvatar('${tid}','${escHTML(a.id)}')" title="Use this cover" style="position:relative;padding:0;border:2px solid ${sel?'#c9a84c':'rgba(255,255,255,0.08)'};border-radius:7px;overflow:hidden;cursor:pointer;background:#000;aspect-ratio:16/9"><img src="${escHTML(a.thumb||a.src)}" loading="lazy" alt="${artLabel} cover ${i+1}" style="width:100%;height:100%;object-fit:cover;display:block;opacity:${sel?1:0.82}">${sel?'<span style="position:absolute;top:3px;right:3px;background:#c9a84c;color:#000;font-size:9px;font-weight:800;border-radius:4px;padding:1px 5px">✓</span>':''}</button>`;
+  }).join('');
+  return `<div id="srv-farsi-cover-picker-${tid}" style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;font-family:'JetBrains Mono',monospace">COVER PHOTO — ${artLabel.toUpperCase()} LIBRARY (${lib.length})</div>
+        ${next.how==='manual'?`<button type="button" onclick="_srvFarsiSelectAvatar('${tid}',null)" style="padding:4px 9px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--dim);font-size:10px;cursor:pointer">↺ Back to automatic</button>`:''}</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+          <img src="${escHTML(next.av.thumb||next.av.src)}" alt="Selected cover" style="width:132px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;border:2px solid #c9a84c">
+          <div style="font-size:11px;line-height:1.5;color:var(--text)"><strong>${next.how==='manual'?'Your choice':'Automatic'}</strong><br><span style="color:var(--dim);font-size:10px">${next.how==='manual'?'Build and Rebuild use this cover until you change it.':'Next in the '+artLabel+' rotation. Tap any photo below to choose it for this task.'}</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px;max-height:230px;overflow:auto;padding-right:2px">${tiles}</div>
+      </div>`;
+}
+// SRV Farsi publishing: mood playlist, plus the Shorts playlist for a Short (resolved on the channel by exact title).
+function _srvFarsiPublishPlaylists(task,isLong){
+  const cat=(task&&task.playlistCategory)||_srvFarsiPlaylistCategory(task&&(task.mood||task.mode));
+  return [cat].concat(isLong?[]:['short']).filter(function(k){return ['romantic','emotional','happy','short'].indexOf(k)>=0;});
+}
+function _srvFarsiPlaylistResultHtml(pkg){
+  const r=pkg&&pkg.youtubePlaylists; if(!Array.isArray(r)||!r.length)return '';
+  const why={playlist_not_found_on_channel:'no playlist with this exact name on the channel',needs_playlist_permission:'channel connection lacks the playlist permission',playlist_list_failed:'could not read the channel playlists'};
+  return `<div style="margin-top:8px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:10px;text-align:left;line-height:1.7">`+
+    r.map(function(x){return (x.ok?'✅ ':'⚠️ ')+escHTML(x.title||'Playlists')+(x.ok?'':' — '+escHTML(why[x.error]||x.error||'not added'));}).join('<br>')+`</div>`;
 }
 function _srvFarsiVaSetArtistFormat(taskId,field,value){
   const task=_srvFarsiTaskById(taskId);
@@ -23180,9 +23243,9 @@ async function _srvRenderVideo(opts){
     _farsiPal=SRV_FARSI_MOOD_PALETTES[_srvFarsiMoodKey(mood)];
     _farsiT_ATMO=isShort?15:20;
     const _seed=(typeof seed==='number'&&isFinite(seed))?seed:1;
-    const _baseN=_srvFarsiMoodKey(mood)==='happy'?46:42; // denser field: the frame should feel alive
+    const _baseN=_srvFarsiMoodKey(mood)==='happy'?26:24; // restrained field: atmosphere, never a distraction
     if(_srvFarsiMoodKey(mood)==='emotional'){
-      _farsiAtmo=_srvFarsiGenRain(_seed,Math.round(70*_farsiIntensityMul)); _farsiAtmoKind='rain';
+      _farsiAtmo=_srvFarsiGenRain(_seed,Math.round(50*_farsiIntensityMul)); _farsiAtmoKind='rain';
     } else {
       _farsiAtmo=_srvFarsiGenParticles(_srvFarsiMoodKey(mood),_seed,Math.round(_baseN*_farsiIntensityMul)); _farsiAtmoKind='particle';
     }
@@ -23210,22 +23273,22 @@ async function _srvRenderVideo(opts){
     const wrap=function(v,m){return ((v%m)+m)%m;};
     ctx.save();
     ctx.globalCompositeOperation='screen';
-    for(let i=0;i<7;i++){
+    for(let i=0;i<5;i++){
       const r=W*(0.11+0.045*(i%4));
       const dir=(i%2)?1:-1;
-      const x=wrap((i*0.371+0.13)+dir*(0.016+0.005*(i%3))*t,1.3)-0.15;
-      const y=wrap((i*0.529+0.21)-(0.011+0.004*(i%4))*t,1.3)-0.15;
-      ctx.globalAlpha=0.055+0.03*(0.5+0.5*Math.sin(t*0.9+i*1.7));
+      const x=wrap((i*0.371+0.13)+dir*(0.004+0.002*(i%3))*t,1.3)-0.15;
+      const y=wrap((i*0.529+0.21)-(0.003+0.001*(i%4))*t,1.3)-0.15;
+      ctx.globalAlpha=0.04+0.02*(0.5+0.5*Math.sin(t*0.25+i*1.7));
       ctx.drawImage(sp,x*W-r,y*H-r,r*2,r*2);
     }
     if(_farsiAtmoKind==='particle'){
       const k=W/1280;
       for(const p of _farsiAtmo){
         const d=Math.min(1,p.baseOp*1.6);                       // 0..1 depth: nearer = faster, bigger, brighter
-        const yf=wrap(p.y0-(0.085+0.15*d)*t,1.15)-0.075;
-        const xf=wrap(p.x0+(0.012+0.02*d)*(p.wrapsX?-1:1)*t+0.022*Math.sin(t*(0.7+0.5*d)+p.phase),1.1)-0.05;
+        const yf=wrap(p.y0-(0.018+0.03*d)*t,1.15)-0.075;          // slow, soft fall-away upward drift
+        const xf=wrap(p.x0+(0.003+0.004*d)*(p.wrapsX?-1:1)*t+0.008*Math.sin(t*(0.18+0.12*d)+p.phase),1.1)-0.05;
         const s=Math.min(W*0.022,p.size*k*(1.5+1.9*d));
-        ctx.globalAlpha=Math.max(0.08,p.baseOp*(0.6+0.4*Math.sin(t*(1.6+p.harmonic)+p.phase)));
+        ctx.globalAlpha=Math.max(0.08,p.baseOp*(0.7+0.3*Math.sin(t*(0.35+0.15*p.harmonic)+p.phase)));
         ctx.drawImage(sp,xf*W-s,yf*H-s,s*2,s*2);
       }
       ctx.globalCompositeOperation='source-over';
@@ -23233,7 +23296,7 @@ async function _srvRenderVideo(opts){
       ctx.globalCompositeOperation='source-over';
       ctx.strokeStyle=_farsiPal.particle; ctx.lineWidth=1.5;
       for(const d of _farsiAtmo){
-        const yf=wrap(d.y0+0.46*t,1.4)-0.2;
+        const yf=wrap(d.y0+0.20*t,1.4)-0.2;
         ctx.globalAlpha=d.op;
         ctx.beginPath(); ctx.moveTo(d.x0*W,yf*H); ctx.lineTo(d.x0*W+d.length*0.28,yf*H+d.length*1.7); ctx.stroke();
       }
@@ -23262,7 +23325,7 @@ async function _srvRenderVideo(opts){
       const cover=Math.max(pw/iw,ph/ih);
       let sc=cover;
       // scale so the face reaches the target size; never below "cover", never so far the photo goes soft
-      if(fw>0&&aim.face>0) sc=Math.min(cover*1.7,Math.max(cover,(aim.face*pw)/(fw*iw)));
+      if(fw>0&&aim.face>0) sc=Math.min(Math.max(cover,Math.min(cover*1.7,1.5)),Math.max(cover,(aim.face*pw)/(fw*iw))); // ≤1.5x native unless the frame itself needs more
       const sw=pw/sc, sh=ph/sc;
       const sx=Math.min(iw-sw,Math.max(0,iw*fx-sw*aim.x));
       const sy=Math.min(ih-sh,Math.max(0,ih*fy-sh*aim.y));
@@ -23438,10 +23501,11 @@ async function _srvRenderVideo(opts){
     const _in=function(a,b){ if(skipFade)return 1; const x=_c01((t-a)/(b-a)); return 1-Math.pow(1-x,3); }; // ease-out
     const _live=skipFade?0:1;
     const _cyc=function(period,phase){return Math.sin(2*Math.PI*t/period+(phase||0));};
-    // camera: a slow push-in/out plus a faster small breath, and a drifting pan (all about the face)
-    const zoom=1.09+_live*((0.05*_farsiIntensityMul)*_cyc(11,0)+0.012*_cyc(4.3,1));
-    const panX=_live*_cyc(13,0.6), panY=_live*_cyc(9,2.1);
-    const sweep=_live?(((t+2)%9)/9)*1.8-0.4:undefined; // a light band crosses the photo every 9s
+    // camera — "a still portrait brought gently to life": one slow push/pull (26s), a barely-there drift, no
+    // breath, no shake, no light sweep. The pivot is the face (see _drawFarsiPanel), so the face stays still.
+    const zoom=1.045+_live*((0.025*_farsiIntensityMul)*_cyc(26,0));
+    const panX=_live*0.35*_cyc(37,0.6), panY=_live*0.25*_cyc(43,2.1);
+    const sweep=undefined;
     const isMirror=!!mirror;
     const _rawTitle=(title||hookText||'').replace(/\s*[|·—–].*$/,'').replace(/\s+(?:Emotional|Romantic|Happy)\b.*/i,'').trim();
     const _titleFontStr=function(px){ return `600 ${px}px 'Noto Nastaliq Urdu', serif`; };
@@ -23492,7 +23556,7 @@ async function _srvRenderVideo(opts){
       const _wordmarkH=Math.round(W*0.028);
       const _stackH=(_nTitleLines*_titleLineH)+_ruleGap+3+_finglishH+_wordmarkGap+_wordmarkH;
       const titleTopY=Math.max(Math.round(H*0.16),Math.round(H*0.5-_stackH/2));
-      const _drift=_live*W*0.003*_cyc(7,0.4);                  // the settled title keeps a slight float (parallax against the photo)
+      const _drift=0;                                          // the title holds still once it has slid in
       const pT=_in(0.35,1.30);
       ctx.save();
       ctx.globalAlpha=pT; ctx.translate((1-pT)*_dir*W*0.09+_drift,0);
@@ -23540,14 +23604,14 @@ async function _srvRenderVideo(opts){
         bx.drawImage(_avatarImg,(54-iw*sc)/2,(96-ih*sc)/2,iw*sc,ih*sc);
       }
       if(_farsiShortBg){
-        const bz=1.30+_live*0.07*_cyc(17,0);
+        const bz=1.30+_live*0.03*_cyc(41,0);
         ctx.save(); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-        ctx.translate(W/2+_live*W*0.04*_cyc(23,1),H/2+_live*H*0.02*_cyc(19,2)); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
+        ctx.translate(W/2+_live*W*0.012*_cyc(47,1),H/2+_live*H*0.008*_cyc(53,2)); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
         ctx.drawImage(_farsiShortBg,0,0,W,H);
         ctx.restore();
       }
       const _g0=_srvFarsiHexRgb(_farsiPal.gradient[0]), _g1=_srvFarsiHexRgb(_farsiPal.gradient[1]), _g2=_srvFarsiHexRgb(_farsiPal.gradient[2]);
-      const bgG=ctx.createLinearGradient(W*(0.2+_live*0.15*_cyc(21,0)),0,W*0.8,H);
+      const bgG=ctx.createLinearGradient(W*(0.2+_live*0.05*_cyc(45,0)),0,W*0.8,H);
       bgG.addColorStop(0,'rgba('+_g0+',0.58)'); bgG.addColorStop(0.5,'rgba('+_g1+',0.70)'); bgG.addColorStop(1,'rgba('+_g2+',0.92)');
       ctx.fillStyle=bgG; ctx.fillRect(0,0,W,H);
       _drawFarsiAtmo(t);

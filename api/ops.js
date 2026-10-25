@@ -240,6 +240,7 @@ const PUBLISH_GATED_ACTIONS = new Set([
   'srv_studio_v2_va_upload', // SRV-STUDIO-V2-023 (it also requires a VA/CEO session itself)
   'srv_studio_v2_production_upload', // SRV-STUDIO-V2-028 (it also requires a VA/CEO session itself)
   'srv_studio_v2_playlist_sync', // SRV-STUDIO-V2-030 (it also requires a VA/CEO session itself)
+  'srv_farsi_playlists', // SRV Farsi playlist check (uses the channel token, read-only)
 ]);
 const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
 const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -7599,6 +7600,55 @@ const _FARSI_PLAYLIST_MAP = {
   happy:     'SRV Farsi - Happy',
 };
 
+// SRV Farsi playlist routing (order: SRV FARSI — AVATAR + MOTION + BUILD COVER + PUBLISHING). Each video goes to its
+// mood playlist, and a Short also to the Shorts playlist. Playlists are looked up on the connected Silk Road Voices
+// channel by exact title (private and unlisted included, via playlists?mine=true) and are never created or guessed:
+// a missing title is reported back as missing. Adding to a playlist needs the youtube.force-ssl permission
+// (playlistItems.insert), so until Silk Road Voices is reconnected with it the add is reported as failed, non-fatal.
+const SRV_FARSI_PLAYLIST_TITLES = {
+  romantic:  'Silk Road Voices Romantic',
+  emotional: 'Silk Road Voices Emotional',
+  happy:     'Silk Road Voices Happy',
+  short:     'Silk Road Voices Short',
+};
+const _plNorm = (t) => String(t || '').normalize('NFKC').trim().toLowerCase();
+async function _srvFarsiListPlaylists(accessToken) {
+  const all = []; let pageToken = '';
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch('https://www.googleapis.com/youtube/v3/playlists?part=snippet,status,contentDetails&mine=true&maxResults=50' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''),
+      { headers: { 'Authorization': 'Bearer ' + accessToken } });
+    if (!r.ok) throw new Error('playlist_list_failed_' + r.status);
+    const d = await r.json();
+    (d.items || []).forEach(function(p) { all.push({ id: p.id, title: p.snippet && p.snippet.title, privacy: p.status && p.status.privacyStatus, items: p.contentDetails && p.contentDetails.itemCount }); });
+    if (!d.nextPageToken) break; pageToken = d.nextPageToken;
+  }
+  return all;
+}
+// keys -> [{ key, title, id|null }] by exact (normalised) title on the channel
+function _srvFarsiResolvePlaylists(keys, channelPlaylists) {
+  return (keys || []).filter(function(k, i, a) { return SRV_FARSI_PLAYLIST_TITLES[k] && a.indexOf(k) === i; }).map(function(k) {
+    const want = SRV_FARSI_PLAYLIST_TITLES[k];
+    const hit = (channelPlaylists || []).find(function(p) { return _plNorm(p.title) === _plNorm(want); });
+    return { key: k, title: want, id: hit ? hit.id : null };
+  });
+}
+// Read-only check for the SRV Farsi Publish stage: which of the four playlists exist on the channel, with their ids.
+async function srvFarsiPlaylists(req, res) {
+  try {
+    const conn = await _getYoutubeConnectionByTitle(YT_ENGINE_TO_TITLE['SRV Farsi'], { exact: true });
+    if (!conn || !conn.refresh_token) return res.status(404).json({ ok: false, error: 'no_connection' });
+    const { accessToken } = await _refreshYoutubeToken(conn.refresh_token);
+    const list = await _srvFarsiListPlaylists(accessToken);
+    const scope = String(conn.scope || '');
+    return res.status(200).json({ ok: true, channelId: conn.channel_id,
+      resolved: _srvFarsiResolvePlaylists(Object.keys(SRV_FARSI_PLAYLIST_TITLES), list),
+      channelPlaylists: list.map(function(p) { return { id: p.id, title: p.title, privacy: p.privacy, items: p.items }; }),
+      canAddToPlaylists: /youtube\.force-ssl|auth\/youtube(\s|$)/.test(scope) });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: 'playlist_check_failed', message: e.message });
+  }
+}
+
 // Fetch playlist by title from channel, or create it if missing.
 async function _ytGetOrCreatePlaylist(playlistTitle, accessToken) {
   const listRes = await fetch(
@@ -7659,6 +7709,7 @@ async function youtubeUploadVideo(req, res) {
     publishAt,         // ISO timestamp for scheduled publish (requires privacy=private)
     madeForKids,       // boolean, defaults false (we're general audience)
     playlistCategory,  // v13.72.0 — 'romantic'|'emotional'|'happy' → auto-add to named playlist
+    farsiPlaylists,    // SRV Farsi only: ['romantic'|'emotional'|'happy', 'short'?] → exact-title playlists on the channel
     containsSyntheticMedia, // Release A3 (2026-09-28) — optional, additive; official YouTube Data API
                              // field (status.containsSyntheticMedia, live since 2024-10-30, confirmed
                              // via developers.google.com/youtube/v3/docs/videos) for the structured
@@ -7710,11 +7761,12 @@ async function youtubeUploadVideo(req, res) {
   // Safety net: ensure SOME AI disclosure exists. If frontend forgot to include one, append.
   // v13.69.8 — skip for Farsi descriptions (Arabic/Persian chars present → Farsi description already appropriate)
   const hasFarsiChars = /[؀-ۿ]/.test(descClean);
-  if (!hasFarsiChars && !/ai[\s\-]?generated|🤖/i.test(descClean)) {
+  const _isSrvFarsi = engine === 'SRV Farsi'; // SRV Farsi: no appended disclosure line (it sets containsSyntheticMedia instead)
+  if (!_isSrvFarsi && !hasFarsiChars && !/ai[\s\-]?generated|🤖/i.test(descClean)) {
     descClean = (descClean + '\n\n— AI-generated avatar narration + auto-edited captions/visuals.').slice(0, 5000);
   }
   // v13.72.0 — Farsi: append AI disclosure in Persian if not already present
-  if (hasFarsiChars && !/هوش مصنوعی/.test(descClean)) {
+  if (!_isSrvFarsi && hasFarsiChars && !/هوش مصنوعی/.test(descClean)) {
     descClean = (descClean + '\n\n🤖 این ویدیو با استفاده از هوش مصنوعی تولید شده است.').slice(0, 5000);
   }
   const tagList = Array.isArray(tags) ? tags.slice(0, 30) : [];
@@ -7756,7 +7808,20 @@ async function youtubeUploadVideo(req, res) {
     const youtubeVideoId = result && result.id;
     // v13.72.0 — Auto-add to named playlist (SRV Farsi Romantic/Emotional/Happy)
     let playlistResult = null;
-    if (playlistCategory && youtubeVideoId) {
+    let playlistsResult = null;
+    if (engine === 'SRV Farsi' && Array.isArray(farsiPlaylists) && youtubeVideoId) {
+      try {
+        const targets = _srvFarsiResolvePlaylists(farsiPlaylists, await _srvFarsiListPlaylists(accessToken));
+        playlistsResult = [];
+        for (const t of targets) {
+          if (!t.id) { playlistsResult.push(Object.assign({}, t, { ok: false, error: 'playlist_not_found_on_channel' })); continue; }
+          try { await _ytAddVideoToPlaylist(youtubeVideoId, t.id, accessToken); playlistsResult.push(Object.assign({}, t, { ok: true })); }
+          catch (e) { playlistsResult.push(Object.assign({}, t, { ok: false, error: /insufficient|scope|403/i.test(e.message) ? 'needs_playlist_permission' : String(e.message).slice(0, 160) })); }
+        }
+      } catch (e) {
+        playlistsResult = [{ ok: false, error: 'playlist_list_failed', message: String(e.message).slice(0, 160) }];
+      }
+    } else if (playlistCategory && youtubeVideoId && engine !== 'SRV Farsi') {
       try {
         // Production Hardening Release A2 (2026-09-28) — the fallback naming below was hardcoded
         // to "SRV Farsi - <category>" regardless of engine, which would have mis-named NextWave's
@@ -7784,6 +7849,7 @@ async function youtubeUploadVideo(req, res) {
       studioUrl: youtubeVideoId ? ('https://studio.youtube.com/video/' + youtubeVideoId + '/edit') : null,
       uploadedAt: new Date().toISOString(),
       playlist: playlistResult,
+      playlists: playlistsResult,
       result,
     });
   } catch (e) {
@@ -20443,6 +20509,7 @@ export default async function handler(req, res) {
     if (action === 'farsi_regen_caption')        return await farsiRegenCaption(req, res); // v15.6.5
     if (action === 'srv_english_regen_caption')  return await srvEnglishRegenCaption(req, res); // SRV Studio V2 (flag-gated client)
     if (action === 'srv_studio_v2_pilot_upload') return await srvStudioV2PilotUpload(req, res); // SRV Studio V2 pilot (server-enforced, off unless authorized)
+    if (action === 'srv_farsi_playlists') return await srvFarsiPlaylists(req, res); // SRV Farsi read-only playlist check
     if (action === 'srv_studio_v2_playlist_sync') return await srvStudioV2PlaylistSync(req, res); // SRV-STUDIO-V2-030 playlist check/add + VA-step eligibility (VA/CEO session)
     if (action === 'srv_studio_v2_va_upload')    return await srvStudioV2VaUpload(req, res);    // SRV-STUDIO-V2-023 VA allowance (VA/CEO session; off unless authorized)
     if (action === 'srv_studio_v2_production_upload') return await srvStudioV2ProductionUpload(req, res); // SRV-STUDIO-V2-028 normal VA production (VA/CEO session; private, Long only)
