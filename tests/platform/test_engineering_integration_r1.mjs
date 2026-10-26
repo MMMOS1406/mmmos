@@ -1,15 +1,10 @@
 // MMMOS Engineering Integration — Release 1 tests.
 // Runs the REAL api/ops.js handler against an in-memory stand-in for
 // Supabase REST + Storage (global fetch is replaced before import). Never
-// touches production. Also runs the REAL migration against local Postgres
-// (PGlite). Run: node tests/platform/test_engineering_integration_r1.mjs
-import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+// touches production. Migration + rollback SQL are tested separately in
+// tests/platform/test_engineering_integration_r1_migration.mjs.
+// Run: node tests/platform/test_engineering_integration_r1.mjs
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = '') => { cond ? pass++ : fail++; console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${!cond && extra ? '  ' + extra : ''}`); };
 
@@ -45,7 +40,7 @@ function cond(row, key, expr) {
 }
 function matches(row, params) {
   for (const [k, raw] of params) {
-    if (['select', 'order', 'limit'].includes(k)) continue;
+    if (['select', 'order', 'limit', 'offset'].includes(k)) continue;
     if (k === 'or') {
       const inner = raw.slice(1, -1).split(',');
       if (!inner.some(p => { const i = p.indexOf('.'); return cond(row, p.slice(0, i), p.slice(i + 1)); })) return false;
@@ -112,6 +107,7 @@ globalThis.fetch = async (url, opts = {}) => {
   const norm = (o) => { for (const c of uuidCols) if (c in o) o[c] = toUuid(o[c]); return o; };
   if (method === 'GET') {
     let rows = db[table].filter(r => matches(r, params));
+    const off = params.find(([k]) => k === 'offset'); if (off) rows = rows.slice(Number(off[1]));
     const lim = params.find(([k]) => k === 'limit'); if (lim) rows = rows.slice(0, Number(lim[1]));
     return json(200, rows.map(r => project(r, params)));
   }
@@ -332,6 +328,106 @@ let advTaskId;
   ok('revoked adviser is refused immediately', r.status === 401);
 }
 
+// ════ 5b. Readiness-review corrections C1–C5 ═══════════════════════════════
+let AC2;
+{
+  const pr = await call('engineering_adviser_provision', { label: 'Adviser 2', ceo_session_token: CEO });
+  AC2 = pr.body.adviser_credential;
+}
+const H2 = { headers: { authorization: `Bearer ${AC2}` } };
+{
+  // C1 — no markup from the adviser or in worker artifact text.
+  const tasksBefore = db.engineering_tasks.length, evBefore = db.brain_evidence.length;
+  const xss = '<img src=x onerror="fetch(1)">';
+  for (const field of ['problem', 'expected_result', 'authorization_boundary', 'acceptance_criteria', 'affected_engine']) {
+    const r = await call('engineering_adviser_submit_task', { ...goodTask, [field]: `Fix it ${xss}` }, H2);
+    ok(`C1 HTML refused in ${field}`, r.status === 400 && /must not contain < or >/.test(r.body.error), JSON.stringify(r.body));
+  }
+  let r = await call('engineering_adviser_submit_task', { ...goodTask, problem: 'Show 3 > 2 items' }, H2);
+  ok('C1 a lone ">" is refused too', r.status === 400);
+  r = await call('engineering_adviser_post_followup', { task_id: advTaskId, message: '<script>steal()</script>' }, H2);
+  ok('C1 HTML refused in follow-up messages', r.status === 400);
+  ok('C1 nothing was written by refused requests', db.engineering_tasks.length === tasksBefore && db.brain_evidence.length === evBefore);
+  r = await call('engineering_adviser_submit_task', { ...goodTask, problem: 'Fix "quotes" & ampersands, 50% faster' }, H2);
+  ok('C1 ordinary punctuation is still accepted', r.status === 200);
+}
+{
+  // C1/C5 on the worker artifact path.
+  const claim = await call('engineering_worker_claim_task', { worker_credential: WORKER_CRED, task_id: seededTaskId });
+  const run = claim.body.run_id || db.engineering_tasks.find(t => t.id === seededTaskId).agent_run_id;
+  const gw = (op, extra = {}) => call('engineering_agent_gateway', { worker_credential: WORKER_CRED, task_id: seededTaskId, agent_run_id: run, op, ...extra });
+  let r = await gw('create_artifact_upload', { file_name: 'shot.png' });
+  const p = r.body.object_path;
+  storage.objects.set(p, { size: 10, mimetype: 'image/png' });
+  r = await gw('submit_artifact', { object_path: p, title: '<b>shot</b>' });
+  ok('C1 HTML refused in artifact titles', r.status === 400);
+  r = await gw('submit_artifact', { object_path: p, description: 'x'.repeat(5001) });
+  ok('C5 over-length artifact description refused', r.status === 400 && /too long/.test(r.body.error));
+  r = await gw('submit_artifact', { object_path: p, artifact_kind: 'movie' });
+  ok('C5 unknown artifact_kind refused', r.status === 400);
+  r = await gw('submit_artifact', { object_path: p, artifact_kind: 'screenshot', title: 'Approve page' });
+  const audit = db.brain_agent_runs.find(a => a.action === 'gateway:submit_artifact' && a.status === 'allowed' && a.output?.object_path === p);
+  ok('C5 successful artifact registration is audited', r.status === 200 && !!audit);
+}
+{
+  // C2 — the adviser sees and comments on its own tasks only.
+  const evBefore = db.brain_evidence.length;
+  let r = await call('engineering_adviser_get_results', { task_id: seededTaskId }, H2);
+  ok('C2 non-adviser task reads as task_not_found', r.status === 404 && r.body.error === 'task_not_found');
+  r = await call('engineering_adviser_post_followup', { task_id: seededTaskId, message: 'hello' }, H2);
+  ok('C2 follow-up on a non-adviser task refused as task_not_found', r.status === 404);
+  ok('C2 refused follow-up wrote nothing', db.brain_evidence.length === evBefore);
+  r = await call('engineering_adviser_get_results', { task_id: advTaskId }, H2);
+  ok('C2 adviser-submitted tasks are still readable', r.status === 200 && r.body.task.id === advTaskId);
+}
+{
+  // C3 — bounded, paginated responses.
+  for (let i = 0; i < 200; i++) db.brain_evidence.push({ id: randomUUID(), task_id: advTaskId, evidence_type: 'note', title: 'bulk ' + i, content: 'x'.repeat(5000), metadata: {}, created_at: new Date(Date.now() + 1000 + i).toISOString() });
+  const total = db.brain_evidence.filter(e => e.task_id === advTaskId).length;
+  let cursor, pages = 0, seen = new Set(), maxLen = 0, maxItems = 0, truncated = false;
+  do {
+    const r = await call('engineering_adviser_get_results', { task_id: advTaskId, ...(cursor !== undefined ? { cursor } : {}) }, H2);
+    if (r.status !== 200) { ok('C3 paging call succeeds', false, JSON.stringify(r.body)); break; }
+    const len = JSON.stringify(r.body).length; maxLen = Math.max(maxLen, len);
+    const items = [...r.body.evidence, ...r.body.artifacts, ...r.body.followups];
+    maxItems = Math.max(maxItems, items.length);
+    items.forEach(i => seen.add(i.id));
+    truncated = truncated || r.body.evidence.some(e => e.content_truncated && e.content.length === 1500);
+    cursor = r.body.next_cursor; pages++;
+  } while (cursor !== null && pages < 50);
+  ok('C3 every response stays under 60,000 characters', maxLen <= 60000, String(maxLen));
+  ok('C3 at most 30 evidence entries per page', maxItems <= 30, String(maxItems));
+  ok('C3 long evidence text is shortened and flagged', truncated);
+  ok('C3 paging returns every evidence entry exactly once', seen.size === total, `${seen.size}/${total}`);
+  let r = await call('engineering_adviser_get_results', { task_id: advTaskId, cursor: 'abc' }, H2);
+  ok('C3 malformed cursor refused', r.status === 400);
+  r = await call('engineering_adviser_get_results', {}, H2);
+  ok('C3 task list stays within budget', r.status === 200 && JSON.stringify(r.body).length <= 60000);
+}
+{
+  // C5 — input handling.
+  let r = await call('engineering_adviser_get_results', {}, { headers: { authorization: `bearer ${AC2}` } });
+  ok('C5 lowercase "bearer" accepted', r.status === 200);
+  r = await call('engineering_adviser_submit_task', { ...goodTask, priority: 'P1' }, H2);
+  ok('C5 P1 maps to high', r.status === 200 && db.engineering_tasks.find(t => t.id === r.body.task_id).priority === 'high');
+  r = await call('engineering_adviser_submit_task', { ...goodTask, priority: 'p3' }, H2);
+  ok('C5 p3 maps to low', r.status === 200 && db.engineering_tasks.find(t => t.id === r.body.task_id).priority === 'low');
+  r = await call('engineering_adviser_submit_task', { ...goodTask, priority: 'urgent' }, H2);
+  ok('C5 unknown priority refused, not guessed', r.status === 400);
+  r = await call('engineering_adviser_submit_task', { ...goodTask, problem: 'p'.repeat(5001) }, H2);
+  ok('C5 over-length problem refused instead of cut', r.status === 400 && /too long/.test(r.body.error));
+  r = await call('engineering_adviser_submit_task', { ...goodTask, problem: 'p'.repeat(5000) }, H2);
+  ok('C5 problem at exactly the limit accepted', r.status === 200);
+  r = await call('engineering_adviser_submit_task', { ...goodTask, parent_task_id: 'not-a-uuid' }, H2);
+  ok('C5 malformed parent_task_id refused', r.status === 400);
+  r = await call('engineering_adviser_post_followup', { task_id: advTaskId, message: 'm'.repeat(5001) }, H2);
+  ok('C5 over-length follow-up refused', r.status === 400);
+  r = await call('engineering_adviser_post_followup', { task_id: advTaskId, kind: 'order', message: 'x' }, H2);
+  ok('C5 unknown follow-up kind refused', r.status === 400);
+  r = await call('engineering_adviser_submit_task', { ...goodTask, problem: 12345 }, H2);
+  ok('C5 non-text field refused', r.status === 400);
+}
+
 // ════ 6. Fail-closed when the migration has not been applied ═══════════════
 {
   const saved = db.engineering_advisers; delete db.engineering_advisers;
@@ -340,37 +436,6 @@ let advTaskId;
   db.engineering_advisers = saved;
 }
 ok('no network call left the in-memory Supabase', calls.every(c => c.url.startsWith(SB)));
-
-// ════ 7. Migration (real SQL, local Postgres) ═══════════════════════════════
-{
-  const pg = new PGlite();
-  await pg.exec(`create role anon; create role authenticated;
-    create schema storage;
-    create table storage.buckets (id text primary key, name text not null, public boolean default false,
-      file_size_limit bigint, allowed_mime_types text[], created_at timestamptz default now(), updated_at timestamptz default now());
-    insert into storage.buckets (id, name, public) values ('srv-assets', 'srv-assets', true);
-    grant usage on schema public to anon, authenticated;
-    alter default privileges in schema public grant all on tables to anon, authenticated;`);
-  const sql = readFileSync(join(root, 'migrations/20261026_engineering_integration_r1.sql'), 'utf8');
-  await pg.exec(sql);
-  await pg.exec(sql); // idempotent
-  const b = (await pg.query(`select public, file_size_limit, 'video/mp4' = any(allowed_mime_types) mp4 from storage.buckets where id='engineering-artifacts'`)).rows[0];
-  ok('migration creates a PRIVATE engineering-artifacts bucket', b && b.public === false && Number(b.file_size_limit) === 524288000 && b.mp4 === true);
-  const srv = (await pg.query(`select public from storage.buckets where id='srv-assets'`)).rows[0];
-  ok('existing srv-assets bucket untouched', srv.public === true);
-  const rls = (await pg.query(`select relrowsecurity from pg_class where relname='engineering_advisers'`)).rows[0];
-  const pol = (await pg.query(`select count(*)::int n from pg_policies where tablename='engineering_advisers'`)).rows[0];
-  ok('engineering_advisers has RLS on and zero policies', rls.relrowsecurity === true && pol.n === 0);
-  await pg.exec(`insert into engineering_advisers (label, credential_hash) values ('x', 'h')`);
-  let denied = false;
-  try { await pg.exec(`set role anon; select * from engineering_advisers;`); } catch (e) { denied = /permission denied/.test(e.message); }
-  await pg.exec('reset role');
-  ok('anon cannot read engineering_advisers', denied);
-  await pg.exec(`update storage.buckets set public = true where id='engineering-artifacts'`);
-  await pg.exec(sql);
-  const again = (await pg.query(`select public from storage.buckets where id='engineering-artifacts'`)).rows[0];
-  ok('re-running the migration forces the bucket back to private', again.public === false);
-}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

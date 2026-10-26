@@ -1190,7 +1190,8 @@ async function _engArtifactSignedDownload(objectPath) {
 
 function _engAdviserCredentialFrom(req) {
   const h = (req.headers && (req.headers.authorization || req.headers.Authorization)) || '';
-  const m = /^Bearer\s+([A-Za-z0-9]{32,128})$/.exec(String(h).trim());
+  // Auth scheme names are case-insensitive (RFC 7235), so "bearer" works too.
+  const m = /^Bearer\s+([A-Za-z0-9]{32,128})$/i.exec(String(h).trim());
   if (m) return m[1];
   const b = req.body && req.body.adviser_credential;
   return typeof b === 'string' ? b : null;
@@ -1256,7 +1257,47 @@ async function engineeringAdviserList(req, res) {
   }
 }
 
-const _engStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+// ── Text field validation (R1 corrections C1 + C5) ─────────────────────────────
+// C1: CEO Engineering Review renders task and evidence text into the page as
+// HTML, and the CEO session token lives in browser sessionStorage. Text that
+// reaches that page from outside the CEO's own hands (the CEO Adviser, and
+// worker-registered artifacts) therefore must not carry markup: any '<' or
+// '>' is refused outright rather than silently rewritten.
+// C5: over-length text is refused with a clear error instead of being cut off.
+// Returns { value } on success or { error } describing what to fix.
+const ENG_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function _engText(body, field, { max, required = false } = {}) {
+  const raw = body ? body[field] : undefined;
+  if (raw === undefined || raw === null || raw === '') {
+    return required ? { error: `${field} is required` } : { value: '' };
+  }
+  if (typeof raw !== 'string') return { error: `${field} must be text` };
+  const v = raw.trim();
+  if (required && !v) return { error: `${field} is required` };
+  if (v.length > max) return { error: `${field} is too long (${v.length} characters, limit ${max})` };
+  if (/[<>]/.test(v)) return { error: `${field} must not contain < or > (HTML is not allowed; write "less than" / "greater than" instead)` };
+  return { value: v };
+}
+// Reads several fields at once; the first problem found is returned as `error`.
+function _engFields(body, spec) {
+  const out = {};
+  for (const [field, opts] of Object.entries(spec)) {
+    const r = _engText(body, field, opts);
+    if (r.error) return { error: r.error };
+    out[field] = r.value;
+  }
+  return { values: out };
+}
+// C5: P1/P2/P3 (the convention the worker tools already document) map to
+// high/medium/low; anything else unrecognised is refused, never guessed.
+const ENG_PRIORITY_MAP = { p1: 'high', p2: 'medium', p3: 'low', high: 'high', medium: 'medium', low: 'low' };
+function _engPriority(v) {
+  if (v === undefined || v === null || v === '') return { value: 'medium' };
+  const p = ENG_PRIORITY_MAP[String(v).trim().toLowerCase()];
+  return p ? { value: p } : { error: 'priority must be P1, P2, P3, high, medium or low' };
+}
+// C2: the adviser works only on tasks it submitted itself.
+const _engIsAdviserTask = (t) => t?.packet?.derived_from === 'ceo_adviser_submission';
 
 // Adviser action 1 — submit a task. Lands as status 'open' in normal CEO
 // Engineering Review. The adviser must name exactly one business and write
@@ -1267,19 +1308,26 @@ async function engineeringAdviserSubmitTask(req, res) {
     const adviser = await _engAdviserGate(req, res);
     if (!adviser) return;
     const body = req.body || {};
-    const problem = _engStr(body.problem, 5000);
-    const expected_result = _engStr(body.expected_result, 5000);
-    const authorization_boundary = _engStr(body.authorization_boundary, 5000);
+    const f = _engFields(body, {
+      problem: { max: 5000, required: true },
+      expected_result: { max: 5000, required: true },
+      authorization_boundary: { max: 5000, required: true },
+      acceptance_criteria: { max: 5000 },
+      affected_engine: { max: 100 },
+      submission_idempotency_key: { max: 200 },
+      parent_task_id: { max: 36 },
+    });
+    if (f.error) return res.status(400).json({ ok: false, error: f.error });
+    const { problem, expected_result, authorization_boundary, acceptance_criteria } = f.values;
     const business = _engBusinessSlug(body.business);
-    if (!problem || !expected_result || !authorization_boundary) {
-      return res.status(400).json({ ok: false, error: 'problem, expected_result and authorization_boundary are required' });
-    }
     if (!business) return res.status(400).json({ ok: false, error: 'business must be one of: ' + ENG_BUSINESSES.join(', ') });
-    const affected_engine = _engStr(body.affected_engine, 100) || business;
-    const priority = ['high', 'medium', 'low'].includes(body.priority) ? body.priority : 'medium';
-    const acceptance_criteria = _engStr(body.acceptance_criteria, 5000);
-    const key = _engStr(body.submission_idempotency_key, 200);
-    const parent_task_id = _engStr(body.parent_task_id, 64) || null;
+    const pr = _engPriority(body.priority);
+    if (pr.error) return res.status(400).json({ ok: false, error: pr.error });
+    const priority = pr.value;
+    const affected_engine = f.values.affected_engine || business;
+    const key = f.values.submission_idempotency_key;
+    const parent_task_id = f.values.parent_task_id || null;
+    if (parent_task_id && !ENG_UUID_RE.test(parent_task_id)) return res.status(400).json({ ok: false, error: 'parent_task_id must be a task UUID' });
 
     if (key) {
       const dup = await sbGetSafe(`engineering_tasks?packet->>adviser_idempotency_key=eq.${encodeURIComponent(key)}&select=id,status,created_at&limit=1`);
@@ -1311,65 +1359,121 @@ async function engineeringAdviserSubmitTask(req, res) {
 
 // Adviser action 2 — read results. With task_id: one task's status, PR /
 // commit, evidence, follow-ups and artifacts (1-hour signed download links).
-// Without task_id: the 50 most recent adviser-submitted tasks, summary only.
+// Without task_id: the most recent adviser-submitted tasks, summary only.
+// C2: only tasks the adviser submitted are visible; any other task id answers
+// task_not_found exactly like a missing one, so other businesses' work is
+// neither shown nor confirmed to exist.
+// C3: responses stay well under ChatGPT's 100,000-character limit. Evidence
+// text is shortened to ENG_RESULTS_TEXT_MAX characters, at most
+// ENG_RESULTS_PAGE_MAX evidence entries come back per call, and the whole
+// response is trimmed to ENG_RESULTS_CHAR_BUDGET. `next_cursor` (when set) is
+// passed back as `cursor` to read the next page.
+const ENG_RESULTS_PAGE_MAX = 30;
+const ENG_RESULTS_TEXT_MAX = 1500;
+const ENG_RESULTS_CHAR_BUDGET = 60000;
+const ENG_RESULTS_TASK_LIST_MAX = 50;
+function _engShort(v, max) {
+  const s = v == null ? '' : String(v);
+  return s.length > max ? { text: s.slice(0, max), truncated: true } : { text: s, truncated: false };
+}
+function _engCursor(v) {
+  if (v === undefined || v === null || v === '') return 0;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= 100000 ? n : null;
+}
+// Drops entries from the end of `list` until `build(list)` serialises within
+// the budget. Returns how many entries were kept.
+function _engFitBudget(list, build) {
+  let keep = list.length;
+  while (keep > 0 && JSON.stringify(build(list.slice(0, keep))).length > ENG_RESULTS_CHAR_BUDGET) keep--;
+  return keep;
+}
 async function engineeringAdviserGetResults(req, res) {
   try {
     const adviser = await _engAdviserGate(req, res);
     if (!adviser) return;
     const body = req.body || {};
-    const taskId = _engStr(body.task_id, 64);
+    const cursor = _engCursor(body.cursor);
+    if (cursor === null) return res.status(400).json({ ok: false, error: 'cursor must be the next_cursor value from a previous response' });
+    const taskId = typeof body.task_id === 'string' ? body.task_id.trim() : '';
     const SUMMARY = 'id,problem,status,priority,affected_engine,ceo_decision,ceo_decision_at,agent_authorized_at,agent_claimed_at,git_commit_sha,created_at,updated_at';
+
     if (!taskId) {
-      const rows = await sbGetSafe(`engineering_tasks?packet->>derived_from=eq.ceo_adviser_submission&select=${SUMMARY},packet->>business&order=created_at.desc&limit=50`);
-      return res.status(200).json({ ok: true, tasks: (rows || []).map(t => ({ ...t, problem: String(t.problem || '').slice(0, 300) })) });
+      const rows = await sbGetSafe(`engineering_tasks?packet->>derived_from=eq.ceo_adviser_submission&select=${SUMMARY},packet->>business&order=created_at.desc&limit=${ENG_RESULTS_TASK_LIST_MAX + 1}&offset=${cursor}`);
+      const all = (rows || []).slice(0, ENG_RESULTS_TASK_LIST_MAX).map(t => ({ ...t, problem: _engShort(t.problem, 300).text }));
+      const build = (list) => ({ ok: true, tasks: list, next_cursor: null });
+      const keep = _engFitBudget(all, build);
+      const more = keep < all.length || (rows || []).length > ENG_RESULTS_TASK_LIST_MAX;
+      return res.status(200).json({ ...build(all.slice(0, keep)), next_cursor: more ? cursor + keep : null });
     }
-    if (!/^[0-9a-f-]{36}$/i.test(taskId)) return res.status(400).json({ ok: false, error: 'task_id must be a task UUID' });
+
+    if (!ENG_UUID_RE.test(taskId)) return res.status(400).json({ ok: false, error: 'task_id must be a task UUID' });
     const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(taskId)}&select=${SUMMARY},expected_result,acceptance_criteria,packet&limit=1`);
     const t = rows?.[0];
-    if (!t) return res.status(404).json({ ok: false, error: 'task_not_found' });
-    const ev = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(taskId)}&select=id,evidence_type,title,content,url,metadata,created_at&order=created_at.asc&limit=200`);
-    const evidence = [], followups = [], artifacts = [];
-    for (const e of ev || []) {
+    if (!t || !_engIsAdviserTask(t)) return res.status(404).json({ ok: false, error: 'task_not_found' });
+
+    const ev = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(taskId)}&select=id,evidence_type,title,content,url,metadata,created_at&order=created_at.asc&limit=${ENG_RESULTS_PAGE_MAX + 1}&offset=${cursor}`);
+    const page = (ev || []).slice(0, ENG_RESULTS_PAGE_MAX);
+    const entries = [];
+    for (const e of page) {
+      const title = _engShort(e.title, 300).text;
+      const c = _engShort(e.content, ENG_RESULTS_TEXT_MAX);
       if (e.evidence_type === 'adviser_followup') {
-        followups.push({ id: e.id, kind: e.metadata?.kind || 'note', message: e.content, created_at: e.created_at });
+        entries.push({ group: 'followups', item: { id: e.id, kind: e.metadata?.kind || 'note', message: c.text, message_truncated: c.truncated, created_at: e.created_at } });
       } else if (e.evidence_type === 'artifact' && e.metadata?.bucket === ENG_ARTIFACTS_BUCKET && _engArtifactPathBelongsToTask(e.metadata?.object_path, t)) {
-        artifacts.push({
-          id: e.id, title: e.title, description: e.content, artifact_kind: e.metadata.artifact_kind,
+        entries.push({ group: 'artifacts', item: {
+          id: e.id, title, description: c.text, description_truncated: c.truncated, artifact_kind: e.metadata.artifact_kind,
           size_bytes: e.metadata.size_bytes, mime_type: e.metadata.mime_type, created_at: e.created_at,
           download_url: await _engArtifactSignedDownload(e.metadata.object_path),
           download_url_expires_in_s: ENG_ARTIFACT_DOWNLOAD_TTL_S,
-        });
+        } });
       } else {
-        evidence.push({ id: e.id, type: e.evidence_type, title: e.title, content: e.content, url: e.url, created_at: e.created_at });
+        entries.push({ group: 'evidence', item: { id: e.id, type: e.evidence_type, title, content: c.text, content_truncated: c.truncated, url: e.url ? _engShort(e.url, 1000).text : null, created_at: e.created_at } });
       }
     }
-    const { packet, ...rest } = t;
-    return res.status(200).json({
-      ok: true,
-      task: { ...rest, business: _engTaskBusiness(t), authorization_boundary: packet?.origin_decision?.authorization_boundary || null, parent_task_id: packet?.parent_task_id || null },
-      evidence, artifacts, followups,
-    });
+    const { packet } = t;
+    const task = {
+      id: t.id, problem: t.problem, expected_result: t.expected_result, acceptance_criteria: t.acceptance_criteria,
+      status: t.status, priority: t.priority, affected_engine: t.affected_engine, ceo_decision: t.ceo_decision,
+      ceo_decision_at: t.ceo_decision_at, agent_authorized_at: t.agent_authorized_at, agent_claimed_at: t.agent_claimed_at,
+      git_commit_sha: t.git_commit_sha, created_at: t.created_at, updated_at: t.updated_at,
+      business: _engTaskBusiness(t), authorization_boundary: packet?.origin_decision?.authorization_boundary || null,
+      parent_task_id: packet?.parent_task_id || null,
+    };
+    const build = (list) => {
+      const out = { ok: true, task, evidence: [], artifacts: [], followups: [], next_cursor: null };
+      for (const en of list) out[en.group].push(en.item);
+      return out;
+    };
+    const keep = _engFitBudget(entries, build);
+    const more = keep < entries.length || (ev || []).length > ENG_RESULTS_PAGE_MAX;
+    return res.status(200).json({ ...build(entries.slice(0, keep)), next_cursor: more ? cursor + keep : null });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
 
 // Adviser action 3 — post a follow-up (correction, question, note or
-// acceptance) on an existing task. Stored as non-authoritative evidence that
-// the worker reads through the gateway op read_adviser_followups. It never
-// changes the task's status or any CEO field.
+// acceptance) on a task the adviser submitted (C2). Stored as
+// non-authoritative evidence that the worker reads through the gateway op
+// read_adviser_followups. It never changes the task's status or any CEO field.
 const ENG_FOLLOWUP_KINDS = new Set(['correction', 'question', 'note', 'acceptance']);
 async function engineeringAdviserPostFollowup(req, res) {
   try {
     const adviser = await _engAdviserGate(req, res);
     if (!adviser) return;
     const body = req.body || {};
-    const taskId = _engStr(body.task_id, 64);
-    const message = _engStr(body.message, 5000);
-    if (!/^[0-9a-f-]{36}$/i.test(taskId) || !message) return res.status(400).json({ ok: false, error: 'task_id (UUID) and message are required' });
-    const kind = ENG_FOLLOWUP_KINDS.has(body.kind) ? body.kind : 'note';
-    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(taskId)}&select=id,affected_engine&limit=1`);
-    if (!rows?.[0]) return res.status(404).json({ ok: false, error: 'task_not_found' });
+    const taskId = typeof body.task_id === 'string' ? body.task_id.trim() : '';
+    if (!ENG_UUID_RE.test(taskId)) return res.status(400).json({ ok: false, error: 'task_id must be a task UUID' });
+    const f = _engFields(body, { message: { max: 5000, required: true } });
+    if (f.error) return res.status(400).json({ ok: false, error: f.error });
+    const message = f.values.message;
+    if (body.kind !== undefined && !ENG_FOLLOWUP_KINDS.has(body.kind)) {
+      return res.status(400).json({ ok: false, error: 'kind must be one of: ' + [...ENG_FOLLOWUP_KINDS].join(', ') });
+    }
+    const kind = body.kind || 'note';
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(taskId)}&select=id,affected_engine,packet&limit=1`);
+    if (!rows?.[0] || !_engIsAdviserTask(rows[0])) return res.status(404).json({ ok: false, error: 'task_not_found' });
     const row = await sbInsert('brain_evidence', {
       task_id: taskId, run_id: null, evidence_type: 'adviser_followup',
       title: `CEO Adviser ${kind}`, content: message,
@@ -1703,14 +1807,24 @@ async function engineeringAgentGateway(req, res) {
         await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_path_not_authorized', object_path: objectPath });
         return res.status(403).json({ ok: false, error: 'artifact_path_not_authorized' });
       }
-      const kind = ENG_ARTIFACT_KINDS.has(body.artifact_kind) ? body.artifact_kind : 'other';
+      if (body.artifact_kind !== undefined && !ENG_ARTIFACT_KINDS.has(body.artifact_kind)) {
+        return res.status(400).json({ ok: false, error: 'artifact_kind must be one of: ' + [...ENG_ARTIFACT_KINDS].join(', ') });
+      }
+      const kind = body.artifact_kind || 'other';
+      // C1/C5: title and description are shown in CEO Engineering Review —
+      // no markup, and over-length text is refused rather than cut.
+      const af = _engFields(body, { title: { max: 300 }, description: { max: 5000 } });
+      if (af.error) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'invalid_text', object_path: objectPath });
+        return res.status(400).json({ ok: false, error: af.error });
+      }
       const info = await _engArtifactStat(objectPath);
       if (!info) {
         await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_not_found', object_path: objectPath });
         return res.status(404).json({ ok: false, error: 'artifact_not_found', message: 'Upload the file first, then register it.' });
       }
-      const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 300) : objectPath.split('/').pop();
-      const description = typeof body.description === 'string' ? body.description.slice(0, 5000) : '';
+      const title = af.values.title || objectPath.split('/').pop();
+      const description = af.values.description;
       await sbInsert('brain_evidence', {
         task_id: String(task_id), run_id: agent_run_id, evidence_type: 'artifact',
         title, content: description,
@@ -1721,6 +1835,8 @@ async function engineeringAgentGateway(req, res) {
         },
         engine: task.affected_engine,
       });
+      // C5: successful registrations are audited too, not only denials.
+      await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { object_path: objectPath, artifact_kind: kind, size_bytes: info.size });
       result = { accepted: true, object_path: objectPath, artifact_kind: kind, size_bytes: info.size, mime_type: info.mimetype, note: 'Artifact stored permanently and recorded as non-authoritative evidence.' };
     } else if (op === 'read_adviser_followups') {
       const rowsF = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(String(task_id))}&evidence_type=eq.adviser_followup&select=id,title,content,metadata,created_at&order=created_at.asc&limit=100`);
