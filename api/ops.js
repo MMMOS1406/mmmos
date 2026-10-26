@@ -447,6 +447,24 @@ function _agentTokenMatches(providedToken, storedHash) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// MMMOS Engineering Integration R1 — gateway run_id fix. A claim mints the run
+// id as 32 hex characters, but engineering_tasks.agent_run_id is a uuid column,
+// so Postgres hands it back hyphenated (8-4-4-4-12). The gateway compared the
+// two strings exactly, so a worker presenting the id it was given was always
+// denied. Both sides are reduced to the same canonical form (32 lowercase hex,
+// no hyphens) before comparing; anything that isn't a 128-bit hex id is null
+// and never matches.
+function _agentNormalizeRunId(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toLowerCase().replace(/-/g, '');
+  return /^[0-9a-f]{32}$/.test(s) ? s : null;
+}
+function _agentRunIdMatches(stored, presented) {
+  const a = _agentNormalizeRunId(stored);
+  const b = _agentNormalizeRunId(presented);
+  return !!a && !!b && a === b;
+}
+
 // ── Task-Scoped File/Validation Capabilities (v16.37.0 — Phase 4E, CEO-approved
 // 2026-08-16) ────────────────────────────────────────────────────────────────
 // A path is only ever "safe" if it is a plain relative path rooted under the
@@ -1068,6 +1086,303 @@ async function engineeringWorkerSubmitTask(req, res) {
   }
 }
 
+// ── MMMOS Engineering Integration R1: permanent engineering artifacts ──────────
+// One PRIVATE bucket (created by migrations/20261026_engineering_integration_r1.sql)
+// holds every engineering output: videos, screenshots, source bundles,
+// checkpoints and QA reports. No storage policies exist on it, so only this
+// server (service role) can read or write; people and agents get short-lived
+// signed URLs. Folder layout keeps businesses apart:
+//   <business>/<task_id>/<run_id>/<timestamp>-<file name>
+const ENG_ARTIFACTS_BUCKET = 'engineering-artifacts';
+const ENG_ARTIFACT_KINDS = new Set(['video', 'screenshot', 'source', 'checkpoint', 'qa_report', 'other']);
+const ENG_BUSINESSES = ['mmmos', 'srv_farsi', 'srv_english', 'srv_studio', 'ai_creation_studio', 'nextwave', 'smm', 'finance'];
+const ENG_ARTIFACT_DOWNLOAD_TTL_S = 60 * 60; // 1 hour
+
+function _engBusinessSlug(v) {
+  const s = String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return ENG_BUSINESSES.includes(s) ? s : null;
+}
+function _engTaskBusiness(task) {
+  return _engBusinessSlug(task?.packet?.business) || _engBusinessSlug(task?.affected_engine) || 'unassigned';
+}
+function _engArtifactSafeFileName(name) {
+  if (typeof name !== 'string') return null;
+  const n = name.trim();
+  if (n.length > 150 || n.includes('..')) return null;
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9]{1,10}$/.test(n) ? n : null;
+}
+function _engArtifactObjectPath(task, runId, fileName) {
+  const run = _agentNormalizeRunId(runId) || 'norun';
+  return `${_engTaskBusiness(task)}/${task.id}/${run}/${Date.now()}-${fileName}`;
+}
+function _engArtifactPathBelongsToTask(objectPath, task) {
+  if (typeof objectPath !== 'string' || !objectPath || objectPath.length > 400) return false;
+  if (objectPath.includes('..') || objectPath.includes('\\') || objectPath.includes('\0') || objectPath.startsWith('/')) return false;
+  const parts = objectPath.split('/');
+  if (parts.length !== 4) return false;
+  const [biz, tid, run, file] = parts;
+  return biz === _engTaskBusiness(task) && tid === String(task.id)
+    && /^[0-9a-f]{32}$/.test(run) && /^\d+-[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9]{1,10}$/.test(file);
+}
+function _engStorageEncodePath(p) { return p.split('/').map(encodeURIComponent).join('/'); }
+const _engStorageHeaders = () => ({ apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' });
+
+async function _engArtifactCreateSignedUpload(objectPath) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/upload/sign/${ENG_ARTIFACTS_BUCKET}/${_engStorageEncodePath(objectPath)}`, {
+      method: 'POST', headers: _engStorageHeaders(), body: JSON.stringify({}),
+    });
+    const data = await r.json().catch(() => null);
+    if (!r.ok || !data || !data.url) return { ok: false, error: `signed_upload_failed_${r.status}` };
+    return { ok: true, upload_url: `${SUPABASE_URL}/storage/v1${data.url}` };
+  } catch (e) {
+    return { ok: false, error: 'storage_unreachable' };
+  }
+}
+// Returns {size, mimetype} for an existing object, else null.
+async function _engArtifactStat(objectPath) {
+  try {
+    const i = objectPath.lastIndexOf('/');
+    const prefix = objectPath.slice(0, i);
+    const name = objectPath.slice(i + 1);
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${ENG_ARTIFACTS_BUCKET}`, {
+      method: 'POST', headers: _engStorageHeaders(), body: JSON.stringify({ prefix, search: name, limit: 100 }),
+    });
+    if (!r.ok) return null;
+    const rows = await r.json().catch(() => []);
+    const hit = (Array.isArray(rows) ? rows : []).find(o => o && o.name === name && o.id);
+    if (!hit) return null;
+    return { size: Number(hit.metadata?.size) || 0, mimetype: hit.metadata?.mimetype || 'application/octet-stream' };
+  } catch (e) {
+    return null;
+  }
+}
+async function _engArtifactSignedDownload(objectPath) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${ENG_ARTIFACTS_BUCKET}/${_engStorageEncodePath(objectPath)}`, {
+      method: 'POST', headers: _engStorageHeaders(), body: JSON.stringify({ expiresIn: ENG_ARTIFACT_DOWNLOAD_TTL_S }),
+    });
+    const data = await r.json().catch(() => null);
+    const rel = data && (data.signedURL || data.signedUrl);
+    return r.ok && rel ? `${SUPABASE_URL}/storage/v1${rel}` : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ── MMMOS Engineering Integration R1: CEO Adviser (ChatGPT) actions ────────────
+// The CEO Adviser is a separate identity from any Engineering Worker, stored in
+// its own table (engineering_advisers, service-role only). An adviser
+// credential can never be used as a worker credential or vice versa, because
+// each authenticate function reads only its own table.
+//
+// What the adviser CAN do: submit an engineering task (status 'open', through
+// the same _insertEngineeringTaskRow path the CEO Task Generator uses), read a
+// task's results (status, evidence, PR/commit, artifacts via 1-hour signed
+// links), and post follow-up instructions as evidence.
+// What it CANNOT do: authorize an agent, approve or reject a task, set any
+// CEO field, create or execute a production release, or touch any other
+// business engine. None of the functions below call anything that does.
+//
+// The credential is accepted from an `Authorization: Bearer <credential>`
+// header (what ChatGPT Actions send for API-key auth) or `adviser_credential`
+// in the JSON body. It is never logged or echoed back.
+
+function _engAdviserCredentialFrom(req) {
+  const h = (req.headers && (req.headers.authorization || req.headers.Authorization)) || '';
+  const m = /^Bearer\s+([A-Za-z0-9]{32,128})$/.exec(String(h).trim());
+  if (m) return m[1];
+  const b = req.body && req.body.adviser_credential;
+  return typeof b === 'string' ? b : null;
+}
+
+async function _engineeringAdviserAuthenticate(rawCredential) {
+  if (!rawCredential || typeof rawCredential !== 'string') return null;
+  const rows = await sbGetSafe(`engineering_advisers?active=eq.true&select=id,label,credential_hash`);
+  for (const a of rows) {
+    if (_agentTokenMatches(rawCredential, a.credential_hash)) return { id: a.id, label: a.label };
+  }
+  return null;
+}
+
+async function _engAdviserGate(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ ok: false, error: 'POST only' }); return null; }
+  const adviser = await _engineeringAdviserAuthenticate(_engAdviserCredentialFrom(req));
+  if (!adviser) { res.status(401).json({ ok: false, error: 'adviser_authentication_failed' }); return null; }
+  try { await sbPatch('engineering_advisers', `id=eq.${encodeURIComponent(adviser.id)}`, { last_seen_at: new Date().toISOString() }); } catch (_) {}
+  return adviser;
+}
+
+// CEO-session-gated. Mints an adviser credential; the raw value is returned
+// once, here, and only its SHA-256 hash is stored (same primitive as workers).
+async function engineeringAdviserProvision(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const body = req.body || {};
+    const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 100) : 'ChatGPT CEO Adviser';
+    const rawCredential = randomBytes(32).toString('hex');
+    const adviser = await sbInsert('engineering_advisers', { label, credential_hash: _agentHashHex(rawCredential), active: true, created_by: 'ceo' });
+    if (!adviser) return res.status(500).json({ ok: false, error: 'provision_failed' });
+    return res.status(200).json({
+      ok: true, adviser_id: adviser.id, label: adviser.label, adviser_credential: rawCredential,
+      note: 'Paste this into the ChatGPT connector as the API key (Bearer). It will not be shown again. It can submit tasks, read results and post follow-ups only.',
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+async function engineeringAdviserRevoke(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const now = new Date().toISOString();
+    const row = await sbPatch('engineering_advisers', `id=eq.${encodeURIComponent(id)}`, { active: false, revoked_at: now, revoked_by: 'ceo' });
+    if (!row) return res.status(404).json({ ok: false, error: 'adviser_not_found' });
+    return res.status(200).json({ ok: true, adviser_id: id, active: false, revoked_at: now });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+async function engineeringAdviserList(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const rows = await sbGetSafe(`engineering_advisers?select=id,label,active,created_at,created_by,revoked_at,revoked_by,last_seen_at&order=created_at.desc`);
+    return res.status(200).json({ ok: true, advisers: rows });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+const _engStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+// Adviser action 1 — submit a task. Lands as status 'open' in normal CEO
+// Engineering Review. The adviser must name exactly one business and write
+// the authorization boundary (what the worker may and may not touch); the
+// CEO still decides whether to authorize it.
+async function engineeringAdviserSubmitTask(req, res) {
+  try {
+    const adviser = await _engAdviserGate(req, res);
+    if (!adviser) return;
+    const body = req.body || {};
+    const problem = _engStr(body.problem, 5000);
+    const expected_result = _engStr(body.expected_result, 5000);
+    const authorization_boundary = _engStr(body.authorization_boundary, 5000);
+    const business = _engBusinessSlug(body.business);
+    if (!problem || !expected_result || !authorization_boundary) {
+      return res.status(400).json({ ok: false, error: 'problem, expected_result and authorization_boundary are required' });
+    }
+    if (!business) return res.status(400).json({ ok: false, error: 'business must be one of: ' + ENG_BUSINESSES.join(', ') });
+    const affected_engine = _engStr(body.affected_engine, 100) || business;
+    const priority = ['high', 'medium', 'low'].includes(body.priority) ? body.priority : 'medium';
+    const acceptance_criteria = _engStr(body.acceptance_criteria, 5000);
+    const key = _engStr(body.submission_idempotency_key, 200);
+    const parent_task_id = _engStr(body.parent_task_id, 64) || null;
+
+    if (key) {
+      const dup = await sbGetSafe(`engineering_tasks?packet->>adviser_idempotency_key=eq.${encodeURIComponent(key)}&select=id,status,created_at&limit=1`);
+      if (dup && dup[0]) return res.status(200).json({ ok: true, task_id: dup[0].id, status: dup[0].status, deduped: true });
+    }
+
+    const task = await _insertEngineeringTaskRow({
+      problem, expected_result, affected_engine, priority, acceptance_criteria,
+      packetExtra: {
+        created_via: 'task_generator',
+        derived_from: 'ceo_adviser_submission',
+        business,
+        submitted_by_adviser_id: adviser.id,
+        submitted_by_adviser_label: adviser.label,
+        adviser_idempotency_key: key || null,
+        parent_task_id,
+        // Boundary is stored where the existing authorize/claim/gateway checks
+        // already read it. Writing it grants nothing: agent_authorized_at stays
+        // unset until the CEO authorizes the task.
+        origin_decision: { id: null, source: 'ceo_adviser', authorization_boundary },
+      },
+    });
+    return res.status(200).json({ ok: true, task_id: task.id, status: task.status || 'open', business, deduped: false,
+      note: 'Task is in CEO Engineering Review. It runs only after it is authorized.' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// Adviser action 2 — read results. With task_id: one task's status, PR /
+// commit, evidence, follow-ups and artifacts (1-hour signed download links).
+// Without task_id: the 50 most recent adviser-submitted tasks, summary only.
+async function engineeringAdviserGetResults(req, res) {
+  try {
+    const adviser = await _engAdviserGate(req, res);
+    if (!adviser) return;
+    const body = req.body || {};
+    const taskId = _engStr(body.task_id, 64);
+    const SUMMARY = 'id,problem,status,priority,affected_engine,ceo_decision,ceo_decision_at,agent_authorized_at,agent_claimed_at,git_commit_sha,created_at,updated_at';
+    if (!taskId) {
+      const rows = await sbGetSafe(`engineering_tasks?packet->>derived_from=eq.ceo_adviser_submission&select=${SUMMARY},packet->>business&order=created_at.desc&limit=50`);
+      return res.status(200).json({ ok: true, tasks: (rows || []).map(t => ({ ...t, problem: String(t.problem || '').slice(0, 300) })) });
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(taskId)) return res.status(400).json({ ok: false, error: 'task_id must be a task UUID' });
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(taskId)}&select=${SUMMARY},expected_result,acceptance_criteria,packet&limit=1`);
+    const t = rows?.[0];
+    if (!t) return res.status(404).json({ ok: false, error: 'task_not_found' });
+    const ev = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(taskId)}&select=id,evidence_type,title,content,url,metadata,created_at&order=created_at.asc&limit=200`);
+    const evidence = [], followups = [], artifacts = [];
+    for (const e of ev || []) {
+      if (e.evidence_type === 'adviser_followup') {
+        followups.push({ id: e.id, kind: e.metadata?.kind || 'note', message: e.content, created_at: e.created_at });
+      } else if (e.evidence_type === 'artifact' && e.metadata?.bucket === ENG_ARTIFACTS_BUCKET && _engArtifactPathBelongsToTask(e.metadata?.object_path, t)) {
+        artifacts.push({
+          id: e.id, title: e.title, description: e.content, artifact_kind: e.metadata.artifact_kind,
+          size_bytes: e.metadata.size_bytes, mime_type: e.metadata.mime_type, created_at: e.created_at,
+          download_url: await _engArtifactSignedDownload(e.metadata.object_path),
+          download_url_expires_in_s: ENG_ARTIFACT_DOWNLOAD_TTL_S,
+        });
+      } else {
+        evidence.push({ id: e.id, type: e.evidence_type, title: e.title, content: e.content, url: e.url, created_at: e.created_at });
+      }
+    }
+    const { packet, ...rest } = t;
+    return res.status(200).json({
+      ok: true,
+      task: { ...rest, business: _engTaskBusiness(t), authorization_boundary: packet?.origin_decision?.authorization_boundary || null, parent_task_id: packet?.parent_task_id || null },
+      evidence, artifacts, followups,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// Adviser action 3 — post a follow-up (correction, question, note or
+// acceptance) on an existing task. Stored as non-authoritative evidence that
+// the worker reads through the gateway op read_adviser_followups. It never
+// changes the task's status or any CEO field.
+const ENG_FOLLOWUP_KINDS = new Set(['correction', 'question', 'note', 'acceptance']);
+async function engineeringAdviserPostFollowup(req, res) {
+  try {
+    const adviser = await _engAdviserGate(req, res);
+    if (!adviser) return;
+    const body = req.body || {};
+    const taskId = _engStr(body.task_id, 64);
+    const message = _engStr(body.message, 5000);
+    if (!/^[0-9a-f-]{36}$/i.test(taskId) || !message) return res.status(400).json({ ok: false, error: 'task_id (UUID) and message are required' });
+    const kind = ENG_FOLLOWUP_KINDS.has(body.kind) ? body.kind : 'note';
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(taskId)}&select=id,affected_engine&limit=1`);
+    if (!rows?.[0]) return res.status(404).json({ ok: false, error: 'task_not_found' });
+    const row = await sbInsert('brain_evidence', {
+      task_id: taskId, run_id: null, evidence_type: 'adviser_followup',
+      title: `CEO Adviser ${kind}`, content: message,
+      metadata: { kind, adviser_id: adviser.id, adviser_label: adviser.label, submitted_at: new Date().toISOString(), non_authoritative: true },
+      engine: rows[0].affected_engine,
+    });
+    return res.status(200).json({ ok: true, followup_id: row?.id || null, task_id: taskId, kind,
+      note: 'Recorded. The engineering worker reads follow-ups on its next run. Task status is unchanged.' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
 // ── Engineering Agent Gateway (v16.36.0 — Phase 4D, CEO-approved 2026-08-16) ──
 // The ONLY trusted entry point through which a future bounded Engineering Agent
 // may act. Reuses Phase 4B authorization/claim/lease verification VERBATIM — no
@@ -1097,6 +1412,12 @@ const AGENT_GATEWAY_ALLOWED_OPS = new Set([
   // entry in this same fixed whitelist — no new authorization concept, no
   // new credential, no new claim/lease mechanism.
   'submit_commit_sha',
+  // MMMOS Engineering Integration R1 — permanent engineering artifacts and
+  // adviser follow-ups. Same verification chain as every op above; nothing
+  // here can change task status, approve, deploy, or reach another task.
+  'create_artifact_upload', // signed upload URL into this task's own private folder
+  'submit_artifact',        // registers an uploaded file as evidence (server checks it exists)
+  'read_adviser_followups', // follow-up instructions the CEO Adviser posted on this task
 ]);
 
 // v16.37.0 — Phase 4E: manifest is now DERIVED PER-TASK from that task's own
@@ -1226,7 +1547,9 @@ async function engineeringAgentGateway(req, res) {
     // either — both fail closed here. Unchanged, and shared by both paths:
     // the worker-claim path already stamps agent_run_id via the exact same
     // _engineeringTaskAtomicClaim primitive the legacy path uses.
-    const claimOk = !!task.agent_claimed_at && task.agent_run_id === agent_run_id;
+    // R1: compared in canonical form (see _agentNormalizeRunId) — the stored
+    // uuid comes back hyphenated, the claim response is plain hex.
+    const claimOk = !!task.agent_claimed_at && _agentRunIdMatches(task.agent_run_id, agent_run_id);
     const leaseOk = !!task.lease_expires_at && new Date(task.lease_expires_at).getTime() > now;
     if (!authOk || !claimOk || !leaseOk) {
       await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'verification_failed' });
@@ -1352,6 +1675,56 @@ async function engineeringAgentGateway(req, res) {
       // on the task row — submitting evidence cannot complete or approve a
       // task. Only engineeringTaskCeoApprove (CEO-session-gated) can do that.
       result = { accepted: true, note: 'Evidence recorded. Non-authoritative — does not complete or approve the task.' };
+    } else if (op === 'create_artifact_upload') {
+      // R1 — the worker gets a one-time signed URL and PUTs the bytes straight
+      // to Supabase Storage (never through this function's body limit). The
+      // object path is built here from the task row, never from the caller:
+      // <business>/<task_id>/<run_id>/<sanitized filename>.
+      const fileName = _engArtifactSafeFileName(body.file_name);
+      if (!fileName) return res.status(400).json({ ok: false, error: 'file_name required (letters, digits, . _ - only, with an extension)' });
+      const objectPath = _engArtifactObjectPath(task, agent_run_id, fileName);
+      const signed = await _engArtifactCreateSignedUpload(objectPath);
+      if (!signed.ok) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: signed.error });
+        return res.status(502).json({ ok: false, error: signed.error });
+      }
+      await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { object_path: objectPath });
+      result = {
+        bucket: ENG_ARTIFACTS_BUCKET, object_path: objectPath, upload_url: signed.upload_url, method: 'PUT',
+        note: 'PUT the file bytes to upload_url (set Content-Type), then call submit_artifact with this object_path.',
+      };
+    } else if (op === 'submit_artifact') {
+      // R1 — registers an uploaded file as non-authoritative evidence. The
+      // path must sit inside THIS task's folder, and the object must really
+      // exist in the private bucket; size and type come from storage, not
+      // from the caller.
+      const objectPath = typeof body.object_path === 'string' ? body.object_path.trim() : '';
+      if (!_engArtifactPathBelongsToTask(objectPath, task)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_path_not_authorized', object_path: objectPath });
+        return res.status(403).json({ ok: false, error: 'artifact_path_not_authorized' });
+      }
+      const kind = ENG_ARTIFACT_KINDS.has(body.artifact_kind) ? body.artifact_kind : 'other';
+      const info = await _engArtifactStat(objectPath);
+      if (!info) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_not_found', object_path: objectPath });
+        return res.status(404).json({ ok: false, error: 'artifact_not_found', message: 'Upload the file first, then register it.' });
+      }
+      const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 300) : objectPath.split('/').pop();
+      const description = typeof body.description === 'string' ? body.description.slice(0, 5000) : '';
+      await sbInsert('brain_evidence', {
+        task_id: String(task_id), run_id: agent_run_id, evidence_type: 'artifact',
+        title, content: description,
+        metadata: {
+          bucket: ENG_ARTIFACTS_BUCKET, object_path: objectPath, artifact_kind: kind,
+          size_bytes: info.size, mime_type: info.mimetype, business: _engTaskBusiness(task),
+          submitted_at: new Date().toISOString(), non_authoritative: true,
+        },
+        engine: task.affected_engine,
+      });
+      result = { accepted: true, object_path: objectPath, artifact_kind: kind, size_bytes: info.size, mime_type: info.mimetype, note: 'Artifact stored permanently and recorded as non-authoritative evidence.' };
+    } else if (op === 'read_adviser_followups') {
+      const rowsF = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(String(task_id))}&evidence_type=eq.adviser_followup&select=id,title,content,metadata,created_at&order=created_at.asc&limit=100`);
+      result = { followups: (rowsF || []).map(f => ({ id: f.id, kind: f.metadata?.kind || 'note', title: f.title, message: f.content, created_at: f.created_at })) };
     } else if (op === 'submit_commit_sha') {
       // v16.56.0 — CEO Decision #17 Automatic Git Commit Capture Fix. Root
       // cause: no automatic mechanism anywhere populated
@@ -20622,6 +20995,13 @@ export default async function handler(req, res) {
     if (action === 'engineering_worker_pairing_reject')               return await engineeringWorkerPairingReject(req, res);         // v16.52.0 — Step 2D
     if (action === 'engineering_worker_pairing_complete')             return await engineeringWorkerPairingComplete(req, res);       // v16.52.0 — Step 2D
     if (action === 'engineering_agent_gateway')                       return await engineeringAgentGateway(req, res); // v16.36.0 — Phase 4D
+    // MMMOS Engineering Integration R1 — CEO Adviser (ChatGPT) identity + actions.
+    if (action === 'engineering_adviser_provision')                   return await engineeringAdviserProvision(req, res);   // CEO session
+    if (action === 'engineering_adviser_revoke')                      return await engineeringAdviserRevoke(req, res);      // CEO session
+    if (action === 'engineering_adviser_list')                        return await engineeringAdviserList(req, res);        // CEO session
+    if (action === 'engineering_adviser_submit_task')                 return await engineeringAdviserSubmitTask(req, res);  // adviser credential
+    if (action === 'engineering_adviser_get_results')                 return await engineeringAdviserGetResults(req, res);  // adviser credential
+    if (action === 'engineering_adviser_post_followup')               return await engineeringAdviserPostFollowup(req, res);// adviser credential
     // v13.91.0 — MMMOS Stabilization Roadmap
     if (action === 'roadmap_load')               return await roadmapLoad(req, res);
     if (action === 'roadmap_approve_phase')      return await roadmapApprovePhase(req, res);
