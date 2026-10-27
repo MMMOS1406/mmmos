@@ -22,7 +22,21 @@ ok('old gray-blue Emotional colours are gone',!/#5f7290|#23283a|#9aa9c2/.test(h)
 const comp=(()=>{const s=h.indexOf('  function _drawFarsiComposedFrame(');return h.slice(s,h.indexOf('\n  // ── Main frame renderer',s));})();
 ok('Long: photo drawn edge-to-edge with no border and no rounded frame',/_drawFarsiPanel\(panelX,panelTop,panelW,panelH,zoom,0,\{aim:/.test(comp)&&!/_drawFarsiPanel\(panelX[^\n]*border:true/.test(comp)&&/panelH=H, panelTop=0/.test(comp));
 ok('Long: no framed-panel call remains',!/_drawFarsiPanel\([^)]*,18,true,true\)/.test(comp));
-ok('Long: no dark veil behind the title — the cover photo runs full-width under it (face keeps its screen position and size; lighter edge vignette)',!/ctx\.drawImage\(_farsiLongVeil/.test(comp)&&/const panelW=W, panelH=H, panelTop=0, panelX=0;/.test(comp)&&/aim:\{x:isMirror\?0\.40\*0\.66:0\.34\+0\.60\*0\.66,y:0\.40,face:0\.21\*0\.66\}/.test(comp)&&/vignette:0\.16,prefilter:true\}/.test(comp)&&/if\(o\.prefilter\)\{/.test(panel)&&/else ctx\.filter='contrast\(1\.07\) saturate\(1\.10\) brightness\(1\.03\)';/.test(panel)&&/x\.fillStyle=_farsiPal\.tint; x\.fillRect\(0,0,iw,ih\);/.test(panel)&&/if\(o\.prefilter\)\{ const R=faceR\*2\.4; ctx\.fillRect\(faceX-R,faceY-R,R\*2,R\*2\); \}/.test(panel)&&/ctx\.imageSmoothingQuality=o\.prefilter\?'medium':'high';/.test(panel)&&/_farsiAvatarPre=\(typeof createImageBitmap==='function'\)\?await createImageBitmap\(_pc\):_pc;/.test(h)&&/else ctx\.fillRect\(px-pw,py-ph,pw\*3,ph\*3\);/.test(panel));
+ok('Long: the title goes on the free side — face in the left half → title right, face right → title left (Short keeps its layout)',
+    /const isMirror=\(!isShort&&typeof avatarFocusX==='number'\)\?\(avatarFocusX<0\.5\):!!mirror;/.test(comp)&&/const titleSide=isMirror\?'right':'left';/.test(comp));
+ok('Long: medium/close shots keep the face on its own side (not re-centred under the title); Short unchanged',
+    /const fxT=o\.keepFaceSide\?fx-\(aim\.x-0\.5\)\*\(pw\/\(sc\*zz\)\)\/iw:fx;/.test(panel)&&/prefilter:true,keepFaceSide:true\}/.test(comp)&&(comp.match(/keepFaceSide/g)||[]).length===1);
+{ // every library cover, real formulas: the face never sits under the title, wide or close shot
+  const ci=h.indexOf('{id:"srv_farsi"'), la=h.indexOf('avatarLibrary:',ci); let dd=0,jj=h.indexOf('{',la); const s0=jj; for(;jj<h.length;jj++){if(h[jj]==='{')dd++;else if(h[jj]==='}'){dd--;if(!dd)break;}}
+  const lib=new Function('return '+h.slice(s0,jj+1))(); const W=1920,H=1080,iw=1672,ih=941; let worst=0,n=0;
+  for(const pool of Object.values(lib))for(const e of pool){ n++;
+    const left=e.fx>=0.5, ax=left?0.34+0.60*0.66:0.40*0.66, cover=Math.max(W/iw,H/ih), sc=Math.min(Math.max(cover,Math.min(cover*1.7,1.5)),Math.max(cover,(0.21*0.66*W)/(e.fw*iw)));
+    const sw=W/sc, sx=Math.min(iw-sw,Math.max(0,iw*e.fx-sw*ax)), bcx=(sx+sw/2)/iw; const t=left?[0.036*W,0.434*W]:[0.566*W,0.964*W];
+    for(const z of [1.06,1.13*1.06*1.06,1.26*1.06*1.06*1.055]){ const fxT=e.fx-(ax-0.5)*(W/(sc*z))/iw; const pull=z<1.1?0.25:1;
+      const w=W/(sc*z); let x=Math.min(Math.max((bcx+(fxT-bcx)*pull)*iw,w/2),iw-w/2); const fX=(iw*e.fx-(x-w/2))*sc*z, fW=e.fw*iw*sc*z;
+      worst=Math.max(worst,Math.min(fX+fW*0.75,t[1])-Math.max(fX-fW*0.75,t[0])); } }
+  ok('Long: across all '+n+' library covers the face never sits under the title (wide, medium and close shots)',n===37&&worst<=2,'worst overlap '+Math.max(0,worst).toFixed(1)+' px'); }
+ok('Long: no dark veil behind the title — the cover photo runs full-width under it (face keeps its screen position and size; lighter edge vignette)',!/ctx\.drawImage\(_farsiLongVeil/.test(comp)&&/const panelW=W, panelH=H, panelTop=0, panelX=0;/.test(comp)&&/aim:\{x:isMirror\?0\.40\*0\.66:0\.34\+0\.60\*0\.66,y:0\.40,face:0\.21\*0\.66\}/.test(comp)&&/vignette:0\.16,prefilter:true,keepFaceSide:true\}/.test(comp)&&/if\(o\.prefilter\)\{/.test(panel)&&/else ctx\.filter='contrast\(1\.07\) saturate\(1\.10\) brightness\(1\.03\)';/.test(panel)&&/x\.fillStyle=_farsiPal\.tint; x\.fillRect\(0,0,iw,ih\);/.test(panel)&&/if\(o\.prefilter\)\{ const R=faceR\*2\.4; ctx\.fillRect\(faceX-R,faceY-R,R\*2,R\*2\); \}/.test(panel)&&/ctx\.imageSmoothingQuality=o\.prefilter\?'medium':'high';/.test(panel)&&/_farsiAvatarPre=\(typeof createImageBitmap==='function'\)\?await createImageBitmap\(_pc\):_pc;/.test(h)&&/else ctx\.fillRect\(px-pw,py-ph,pw\*3,ph\*3\);/.test(panel));
 ok('still cover frame keeps the zoom floor 1 (no edge revealed)',/const z=Math\.max\(1,zoom\|\|1\)/.test(panel));
 ok('Long: romanized line is a restrained sans (no monospace caps block)',/500 \$\{Math\.round\(W\*0\.0195\)\}px 'Vazirmatn'/.test(comp)&&!/IBM Plex Mono', monospace`;\s*\n\s*ctx\.fillStyle='rgba\(253,246,232,0\.82\)'/.test(comp));
 ok('Long/Short: title type is cream, not pure white',(comp.match(/#fdf6e8/g)||[]).length>=2&&!/fillStyle='#fff(fff)?'/.test(comp));
@@ -116,7 +130,7 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   ok('face framing: enlargement is capped so the photo never goes soft',notSoft);
   ok('every pool entry carries a face box (fx, fy, fw)',plist.every(([k,pool])=>pool.every(e=>typeof e==='object'&&[e.fx,e.fy,e.fw].every(v=>typeof v==='number'&&v>0&&v<1))));
   ok('face light + face-centred vignette keep the face the brightest, clearest area',/createRadialGradient\(faceX,faceY,0,faceX,faceY,faceR\*2\.4\)/.test(panel)&&/createRadialGradient\(faceX,faceY,faceR\*1\.7/.test(panel));
-  ok('camera is face-centred: the still frame zooms about the face; medium/close shots centre on the face like SRV English (pull 1)',/ctx\.translate\(faceX,faceY\); ctx\.scale\(z,z\); ctx\.translate\(-faceX,-faceY\);/.test(panel)&&/bcx\+\(fx-bcx\)\*F\.pull/.test(panel));
+  ok('camera is face-centred: the still frame zooms about the face; medium/close shots centre on the face like SRV English (pull 1)',/ctx\.translate\(faceX,faceY\); ctx\.scale\(z,z\); ctx\.translate\(-faceX,-faceY\);/.test(panel)&&/bcx\+\(fxT-bcx\)\*F\.pull/.test(panel));
   ok('photo is drawn with high-quality smoothing and real colour',/imageSmoothingQuality=o\.prefilter\?'medium':'high'/.test(panel)&&!/ctx\.filter='[^']*grayscale/.test(panel)); }
 // ── Motion / text shadow / snow (CEO 2026-10-27): SRV English motion feel, no text shadow, small top-down snow ──
 { const atmo=(()=>{const s2=h.indexOf('  function _drawFarsiAtmo(');return h.slice(s2,h.indexOf('\n  }\n',s2));})();
@@ -140,7 +154,7 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   ok('motion: identical camera rectangle to srv2CameraRect (with SRV English\'s cover-fit base)',rectSame);
   const pnl=(()=>{const s2=h.indexOf('  function _drawFarsiPanel(');return h.slice(s2,h.indexOf('\n  }\n',s2));})();
   ok('motion: Long = SRV English shots (srv2ShotCameraRect: framing × eased push × overscan × breathing, sway inside the margin) + cross-dissolves',
-    /const zz=F\.z\*\(1\+C\.push\*_srvFarsiCamEase\(pp\)\)\*C\.overscan\*cam\.zoom;/.test(pnl)&&/_srvFarsiCamRect\(iw,ih,pw,ph,sc,zz,bcx\+\(fx-bcx\)\*F\.pull,bcy\+\(fy\+F\.dy-bcy\)\*F\.pull,cam\.mx,cam\.my,F\.z\*C\.overscan\)/.test(pnl)&&
+    /const zz=F\.z\*\(1\+C\.push\*_srvFarsiCamEase\(pp\)\)\*C\.overscan\*cam\.zoom;/.test(pnl)&&/_srvFarsiCamRect\(iw,ih,pw,ph,sc,zz,bcx\+\(fxT-bcx\)\*F\.pull,bcy\+\(fy\+F\.dy-bcy\)\*F\.pull,cam\.mx,cam\.my,F\.z\*C\.overscan\)/.test(pnl)&&
     /layers\.push\(\{r:shotRect\(pv\),a:1-_srvFarsiCamFade\(tt,cur\.start-hx,cur\.start\+hx\)\}\)/.test(pnl)&&/layers\.push\(\{r:shotRect\(nx\),a:_srvFarsiCamFade\(tt,nx\.start-hx,nx\.start\+hx\)\}\)/.test(pnl));
   { let inside=true; const iw=1672,ih=941,pw=1267,ph=1080,cover=Math.max(pw/iw,ph/ih),sc=Math.max(cover,1.3),C=FC.C;
     const shots=FC.tl(240,'edge'); for(let t=0;t<240;t+=0.25){const cam=FC.cam(t,99);for(const sh of shots){const F=C.framings[sh.framing];const pp=Math.max(-0.1,Math.min(1.1,(t-sh.start)/Math.max(1,sh.end-sh.start)));
