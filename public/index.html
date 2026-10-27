@@ -20002,6 +20002,7 @@ function renderSRVFarsiLifecycleCard(task){
       <div style="font-size:11px;color:var(--dim);margin-bottom:12px">Review the final video before it publishes. Approve to upload to YouTube, or rebuild if something's wrong.</div>
       ${isLongApprove?(longUrl?`<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">LONG VIDEO (16:9)</div><video src="${escHTML(longUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Long video not ready yet.</div>'):''}
       ${!isLongApprove?(shortUrl?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">SHORT VIDEO (9:16)</div><video src="${escHTML(shortUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Short video not ready yet.</div>'):''}
+      ${_srvFarsiRenderNoteHtml(pkg,isLongApprove)}
       ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Cover ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in the library · ${pkg._srvAvatarChoice&&pkg._srvAvatarChoice.how==='manual'?'chosen at Build — Rebuild keeps it unless you change it':'automatic — Rebuild moves to the next image, or choose one at Build'}</div>`:''}
       ${pubLabel?`<div style="padding:8px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:#22c55e;margin-bottom:10px">📅 Will publish: ${escHTML(pubLabel)}</div>`:''}
       ${_srvFarsiPublishPanelHtml(task,pkg,isLongApprove)}
@@ -20156,9 +20157,27 @@ async function _srvFarsiRenderVisible(opts){
   if(hid>SRV_FARSI_HIDDEN_MAX_MS) throw new Error('the video froze because this tab was in the background for '+Math.round(hid/1000)+' s while it rendered (the browser pauses drawing in hidden tabs). Nothing was uploaded. Keep the MMMOS tab open and in front, then press Build again.');
   return r;
 }
+// Approve: which renderer drew the video under review. A video from an older renderer (or one rendered before versions
+// were recorded) is flagged so the operator rebuilds it instead of approving the old look.
+function _srvFarsiRenderNoteHtml(pkg,isLong){
+  if(!pkg)return '';
+  const K=isLong?'Long':'Short', v=pkg['_srv'+K+'RenderVersion'], at=pkg['_srv'+K+'RenderedAt'];
+  if(!pkg['_srv'+K+'VideoUrl'])return '';
+  if(v===SRV_FARSI_RENDERER_VERSION){
+    const when=at?new Date(at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    return `<div data-srvf-render="current" style="font-size:10px;color:#22c55e;margin:-4px 0 10px;font-family:'JetBrains Mono',monospace">✓ Rendered with the current video style${when?' · '+escHTML(when):''}</div>`;
+  }
+  return `<div data-srvf-render="old" style="padding:8px 12px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:11px;color:#f87171;margin-bottom:10px;line-height:1.5">⚠ This video was made with an older version of the SRV Farsi video style${v?'':' (before 27 Oct 2026)'}. Press <strong>↻ Rebuild</strong>, then Build, to render it again with the current motion, text and snow.</div>`;
+}
 async function _srvFarsiBuildTrigger(pkgId,taskId){
   const btn=document.getElementById('srv-farsi-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-farsi-build-status-'+pkgId);
+  // A tab opened before a release keeps running the old renderer until it is reloaded: check the deployed version
+  // first and refuse to render (nothing rendered, uploaded or changed) when this tab is out of date.
+  if(await _srvFarsiPageIsCurrent()===false){
+    if(statusEl){statusEl.style.color='#ef4444';statusEl.textContent='⚠ This tab is running an older version of MMMOS, so it would render with the old video style. Reload the page (⌘R / Ctrl+R), then press Build again — nothing was rendered or changed.';}
+    return;
+  }
   let audio=_srvAudioData[pkgId];
   const _shortPkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
   if(!audio&&_srvFarsiIsShortFromLong(_shortPkg)){
@@ -20296,6 +20315,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const shortFile=new File([shortResult.blob],'srv_farsi_short.webm',{type:shortResult.blob.type});
       const shortUrl=await _srvUploadToStorage(pkgId,shortFile,'short');
       pkg._srvShortVideoUrl=shortUrl;
+      pkg._srvShortRenderVersion=SRV_FARSI_RENDERER_VERSION; pkg._srvShortRenderedAt=new Date().toISOString(); pkg._srvShortRenderBuild=SRV_FARSI_UI_BUILD;
       if(shortResult.thumbDataUrl){pkg._srvThumbDataUrl=shortResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
@@ -20321,6 +20341,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const longFile=new File([longResult.blob],'srv_farsi_long.webm',{type:longResult.blob.type});
       const longUrl=await _srvUploadToStorage(pkgId,longFile,'long');
       pkg._srvLongVideoUrl=longUrl;
+      pkg._srvLongRenderVersion=SRV_FARSI_RENDERER_VERSION; pkg._srvLongRenderedAt=new Date().toISOString(); pkg._srvLongRenderBuild=SRV_FARSI_UI_BUILD;
       try{ const _a=new Audio(URL.createObjectURL(audio.file)); await new Promise(function(r){_a.onloadedmetadata=r;_a.onerror=r;setTimeout(r,4000);}); if(isFinite(_a.duration)&&_a.duration>0)pkg._srvLongDurationSec=Math.round(_a.duration*10)/10; URL.revokeObjectURL(_a.src); }catch(_){}
       if(longResult.thumbDataUrl){pkg._srvThumbDataUrl=longResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
@@ -20737,7 +20758,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-27-b';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-k';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -23502,15 +23523,62 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 // the existing Pexels-photo renderer below is unchanged for every other engine.
 // Strength of the warm soft-light wash over the colour cover photo (0 = untouched photo). One knob,
 // so the look can be tuned to the benchmark without touching the renderer.
-// SRV Farsi camera (CEO 2026-10-27): the same motion feel as SRV English (SRV Studio V2, srv2-render.mjs
-// SRV2_MOTION / SRV2_LONG_TIMING) — copied here, not imported, so SRV English stays untouched.
-// overscan 1.06 · breathing 3.5 % / 16 s + 2 % / 41 s (raised-cosine, always ≥ 1) · slow 6 % eased push-in ·
-// sway = up to 0.8 of the free margin opened by the zoom (x: 23 s + 37 s, y: 29 s, smaller) — pure sums of sines,
-// so position and speed are continuous: no shake, no jumps. The pivot stays the face (face-aware crop unchanged).
-const SRV_FARSI_MOTION={overscan:1.06,breathe:0.035,breatheSec:16,breathe2:0.02,breathe2Sec:41,swaySec:23,sway2Sec:37,liftSec:29,swayAmt:0.8,liftAmt:0.3,
-  push:0.06,pushSec:24,shortOverscan:1.03,shortZoomShare:0.45,shortPushSec:30};
-// Snow (CEO 2026-10-27): small flakes that enter above the frame and fall gently; slight horizontal drift only.
-const SRV_FARSI_SNOW={fall:[0.010,0.020],drift:0.0025,sway:0.004,swaySec:[9,15],radius:[1.4,3.6],count:{happy:40,other:36}};
+// The SRV Farsi video look (camera, text, snow, Long composition). Bumped only when that look changes; recorded on every
+// rendered video (pkg._srvLongRenderVersion / _srvShortRenderVersion) and checked at Approve, so a video drawn by an
+// older renderer is visible.
+const SRV_FARSI_RENDERER_VERSION='srvf-render-2026-10-27-j';
+// SRV Farsi camera (CEO 2026-10-27, "exact SRV English motion match"): an exact copy of the SRV English (SRV Studio V2)
+// camera in public/srv-studio-v2/srv2-render.mjs — SRV2_FRAMINGS, SRV2_LONG_TIMING, SRV2_MOTION, srv2Rng, srv2LongTimeline,
+// srv2Camera, srv2CameraRect, srv2ShotCameraRect, srv2CardCameraRect and the Long shot cross-dissolve. Copied (not
+// imported) so SRV English stays untouched; the tests compare every function against the SRV English module output.
+// Long: shots of 20–28 s (wide first, then a different framing each time), each a steady eased 6 % push-in, joined by
+// 1.5 s cross-dissolves; on top: overscan 1.06, breathing 3.5 %/16 s + 2 %/41 s, sway inside the free image margin.
+// Short card: one 6 % push-in over the Short, breathing at 45 %, sway inside the free margin. The one SRV Farsi
+// adaptation: the "wide" framing is the approved face-aware SRV Farsi composition (not the plain cover fit).
+const SRV_FARSI_CAM={
+  framings:{wide:{z:1.0,dy:0.0,pull:0.25},medium:{z:1.13,dy:0.10,pull:1.0},close:{z:1.26,dy:0.06,pull:1.0}},
+  shotMin:20,shotMax:28,xfade:1.5,push:0.06,
+  overscan:1.06,breathe:0.035,breatheSec:16,breathe2:0.02,breathe2Sec:41,swaySec:23,sway2Sec:37,liftSec:29,swayAmt:0.8,shortZoomShare:0.45};
+function _srvFarsiCamRng(seed){ // = srv2Rng
+  let h=2166136261>>>0; for(const c of String(seed)){ h^=c.charCodeAt(0); h=Math.imul(h,16777619)>>>0; }
+  return function(){ h+=0x6D2B79F5; let t=h; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; };
+}
+function _srvFarsiCamSeed(str){ let h=0; for(const c of String(str||''))h=(h*31+c.charCodeAt(0))>>>0; return h; } // = seedOf
+function _srvFarsiCamEase(p){ p=Math.max(0,Math.min(1,p)); return p*p*(3-2*p); }
+function _srvFarsiCamFade(t,a,b){ return _srvFarsiCamEase((t-a)/Math.max(1e-6,b-a)); }
+function _srvFarsiCamTimeline(duration,seed){ // = srv2LongTimeline(...).shots
+  const C=SRV_FARSI_CAM, rnd=_srvFarsiCamRng(seed); const shots=[]; let t=0, prev=null;
+  while(t<duration-0.01){
+    let len=C.shotMin+rnd()*(C.shotMax-C.shotMin);
+    if(duration-(t+len)<C.shotMin*0.6) len=duration-t;
+    let framing;
+    if(!prev) framing='wide';
+    else { const opts=Object.keys(C.framings).filter(function(f){return f!==prev;}); framing=opts[Math.floor(rnd()*opts.length)]; }
+    shots.push({start:+t.toFixed(3),end:+Math.min(duration,t+len).toFixed(3),framing:framing,dir:shots.length%2?-1:1});
+    prev=framing; t+=len;
+  }
+  return shots;
+}
+function _srvFarsiCamera(t,seed){ // = srv2Camera
+  const M=SRV_FARSI_CAM; const ph=(seed%1000)/1000*Math.PI*2; const TAU=Math.PI*2;
+  const zoom=1+M.breathe*(0.5-0.5*Math.cos(TAU*t/M.breatheSec))+M.breathe2*(0.5-0.5*Math.cos(TAU*t/M.breathe2Sec+ph));
+  const mx=M.swayAmt*(0.68*Math.sin(TAU*t/M.swaySec+ph)+0.32*Math.sin(TAU*t/M.sway2Sec+ph*1.7));
+  const my=M.swayAmt*0.5*Math.sin(TAU*t/M.liftSec+ph*0.6);
+  return {zoom:zoom,mx:mx,my:my};
+}
+// = srv2CameraRect, with the base scale passed in (SRV English: cover fit; SRV Farsi: the face-aware composition scale)
+function _srvFarsiCamRect(srcW,srcH,W,H,base,s,cx,cy,mx,my,sRef){
+  if(sRef==null)sRef=s;
+  const k=base*s, k0=base*Math.min(sRef,s);
+  const w=W/k, h=H/k, w0=W/k0, h0=H/k0;
+  const cl=function(v,a,b){return Math.max(a,Math.min(b,v));};
+  let x=cl(cx*srcW,w0/2,srcW-w0/2), y=cl(cy*srcH,h0/2,srcH-h0/2);
+  x+=mx*Math.min(x-w0/2,srcW-w0/2-x); y+=my*Math.min(y-h0/2,srcH-h0/2-y);
+  return {x:x-w/2,y:y-h/2,w:w,h:h,scale:k};
+}
+// Snow (CEO 2026-10-27): small flakes that enter above the frame and fall gently; slight horizontal drift only. Sized and
+// opaque enough to survive video encoding (crisp core), faded out near the face so they never cover it.
+const SRV_FARSI_SNOW={fall:[0.015,0.030],drift:0.0025,sway:0.004,swaySec:[9,15],radius:[2.2,4.6],alpha:[0.45,0.85],count:{happy:46,other:42}}; // radius in px per 1080 px of the frame's short side
 const SRV_FARSI_WARM_GRADE_ALPHA=0.20; // light enough to keep natural skin tones
 const SRV_FARSI_MOOD_PALETTES={
   romantic:{gradient:['#6b3420','#3a1810','#1c0e0c'],tint:'#c9793f',frame:'#e0b56a',word:'عاشقانه',particle:'#f4d9a8'},
@@ -23693,7 +23761,7 @@ async function _srvRenderVideo(opts){
     ? 'video/webm;codecs=vp9,opus'
     : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : 'video/webm');
   // v13.74.14 — unified 1Mbps for both Short + Long. Long at 1.5Mbps hit Supabase 50MB ceiling. 1Mbps × 180s = ~22MB. YouTube transcodes anyway.
-  const recorder = new MediaRecorder(combined, { mimeType: mime, videoBitsPerSecond: 1_000_000 });
+  const recorder = new MediaRecorder(combined, { mimeType: mime, videoBitsPerSecond: isFarsiComposed ? (isShort ? 6_000_000 : 8_000_000) : 1_000_000 }); // SRV Farsi: SRV English's bitrate (1 Mbps smeared the title edges and the flakes)
   const chunks = [];
   recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
   // ── Helper: draw one background image with per-scene Ken Burns ──────────────
@@ -23736,7 +23804,8 @@ async function _srvRenderVideo(opts){
   }
 
   // ── SRV Farsi V2 Phase 2 composed-cover frame (canvas port of VISUAL_BASELINE_v1) ──
-  let _farsiPal=null,_farsiAtmo=null,_farsiAtmoKind=null,_farsiGrainPattern=null,_farsiT_ATMO=20;
+  let _farsiPal=null,_farsiAtmo=null,_farsiAtmoKind=null,_farsiGrainPattern=null,_farsiT_ATMO=20,_farsiCamShots=null,_farsiFace=null,_farsiFlake=null;
+  let _farsiAvatarPre=null; // Long: colour-lifted + warm-graded cover photo, built once per render (ImageBitmap)
   let _farsiSprite=null, _farsiShortBg=null; // cached glow sprite + blurred Short backdrop
   let _farsiLongVeil=null; // cached title-side veil for the frameless Long cover (static, built once per render)
   // v2-phase2 — intensity scalar (soft/standard/vivid) modulates atmo density + zoom amplitude;
@@ -23761,6 +23830,16 @@ async function _srvRenderVideo(opts){
     _gctx.fillStyle='rgba(255,255,255,0.35)'; _gctx.fillRect(0,0,1,1);
     _farsiGrainPattern=ctx.createPattern(_gc,'repeat');
   }
+  // Long: the cover photo with its colour lift + warm grade applied once, held as an ImageBitmap so the browser keeps it
+  // on the graphics card (re-filtering the full-width photo every frame, or re-uploading a plain canvas, is too slow).
+  if(isFarsiComposed&&!isShort&&_avatarImg){
+    const _pc=document.createElement('canvas'); _pc.width=_avatarImg.naturalWidth; _pc.height=_avatarImg.naturalHeight;
+    const _px=_pc.getContext('2d');
+    _px.filter='contrast(1.07) saturate(1.10) brightness(1.03)'; _px.drawImage(_avatarImg,0,0); _px.filter='none';
+    _px.globalCompositeOperation='soft-light'; _px.globalAlpha=SRV_FARSI_WARM_GRADE_ALPHA; _px.fillStyle=_farsiPal.tint; _px.fillRect(0,0,_pc.width,_pc.height);
+    _px.globalAlpha=1; _px.globalCompositeOperation='source-over';
+    try{ _farsiAvatarPre=(typeof createImageBitmap==='function')?await createImageBitmap(_pc):_pc; }catch(_){ _farsiAvatarPre=_pc; }
+  }
   // Soft glow sprite, built once: particles and bokeh are stamped from it (no per-particle blur filter,
   // so a denser, faster field still renders in real time).
   function _farsiGlowSprite(){
@@ -23781,16 +23860,26 @@ async function _srvRenderVideo(opts){
     const wrap=function(v,m){return ((v%m)+m)%m;};
     ctx.save();
     if(_farsiAtmoKind==='particle'){
-      ctx.globalCompositeOperation='screen';
-      const k=W/1280, sMin=Math.min.apply(null,_farsiAtmo.map(function(p){return p.size;})), sMax=Math.max.apply(null,_farsiAtmo.map(function(p){return p.size;}));
+      if(!_farsiFlake){ // crisp flake sprite: solid core, short soft edge (survives video encoding; no glow / bokeh)
+        const c=document.createElement('canvas'); c.width=c.height=32; const x=c.getContext('2d');
+        const g=x.createRadialGradient(16,16,0,16,16,16);
+        g.addColorStop(0,'rgba(255,250,240,1)'); g.addColorStop(0.45,'rgba(255,250,240,0.95)'); g.addColorStop(0.75,'rgba(255,250,240,0.35)'); g.addColorStop(1,'rgba(255,250,240,0)');
+        x.fillStyle=g; x.fillRect(0,0,32,32); _farsiFlake=c;
+      }
+      ctx.globalCompositeOperation='source-over';
+      const k=Math.min(W,H)/1080, sMin=Math.min.apply(null,_farsiAtmo.map(function(p){return p.size;})), sMax=Math.max.apply(null,_farsiAtmo.map(function(p){return p.size;}));
+      const F=_farsiFace, near=Math.min(W,H)*0.32;
       for(const p of _farsiAtmo){
         const d=Math.min(1,p.baseOp*1.6);                                        // 0..1 depth: nearer = a touch faster/bigger
         const u=sMax>sMin?(p.size-sMin)/(sMax-sMin):0.5;                          // the flake's own size variation
         const yf=wrap(p.y0+(S.fall[0]+(S.fall[1]-S.fall[0])*d)*t,1.1)-0.05;        // TOP → DOWN; re-enters above the frame
         const xf=wrap(p.x0+S.drift*(p.wrapsX?-1:1)*t+S.sway*Math.sin(_TAU2*t/(S.swaySec[0]+(S.swaySec[1]-S.swaySec[0])*u)+p.phase),1.04)-0.02;
-        const r=k*(S.radius[0]+(S.radius[1]-S.radius[0])*(0.55*u+0.45*d));       // 1.4–3.6 px at 1280 wide
-        ctx.globalAlpha=Math.max(0.10,Math.min(0.55,p.baseOp*(0.85+0.15*Math.sin(t*0.3+p.phase))));
-        ctx.drawImage(sp,xf*W-r,yf*H-r,r*2,r*2);
+        const r=k*(S.radius[0]+(S.radius[1]-S.radius[0])*(0.55*u+0.45*d));
+        let a=S.alpha[0]+(S.alpha[1]-S.alpha[0])*(0.5*d+0.5*u);
+        if(F){ const dd=Math.hypot(xf*W-F.x,yf*H-F.y)/near; a*=Math.max(0,Math.min(1,(dd-0.55)/0.6)); } // as SRV English: never over the face
+        if(a<=0.01)continue;
+        ctx.globalAlpha=a*(0.9+0.1*Math.sin(t*0.3+p.phase));
+        ctx.drawImage(_farsiFlake,xf*W-r,yf*H-r,r*2,r*2);
       }
       ctx.globalCompositeOperation='source-over';
     } else {
@@ -23831,28 +23920,68 @@ async function _srvRenderVideo(opts){
       const sx=Math.min(iw-sw,Math.max(0,iw*fx-sw*aim.x));
       const sy=Math.min(ih-sh,Math.max(0,ih*fy-sh*aim.y));
       faceX=px+(iw*fx-sx)*sc; faceY=py+(ih*fy-sy)*sc; if(fw>0)faceR=fw*iw*sc*0.75;
-      const z=Math.max(1,zoom||1);
-      // pan is limited to the margin the zoom opened up, so the photo can never reveal an edge
-      const mx=Math.min(faceX-px,px+pw-faceX)*(z-1)*0.9, my=Math.min(faceY-py,py+ph-faceY)*(z-1)*0.9;
-      ctx.translate(faceX+(o.panX||0)*mx,faceY+(o.panY||0)*my); ctx.scale(z,z); ctx.translate(-faceX,-faceY);
-      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality=o.prefilter?'medium':'high'; // Long: 'high' on the pre-coloured bitmap runs on the CPU (~18 fps); 'medium' keeps 30 fps, same detail
       // real colours, lifted slightly for a clean HD read (no grayscale / duotone)
-      ctx.filter='contrast(1.07) saturate(1.10) brightness(1.03)';
-      ctx.drawImage(_avatarImg,sx,sy,sw,sh,px,py,pw,ph);
+      // Long (o.prefilter): the same colour lift applied ONCE to the photo and reused every frame, so the full-width
+      // photo stays real-time (re-filtering 1920×1080 every frame dropped a test render to ~25 fps). Same look.
+      let _src=_avatarImg;
+      if(o.prefilter){
+        if(!_farsiAvatarPre){ const c=document.createElement('canvas'); c.width=iw; c.height=ih; const x=c.getContext('2d');
+          x.filter='contrast(1.07) saturate(1.10) brightness(1.03)'; x.drawImage(_avatarImg,0,0); x.filter='none';
+          x.globalCompositeOperation='soft-light'; x.globalAlpha=SRV_FARSI_WARM_GRADE_ALPHA; x.fillStyle=_farsiPal.tint; x.fillRect(0,0,iw,ih); // the even warm grade, baked in once
+          x.globalAlpha=1; x.globalCompositeOperation='source-over'; _farsiAvatarPre=c; }
+        _src=_farsiAvatarPre;
+      } else ctx.filter='contrast(1.07) saturate(1.10) brightness(1.03)';
+      if(o.cam){
+        // SRV English camera (srv2ShotCameraRect / srv2CardCameraRect + the Long cross-dissolve). Base framing = the
+        // face-aware composition above: its centre plays the role of SRV English's image centre, its scale the cover fit.
+        const C=SRV_FARSI_CAM, cam=o.cam.cam, bcx=(sx+sw/2)/iw, bcy=(sy+sh/2)/ih;
+        const shotRect=function(sh){
+          const F=C.framings[sh.framing]; const pp=Math.max(-0.1,Math.min(1.1,(o.cam.t-sh.start)/Math.max(1,sh.end-sh.start)));
+          const zz=F.z*(1+C.push*_srvFarsiCamEase(pp))*C.overscan*cam.zoom;
+          return _srvFarsiCamRect(iw,ih,pw,ph,sc,zz,bcx+(fx-bcx)*F.pull,bcy+(fy+F.dy-bcy)*F.pull,cam.mx,cam.my,F.z*C.overscan);
+        };
+        let layers;
+        if(o.cam.kind==='long'&&o.cam.shots&&o.cam.shots.length){
+          const tl=o.cam.shots, tt=o.cam.t, hx=C.xfade/2;
+          let i=tl.findIndex(function(sh){return tt<sh.end;}); if(i<0)i=tl.length-1;
+          const cur=tl[i], nx=tl[i+1], pv=tl[i-1];
+          layers=[{r:shotRect(cur),a:1}];
+          if(pv&&tt<cur.start+hx) layers.push({r:shotRect(pv),a:1-_srvFarsiCamFade(tt,cur.start-hx,cur.start+hx)});
+          if(nx&&tt>cur.end-hx) layers.push({r:shotRect(nx),a:_srvFarsiCamFade(tt,nx.start-hx,nx.start+hx)});
+        } else {
+          const zz=(1+C.push*_srvFarsiCamEase(o.cam.p))*(1+(cam.zoom-1)*C.shortZoomShare);
+          layers=[{r:_srvFarsiCamRect(iw,ih,pw,ph,sc,zz,bcx,bcy,cam.mx,cam.my,1),a:1}];
+        }
+        layers.forEach(function(L){ if(L.a<=0)return; ctx.globalAlpha=L.a; ctx.drawImage(_src,L.r.x,L.r.y,L.r.w,L.r.h,px,py,pw,ph); });
+        ctx.globalAlpha=1;
+        const r0=layers[0].r;
+        faceX=px+(iw*fx-r0.x)/r0.w*pw; faceY=py+(ih*fy-r0.y)/r0.h*ph; if(fw>0)faceR=fw*iw*(pw/r0.w)*0.75;
+      } else {
+        const z=Math.max(1,zoom||1);
+        // still cover/thumbnail framing: zoom about the face (no camera)
+        ctx.translate(faceX,faceY); ctx.scale(z,z); ctx.translate(-faceX,-faceY);
+        ctx.drawImage(_src,sx,sy,sw,sh,px,py,pw,ph);
+      }
       ctx.filter='none';
+      _farsiFace={x:faceX,y:faceY,r:faceR};
     } else {
       ctx.fillStyle='#1a1210'; ctx.fillRect(px,py,pw,ph);
     }
     // warm grade: a light soft-light wash of the mood's warm tint over the colour photo
     ctx.globalCompositeOperation='soft-light';
-    ctx.globalAlpha=SRV_FARSI_WARM_GRADE_ALPHA;
-    ctx.fillStyle=_farsiPal.tint;
-    ctx.fillRect(px-pw,py-ph,pw*3,ph*3);
-    ctx.globalAlpha=1;
+    if(!(o.prefilter&&_avatarImg)){ // Long: already baked into the pre-coloured photo
+      ctx.globalAlpha=SRV_FARSI_WARM_GRADE_ALPHA;
+      ctx.fillStyle=_farsiPal.tint;
+      ctx.fillRect(px-pw,py-ph,pw*3,ph*3);
+      ctx.globalAlpha=1;
+    }
     // face light: a soft key light on the face so it is the brightest, clearest part of the frame
     const fl=ctx.createRadialGradient(faceX,faceY,0,faceX,faceY,faceR*2.4);
     fl.addColorStop(0,'rgba(255,238,212,0.34)'); fl.addColorStop(0.55,'rgba(255,238,212,0.12)'); fl.addColorStop(1,'rgba(255,238,212,0)');
-    ctx.fillStyle=fl; ctx.fillRect(px-pw,py-ph,pw*3,ph*3);
+    ctx.fillStyle=fl;
+    if(o.prefilter){ const R=faceR*2.4; ctx.fillRect(faceX-R,faceY-R,R*2,R*2); } // Long: only where the light falls (same result)
+    else ctx.fillRect(px-pw,py-ph,pw*3,ph*3);
     ctx.globalCompositeOperation='source-over';
     ctx.restore(); // camera transform off: the layers below are fixed to the panel
     // slow light sweep across the photo
@@ -23865,7 +23994,7 @@ async function _srvRenderVideo(opts){
     }
     // vignette centred on the face: everything away from it falls off slightly
     const vg=ctx.createRadialGradient(faceX,faceY,faceR*1.7,faceX,faceY,Math.max(pw,ph)*0.95);
-    vg.addColorStop(0,'rgba(12,6,3,0)'); vg.addColorStop(1,'rgba(12,6,3,0.42)');
+    vg.addColorStop(0,'rgba(12,6,3,0)'); vg.addColorStop(1,'rgba(12,6,3,'+(o.vignette!=null?o.vignette:0.42)+')'); // Long: lighter, so the title side is not shaded
     ctx.fillStyle=vg; ctx.fillRect(px,py,pw,ph);
     if(o.fade){
       const g=ctx.createLinearGradient(0,py+ph*0.50,0,py+ph);
@@ -24002,17 +24131,13 @@ async function _srvRenderVideo(opts){
     const _in=function(a,b){ if(skipFade)return 1; const x=_c01((t-a)/(b-a)); return 1-Math.pow(1-x,3); }; // ease-out
     const _live=skipFade?0:1;
     const _cyc=function(period,phase){return Math.sin(2*Math.PI*t/period+(phase||0));};
-    // camera — SRV English (SRV Studio V2) motion feel, see SRV_FARSI_MOTION. The cover/thumbnail frame
-    // (skipFade) keeps the approved still framing (1.045, no pan).
-    const _M=SRV_FARSI_MOTION, _TAU=2*Math.PI, _ph=((((typeof seed==='number'&&isFinite(seed))?seed:1)%1000)+1000)%1000/1000*_TAU;
-    const _ease=function(x){x=_c01(x);return x*x*(3-2*x);};
-    const _breath=_M.breathe*(0.5-0.5*Math.cos(_TAU*t/_M.breatheSec))+_M.breathe2*(0.5-0.5*Math.cos(_TAU*t/_M.breathe2Sec+_ph));
-    const _tri=function(x){x=((x%2)+2)%2;return x<1?x:2-x;};                     // 0→1→0: push in, then ease back out
-    const zoom=!_live?1.045:(isShort
-      ? _M.shortOverscan*(1+_breath*_M.shortZoomShare)*(1+_M.push*_ease(t/_M.shortPushSec))
-      : _M.overscan*(1+_breath)*(1+_M.push*_ease(_tri(t/_M.pushSec))));
-    const panX=_live*_M.swayAmt*(0.68*Math.sin(_TAU*t/_M.swaySec+_ph)+0.32*Math.sin(_TAU*t/_M.sway2Sec+_ph*1.7));
-    const panY=_live*_M.liftAmt*Math.sin(_TAU*t/_M.liftSec+_ph*0.6);
+    // camera — exact SRV English (SRV Studio V2) camera, see SRV_FARSI_CAM. The cover/thumbnail frame (skipFade) keeps
+    // the approved still framing (1.045, no camera).
+    const _camSeed=_srvFarsiCamSeed(String(avatarUrl||'')+'|'+String(title||''));
+    if(_live&&!isShort&&!_farsiCamShots) _farsiCamShots=_srvFarsiCamTimeline(targetDur,String(avatarUrl||'')+'|'+String(title||''));
+    const _cam=_live?_srvFarsiCamera(t,_camSeed):null;
+    const _camOpt=_cam?(isShort?{kind:'short',cam:_cam,p:Math.max(0,Math.min(1.1,t/Math.max(1,targetDur)))}:{kind:'long',cam:_cam,t:t,shots:_farsiCamShots}):null;
+    const zoom=1.045, panX=0, panY=0;
     const sweep=undefined;
     const isMirror=!!mirror;
     const _rawTitle=(title||hookText||'').replace(/\s*[|·—–].*$/,'').replace(/\s+(?:Emotional|Romantic|Happy)\b.*/i,'').trim();
@@ -24021,27 +24146,11 @@ async function _srvRenderVideo(opts){
       // ── LONG (visual benchmark): frameless 16:9 cinematic cover. The photo fills the subject side
       // edge-to-edge and dissolves into warm dark negative space on the title side, where the large
       // Farsi title sits. The face is framed toward the outer side, clear of the title.
-      const panelW=Math.round(W*0.66), panelH=H, panelTop=0;
-      const panelX=isMirror?0:(W-panelW);
-      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,0,{aim:{x:isMirror?0.40:0.60,y:0.40,face:0.21},panX:panX,panY:panY,sweep:sweep});
-      // Title-side veil: one clean warm-dark field over the title side that dissolves into the photo
-      // (no visible edge). A vertical warm gradient masked by a horizontal alpha ramp; static, so it
-      // is built once and reused every frame.
-      if(!_farsiLongVeil){
-        _farsiLongVeil=document.createElement('canvas'); _farsiLongVeil.width=W; _farsiLongVeil.height=H;
-        const vx=_farsiLongVeil.getContext('2d');
-        const vg=vx.createLinearGradient(0,0,0,H);
-        vg.addColorStop(0,_farsiPal.gradient[1]); vg.addColorStop(1,_farsiPal.gradient[2]);
-        vx.fillStyle=vg; vx.fillRect(0,0,W,H);
-        const _edge=isMirror?panelW:panelX;                     // photo's inner edge
-        const _solidTo=isMirror?(_edge-W*0.02):(_edge+W*0.02);  // fully covered just past the edge
-        const _clearAt=isMirror?(_edge-W*0.30):(_edge+W*0.30);  // photo fully visible from here
-        const vm=vx.createLinearGradient(_solidTo,0,_clearAt,0);
-        vm.addColorStop(0,'rgba(0,0,0,1)'); vm.addColorStop(0.45,'rgba(0,0,0,0.62)'); vm.addColorStop(1,'rgba(0,0,0,0)');
-        vx.globalCompositeOperation='destination-in'; vx.fillStyle=vm; vx.fillRect(0,0,W,H);
-        vx.globalCompositeOperation='source-over';
-      }
-      ctx.drawImage(_farsiLongVeil,0,0);
+      // CEO 2026-10-27: no dark field behind the title — the cover photo runs full-width under it. The face keeps the
+      // approved screen position and size (it sat at 60 % of a 66 %-wide panel with the face 21 % of that panel).
+      const panelW=W, panelH=H, panelTop=0, panelX=0;
+      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,0,{aim:{x:isMirror?0.40*0.66:0.34+0.60*0.66,y:0.40,face:0.21*0.66},panX:panX,panY:panY,sweep:sweep,cam:_camOpt,vignette:0.16,prefilter:true});
+      // (the former title-side dark veil is removed: CEO 2026-10-27, it covered the cover photo behind the title)
       // soft cinematic floor so the lower edge reads as film, not a crop
       const _floor=ctx.createLinearGradient(0,H*0.72,0,H);
       _floor.addColorStop(0,'rgba(10,6,4,0)'); _floor.addColorStop(1,'rgba(10,6,4,0.42)');
@@ -24070,7 +24179,13 @@ async function _srvRenderVideo(opts){
       ctx.globalAlpha=pT; ctx.translate((1-pT)*_dir*W*0.09+_drift,0);
       ctx.direction='rtl'; ctx.textAlign=titleSide==='left'?'left':'right';
       ctx.font=_titleFontStr(_titleFit.fontSize); ctx.fillStyle='#fdf6e8';
+      // Long title edge (CEO 2026-10-27, "dark outline behind the title"): the glyphs are drawn once, plain cream, no
+      // shadow/stroke. A razor-sharp cream-on-dark edge "rings" into a dark outline whenever the video is shown smaller
+      // (YouTube's lower resolutions, phones, small players). A 1.2 px edge softening (at 1920 wide) — invisible at full
+      // size — stops that ring (measured: 9–14 → 0–5 levels darker than the background after a ½ or ⅓ downscale).
+      ctx.filter='blur('+(1.2*W/1920).toFixed(2)+'px)';
       const titleBottomY=_srvDrawPreSplitLinesTop(ctx,_titleFit.lines,tx,titleTopY,_titleLineH);
+      ctx.filter='none';
       ctx.restore();
       // rule: draws itself outward
       const ruleY=titleBottomY+_ruleGap;
@@ -24111,9 +24226,9 @@ async function _srvRenderVideo(opts){
         bx.drawImage(_avatarImg,(54-iw*sc)/2,(96-ih*sc)/2,iw*sc,ih*sc);
       }
       if(_farsiShortBg){
-        const bz=1.30*(1+_live*_breath)*(1+_live*0.04*_c01(t/_M.shortPushSec));
+        const bz=1.30*(1+0.04*_c01(t/Math.max(1,targetDur)))*(_cam?1.04*_cam.zoom:1);
         ctx.save(); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-        ctx.translate(W/2+W*0.03*panX,H/2+H*0.015*panY); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
+        ctx.translate(W/2+(_cam?W*0.03*_cam.mx:0),H/2+(_cam?H*0.03*_cam.my:0)); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
         ctx.drawImage(_farsiShortBg,0,0,W,H);
         ctx.restore();
       }
@@ -24144,7 +24259,7 @@ async function _srvRenderVideo(opts){
       ctx.translate(W/2,cY+cH/2+(1-pC)*H*0.025); ctx.scale(0.965+0.035*pC,0.965+0.035*pC); ctx.translate(-W/2,-(cY+cH/2));
       ctx.save(); ctx.shadowColor='rgba(0,0,0,0.55)'; ctx.shadowBlur=Math.round(W*0.05); ctx.shadowOffsetY=Math.round(W*0.014);
       ctx.fillStyle='#140a07'; ctx.beginPath(); if(ctx.roundRect)ctx.roundRect(cX,cY,cW,cH,cR); else ctx.rect(cX,cY,cW,cH); ctx.fill(); ctx.restore();
-      _drawFarsiPanel(cX,cY,cW,cH,zoom,cR,{aim:{x:0.5,y:0.37,face:0.30},panX:panX,panY:panY,sweep:sweep,fade:true,border:true});
+      _drawFarsiPanel(cX,cY,cW,cH,zoom,cR,{aim:{x:0.5,y:0.37,face:0.30},panX:panX,panY:panY,sweep:sweep,fade:true,border:true,cam:_camOpt});
       // card mark (top-left)
       ctx.direction='ltr'; ctx.textAlign='left'; ctx.fillStyle='rgba(253,246,232,0.78)';
       ctx.font=`600 ${Math.round(W*0.019)}px 'IBM Plex Mono', monospace`;
