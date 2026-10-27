@@ -20139,6 +20139,23 @@ async function _srvFarsiRegeneratePackage(taskId,pkgId){
 }
 
 // ── Farsi build trigger ───────────────────────────────────────────────────────
+// SRV Farsi render guard (CEO 2026-10-27, "Long appears nearly static"): the browser stops drawing a hidden tab, so a
+// render made while MMMOS was in the background records a frozen picture (production Long pkg_1793116949329: no
+// frames from 3.6 s to 191.9 s). Watch the tab during the render; if it was hidden, refuse the video (nothing is
+// uploaded, the stage does not move) and tell the operator to build again with the tab in front.
+const SRV_FARSI_HIDDEN_MAX_MS=1500;
+function _srvFarsiRenderWatch(){
+  let hiddenMs=0, since=document.hidden?performance.now():null;
+  const on=function(){ if(document.hidden){ if(since==null)since=performance.now(); } else if(since!=null){ hiddenMs+=performance.now()-since; since=null; } };
+  document.addEventListener('visibilitychange',on);
+  return {stop:function(){ document.removeEventListener('visibilitychange',on); if(since!=null){hiddenMs+=performance.now()-since;since=null;} return hiddenMs; }};
+}
+async function _srvFarsiRenderVisible(opts){
+  const w=_srvFarsiRenderWatch(); let r, hid=0;
+  try{ r=await _srvRenderVideo(opts); } finally { hid=w.stop(); }
+  if(hid>SRV_FARSI_HIDDEN_MAX_MS) throw new Error('the video froze because this tab was in the background for '+Math.round(hid/1000)+' s while it rendered (the browser pauses drawing in hidden tabs). Nothing was uploaded. Keep the MMMOS tab open and in front, then press Build again.');
+  return r;
+}
 async function _srvFarsiBuildTrigger(pkgId,taskId){
   const btn=document.getElementById('srv-farsi-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-farsi-build-status-'+pkgId);
@@ -20259,8 +20276,8 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
 
     // Step 2: SHORT render (9:16) — only for Short tasks
     if(!isLongTask){
-      setStatus('Rendering SHORT video… do not close this tab','#8b5cf6');
-      const shortResult=await _srvRenderVideo({
+      setStatus('Rendering SHORT video… keep this tab open and in front until it finishes','#8b5cf6');
+      const shortResult=await _srvFarsiRenderVisible({
         photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'short',
@@ -20286,8 +20303,8 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
 
     // Step 3: LONG render (16:9, full song) — only for Long tasks
     if(isLongTask){
-      setStatus('Rendering LONG video… this takes the full song length, do not close this tab','#8b5cf6');
-      const longResult=await _srvRenderVideo({
+      setStatus('Rendering LONG video… this takes the full song length — keep this tab open and in front (switching tabs freezes the video)','#8b5cf6');
+      const longResult=await _srvFarsiRenderVisible({
         photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'long',
@@ -20720,7 +20737,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-25-k';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-b';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -23485,6 +23502,15 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 // the existing Pexels-photo renderer below is unchanged for every other engine.
 // Strength of the warm soft-light wash over the colour cover photo (0 = untouched photo). One knob,
 // so the look can be tuned to the benchmark without touching the renderer.
+// SRV Farsi camera (CEO 2026-10-27): the same motion feel as SRV English (SRV Studio V2, srv2-render.mjs
+// SRV2_MOTION / SRV2_LONG_TIMING) — copied here, not imported, so SRV English stays untouched.
+// overscan 1.06 · breathing 3.5 % / 16 s + 2 % / 41 s (raised-cosine, always ≥ 1) · slow 6 % eased push-in ·
+// sway = up to 0.8 of the free margin opened by the zoom (x: 23 s + 37 s, y: 29 s, smaller) — pure sums of sines,
+// so position and speed are continuous: no shake, no jumps. The pivot stays the face (face-aware crop unchanged).
+const SRV_FARSI_MOTION={overscan:1.06,breathe:0.035,breatheSec:16,breathe2:0.02,breathe2Sec:41,swaySec:23,sway2Sec:37,liftSec:29,swayAmt:0.8,liftAmt:0.3,
+  push:0.06,pushSec:24,shortOverscan:1.03,shortZoomShare:0.45,shortPushSec:30};
+// Snow (CEO 2026-10-27): small flakes that enter above the frame and fall gently; slight horizontal drift only.
+const SRV_FARSI_SNOW={fall:[0.010,0.020],drift:0.0025,sway:0.004,swaySec:[9,15],radius:[1.4,3.6],count:{happy:40,other:36}};
 const SRV_FARSI_WARM_GRADE_ALPHA=0.20; // light enough to keep natural skin tones
 const SRV_FARSI_MOOD_PALETTES={
   romantic:{gradient:['#6b3420','#3a1810','#1c0e0c'],tint:'#c9793f',frame:'#e0b56a',word:'عاشقانه',particle:'#f4d9a8'},
@@ -23723,7 +23749,7 @@ async function _srvRenderVideo(opts){
     _farsiPal=SRV_FARSI_MOOD_PALETTES[_srvFarsiMoodKey(mood)];
     _farsiT_ATMO=isShort?15:20;
     const _seed=(typeof seed==='number'&&isFinite(seed))?seed:1;
-    const _baseN=_srvFarsiMoodKey(mood)==='happy'?26:24; // restrained field: atmosphere, never a distraction
+    const _baseN=_srvFarsiMoodKey(mood)==='happy'?SRV_FARSI_SNOW.count.happy:SRV_FARSI_SNOW.count.other; // small, light flakes
     if(_srvFarsiMoodKey(mood)==='emotional'){
       _farsiAtmo=_srvFarsiGenRain(_seed,Math.round(50*_farsiIntensityMul)); _farsiAtmoKind='rain';
     } else {
@@ -23749,27 +23775,22 @@ async function _srvRenderVideo(opts){
   // Living atmosphere. Three depth layers moving at different speeds (parallax): large slow bokeh,
   // a rising particle field (faster the "nearer" the particle), and — Emotional only — rain.
   function _drawFarsiAtmo(t){
-    const sp=_farsiGlowSprite();
+    // SRV Farsi snow (CEO 2026-10-27): small flakes enter above the frame and fall gently downward with a slight
+    // horizontal drift — no upward flow, no swirl, no large bokeh "snowballs" over the face. Emotional keeps its rain.
+    const sp=_farsiGlowSprite(), S=SRV_FARSI_SNOW, _TAU2=2*Math.PI;
     const wrap=function(v,m){return ((v%m)+m)%m;};
     ctx.save();
-    ctx.globalCompositeOperation='screen';
-    for(let i=0;i<5;i++){
-      const r=W*(0.11+0.045*(i%4));
-      const dir=(i%2)?1:-1;
-      const x=wrap((i*0.371+0.13)+dir*(0.004+0.002*(i%3))*t,1.3)-0.15;
-      const y=wrap((i*0.529+0.21)-(0.003+0.001*(i%4))*t,1.3)-0.15;
-      ctx.globalAlpha=0.04+0.02*(0.5+0.5*Math.sin(t*0.25+i*1.7));
-      ctx.drawImage(sp,x*W-r,y*H-r,r*2,r*2);
-    }
     if(_farsiAtmoKind==='particle'){
-      const k=W/1280;
+      ctx.globalCompositeOperation='screen';
+      const k=W/1280, sMin=Math.min.apply(null,_farsiAtmo.map(function(p){return p.size;})), sMax=Math.max.apply(null,_farsiAtmo.map(function(p){return p.size;}));
       for(const p of _farsiAtmo){
-        const d=Math.min(1,p.baseOp*1.6);                       // 0..1 depth: nearer = faster, bigger, brighter
-        const yf=wrap(p.y0-(0.018+0.03*d)*t,1.15)-0.075;          // slow, soft fall-away upward drift
-        const xf=wrap(p.x0+(0.003+0.004*d)*(p.wrapsX?-1:1)*t+0.008*Math.sin(t*(0.18+0.12*d)+p.phase),1.1)-0.05;
-        const s=Math.min(W*0.022,p.size*k*(1.5+1.9*d));
-        ctx.globalAlpha=Math.max(0.08,p.baseOp*(0.7+0.3*Math.sin(t*(0.35+0.15*p.harmonic)+p.phase)));
-        ctx.drawImage(sp,xf*W-s,yf*H-s,s*2,s*2);
+        const d=Math.min(1,p.baseOp*1.6);                                        // 0..1 depth: nearer = a touch faster/bigger
+        const u=sMax>sMin?(p.size-sMin)/(sMax-sMin):0.5;                          // the flake's own size variation
+        const yf=wrap(p.y0+(S.fall[0]+(S.fall[1]-S.fall[0])*d)*t,1.1)-0.05;        // TOP → DOWN; re-enters above the frame
+        const xf=wrap(p.x0+S.drift*(p.wrapsX?-1:1)*t+S.sway*Math.sin(_TAU2*t/(S.swaySec[0]+(S.swaySec[1]-S.swaySec[0])*u)+p.phase),1.04)-0.02;
+        const r=k*(S.radius[0]+(S.radius[1]-S.radius[0])*(0.55*u+0.45*d));       // 1.4–3.6 px at 1280 wide
+        ctx.globalAlpha=Math.max(0.10,Math.min(0.55,p.baseOp*(0.85+0.15*Math.sin(t*0.3+p.phase))));
+        ctx.drawImage(sp,xf*W-r,yf*H-r,r*2,r*2);
       }
       ctx.globalCompositeOperation='source-over';
     } else {
@@ -23981,10 +24002,17 @@ async function _srvRenderVideo(opts){
     const _in=function(a,b){ if(skipFade)return 1; const x=_c01((t-a)/(b-a)); return 1-Math.pow(1-x,3); }; // ease-out
     const _live=skipFade?0:1;
     const _cyc=function(period,phase){return Math.sin(2*Math.PI*t/period+(phase||0));};
-    // camera — "a still portrait brought gently to life": one slow push/pull (26s), a barely-there drift, no
-    // breath, no shake, no light sweep. The pivot is the face (see _drawFarsiPanel), so the face stays still.
-    const zoom=1.045+_live*((0.025*_farsiIntensityMul)*_cyc(26,0));
-    const panX=_live*0.35*_cyc(37,0.6), panY=_live*0.25*_cyc(43,2.1);
+    // camera — SRV English (SRV Studio V2) motion feel, see SRV_FARSI_MOTION. The cover/thumbnail frame
+    // (skipFade) keeps the approved still framing (1.045, no pan).
+    const _M=SRV_FARSI_MOTION, _TAU=2*Math.PI, _ph=((((typeof seed==='number'&&isFinite(seed))?seed:1)%1000)+1000)%1000/1000*_TAU;
+    const _ease=function(x){x=_c01(x);return x*x*(3-2*x);};
+    const _breath=_M.breathe*(0.5-0.5*Math.cos(_TAU*t/_M.breatheSec))+_M.breathe2*(0.5-0.5*Math.cos(_TAU*t/_M.breathe2Sec+_ph));
+    const _tri=function(x){x=((x%2)+2)%2;return x<1?x:2-x;};                     // 0→1→0: push in, then ease back out
+    const zoom=!_live?1.045:(isShort
+      ? _M.shortOverscan*(1+_breath*_M.shortZoomShare)*(1+_M.push*_ease(t/_M.shortPushSec))
+      : _M.overscan*(1+_breath)*(1+_M.push*_ease(_tri(t/_M.pushSec))));
+    const panX=_live*_M.swayAmt*(0.68*Math.sin(_TAU*t/_M.swaySec+_ph)+0.32*Math.sin(_TAU*t/_M.sway2Sec+_ph*1.7));
+    const panY=_live*_M.liftAmt*Math.sin(_TAU*t/_M.liftSec+_ph*0.6);
     const sweep=undefined;
     const isMirror=!!mirror;
     const _rawTitle=(title||hookText||'').replace(/\s*[|·—–].*$/,'').replace(/\s+(?:Emotional|Romantic|Happy)\b.*/i,'').trim();
@@ -24042,7 +24070,6 @@ async function _srvRenderVideo(opts){
       ctx.globalAlpha=pT; ctx.translate((1-pT)*_dir*W*0.09+_drift,0);
       ctx.direction='rtl'; ctx.textAlign=titleSide==='left'?'left':'right';
       ctx.font=_titleFontStr(_titleFit.fontSize); ctx.fillStyle='#fdf6e8';
-      ctx.shadowColor='rgba(8,4,2,0.55)'; ctx.shadowBlur=Math.round(W*0.012); ctx.shadowOffsetY=2; // keeps the title readable over the image fade
       const titleBottomY=_srvDrawPreSplitLinesTop(ctx,_titleFit.lines,tx,titleTopY,_titleLineH);
       ctx.restore();
       // rule: draws itself outward
@@ -24084,9 +24111,9 @@ async function _srvRenderVideo(opts){
         bx.drawImage(_avatarImg,(54-iw*sc)/2,(96-ih*sc)/2,iw*sc,ih*sc);
       }
       if(_farsiShortBg){
-        const bz=1.30+_live*0.03*_cyc(41,0);
+        const bz=1.30*(1+_live*_breath)*(1+_live*0.04*_c01(t/_M.shortPushSec));
         ctx.save(); ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-        ctx.translate(W/2+_live*W*0.012*_cyc(47,1),H/2+_live*H*0.008*_cyc(53,2)); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
+        ctx.translate(W/2+W*0.03*panX,H/2+H*0.015*panY); ctx.scale(bz,bz); ctx.translate(-W/2,-H/2);
         ctx.drawImage(_farsiShortBg,0,0,W,H);
         ctx.restore();
       }
@@ -24101,7 +24128,6 @@ async function _srvRenderVideo(opts){
       ctx.save();
       ctx.globalAlpha=pH; ctx.translate(0,-(1-pH)*H*0.04);
       ctx.direction='ltr'; ctx.textAlign='center';
-      ctx.shadowColor='rgba(8,4,2,0.7)'; ctx.shadowBlur=Math.round(W*0.01);
       ctx.fillStyle=cream; ctx.font=`800 ${Math.round(W*0.042)}px 'Vazirmatn', sans-serif`;
       try{ctx.letterSpacing=Math.round(W*0.010)+'px';}catch(_){}
       ctx.fillText('SILK ROAD VOICES',W/2,Math.round(H*0.092));
@@ -24136,7 +24162,6 @@ async function _srvRenderVideo(opts){
       ctx.save();
       ctx.globalAlpha=pC*pT; ctx.translate((1-pT)*W*0.10,0);                       // title: from the right
       ctx.direction='rtl'; ctx.textAlign='center'; ctx.fillStyle=cream; ctx.font=_titleFontStr(_fit.fontSize);
-      ctx.shadowColor='rgba(8,4,2,0.9)'; ctx.shadowBlur=Math.round(W*0.014); ctx.shadowOffsetY=2;
       _fit.lines.forEach(function(l,i){ ctx.fillText(l,W/2,_lastBase-(_fit.lines.length-1-i)*_tLH); });
       ctx.restore();
       if(titleFinglish){
@@ -24165,7 +24190,6 @@ async function _srvRenderVideo(opts){
       const pFo=_in(1.30,2.05);
       ctx.save();
       ctx.globalAlpha=pFo; ctx.translate(0,(1-pFo)*H*0.03);
-      ctx.shadowColor='rgba(8,4,2,0.8)'; ctx.shadowBlur=Math.round(W*0.01);
       ctx.direction='ltr'; ctx.textAlign='center'; ctx.fillStyle=cream;
       ctx.font=`800 ${Math.round(W*0.030)}px 'Vazirmatn', sans-serif`;
       try{ctx.letterSpacing=Math.round(W*0.008)+'px';}catch(_){}
