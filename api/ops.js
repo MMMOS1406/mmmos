@@ -1266,10 +1266,15 @@ function _engRunnerPathCheck(paths, runner) {
 // Read-only GitHub check of a runner branch: files changed against main, head
 // commit, and (when the token allows) the pull request itself. Uses the same
 // server-side read-only GITHUB_TOKEN / GITHUB_REPO as commit verification.
+// The canonical repository is public, so where no token is configured (Vercel
+// previews get none) the same read-only checks use GitHub's public API. The
+// repository name is fixed in server code / env — never taken from the caller.
+const ENG_CANONICAL_REPO = 'MMMOS1406/mmmos';
+function _engGithubRepo() { return process.env.GITHUB_REPO || ENG_CANONICAL_REPO; }
 async function _engGithubBranchFacts(branch, prNumber) {
-  const repo = process.env.GITHUB_REPO, token = process.env.GITHUB_TOKEN;
-  if (!repo || !token) return { ok: false, error: 'github_check_not_configured' };
-  const H = { Authorization: `Bearer ${token}`, 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json' };
+  const repo = _engGithubRepo(), token = process.env.GITHUB_TOKEN;
+  const H = { 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  const github_auth = token ? 'token' : 'public';
   try {
     const c = await fetch(`https://api.github.com/repos/${repo}/compare/main...${encodeURIComponent(branch)}`, { headers: H });
     if (!c.ok) return { ok: false, error: `github_compare_failed_${c.status}` };
@@ -1285,7 +1290,7 @@ async function _engGithubBranchFacts(branch, prNumber) {
     } else {
       pr = { verified: false, reason: `github_pulls_${pr_r.status}` };
     }
-    return { ok: true, repo, files, head_sha, ahead_by: cj.ahead_by, truncated: (cj.files || []).length >= 300, pr };
+    return { ok: true, repo, files, head_sha, ahead_by: cj.ahead_by, truncated: (cj.files || []).length >= 300, pr, github_auth };
   } catch (e) {
     return { ok: false, error: 'github_unreachable' };
   }
@@ -2198,7 +2203,7 @@ async function engineeringAgentGateway(req, res) {
       // server reads the branch from GitHub itself (read-only token) and checks
       // every changed file against the task's business allowlist. A PR that
       // touches anything outside it is recorded as a violation and refused.
-      const repo = process.env.GITHUB_REPO || '';
+      const repo = _engGithubRepo();
       const prUrl = typeof body.pr_url === 'string' ? body.pr_url.trim() : '';
       const branch = typeof body.branch === 'string' ? body.branch.trim() : '';
       const m = repo ? new RegExp(`^https://github\\.com/${repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pull/(\\d{1,7})$`).exec(prUrl) : null;
@@ -2224,7 +2229,7 @@ async function engineeringAgentGateway(req, res) {
         url: prUrl,
         metadata: { pr_number: Number(m[1]), branch, head_sha: facts.head_sha, files: facts.files.slice(0, 100), files_truncated: facts.truncated,
           within_allowlist: within, denied: check ? check.denied : [], outside: check ? check.outside : [],
-          pr_verified: facts.pr.verified, pr_state: facts.pr.state || null, submitted_at: new Date().toISOString(), non_authoritative: true },
+          pr_verified: facts.pr.verified, pr_state: facts.pr.state || null, github_auth: facts.github_auth, submitted_at: new Date().toISOString(), non_authoritative: true },
         engine: task.affected_engine,
       });
       if (within === false) {

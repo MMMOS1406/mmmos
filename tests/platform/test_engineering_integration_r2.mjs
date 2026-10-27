@@ -127,6 +127,15 @@ const gw = (op, extra = {}) => call('engineering_agent_gateway', { ...W, task_id
   r = await gw('submit_pull_request', { pr_url: url(900), branch: 'runner/ok' });
   ok('C8 if the token cannot read PRs, the branch is still verified and the PR marked unverified', r.status === 200 && r.body.pr_verified === false && r.body.within_allowlist === true);
   github.pullsStatus = 200;
+  // Previews have no GITHUB_TOKEN: the public canonical repo is checked through GitHub's public API.
+  const savedTok = process.env.GITHUB_TOKEN, savedRepo = process.env.GITHUB_REPO;
+  delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPO;
+  r = await gw('submit_pull_request', { pr_url: url(900), branch: 'runner/ok' });
+  const pubEv = db.brain_evidence.filter(e => e.metadata?.pr_number === 900).at(-1);
+  ok('C8b without a token the canonical public repo is still checked (github_auth public)', r.status === 200 && r.body.within_allowlist === true && pubEv.metadata.github_auth === 'public');
+  r = await gw('submit_pull_request', { pr_url: url(901), branch: 'runner/outside' });
+  ok('C8c without a token, files outside the allowlist are still refused', r.status === 409);
+  process.env.GITHUB_TOKEN = savedTok; process.env.GITHUB_REPO = savedRepo;
   ok('C9 task status never changes from runner evidence', db.engineering_tasks.find(t => t.id === taskId).status === 'open');
   r = await call('engineering_adviser_get_results', { task_id: taskId }, A);
   ok('C10 the adviser sees the PR as evidence with its link', r.status === 200 && r.body.evidence.some(e => e.type === 'pull_request' && e.url === url(900)));
