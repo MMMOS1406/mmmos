@@ -30572,24 +30572,26 @@ function renderEngineeringBrain(){
       ${pendingAuth.length?`<div style="margin-bottom:18px">
         <div style="font-size:10px;font-weight:700;color:#38bdf8;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">🔑 Awaiting Agent Authorization (${pendingAuth.length})</div>
         ${pendingAuth.map(t=>`<div style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
-          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · decision-routed · not yet authorized for agent execution</div>
+          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · ${escHTML(_engAuthSource(t))} · not yet authorized for agent execution</div>
+          ${_engAuthDetails(t)}
           <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(56,189,248,0.5);background:rgba(56,189,248,0.15);color:#38bdf8;font-size:11px;font-weight:700;cursor:pointer">🔑 Authorize Agent</button>
         </div>`).join('')}
       </div>`:''}
       ${needsReauth.length?`<div style="margin-bottom:18px">
         <div style="font-size:10px;font-weight:700;color:#f59e0b;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">🔁 Awaiting Re-Authorization (${needsReauth.length})</div>
         ${needsReauth.map(t=>`<div style="background:rgba(245,158,11,0.04);border:1px solid rgba(245,158,11,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
-          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · previously authorized, never claimed · minting a new token invalidates the old one</div>
+          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · ${escHTML(_engAuthSource(t))} · previously authorized, never claimed · minting a new token invalidates the old one</div>
+          ${_engAuthDetails(t)}
           <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(245,158,11,0.5);background:rgba(245,158,11,0.15);color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer">🔁 Re-authorize Agent</button>
         </div>`).join('')}
       </div>`:''}
       ${retroactiveReleases.length?`<div style="margin-bottom:18px">
         <div style="font-size:10px;font-weight:700;color:#22c55e;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">📋 Retroactive Release Records — Awaiting CEO Approval (${retroactiveReleases.length})</div>
         ${retroactiveReleases.map(t=>`<div style="background:rgba(34,197,94,0.04);border:1px solid rgba(34,197,94,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
-          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · already-completed work, no agent execution required · target commit ${t.git_commit_sha?t.git_commit_sha.slice(0,12)+'…':'⚠ NOT SET'}</div>
+          <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · already-completed work, no agent execution required · target commit ${t.git_commit_sha?t.git_commit_sha.slice(0,12)+'…':'⚠ NOT SET'}</div>
           <div style="display:flex;gap:8px">
             <button onclick="_engReviewApprove('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve</button>
             <button onclick="_engReviewReject('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">❌ Reject</button>
@@ -30609,15 +30611,15 @@ function renderEngineeringBrain(){
             <div style="flex:1">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
                 <span style="font-size:9px;padding:2px 8px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.4);border-radius:4px;color:#c9a84c;font-weight:700;font-family:'JetBrains Mono',monospace">ENGINEERING TASK</span>
-                <span style="font-size:9px;color:var(--dim)">${t.affected_engine||'—'}</span>
+                <span style="font-size:9px;color:var(--dim)">${escHTML(t.affected_engine||'—')}</span>
               </div>
-              <div style="font-size:14px;font-weight:800;color:#fff;line-height:1.4">${t.problem||'—'}</div>
-              <div style="font-size:11px;color:#8b9cc4;margin-top:4px">${t.expected_result||''}</div>
+              <div style="font-size:14px;font-weight:800;color:#fff;line-height:1.4">${escHTML(t.problem||'—')}</div>
+              <div style="font-size:11px;color:#8b9cc4;margin-top:4px">${escHTML(t.expected_result||'')}</div>
             </div>
           </div>
           <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;margin-bottom:10px;display:flex;flex-direction:column;gap:5px">
-            <div style="font-size:11px;color:#8b9cc4"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:'JetBrains Mono',monospace">ORIGINATING CEO DECISION  </b>${od.recommendation_title||od.title||'—'}</div>
-            <div style="font-size:11px;color:#8b9cc4"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:'JetBrains Mono',monospace">AUTHORIZATION BOUNDARY  </b>${p.authorization_boundary||'—'}</div>
+            <div style="font-size:11px;color:#8b9cc4"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:'JetBrains Mono',monospace">ORIGINATING CEO DECISION  </b>${escHTML(od.recommendation_title||od.title||'—')}</div>
+            <div style="font-size:11px;color:#8b9cc4"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:'JetBrains Mono',monospace">AUTHORIZATION BOUNDARY  </b>${escHTML(p.authorization_boundary||'—')}</div>
             <div style="font-size:11px;color:#8b9cc4"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:'JetBrains Mono',monospace">AGENT RUN  </b>${p.agent_run_id||'—'} ${p.agent_claimed_at?('· claimed '+new Date(p.agent_claimed_at).toLocaleString()):''}</div>
           </div>
           ${files.length?`<div style="margin-bottom:10px">
@@ -30626,7 +30628,7 @@ function renderEngineeringBrain(){
               const changed=f.baseline_hash!==f.current_hash;
               return `<div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px;margin-bottom:6px">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                  <span style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace">${f.path}</span>
+                  <span style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace">${escHTML(f.path)}</span>
                   <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:${changed?'#22c55e18':'#6b728018'};border:1px solid ${changed?'#22c55e40':'#6b728040'};color:${changed?'#22c55e':'#6b7280'};font-weight:700">${changed?'CHANGED':'UNCHANGED'}</span>
                 </div>
                 <div style="font-size:9px;color:var(--dim);margin-bottom:6px;font-family:'JetBrains Mono',monospace">baseline ${shortHash(f.baseline_hash)} → current ${shortHash(f.current_hash)}</div>
@@ -30640,13 +30642,13 @@ function renderEngineeringBrain(){
           ${tests.length?`<div style="margin-bottom:10px">
             <div style="font-size:9px;font-weight:700;color:var(--dim);letter-spacing:0.8px;margin-bottom:6px">VALIDATION</div>
             ${tests.map(tr=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
-              <span style="font-size:11px;color:var(--text)">${tr.test_name}</span>
+              <span style="font-size:11px;color:var(--text)">${escHTML(tr.test_name)}</span>
               <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:${tr.status==='passed'?'#22c55e18':'#ef444418'};border:1px solid ${tr.status==='passed'?'#22c55e40':'#ef444440'};color:${tr.status==='passed'?'#22c55e':'#ef4444'};font-weight:700">${(tr.status||'').toUpperCase()}</span>
             </div>`).join('')}
           </div>`:''}
           ${ev.length?`<div style="margin-bottom:12px">
             <div style="font-size:9px;font-weight:700;color:var(--dim);letter-spacing:0.8px;margin-bottom:6px">EVIDENCE</div>
-            ${ev.map(e=>`<div style="font-size:10px;color:var(--dim);padding:3px 0">${e.title||e.evidence_type} · ${e.created_at?new Date(e.created_at).toLocaleString():''}</div>`).join('')}
+            ${ev.map(e=>`<div style="font-size:10px;color:var(--dim);padding:3px 0">${escHTML(e.title||e.evidence_type)} · ${e.created_at?new Date(e.created_at).toLocaleString():''}</div>`).join('')}
           </div>`:''}
           <div style="display:flex;gap:8px">
             <button onclick="_engReviewApprove('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve</button>
@@ -30699,8 +30701,8 @@ function renderEngineeringBrain(){
               :'';
             if(reconciled){
               return `<div style="background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.3);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-                <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
-                <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
+                <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
                 ${shaLine}
                 <div style="font-size:11px;font-weight:700;margin-bottom:8px;color:#22c55e">✅ Production Satisfied — Already Deployed</div>
                 <div style="font-size:10px;color:var(--dim);margin-bottom:8px;line-height:1.5">This commit is already contained in the currently deployed production release (verified via GitHub ancestry + current branch head, deployment ${lastAttempt.vercel_deployment_id||'—'}). No release action needed — nothing was deployed by this check.</div>
@@ -30709,8 +30711,8 @@ function renderEngineeringBrain(){
             }
             if(!validSha){
               return `<div style="background:rgba(168,85,247,0.04);border:1px solid rgba(168,85,247,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-                <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
-                <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
+                <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
+                <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
                 <div style="font-size:11px;font-weight:700;margin-bottom:6px;color:#a855f7">Engineering Approved</div>
                 <div style="font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.5">Awaiting Engineering to record the completed commit — nothing to release yet. MMMOS will not ask you to supply a technical identifier; this will become available automatically once Engineering records it.</div>
               </div>`;
@@ -30741,8 +30743,8 @@ function renderEngineeringBrain(){
               :(STATE_MAP[latest.status]||{label:'Needs Review',color:'#6b7280',bg:'rgba(107,114,128,0.05)',border:'rgba(107,114,128,0.3)',note:''});
             const retryNote=(latest&&['failed','ambiguous','revoked'].includes(latest.status))?`<div style="font-size:10px;color:var(--dim);margin-bottom:8px;font-style:italic">Authorizing again creates a brand-new, separate release decision.</div>`:'';
             return `<div style="background:${state.bg};border:1px solid ${state.border};border-radius:12px;padding:14px 16px;margin-bottom:10px">
-              <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${t.problem||'—'}</div>
-              <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${t.affected_engine||'—'} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
+              <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
+              <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · Task approved ${t.ceo_decision_at?new Date(t.ceo_decision_at).toLocaleString():''}</div>
               ${shaLine}
               <div style="font-size:11px;font-weight:700;margin-bottom:6px;color:${state.color}">${state.label}</div>
               ${state.note?`<div style="font-size:11px;color:var(--dim);margin-bottom:8px;line-height:1.5">${state.note}</div>`:''}
@@ -30870,6 +30872,30 @@ async function _ebSeed(){
   if(btn){btn.textContent='↻ Seed Brain';btn.disabled=false;}
 }
 
+// MMMOS Engineering Integration R1-UI — the Authorize / Re-authorize cards show
+// where a task came from, which business it belongs to, and the exact
+// authorization boundary the CEO is about to approve. Every value is escaped
+// (escHTML), as is all task text in Engineering Review: the CEO session token
+// lives in sessionStorage, so markup here must never run.
+function _engAuthSource(t){
+  const p=(t&&t.packet)||{};
+  if(p.derived_from==='ceo_adviser_submission') return 'Submitted by CEO Adviser'+(p.submitted_by_adviser_label?' ('+p.submitted_by_adviser_label+')':'');
+  if(p.derived_from==='engineering_worker_submission') return 'Submitted by Engineering Worker'+(p.submitted_by_worker_label?' ('+p.submitted_by_worker_label+')':'');
+  if(p.derived_from==='ceo_decision_paste') return 'From a pasted CEO decision';
+  if(t&&t.origin_decision_id) return 'Decision-routed';
+  return 'Task Generator';
+}
+function _engAuthDetails(t){
+  const p=(t&&t.packet)||{};
+  const boundary=p.origin_decision&&p.origin_decision.authorization_boundary;
+  const label='font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:\'JetBrains Mono\',monospace';
+  const adviser=p.derived_from==='ceo_adviser_submission';
+  return `<div data-eng-auth-details style="background:rgba(0,0,0,0.2);border-radius:8px;padding:8px 10px;margin-bottom:8px;display:flex;flex-direction:column;gap:4px">
+            ${adviser?`<div><span style="font-size:9px;padding:2px 8px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.4);border-radius:4px;color:#c9a84c;font-weight:700;font-family:'JetBrains Mono',monospace">SUBMITTED BY CEO ADVISER</span></div>`:''}
+            <div style="font-size:11px;color:#8b9cc4"><b style="${label}">BUSINESS  </b>${escHTML(p.business||'—')}</div>
+            <div style="font-size:11px;color:#8b9cc4;white-space:pre-wrap;word-break:break-word"><b style="${label}">AUTHORIZATION BOUNDARY  </b>${boundary?escHTML(boundary):'— none recorded (MMMOS will refuse to authorize this task)'}</div>
+          </div>`;
+}
 function _ebSetSub(sub){_ebActiveSub=sub;if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'system');}
 
 // v16.39.0 — CEO Engineering Review action functions. Both call the SAME
