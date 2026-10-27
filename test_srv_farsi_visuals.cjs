@@ -186,6 +186,16 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   ok('render guard: a render made while the tab was hidden is refused with a clear message (nothing uploaded)',/^ERR the video froze because this tab was in the background for 188 s/.test(r2)&&/Nothing was uploaded/.test(r2),r2.slice(0,90));
   const bt=top('_srvFarsiBuildTrigger');
   ok('render guard: both SRV Farsi renders (Long + Short) go through it; the operator is told to keep the tab in front',(bt.match(/await _srvFarsiRenderVisible\(\{/g)||[]).length===2&&!/await _srvRenderVideo\(/.test(bt)&&/keep this tab open and in front/.test(bt)); }
+{ const bt=top('_srvFarsiBuildTrigger');
+  // outdated tab (CEO 2026-10-27: a Rebuild from a tab opened before the release rendered with the old look)
+  const iCheck=bt.indexOf('if(await _srvFarsiPageIsCurrent()===false)'), iAudio=bt.indexOf('let audio=_srvAudioData[pkgId];'), iRender=bt.indexOf('await _srvFarsiRenderVisible(');
+  ok('outdated tab: Build checks the deployed version FIRST and refuses (nothing rendered, uploaded or changed) with "reload"',iCheck>0&&iCheck<iAudio&&iCheck<iRender&&/older version of MMMOS[\s\S]{0,160}Reload the page[\s\S]{0,60}nothing was rendered or changed/.test(bt.slice(iCheck,iCheck+600))&&/return;\n  \}\n  let audio/.test(bt));
+  ok('versioning: each render records renderer version + time + build, set together with the new URL after the upload (unique file per render)',['Long','Short'].every(K=>new RegExp('pkg\\._srv'+K+'VideoUrl='+K.toLowerCase()+'Url;\\n\\s*pkg\\._srv'+K+'RenderVersion=SRV_FARSI_RENDERER_VERSION; pkg\\._srv'+K+'RenderedAt=').test(bt))&&/const path = `\$\{pkgId\}\/\$\{kind\}_\$\{Date\.now\(\)\}_\$\{safeName\}`;/.test(top('_srvUploadToStorage')));
+  const note=new Function('SRV_FARSI_RENDERER_VERSION','escHTML',top('_srvFarsiRenderNoteHtml')+';return _srvFarsiRenderNoteHtml;')('srvf-render-2026-10-27',x=>String(x));
+  ok('Approve: a video from the current renderer is marked current; an older or unrecorded one is flagged with "Rebuild"',
+    /data-srvf-render="current"/.test(note({_srvLongVideoUrl:'u',_srvLongRenderVersion:'srvf-render-2026-10-27',_srvLongRenderedAt:'2026-10-27T18:00:00Z'},true))&&
+    /data-srvf-render="old"[\s\S]*before 27 Oct 2026[\s\S]*Rebuild/.test(note({_srvLongVideoUrl:'u'},true))&&/data-srvf-render="old"/.test(note({_srvShortVideoUrl:'u',_srvShortRenderVersion:'srvf-render-2026-10-25'},false))&&note({},true)==='');
+  ok('Approve shows the render note above the cover line',/\$\{_srvFarsiRenderNoteHtml\(pkg,isLongApprove\)\}/.test(h)); }
 // ── Fix pass: text animation ──
 { ok('ease-out slide helper; the cover/thumbnail capture is always the settled frame',/const _in=function\(a,b\)\{ if\(skipFade\)return 1;/.test(comp)&&/const _live=skipFade\?0:1;/.test(comp));
   const long=comp.slice(comp.indexOf('if(!isShort){'),comp.indexOf('// ── SHORT (visual benchmark)'));
