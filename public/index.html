@@ -20737,7 +20737,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-27-d';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-e';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -24146,7 +24146,13 @@ async function _srvRenderVideo(opts){
       ctx.globalAlpha=pT; ctx.translate((1-pT)*_dir*W*0.09+_drift,0);
       ctx.direction='rtl'; ctx.textAlign=titleSide==='left'?'left':'right';
       ctx.font=_titleFontStr(_titleFit.fontSize); ctx.fillStyle='#fdf6e8';
+      // Long title edge (CEO 2026-10-27, "dark outline behind the title"): the glyphs are drawn once, plain cream, no
+      // shadow/stroke. A razor-sharp cream-on-dark edge "rings" into a dark outline whenever the video is shown smaller
+      // (YouTube's lower resolutions, phones, small players). A 1.2 px edge softening (at 1920 wide) — invisible at full
+      // size — stops that ring (measured: 9–14 → 0–5 levels darker than the background after a ½ or ⅓ downscale).
+      ctx.filter='blur('+(1.2*W/1920).toFixed(2)+'px)';
       const titleBottomY=_srvDrawPreSplitLinesTop(ctx,_titleFit.lines,tx,titleTopY,_titleLineH);
+      ctx.filter='none';
       ctx.restore();
       // rule: draws itself outward
       const ruleY=titleBottomY+_ruleGap;

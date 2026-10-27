@@ -157,6 +157,9 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   const sh=(comp.match(/shadowColor/g)||[]).length;
   ok('text: no shadow on the Farsi title, Latin title, header or SRV FARSI brand (only the Short card keeps its drop shadow)',sh===1&&/ctx\.save\(\); ctx\.shadowColor='rgba\(0,0,0,0\.55\)'; ctx\.shadowBlur=Math\.round\(W\*0\.05\); ctx\.shadowOffsetY=Math\.round\(W\*0\.014\);\n\s*ctx\.fillStyle='#140a07'; ctx\.beginPath\(\);/.test(comp),'shadowColor uses: '+sh);
   ok('text: no replacement glow / drop-shadow filter on text',!/filter='drop-shadow|shadowBlur=Math\.round\(W\*0\.01/.test(comp));
+  ok('Long title: drawn once in plain cream with a 1.2 px (@1920) edge softening so downscaled video shows no dark ring; the filter is reset right after',
+    /ctx\.font=_titleFontStr\(_titleFit\.fontSize\); ctx\.fillStyle='#fdf6e8';\n(?:\s*\/\/[^\n]*\n)+\s*ctx\.filter='blur\('\+\(1\.2\*W\/1920\)\.toFixed\(2\)\+'px\)';\n\s*const titleBottomY=_srvDrawPreSplitLinesTop\(ctx,_titleFit\.lines,tx,titleTopY,_titleLineH\);\n\s*ctx\.filter='none';/.test(comp)&&(comp.match(/_srvDrawPreSplitLinesTop\(/g)||[]).length===1&&!/strokeText/.test(comp));
+  ok('Short title untouched (no edge filter in the Short)',!/_fit\.lines\.forEach[^\n]*\n?[^\n]*blur/.test(comp)&&(comp.match(/ctx\.filter='blur/g)||[]).length===1);
   // snow: run the real _drawFarsiAtmo with a recording canvas
   const rec=[];const ctx={save(){},restore(){},drawImage(img,x,y,w,hh){rec.push({x,y,w,h:hh,a:this.globalAlpha});},beginPath(){},moveTo(){},lineTo(){},stroke(){},set globalAlpha(v){this._a=v;},get globalAlpha(){return this._a;},globalCompositeOperation:''};
   const genP=new Function(top('_srvMulberry32')+top('_srvFarsiGenParticles')+';return _srvFarsiGenParticles;')();
