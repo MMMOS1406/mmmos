@@ -20002,6 +20002,7 @@ function renderSRVFarsiLifecycleCard(task){
       <div style="font-size:11px;color:var(--dim);margin-bottom:12px">Review the final video before it publishes. Approve to upload to YouTube, or rebuild if something's wrong.</div>
       ${isLongApprove?(longUrl?`<div style="margin-bottom:10px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">LONG VIDEO (16:9)</div><video src="${escHTML(longUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Long video not ready yet.</div>'):''}
       ${!isLongApprove?(shortUrl?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">SHORT VIDEO (9:16)</div><video src="${escHTML(shortUrl)}" controls style="width:100%;border-radius:8px;max-height:200px;background:#000"></video></div>`:'<div style="padding:10px;background:rgba(239,68,68,0.06);border-radius:8px;font-size:11px;color:#ef4444;margin-bottom:10px">⚠️ Short video not ready yet.</div>'):''}
+      ${_srvFarsiRenderNoteHtml(pkg,isLongApprove)}
       ${pkg&&pkg._srvVisualPoolPos?`<div style="padding:7px 12px;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;font-size:10px;color:#c9a84c;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🖼 Cover ${Number(pkg._srvVisualPoolPos.n)||'?'} of ${Number(pkg._srvVisualPoolPos.of)||'?'} in the library · ${pkg._srvAvatarChoice&&pkg._srvAvatarChoice.how==='manual'?'chosen at Build — Rebuild keeps it unless you change it':'automatic — Rebuild moves to the next image, or choose one at Build'}</div>`:''}
       ${pubLabel?`<div style="padding:8px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:#22c55e;margin-bottom:10px">📅 Will publish: ${escHTML(pubLabel)}</div>`:''}
       ${_srvFarsiPublishPanelHtml(task,pkg,isLongApprove)}
@@ -20156,9 +20157,27 @@ async function _srvFarsiRenderVisible(opts){
   if(hid>SRV_FARSI_HIDDEN_MAX_MS) throw new Error('the video froze because this tab was in the background for '+Math.round(hid/1000)+' s while it rendered (the browser pauses drawing in hidden tabs). Nothing was uploaded. Keep the MMMOS tab open and in front, then press Build again.');
   return r;
 }
+// Approve: which renderer drew the video under review. A video from an older renderer (or one rendered before versions
+// were recorded) is flagged so the operator rebuilds it instead of approving the old look.
+function _srvFarsiRenderNoteHtml(pkg,isLong){
+  if(!pkg)return '';
+  const K=isLong?'Long':'Short', v=pkg['_srv'+K+'RenderVersion'], at=pkg['_srv'+K+'RenderedAt'];
+  if(!pkg['_srv'+K+'VideoUrl'])return '';
+  if(v===SRV_FARSI_RENDERER_VERSION){
+    const when=at?new Date(at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+    return `<div data-srvf-render="current" style="font-size:10px;color:#22c55e;margin:-4px 0 10px;font-family:'JetBrains Mono',monospace">✓ Rendered with the current video style${when?' · '+escHTML(when):''}</div>`;
+  }
+  return `<div data-srvf-render="old" style="padding:8px 12px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:11px;color:#f87171;margin-bottom:10px;line-height:1.5">⚠ This video was made with an older version of the SRV Farsi video style${v?'':' (before 27 Oct 2026)'}. Press <strong>↻ Rebuild</strong>, then Build, to render it again with the current motion, text and snow.</div>`;
+}
 async function _srvFarsiBuildTrigger(pkgId,taskId){
   const btn=document.getElementById('srv-farsi-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-farsi-build-status-'+pkgId);
+  // A tab opened before a release keeps running the old renderer until it is reloaded: check the deployed version
+  // first and refuse to render (nothing rendered, uploaded or changed) when this tab is out of date.
+  if(await _srvFarsiPageIsCurrent()===false){
+    if(statusEl){statusEl.style.color='#ef4444';statusEl.textContent='⚠ This tab is running an older version of MMMOS, so it would render with the old video style. Reload the page (⌘R / Ctrl+R), then press Build again — nothing was rendered or changed.';}
+    return;
+  }
   let audio=_srvAudioData[pkgId];
   const _shortPkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
   if(!audio&&_srvFarsiIsShortFromLong(_shortPkg)){
@@ -20296,6 +20315,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const shortFile=new File([shortResult.blob],'srv_farsi_short.webm',{type:shortResult.blob.type});
       const shortUrl=await _srvUploadToStorage(pkgId,shortFile,'short');
       pkg._srvShortVideoUrl=shortUrl;
+      pkg._srvShortRenderVersion=SRV_FARSI_RENDERER_VERSION; pkg._srvShortRenderedAt=new Date().toISOString(); pkg._srvShortRenderBuild=SRV_FARSI_UI_BUILD;
       if(shortResult.thumbDataUrl){pkg._srvThumbDataUrl=shortResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
       if(typeof saveAppState==='function') saveAppState();
@@ -20321,6 +20341,7 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
       const longFile=new File([longResult.blob],'srv_farsi_long.webm',{type:longResult.blob.type});
       const longUrl=await _srvUploadToStorage(pkgId,longFile,'long');
       pkg._srvLongVideoUrl=longUrl;
+      pkg._srvLongRenderVersion=SRV_FARSI_RENDERER_VERSION; pkg._srvLongRenderedAt=new Date().toISOString(); pkg._srvLongRenderBuild=SRV_FARSI_UI_BUILD;
       try{ const _a=new Audio(URL.createObjectURL(audio.file)); await new Promise(function(r){_a.onloadedmetadata=r;_a.onerror=r;setTimeout(r,4000);}); if(isFinite(_a.duration)&&_a.duration>0)pkg._srvLongDurationSec=Math.round(_a.duration*10)/10; URL.revokeObjectURL(_a.src); }catch(_){}
       if(longResult.thumbDataUrl){pkg._srvThumbDataUrl=longResult.thumbDataUrl;delete pkg._srvThumbUrl;pkg.thumbnailSetOnYoutube=false;}
       if(typeof savePackageToSupabase==='function') await savePackageToSupabase(pkg);
@@ -20737,7 +20758,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-27-b';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-c';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -23507,6 +23528,9 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 // overscan 1.06 · breathing 3.5 % / 16 s + 2 % / 41 s (raised-cosine, always ≥ 1) · slow 6 % eased push-in ·
 // sway = up to 0.8 of the free margin opened by the zoom (x: 23 s + 37 s, y: 29 s, smaller) — pure sums of sines,
 // so position and speed are continuous: no shake, no jumps. The pivot stays the face (face-aware crop unchanged).
+// The SRV Farsi video look (camera, text, snow). Bumped only when that look changes; recorded on every rendered video
+// (pkg._srvLongRenderVersion / _srvShortRenderVersion) and checked at Approve, so a video drawn by an older renderer is visible.
+const SRV_FARSI_RENDERER_VERSION='srvf-render-2026-10-27';
 const SRV_FARSI_MOTION={overscan:1.06,breathe:0.035,breatheSec:16,breathe2:0.02,breathe2Sec:41,swaySec:23,sway2Sec:37,liftSec:29,swayAmt:0.8,liftAmt:0.3,
   push:0.06,pushSec:24,shortOverscan:1.03,shortZoomShare:0.45,shortPushSec:30};
 // Snow (CEO 2026-10-27): small flakes that enter above the frame and fall gently; slight horizontal drift only.
