@@ -20737,7 +20737,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-27-i';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-j';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -23895,7 +23895,7 @@ async function _srvRenderVideo(opts){
       const sx=Math.min(iw-sw,Math.max(0,iw*fx-sw*aim.x));
       const sy=Math.min(ih-sh,Math.max(0,ih*fy-sh*aim.y));
       faceX=px+(iw*fx-sx)*sc; faceY=py+(ih*fy-sy)*sc; if(fw>0)faceR=fw*iw*sc*0.75;
-      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality=o.prefilter?'medium':'high'; // Long: 'high' on the pre-coloured bitmap runs on the CPU (~18 fps); 'medium' keeps 30 fps, same detail
       // real colours, lifted slightly for a clean HD read (no grayscale / duotone)
       // Long (o.prefilter): the same colour lift applied ONCE to the photo and reused every frame, so the full-width
       // photo stays real-time (re-filtering 1920×1080 every frame dropped a test render to ~25 fps). Same look.
