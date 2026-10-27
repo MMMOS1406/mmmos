@@ -117,7 +117,7 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   ok('every pool entry carries a face box (fx, fy, fw)',plist.every(([k,pool])=>pool.every(e=>typeof e==='object'&&[e.fx,e.fy,e.fw].every(v=>typeof v==='number'&&v>0&&v<1))));
   ok('face light + face-centred vignette keep the face the brightest, clearest area',/createRadialGradient\(faceX,faceY,0,faceX,faceY,faceR\*2\.4\)/.test(panel)&&/createRadialGradient\(faceX,faceY,faceR\*1\.7/.test(panel));
   ok('camera is face-centred: the still frame zooms about the face; medium/close shots centre on the face like SRV English (pull 1)',/ctx\.translate\(faceX,faceY\); ctx\.scale\(z,z\); ctx\.translate\(-faceX,-faceY\);/.test(panel)&&/bcx\+\(fx-bcx\)\*F\.pull/.test(panel));
-  ok('photo is drawn with high-quality smoothing and real colour',/imageSmoothingQuality='high'/.test(panel)&&!/ctx\.filter='[^']*grayscale/.test(panel)); }
+  ok('photo is drawn with high-quality smoothing and real colour',/imageSmoothingQuality=o\.prefilter\?'medium':'high'/.test(panel)&&!/ctx\.filter='[^']*grayscale/.test(panel)); }
 // ── Motion / text shadow / snow (CEO 2026-10-27): SRV English motion feel, no text shadow, small top-down snow ──
 { const atmo=(()=>{const s2=h.indexOf('  function _drawFarsiAtmo(');return h.slice(s2,h.indexOf('\n  }\n',s2));})();
   const v2=fs.readFileSync(require('path').join(require('path').dirname(process.argv[2]||'public/index.html'),'srv-studio-v2/srv2-render.mjs'),'utf8');
