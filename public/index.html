@@ -20139,6 +20139,23 @@ async function _srvFarsiRegeneratePackage(taskId,pkgId){
 }
 
 // ── Farsi build trigger ───────────────────────────────────────────────────────
+// SRV Farsi render guard (CEO 2026-10-27, "Long appears nearly static"): the browser stops drawing a hidden tab, so a
+// render made while MMMOS was in the background records a frozen picture (production Long pkg_1793116949329: no
+// frames from 3.6 s to 191.9 s). Watch the tab during the render; if it was hidden, refuse the video (nothing is
+// uploaded, the stage does not move) and tell the operator to build again with the tab in front.
+const SRV_FARSI_HIDDEN_MAX_MS=1500;
+function _srvFarsiRenderWatch(){
+  let hiddenMs=0, since=document.hidden?performance.now():null;
+  const on=function(){ if(document.hidden){ if(since==null)since=performance.now(); } else if(since!=null){ hiddenMs+=performance.now()-since; since=null; } };
+  document.addEventListener('visibilitychange',on);
+  return {stop:function(){ document.removeEventListener('visibilitychange',on); if(since!=null){hiddenMs+=performance.now()-since;since=null;} return hiddenMs; }};
+}
+async function _srvFarsiRenderVisible(opts){
+  const w=_srvFarsiRenderWatch(); let r, hid=0;
+  try{ r=await _srvRenderVideo(opts); } finally { hid=w.stop(); }
+  if(hid>SRV_FARSI_HIDDEN_MAX_MS) throw new Error('the video froze because this tab was in the background for '+Math.round(hid/1000)+' s while it rendered (the browser pauses drawing in hidden tabs). Nothing was uploaded. Keep the MMMOS tab open and in front, then press Build again.');
+  return r;
+}
 async function _srvFarsiBuildTrigger(pkgId,taskId){
   const btn=document.getElementById('srv-farsi-build-btn-'+pkgId);
   const statusEl=document.getElementById('srv-farsi-build-status-'+pkgId);
@@ -20259,8 +20276,8 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
 
     // Step 2: SHORT render (9:16) — only for Short tasks
     if(!isLongTask){
-      setStatus('Rendering SHORT video… do not close this tab','#8b5cf6');
-      const shortResult=await _srvRenderVideo({
+      setStatus('Rendering SHORT video… keep this tab open and in front until it finishes','#8b5cf6');
+      const shortResult=await _srvFarsiRenderVisible({
         photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'short',
@@ -20286,8 +20303,8 @@ async function _srvFarsiBuildTrigger(pkgId,taskId){
 
     // Step 3: LONG render (16:9, full song) — only for Long tasks
     if(isLongTask){
-      setStatus('Rendering LONG video… this takes the full song length, do not close this tab','#8b5cf6');
-      const longResult=await _srvRenderVideo({
+      setStatus('Rendering LONG video… this takes the full song length — keep this tab open and in front (switching tabs freezes the video)','#8b5cf6');
+      const longResult=await _srvFarsiRenderVisible({
         photoUrls:_fAvUrlForRender?[_fAvUrlForRender]:[],
         audioFile:audio.file,
         type:'long',
@@ -20720,7 +20737,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-27-a';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-b';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
