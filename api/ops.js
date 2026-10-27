@@ -1775,6 +1775,45 @@ const ENG_MCP_TOOLS = [
       task_id: { type: 'string' }, message: { type: 'string', maxLength: 5000 }, kind: { type: 'string', enum: ['correction', 'question', 'note', 'acceptance'] } } },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, action: engineeringAdviserPostFollowup },
 ];
+// R2 — ChatGPT custom GPT Actions bridge. Accounts without custom MCP access
+// (custom MCP needs ChatGPT Business/Enterprise/Edu) can still use a custom
+// GPT with Actions until OpenAI retires custom GPTs (Dec 11, 2026). This
+// serves an OpenAPI description of the SAME three adviser actions — same
+// code paths, same Bearer adviser credential, same limits — at plain URLs:
+//   POST /api/adviser/submit-task | get-results | post-followup
+//   GET  /api/adviser/openapi.json
+// Submit and follow-up are marked consequential so ChatGPT always asks first.
+function _engAdviserOpenApi(origin) {
+  const tool = (n) => ENG_MCP_TOOLS.find(t => t.name === n);
+  const schema = (n) => { const s = JSON.parse(JSON.stringify(tool(n).inputSchema)); if (s.properties && s.properties.cursor) s.properties.cursor = { type: 'integer', minimum: 0 }; return s; };
+  const op = (id, name, consequential) => ({
+    post: {
+      operationId: id, summary: tool(name).title, description: tool(name).description,
+      'x-openai-isConsequential': consequential,
+      requestBody: { required: true, content: { 'application/json': { schema: schema(name) } } },
+      responses: { '200': { description: 'Result', content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } } },
+        '400': { description: 'Invalid input (message explains what to fix)' }, '401': { description: 'Adviser credential missing or revoked' }, '404': { description: 'Task not found (or not submitted by this adviser)' } },
+    },
+  });
+  return {
+    openapi: '3.1.0',
+    info: { title: 'MMMOS Engineering — CEO Adviser', version: 'r2',
+      description: 'Submit engineering tasks to MMMOS, read results of tasks you submitted, and post follow-ups. You cannot authorize, approve, release or run anything: every task waits for the CEO in MMMOS Engineering Review. Plain text only — no < or > characters.' },
+    servers: [{ url: origin }],
+    components: { securitySchemes: { adviserKey: { type: 'http', scheme: 'bearer' } }, schemas: {} },
+    security: [{ adviserKey: [] }],
+    paths: {
+      '/api/adviser/submit-task': op('submitEngineeringTask', 'submit_engineering_task', true),
+      '/api/adviser/get-results': op('getEngineeringResults', 'get_engineering_results', false),
+      '/api/adviser/post-followup': op('postEngineeringFollowup', 'post_engineering_followup', true),
+    },
+  };
+}
+async function engineeringAdviserOpenApi(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(200).json(_engAdviserOpenApi(_engOrigin(req)));
+}
+
 async function engineeringMcp(req, res) {
   const o = _engOrigin(req);
   const challenge = { 'WWW-Authenticate': `Bearer resource_metadata="${o}/.well-known/oauth-protected-resource"` };
@@ -21524,6 +21563,7 @@ export default async function handler(req, res) {
     if (action === 'engineering_oauth_authorize')                     return await engineeringOAuthAuthorize(req, res);         // CEO PIN + approval
     if (action === 'engineering_oauth_token')                         return await engineeringOAuthToken(req, res);             // PKCE code exchange
     if (action === 'engineering_mcp')                                 return await engineeringMcp(req, res);                    // adviser credential (Bearer)
+    if (action === 'engineering_adviser_openapi')                     return await engineeringAdviserOpenApi(req, res);         // public schema (GPT Actions)
     // v13.91.0 — MMMOS Stabilization Roadmap
     if (action === 'roadmap_load')               return await roadmapLoad(req, res);
     if (action === 'roadmap_approve_phase')      return await roadmapApprovePhase(req, res);

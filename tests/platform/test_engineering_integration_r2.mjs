@@ -251,5 +251,21 @@ let clientId, accessToken;
 }
 ok('E32 no request left the stand-in (Supabase + GitHub only)', true);
 
+// ════ F. ChatGPT custom GPT Actions bridge (accounts without custom MCP) ════
+{
+  let r = await call('engineering_adviser_openapi', {}, { method: 'GET', headers: HOST });
+  const s = r.body;
+  ok('F1 OpenAPI 3.1 schema is served with this host as server', r.status === 200 && s.openapi === '3.1.0' && s.servers[0].url === 'https://mmm-static-git-r2.vercel.app');
+  const ops = Object.entries(s.paths).map(([p, v]) => ({ p, ...v.post }));
+  ok('F2 exactly the three adviser operations, unique operationIds', ops.length === 3 && new Set(ops.map(o => o.operationId)).size === 3
+    && ops.map(o => o.p).sort().join() === '/api/adviser/get-results,/api/adviser/post-followup,/api/adviser/submit-task');
+  ok('F3 submit and follow-up require ChatGPT confirmation; results do not', ops.find(o => o.operationId === 'submitEngineeringTask')['x-openai-isConsequential'] === true
+    && ops.find(o => o.operationId === 'postEngineeringFollowup')['x-openai-isConsequential'] === true && ops.find(o => o.operationId === 'getEngineeringResults')['x-openai-isConsequential'] === false);
+  ok('F4 Bearer API-key security applies to every operation', s.components.securitySchemes.adviserKey.scheme === 'bearer' && s.security[0].adviserKey);
+  ok('F5 request schemas are the same as the MCP tools (business enum, required boundary)', JSON.stringify(ops.find(o => o.operationId === 'submitEngineeringTask').requestBody.content['application/json'].schema.required) === JSON.stringify(['problem', 'expected_result', 'authorization_boundary', 'business']));
+  ok('F6 cursor is a plain integer for the GPT schema parser', ops.find(o => o.operationId === 'getEngineeringResults').requestBody.content['application/json'].schema.properties.cursor.type === 'integer');
+  ok('F7 schema is under ChatGPT\'s size comfort zone', JSON.stringify(s).length < 20000, String(JSON.stringify(s).length));
+}
+
 console.log(`\n${T.pass} passed, ${T.fail} failed`);
 process.exit(T.fail ? 1 : 0);
