@@ -20737,7 +20737,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-27-e';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-f';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -23945,7 +23945,7 @@ async function _srvRenderVideo(opts){
     }
     // vignette centred on the face: everything away from it falls off slightly
     const vg=ctx.createRadialGradient(faceX,faceY,faceR*1.7,faceX,faceY,Math.max(pw,ph)*0.95);
-    vg.addColorStop(0,'rgba(12,6,3,0)'); vg.addColorStop(1,'rgba(12,6,3,0.42)');
+    vg.addColorStop(0,'rgba(12,6,3,0)'); vg.addColorStop(1,'rgba(12,6,3,'+(o.vignette!=null?o.vignette:0.42)+')'); // Long: lighter, so the title side is not shaded
     ctx.fillStyle=vg; ctx.fillRect(px,py,pw,ph);
     if(o.fade){
       const g=ctx.createLinearGradient(0,py+ph*0.50,0,py+ph);
@@ -24097,27 +24097,11 @@ async function _srvRenderVideo(opts){
       // ── LONG (visual benchmark): frameless 16:9 cinematic cover. The photo fills the subject side
       // edge-to-edge and dissolves into warm dark negative space on the title side, where the large
       // Farsi title sits. The face is framed toward the outer side, clear of the title.
-      const panelW=Math.round(W*0.66), panelH=H, panelTop=0;
-      const panelX=isMirror?0:(W-panelW);
-      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,0,{aim:{x:isMirror?0.40:0.60,y:0.40,face:0.21},panX:panX,panY:panY,sweep:sweep,cam:_camOpt});
-      // Title-side veil: one clean warm-dark field over the title side that dissolves into the photo
-      // (no visible edge). A vertical warm gradient masked by a horizontal alpha ramp; static, so it
-      // is built once and reused every frame.
-      if(!_farsiLongVeil){
-        _farsiLongVeil=document.createElement('canvas'); _farsiLongVeil.width=W; _farsiLongVeil.height=H;
-        const vx=_farsiLongVeil.getContext('2d');
-        const vg=vx.createLinearGradient(0,0,0,H);
-        vg.addColorStop(0,_farsiPal.gradient[1]); vg.addColorStop(1,_farsiPal.gradient[2]);
-        vx.fillStyle=vg; vx.fillRect(0,0,W,H);
-        const _edge=isMirror?panelW:panelX;                     // photo's inner edge
-        const _solidTo=isMirror?(_edge-W*0.02):(_edge+W*0.02);  // fully covered just past the edge
-        const _clearAt=isMirror?(_edge-W*0.30):(_edge+W*0.30);  // photo fully visible from here
-        const vm=vx.createLinearGradient(_solidTo,0,_clearAt,0);
-        vm.addColorStop(0,'rgba(0,0,0,1)'); vm.addColorStop(0.45,'rgba(0,0,0,0.62)'); vm.addColorStop(1,'rgba(0,0,0,0)');
-        vx.globalCompositeOperation='destination-in'; vx.fillStyle=vm; vx.fillRect(0,0,W,H);
-        vx.globalCompositeOperation='source-over';
-      }
-      ctx.drawImage(_farsiLongVeil,0,0);
+      // CEO 2026-10-27: no dark field behind the title — the cover photo runs full-width under it. The face keeps the
+      // approved screen position and size (it sat at 60 % of a 66 %-wide panel with the face 21 % of that panel).
+      const panelW=W, panelH=H, panelTop=0, panelX=0;
+      _drawFarsiPanel(panelX,panelTop,panelW,panelH,zoom,0,{aim:{x:isMirror?0.40*0.66:0.34+0.60*0.66,y:0.40,face:0.21*0.66},panX:panX,panY:panY,sweep:sweep,cam:_camOpt,vignette:0.16});
+      // (the former title-side dark veil is removed: CEO 2026-10-27, it covered the cover photo behind the title)
       // soft cinematic floor so the lower edge reads as film, not a crop
       const _floor=ctx.createLinearGradient(0,H*0.72,0,H);
       _floor.addColorStop(0,'rgba(10,6,4,0)'); _floor.addColorStop(1,'rgba(10,6,4,0.42)');

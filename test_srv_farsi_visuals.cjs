@@ -22,7 +22,7 @@ ok('old gray-blue Emotional colours are gone',!/#5f7290|#23283a|#9aa9c2/.test(h)
 const comp=(()=>{const s=h.indexOf('  function _drawFarsiComposedFrame(');return h.slice(s,h.indexOf('\n  // ── Main frame renderer',s));})();
 ok('Long: photo drawn edge-to-edge with no border and no rounded frame',/_drawFarsiPanel\(panelX,panelTop,panelW,panelH,zoom,0,\{aim:/.test(comp)&&!/_drawFarsiPanel\(panelX[^\n]*border:true/.test(comp)&&/panelH=H, panelTop=0/.test(comp));
 ok('Long: no framed-panel call remains',!/_drawFarsiPanel\([^)]*,18,true,true\)/.test(comp));
-ok('Long: title side is a masked veil that dissolves into the photo',/_farsiLongVeil/.test(comp)&&/destination-in/.test(comp));
+ok('Long: no dark veil behind the title — the cover photo runs full-width under it (face keeps its screen position and size; lighter edge vignette)',!/ctx\.drawImage\(_farsiLongVeil/.test(comp)&&/const panelW=W, panelH=H, panelTop=0, panelX=0;/.test(comp)&&/aim:\{x:isMirror\?0\.40\*0\.66:0\.34\+0\.60\*0\.66,y:0\.40,face:0\.21\*0\.66\}/.test(comp)&&/vignette:0\.16\}/.test(comp));
 ok('still cover frame keeps the zoom floor 1 (no edge revealed)',/const z=Math\.max\(1,zoom\|\|1\)/.test(panel));
 ok('Long: romanized line is a restrained sans (no monospace caps block)',/500 \$\{Math\.round\(W\*0\.0195\)\}px 'Vazirmatn'/.test(comp)&&!/IBM Plex Mono', monospace`;\s*\n\s*ctx\.fillStyle='rgba\(253,246,232,0\.82\)'/.test(comp));
 ok('Long/Short: title type is cream, not pure white',(comp.match(/#fdf6e8/g)||[]).length>=2&&!/fillStyle='#fff(fff)?'/.test(comp));
@@ -149,7 +149,7 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   ok('motion: Short card = srv2CardCameraRect (eased 6 % push over the Short × 45 % breathing, sway inside the margin)',
     /const zz=\(1\+C\.push\*_srvFarsiCamEase\(o\.cam\.p\)\)\*\(1\+\(cam\.zoom-1\)\*C\.shortZoomShare\);/.test(pnl)&&/_srvFarsiCamRect\(iw,ih,pw,ph,sc,zz,bcx,bcy,cam\.mx,cam\.my,1\)/.test(pnl));
   ok('motion: the composed frame drives it (timeline from the song length, seed from cover + title); cover/thumbnail keeps the still 1.045 framing',
-    /_farsiCamShots=_srvFarsiCamTimeline\(targetDur,/.test(comp)&&/const _cam=_live\?_srvFarsiCamera\(t,_camSeed\):null;/.test(comp)&&/const zoom=1\.045, panX=0, panY=0;/.test(comp)&&(comp.match(/cam:_camOpt\}\)/g)||[]).length===2);
+    /_farsiCamShots=_srvFarsiCamTimeline\(targetDur,/.test(comp)&&/const _cam=_live\?_srvFarsiCamera\(t,_camSeed\):null;/.test(comp)&&/const zoom=1\.045, panX=0, panY=0;/.test(comp)&&(comp.match(/cam:_camOpt[,}]/g)||[]).length===2);
   ok('motion: copied into SRV Farsi, not imported (no SRV Studio module reference in the SRV Farsi path)',!/srv2-render|SRV2_MOTION\b/.test(comp)&&!/srv2-render|SRV2_MOTION\b/.test(atmo)&&!/srv2-render/.test(pnl));
   ok('motion: the face-aware base composition is unchanged (its centre/scale are SRV English\'s "wide" base)',/bcx=\(sx\+sw\/2\)\/iw, bcy=\(sy\+sh\/2\)\/ih;/.test(pnl)&&/sc=Math\.min\(Math\.max\(cover,Math\.min\(cover\*1\.7,1\.5\)\),Math\.max\(cover,\(aim\.face\*pw\)\/\(fw\*iw\)\)\);/.test(pnl));
   ok('encoding: SRV Farsi records at SRV English\'s bitrate (8 Mbps Long, 6 Mbps Short); every other channel unchanged at 1 Mbps',/videoBitsPerSecond: isFarsiComposed \? \(isShort \? 6_000_000 : 8_000_000\) : 1_000_000/.test(h));
