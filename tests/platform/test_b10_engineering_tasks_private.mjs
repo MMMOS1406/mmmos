@@ -43,5 +43,23 @@ ok('rollback restores the exact previous public read', r.rows && r.rows[0].n ===
 await pg.exec(MIG);
 r = await asRole('anon', 'select * from public.engineering_tasks');
 ok('migration re-applies cleanly after rollback', /permission denied/.test(r.error || ''));
+// ── B10b: brain_agent_runs ────────────────────────────────────────────────────
+const MIG_B = readFileSync(join(root, 'migrations/20261027_b10b_brain_agent_runs_private.sql'), 'utf8');
+const RB_B = readFileSync(join(root, 'migrations/20261027_b10b_brain_agent_runs_private_rollback.sql'), 'utf8');
+await pg.exec(`create table public.brain_agent_runs (id uuid primary key default gen_random_uuid(), session_id text, task_id text, action text);
+  alter table public.brain_agent_runs enable row level security;
+  grant select on public.brain_agent_runs to anon, authenticated; grant all on public.brain_agent_runs to service_role;
+  create policy ceo015b_browser_read_only on public.brain_agent_runs for select to anon, authenticated using (true);
+  insert into public.brain_agent_runs (session_id, task_id, action) values ('run1','t1','gateway:read_task_packet');`);
+r = await asRole('anon', 'select count(*)::int n from public.brain_agent_runs');
+ok('B10b before: anon can read the agent audit trail', r.rows && r.rows[0].n === 1);
+await pg.exec(MIG_B); await pg.exec(MIG_B);
+r = await asRole('anon', 'select * from public.brain_agent_runs');
+ok('B10b after: anon read → permission denied (re-runnable)', /permission denied/.test(r.error || ''));
+r = await asRole('service_role', 'select count(*)::int n from public.brain_agent_runs');
+ok('B10b after: the server still reads it', r.rows && r.rows[0].n === 1);
+await pg.exec(RB_B);
+r = await asRole('anon', 'select count(*)::int n from public.brain_agent_runs');
+ok('B10b rollback restores the previous browser read', r.rows && r.rows[0].n === 1);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

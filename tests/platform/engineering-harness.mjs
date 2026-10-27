@@ -14,6 +14,7 @@ export const db = {
   brain_agent_runs: [], engineering_brain: [], brain_knowledge: [], brain_learning_memory: [],
   engineering_workspace_files: [], brain_test_runs: [], production_deployments: [], production_release_authorizations: [],
   app_settings: [],
+  mmm_platform_flags: [], // release switches; tests turn them on explicitly
   ceo_auth_config: [{ key: 'ceo_session_secret_production', value: SESSION_SECRET }, { key: 'ceo_pin_hash_production', value: sha(CEO_PIN) }],
 };
 export const storage = { objects: new Map() };

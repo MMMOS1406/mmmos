@@ -797,6 +797,7 @@ async function engineeringTaskCeoAuthorizeAgent(req, res) {
     // its record and authorization history are untouched. Re-authorizing
     // rewrites the scope, so eligibility must be chosen again every time.
     if (body.runner_eligible === true) {
+      if (!(await _engPlatformFlag('eng_runner'))) return res.status(409).json({ ok: false, error: 'runner_disabled', message: 'The automatic runner is switched off in MMMOS.' });
       const runner = _engRunnerScopeFor(task, body.runner_shared_paths);
       if (runner.error) return res.status(409).json({ ok: false, error: runner.error });
       scope.runner = runner.scope;
@@ -950,6 +951,8 @@ async function engineeringWorkerListAuthorizedTasks(req, res) {
     // (scope.runner.eligible under the current gate). The default (manual)
     // listing is unchanged.
     const runnerMode = body.mode === 'runner';
+    // Switched off → a distinct mode the connector's fail-safe refuses.
+    if (runnerMode && !(await _engPlatformFlag('eng_runner'))) return res.status(200).json({ ok: true, worker_id: worker.id, mode: 'runner_disabled', tasks: [] });
     const rows = await sbGetSafe(
       `engineering_tasks?select=id,problem,affected_engine,priority,agent_authorized_at,agent_capability_scope&` +
       `agent_authorized_at=not.is.null&agent_authorization_revoked_at=is.null&` +
@@ -1001,6 +1004,7 @@ async function engineeringWorkerClaimTask(req, res) {
     // R2: a runner-mode claim succeeds only for a task the CEO explicitly made
     // runner-eligible. Pre-R2 tasks (no scope.runner) are refused here.
     const runnerMode = body.mode === 'runner';
+    if (runnerMode && !(await _engPlatformFlag('eng_runner'))) return res.status(409).json({ ok: false, error: 'runner_disabled' });
     if (runnerMode && !_engRunnerEligible(task)) return res.status(409).json({ ok: false, error: 'task_not_runner_eligible' });
 
     // Independent re-verification of CEO authority — never inferred from the
@@ -1196,6 +1200,20 @@ async function _engArtifactSignedDownload(objectPath) {
 // public key. B10 removes public reads, so registered workers read through here
 // instead: same fields the connector showed before, never token hashes.
 const ENG_WORKER_TASK_FIELDS = 'id,problem,expected_result,status,priority,affected_engine,acceptance_criteria,packet,ceo_decision,ceo_decision_at,agent_authorized_at,agent_claimed_at,git_commit_sha,release_kind,created_at,updated_at';
+// R2 (B10b): the Brain v2 Agents panel read brain_agent_runs with the public
+// key. The audit trail (run ids, task ids, file paths, refusal reasons) is now
+// a CEO-session read through the server instead.
+async function engineeringAgentRunsList(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const src = (req.method === 'POST' ? req.body : req.query) || {};
+    const limit = Math.min(Math.max(parseInt(src.limit, 10) || 30, 1), 200);
+    const rows = await sbGetSafe(`brain_agent_runs?order=started_at.desc&limit=${limit}`);
+    return res.status(200).json({ ok: true, runs: rows || [] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
 async function engineeringWorkerReadTasks(req, res) {
   try {
     const body = req.body || {};
@@ -1223,6 +1241,20 @@ async function engineeringWorkerReadTasks(req, res) {
 // business folders, plus any shared file the CEO granted for that task.
 // Release, deploy and schema files can never be granted.
 const ENG_RUNNER_GATE = 'r2';
+// R2 release switches (fail-closed). New capabilities stay OFF in production
+// until the CEO turns them on by adding an enabled row to mmm_platform_flags
+// (no code change, no migration). A missing row, a disabled row, or any read
+// error means OFF.
+//   eng_adviser_connect — lets MMMOS mint adviser credentials (CEO panel and
+//                         the ChatGPT OAuth approval page)
+//   eng_runner          — lets the CEO make tasks runner-eligible and lets the
+//                         runner list / claim them
+async function _engPlatformFlag(flag) {
+  try {
+    const rows = await sbGet(`mmm_platform_flags?flag=eq.${encodeURIComponent(flag)}&select=enabled&limit=1`);
+    return !!(rows && rows[0] && rows[0].enabled === true);
+  } catch { return false; }
+}
 const ENG_RUNNER_MAX_CLAIM_MS = 8 * 60 * 60 * 1000; // a claim can be renewed for up to 8 hours
 const ENG_BUSINESS_PATHS = {
   mmmos: ['tests/platform/', 'tests/preservation/', 'docs/platform/', 'sandbox/', 'tools/engineering-runner/'],
@@ -1344,6 +1376,7 @@ async function _engAdviserGate(req, res) {
 // once, here, and only its SHA-256 hash is stored (same primitive as workers).
 async function engineeringAdviserProvision(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!(await _engPlatformFlag('eng_adviser_connect'))) return res.status(409).json({ ok: false, error: 'adviser_connect_disabled', message: 'Adviser connections are switched off in MMMOS.' });
   try {
     const body = req.body || {};
     const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 100) : 'ChatGPT CEO Adviser';
@@ -1711,10 +1744,10 @@ input[type=password]{width:100%;box-sizing:border-box;padding:10px;border-radius
 <ul><li>submit engineering tasks (each waits for your authorization in Engineering Review),</li><li>read results of tasks it submitted,</li><li>post follow-up instructions.</li></ul>
 <p>It will <b>not</b> be able to authorize, approve, release, deploy or run anything. You can revoke it any time in Engineering Workers.</p>
 ${message ? `<p class="msg">${_engHtml(message)}</p>` : ''}
-<form method="post" action="/oauth/authorize" autocomplete="off">${hidden}
+${p._disabled ? '' : `<form method="post" action="/oauth/authorize" autocomplete="off">${hidden}
 <label for="pin">CEO PIN</label><input id="pin" name="pin" type="password" inputmode="numeric" required>
 <div class="row"><button class="no" type="submit" name="decision" value="deny" formnovalidate>Deny</button><button class="ok" type="submit" name="decision" value="approve">Approve</button></div>
-</form></main></body></html>`;
+</form>`}</main></body></html>`;
 }
 async function engineeringOAuthAuthorize(req, res) {
   const p = Object.assign({}, req.method === 'POST' ? (req.body || {}) : (req.query || {}));
@@ -1729,6 +1762,11 @@ async function engineeringOAuthAuthorize(req, res) {
     return back({ error: 'invalid_request', error_description: 'PKCE S256 is required', state: p.state });
   }
   const page = (msg) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.status(200).send(_engAuthorizePage({ ...p, client_name: client.name }, msg)); };
+  if (!(await _engPlatformFlag('eng_adviser_connect'))) {
+    if (req.method === 'POST') return back({ error: 'access_denied', error_description: 'adviser connections are switched off in MMMOS', state: p.state });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(_engAuthorizePage({ ...p, client_name: client.name, _disabled: true }, 'Connecting ChatGPT is switched off in MMMOS right now. Nothing was changed.'));
+  }
   if (req.method !== 'POST') return page(null);
   if (p.decision !== 'approve') return back({ error: 'access_denied', state: p.state });
   // Verify the PIN through the existing CEO login (same hash, same lockout).
@@ -21557,6 +21595,7 @@ export default async function handler(req, res) {
     if (action === 'engineering_adviser_post_followup')               return await engineeringAdviserPostFollowup(req, res);// adviser credential
     // MMMOS Engineering Integration R2.
     if (action === 'engineering_worker_read_tasks')                   return await engineeringWorkerReadTasks(req, res);    // worker credential (B10)
+    if (action === 'engineering_agent_runs_list')                     return await engineeringAgentRunsList(req, res);      // CEO session (B10b)
     if (action === 'engineering_oauth_protected_resource')            return await engineeringOAuthProtectedResource(req, res); // public metadata
     if (action === 'engineering_oauth_metadata')                      return await engineeringOAuthMetadata(req, res);          // public metadata
     if (action === 'engineering_oauth_register')                      return await engineeringOAuthRegister(req, res);          // ChatGPT redirect hosts only

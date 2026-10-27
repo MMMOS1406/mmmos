@@ -6,6 +6,8 @@ import { db, storage, github, call, ceoToken, makeOk, sha, randomUUID, CEO_PIN, 
 import { createHash, randomBytes } from 'node:crypto';
 
 const T = makeOk(); const ok = T.ok;
+// Sections A–F run with both release switches ON; section G proves they fail closed when OFF.
+db.mmm_platform_flags.push({ flag: 'eng_runner', enabled: true }, { flag: 'eng_adviser_connect', enabled: true });
 const CEO = ceoToken();
 const WORKER = 'a'.repeat(64);
 db.engineering_workers.push({ id: randomUUID(), label: 'Runner Worker', credential_hash: sha(WORKER), active: true });
@@ -265,6 +267,40 @@ ok('E32 no request left the stand-in (Supabase + GitHub only)', true);
   ok('F5 request schemas are the same as the MCP tools (business enum, required boundary)', JSON.stringify(ops.find(o => o.operationId === 'submitEngineeringTask').requestBody.content['application/json'].schema.required) === JSON.stringify(['problem', 'expected_result', 'authorization_boundary', 'business']));
   ok('F6 cursor is a plain integer for the GPT schema parser', ops.find(o => o.operationId === 'getEngineeringResults').requestBody.content['application/json'].schema.properties.cursor.type === 'integer');
   ok('F7 schema is under ChatGPT\'s size comfort zone', JSON.stringify(s).length < 20000, String(JSON.stringify(s).length));
+}
+
+// ════ G. Release switches OFF (production default) + B10b ══════════════════
+{
+  db.mmm_platform_flags.length = 0; // no rows = everything new stays off
+  const t2 = randomUUID();
+  db.engineering_tasks.push({ id: t2, problem: 'p', affected_engine: 'x', status: 'open', packet: { business: 'mmmos', origin_decision: { authorization_boundary: 'b' } } });
+  let r = await call('engineering_task_ceo_authorize_agent', { id: t2, runner_eligible: true, ceo_session_token: CEO });
+  ok('G1 runner OFF: CEO cannot make a task runner-eligible', r.status === 409 && r.body.error === 'runner_disabled' && !db.engineering_tasks.find(t => t.id === t2).agent_capability_scope);
+  r = await call('engineering_worker_list_authorized_tasks', { ...W, mode: 'runner' });
+  ok('G2 runner OFF: runner listing reports runner_disabled with no tasks (connector refuses non-"runner" mode)', r.status === 200 && r.body.mode === 'runner_disabled' && r.body.tasks.length === 0);
+  r = await call('engineering_worker_claim_task', { ...W, task_id: taskId, mode: 'runner' });
+  ok('G3 runner OFF: runner claim refused even for a previously eligible task', r.status === 409 && r.body.error === 'runner_disabled');
+  r = await call('engineering_worker_list_authorized_tasks', W);
+  ok('G4 runner OFF: the manual worker path is unchanged', r.status === 200 && r.body.mode === 'manual');
+  r = await call('engineering_task_ceo_authorize_agent', { id: t2, ceo_session_token: CEO });
+  ok('G5 runner OFF: ordinary (manual) CEO authorization still works', r.status === 200);
+  const advBefore = db.engineering_advisers.length;
+  r = await call('engineering_adviser_provision', { label: 'x', ceo_session_token: CEO });
+  ok('G6 adviser OFF: no adviser credential can be created', r.status === 409 && r.body.error === 'adviser_connect_disabled' && db.engineering_advisers.length === advBefore);
+  const reg = await call('engineering_oauth_register', { redirect_uris: [REDIRECT], client_name: 'ChatGPT' }, { headers: HOST });
+  const q2 = { client_id: reg.body.client_id, redirect_uri: REDIRECT, response_type: 'code', code_challenge: 'a'.repeat(43), code_challenge_method: 'S256', state: 's2' };
+  r = await call('engineering_oauth_authorize', {}, { method: 'GET', headers: HOST, query: q2 });
+  ok('G7 adviser OFF: approval page says it is switched off and shows no PIN form', r.status === 200 && /switched off/.test(r.body) && !/name="pin"/.test(r.body));
+  const secBefore = JSON.stringify(db.app_settings);
+  r = await call('engineering_oauth_authorize', { ...q2, pin: CEO_PIN, decision: 'approve' }, { headers: HOST });
+  ok('G8 adviser OFF: approve is refused before any PIN check (no adviser, no lockout change)', r.status === 302 && /error=access_denied/.test(r.headers.location) && db.engineering_advisers.length === advBefore && JSON.stringify(db.app_settings) === secBefore);
+  db.mmm_platform_flags.push({ flag: 'eng_runner', enabled: false });
+  r = await call('engineering_worker_list_authorized_tasks', { ...W, mode: 'runner' });
+  ok('G9 a row with enabled=false is still OFF', r.body.mode === 'runner_disabled');
+  r = await call('engineering_agent_runs_list', {}, { method: 'GET' });
+  ok('G10 B10b: the agent audit trail needs a CEO session', r.status === 401);
+  r = await call('engineering_agent_runs_list', { limit: 5, ceo_session_token: CEO });
+  ok('G11 B10b: with a CEO session the audit trail is returned (limit honoured)', r.status === 200 && Array.isArray(r.body.runs) && r.body.runs.length <= 5 && r.body.runs.length > 0);
 }
 
 console.log(`\n${T.pass} passed, ${T.fail} failed`);

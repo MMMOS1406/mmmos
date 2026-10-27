@@ -29245,8 +29245,10 @@ async function _ebV2Load(action,params=''){
       const r=await fetch('/api/ops?action=brain_v2_get_validations&limit=20');
       data=await r.json();
     } else if(action==='b2_agents'){
-      const r=await fetch(SUPABASE_URL+'/rest/v1/brain_agent_runs?order=started_at.desc&limit=30',{headers:H});
-      data={ok:true,runs:await r.json()};
+      // R2 (B10b): the agent audit trail comes from a CEO-session server read, not the public key.
+      const r=await _ceoAuthedFetch('/api/ops?action=engineering_agent_runs_list',{limit:30});
+      const j=await r.json().catch(()=>({ok:false}));
+      data={ok:!!j.ok,error:j.error,runs:Array.isArray(j.runs)?j.runs:[]};
     } else if(action==='b2_autonomous'){
       // v14.6.0 — Phase 3.7: parallel fetch system state + next recommendation
       const [sR,rR]=await Promise.all([
@@ -30578,7 +30580,7 @@ function renderEngineeringBrain(){
           <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
           <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · ${escHTML(_engAuthSource(t))} · not yet authorized for agent execution</div>
           ${_engAuthDetails(t)}
-          <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(56,189,248,0.5);background:rgba(56,189,248,0.15);color:#38bdf8;font-size:11px;font-weight:700;cursor:pointer">🔑 Authorize Agent</button>
+          <button data-id="${_engAttr(t.id)}" onclick="_engReviewAuthorizeAgent(this.dataset.id)" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(56,189,248,0.5);background:rgba(56,189,248,0.15);color:#38bdf8;font-size:11px;font-weight:700;cursor:pointer">🔑 Authorize Agent</button>
           ${_engRunnerButton(t)}
         </div>`).join('')}
       </div>`:''}
@@ -30588,7 +30590,7 @@ function renderEngineeringBrain(){
           <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
           <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · ${escHTML(_engAuthSource(t))} · previously authorized, never claimed · minting a new token invalidates the old one</div>
           ${_engAuthDetails(t)}
-          <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(245,158,11,0.5);background:rgba(245,158,11,0.15);color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer">🔁 Re-authorize Agent</button>
+          <button data-id="${_engAttr(t.id)}" onclick="_engReviewAuthorizeAgent(this.dataset.id)" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(245,158,11,0.5);background:rgba(245,158,11,0.15);color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer">🔁 Re-authorize Agent</button>
           ${_engRunnerButton(t)}
         </div>`).join('')}
       </div>`:''}
@@ -30598,8 +30600,8 @@ function renderEngineeringBrain(){
           <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(t.problem||'—')}</div>
           <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · already-completed work, no agent execution required · target commit ${t.git_commit_sha?t.git_commit_sha.slice(0,12)+'…':'⚠ NOT SET'}</div>
           <div style="display:flex;gap:8px">
-            <button onclick="_engReviewApprove('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve</button>
-            <button onclick="_engReviewReject('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">❌ Reject</button>
+            <button data-id="${_engAttr(t.id)}" onclick="_engReviewApprove(this.dataset.id)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve</button>
+            <button data-id="${_engAttr(t.id)}" onclick="_engReviewReject(this.dataset.id)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">❌ Reject</button>
           </div>
         </div>`).join('')}
       </div>`:''}
@@ -30656,8 +30658,8 @@ function renderEngineeringBrain(){
             ${ev.map(e=>`<div style="font-size:10px;color:var(--dim);padding:3px 0">${escHTML(e.title||e.evidence_type)} · ${e.created_at?new Date(e.created_at).toLocaleString():''}</div>`).join('')}
           </div>`:''}
           <div style="display:flex;gap:8px">
-            <button onclick="_engReviewApprove('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve</button>
-            <button onclick="_engReviewReject('${t.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">❌ Reject</button>
+            <button data-id="${_engAttr(t.id)}" onclick="_engReviewApprove(this.dataset.id)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve</button>
+            <button data-id="${_engAttr(t.id)}" onclick="_engReviewReject(this.dataset.id)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">❌ Reject</button>
           </div>
         </div>`;
       }).join('')}
@@ -30805,24 +30807,24 @@ function renderEngineeringBrain(){
       <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;margin-bottom:8px">PENDING CONNECTION REQUESTS ${pending.length?('('+pending.length+')'):''}</div>
       ${pending.length===0?'<div style="font-size:12px;color:var(--dim);padding:0 0 16px 0">No pending requests. When Cowork attempts to connect, it will appear here for you to approve or reject.</div>':pending.map(p=>`
       <div style="background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
-        <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${(p.label||'Engineering Worker').replace(/</g,'&lt;')}</div>
+        <div style="font-size:13px;font-weight:800;color:#fff;margin-bottom:4px">${escHTML(p.label||'Engineering Worker')}</div>
         <div style="font-size:10px;color:var(--dim);margin-bottom:10px">requested ${p.created_at?new Date(p.created_at).toLocaleString():'—'} · expires ${p.expires_at?new Date(p.expires_at).toLocaleString():'—'}</div>
         <div style="display:flex;gap:8px">
-          <button onclick="_engWorkerPairingApprove('${p.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve Connection</button>
-          <button onclick="_engWorkerPairingReject('${p.id}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">✖ Reject</button>
+          <button data-id="${_engAttr(p.id)}" onclick="_engWorkerPairingApprove(this.dataset.id)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(34,197,94,0.5);background:rgba(34,197,94,0.12);color:#22c55e;font-size:11px;font-weight:700;cursor:pointer">✅ Approve Connection</button>
+          <button data-id="${_engAttr(p.id)}" onclick="_engWorkerPairingReject(this.dataset.id)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">✖ Reject</button>
         </div>
       </div>`).join('')}
       <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;margin:18px 0 8px 0">CONNECTED WORKERS</div>
       ${workers.length===0?'<div style="font-size:12px;color:var(--dim);padding:10px 0">No Engineering Workers connected yet.</div>':''}
       ${workers.map(w=>`<div style="background:${w.active?'rgba(34,197,94,0.04)':'rgba(255,255,255,0.02)'};border:1px solid ${w.active?'rgba(34,197,94,0.25)':'var(--border)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
-          <div style="font-size:13px;font-weight:800;color:#fff">${(w.label||'Engineering Worker').replace(/</g,'&lt;')}</div>
+          <div style="font-size:13px;font-weight:800;color:#fff">${escHTML(w.label||'Engineering Worker')}</div>
           <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:${w.active?'#22c55e18':'#6b728018'};border:1px solid ${w.active?'#22c55e40':'#6b728040'};color:${w.active?'#22c55e':'#6b7280'};font-weight:700">${w.active?'ACTIVE':'REVOKED'}</span>
         </div>
         <div style="font-size:10px;color:var(--dim);margin-bottom:${w.active?'10px':'0'}">
           connected ${w.created_at?new Date(w.created_at).toLocaleString():'—'}${w.last_seen_at?(' · last seen '+new Date(w.last_seen_at).toLocaleString()):' · never used yet'}
         </div>
-        ${w.active?`<button onclick="_engWorkerRevoke('${w.id}','${(w.label||'').replace(/'/g,"\\'")}')" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">🚫 Revoke</button>`:''}
+        ${w.active?`<button data-id="${_engAttr(w.id)}" data-label="${_engAttr(w.label||'')}" onclick="_engWorkerRevoke(this.dataset.id,this.dataset.label)" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">🚫 Revoke</button>`:''}
       </div>`).join('')}
       ${_engAdviserSection(j)}
       `;
@@ -30895,12 +30897,16 @@ function _engAuthSource(t){
 // R2: second, separate button — the CEO's explicit choice to let the automatic
 // runner take this task. Shown only when the task names a business the runner
 // has folders for; the server re-checks everything.
+// Attribute-safe escaping: also escapes quotes, so a value can never close an
+// HTML attribute. Click handlers read values from data-* attributes instead of
+// having text spliced into inline script.
+function _engAttr(s){return escHTML(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 const _ENG_RUNNER_BUSINESSES=['mmmos','nextwave','srv_studio','srv_farsi'];
 function _engRunnerButton(t){
   const p=(t&&t.packet)||{};
   if(!_ENG_RUNNER_BUSINESSES.includes(p.business)) return '';
   if(!(p.origin_decision&&p.origin_decision.authorization_boundary)) return '';
-  return `<button data-eng-runner-btn onclick="_engReviewAuthorizeAgent('${escHTML(t.id)}','runner')" style="width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.12);color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer">🤖 Authorize for Runner — ${escHTML(p.business)} folders only, ends in a pull request</button>`;
+  return `<button data-eng-runner-btn data-id="${_engAttr(t.id)}" onclick="_engReviewAuthorizeAgent(this.dataset.id,'runner')" style="width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.12);color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer">🤖 Authorize for Runner — ${escHTML(p.business)} folders only, ends in a pull request</button>`;
 }
 function _engAuthDetails(t){
   const p=(t&&t.packet)||{};
@@ -31002,7 +31008,7 @@ async function _engReviewAuthorizeAgent(id,mode){
         try{ logout(); }catch(e){}
         return;
       }
-      const why={runner_requires_business:'the task has no business assigned',runner_business_has_no_paths:'this business has no folders the runner may change yet'}[j.error];
+      const why={runner_requires_business:'the task has no business assigned',runner_business_has_no_paths:'this business has no folders the runner may change yet',runner_disabled:'the automatic runner is switched off in MMMOS'}[j.error];
       alert('Authorize agent failed: '+(why||j.error));return;
     }
     if(runner) alert('Authorized for the runner. It will pick this task up on its next run and report back with a pull request.');
@@ -31031,7 +31037,7 @@ function _engAdviserSection(j){
           <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:${a.active?'#22c55e18':'#6b728018'};border:1px solid ${a.active?'#22c55e40':'#6b728040'};color:${a.active?'#22c55e':'#6b7280'};font-weight:700">${a.active?'ACTIVE':'REVOKED'}</span>
         </div>
         <div style="font-size:10px;color:var(--dim);margin-bottom:${a.active?'10px':'0'}">created ${a.created_at?new Date(a.created_at).toLocaleString():'—'}${a.last_seen_at?(' · last used '+new Date(a.last_seen_at).toLocaleString()):' · never used yet'}${a.revoked_at?(' · revoked '+new Date(a.revoked_at).toLocaleString()):''}</div>
-        ${a.active?`<button onclick="_engAdviserRevoke('${escHTML(a.id)}')" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">🚫 Revoke</button>`:''}
+        ${a.active?`<button data-id="${_engAttr(a.id)}" onclick="_engAdviserRevoke(this.dataset.id)" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">🚫 Revoke</button>`:''}
       </div>`).join('')}`;
 }
 async function _engAdviserCreate(){
@@ -31042,7 +31048,7 @@ async function _engAdviserCreate(){
     const j=await r.json();
     if(!j.ok){
       if(j.error==='ceo_authorization_required'){alert('Your CEO session has expired. Please log in again, then retry.');try{logout();}catch(e){}return;}
-      alert('Could not create the credential: '+j.error);return;
+      alert(j.error==='adviser_connect_disabled'?'Adviser connections are switched off in MMMOS. Nothing was created.':'Could not create the credential: '+j.error);return;
     }
     prompt('Adviser credential — copy it now into the ChatGPT connector. It is shown once only:',j.adviser_credential);
     _ebV2Cache['b2_workers']=null;
