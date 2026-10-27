@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import { writeFile, readFile, unlink, stat as fsStat, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
+import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
@@ -767,7 +767,7 @@ async function engineeringTaskCeoAuthorizeAgent(req, res) {
     const body = req.body || {};
     const { id } = body;
     if (!id) return res.status(400).json({ ok: false, error: 'id required' });
-    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(id)}&select=id,status,packet,agent_authorized_at&limit=1`);
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(id)}&select=id,status,packet,affected_engine,agent_authorized_at&limit=1`);
     const task = rows?.[0];
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
 
@@ -791,6 +791,16 @@ async function engineeringTaskCeoAuthorizeAgent(req, res) {
     // input defaults to fully empty (zero file/validation capabilities),
     // matching "missing capability = DENIED".
     const scope = _agentSanitizeScope(body.capability_scope);
+    // R2 — runner eligibility gate. Only an explicit CEO choice made HERE, at
+    // authorization time, makes a task available to the automatic runner.
+    // Every task authorized before R2 has no scope.runner and stays manual-only;
+    // its record and authorization history are untouched. Re-authorizing
+    // rewrites the scope, so eligibility must be chosen again every time.
+    if (body.runner_eligible === true) {
+      const runner = _engRunnerScopeFor(task, body.runner_shared_paths);
+      if (runner.error) return res.status(409).json({ ok: false, error: runner.error });
+      scope.runner = runner.scope;
+    }
     const patch = {
       agent_authorized_at: now,
       agent_authorized_by: 'ceo',
@@ -936,19 +946,26 @@ async function engineeringWorkerListAuthorizedTasks(req, res) {
     if (!worker) return res.status(401).json({ ok: false, error: 'worker_authentication_failed' });
 
     const nowIso = new Date().toISOString();
+    // R2: mode 'runner' lists ONLY tasks the CEO explicitly made runner-eligible
+    // (scope.runner.eligible under the current gate). The default (manual)
+    // listing is unchanged.
+    const runnerMode = body.mode === 'runner';
     const rows = await sbGetSafe(
-      `engineering_tasks?select=id,problem,affected_engine,priority,agent_authorized_at&` +
+      `engineering_tasks?select=id,problem,affected_engine,priority,agent_authorized_at,agent_capability_scope&` +
       `agent_authorized_at=not.is.null&agent_authorization_revoked_at=is.null&` +
       `or=(agent_claimed_at.is.null,lease_expires_at.lt.${encodeURIComponent(nowIso)})&` +
+      (runnerMode ? `agent_capability_scope->runner->>eligible=eq.true&agent_capability_scope->runner->>gate=eq.${ENG_RUNNER_GATE}&` : '') +
       `order=agent_authorized_at.asc&limit=50`
     );
     try { await sbPatch('engineering_workers', `id=eq.${encodeURIComponent(worker.id)}`, { last_seen_at: nowIso }); } catch (_) {}
 
     return res.status(200).json({
-      ok: true, worker_id: worker.id,
-      tasks: (rows || []).map(t => ({
+      ok: true, worker_id: worker.id, mode: runnerMode ? 'runner' : 'manual',
+      // The filter is re-applied in code, so a PostgREST filter change can never widen it.
+      tasks: (rows || []).filter(t => !runnerMode || _engRunnerEligible(t)).map(t => ({
         id: t.id, problem: String(t.problem || '').slice(0, 300),
         affected_engine: t.affected_engine, priority: t.priority, agent_authorized_at: t.agent_authorized_at,
+        ...(runnerMode ? { business: t.agent_capability_scope.runner.business } : {}),
       })),
     });
   } catch (e) {
@@ -978,9 +995,13 @@ async function engineeringWorkerClaimTask(req, res) {
     const worker = await _engineeringWorkerAuthenticate(body.worker_credential);
     if (!worker) return res.status(401).json({ ok: false, error: 'worker_authentication_failed' });
 
-    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,packet,agent_authorized_at,agent_authorization_revoked_at,agent_claimed_at,lease_expires_at&limit=1`);
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,packet,agent_authorized_at,agent_authorization_revoked_at,agent_claimed_at,lease_expires_at,agent_capability_scope&limit=1`);
     const task = rows?.[0];
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
+    // R2: a runner-mode claim succeeds only for a task the CEO explicitly made
+    // runner-eligible. Pre-R2 tasks (no scope.runner) are refused here.
+    const runnerMode = body.mode === 'runner';
+    if (runnerMode && !_engRunnerEligible(task)) return res.status(409).json({ ok: false, error: 'task_not_runner_eligible' });
 
     // Independent re-verification of CEO authority — never inferred from the
     // worker's identity, never inferred from the caller's say-so. Same
@@ -993,7 +1014,7 @@ async function engineeringWorkerClaimTask(req, res) {
       && !!boundary && typeof boundary === 'string' && !!boundary.trim();
     if (!authOk) return res.status(409).json({ ok: false, error: 'task_not_authorized' });
 
-    const claimedByLabel = `worker:${worker.label}`;
+    const claimedByLabel = `${runnerMode ? 'runner' : 'worker'}:${worker.label}`;
     const claimResult = await _engineeringTaskAtomicClaim(task_id, claimedByLabel, { claimed_by_worker_id: worker.id });
     if (!claimResult) {
       return res.status(409).json({ ok: false, error: 'already_claimed', message: 'This task already has an active, unexpired claim.' });
@@ -1167,6 +1188,106 @@ async function _engArtifactSignedDownload(objectPath) {
     return r.ok && rel ? `${SUPABASE_URL}/storage/v1${rel}` : null;
   } catch (e) {
     return null;
+  }
+}
+
+// ── MMMOS Engineering Integration R2 (B10): worker-credential task reads ─────────
+// The local Engineering Brain connector used to read engineering_tasks with the
+// public key. B10 removes public reads, so registered workers read through here
+// instead: same fields the connector showed before, never token hashes.
+const ENG_WORKER_TASK_FIELDS = 'id,problem,expected_result,status,priority,affected_engine,acceptance_criteria,packet,ceo_decision,ceo_decision_at,agent_authorized_at,agent_claimed_at,git_commit_sha,release_kind,created_at,updated_at';
+async function engineeringWorkerReadTasks(req, res) {
+  try {
+    const body = req.body || {};
+    const worker = await _engineeringWorkerAuthenticate(body.worker_credential);
+    if (!worker) return res.status(401).json({ ok: false, error: 'worker_authentication_failed' });
+    if (body.task_id !== undefined) {
+      if (typeof body.task_id !== 'string' || !ENG_UUID_RE.test(body.task_id)) return res.status(400).json({ ok: false, error: 'task_id must be a task UUID' });
+      const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(body.task_id)}&select=${ENG_WORKER_TASK_FIELDS}&limit=1`);
+      if (!rows?.[0]) return res.status(404).json({ ok: false, error: 'task_not_found' });
+      return res.status(200).json({ ok: true, task: rows[0] });
+    }
+    const status = typeof body.status === 'string' && /^[a-z_]{1,30}$/.test(body.status) ? body.status : null;
+    const rows = await sbGetSafe(`engineering_tasks?select=id,problem,status,priority,affected_engine,acceptance_criteria,created_at,updated_at${status ? `&status=eq.${status}` : ''}&order=created_at.desc&limit=200`);
+    return res.status(200).json({ ok: true, tasks: rows || [] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+}
+
+// ── MMMOS Engineering Integration R2: runner eligibility + business file paths ──
+// The automatic runner may only work on tasks the CEO explicitly made
+// runner-eligible when authorizing them (scope.runner, set ONLY in
+// engineeringTaskCeoAuthorizeAgent). Every task authorized before R2 lacks it
+// and stays manual-only. The runner may only change files inside the task's
+// business folders, plus any shared file the CEO granted for that task.
+// Release, deploy and schema files can never be granted.
+const ENG_RUNNER_GATE = 'r2';
+const ENG_RUNNER_MAX_CLAIM_MS = 8 * 60 * 60 * 1000; // a claim can be renewed for up to 8 hours
+const ENG_BUSINESS_PATHS = {
+  mmmos: ['tests/platform/', 'tests/preservation/', 'docs/platform/', 'sandbox/', 'tools/engineering-runner/'],
+  nextwave: ['lib/nextwaveV2', 'nextwave_v2_storyboard_eval/', 'test_nextwave'],
+  srv_studio: ['lib/srvStudioV2', 'docs/srv-studio-v2/', 'public/srv-studio-v2/', 'tests/srv/test_srv_studio_v2'],
+  srv_farsi: ['lib/srvFarsi', 'tests/srv/test_srv_farsi', 'test_srv_farsi'],
+  srv_english: [], ai_creation_studio: [], smm: [], finance: [],
+};
+const ENG_SHARED_PATHS = ['api/ops.js', 'public/index.html', 'public/shell.js'];
+const ENG_DENIED_PATHS = ['.auto-deploy.sh', '.auto-deploy.plist', '.last-deploy-md5', '.pause-deploy', 'vercel.json',
+  'package.json', 'package-lock.json', '.gitignore', 'migrations/', '.github/', 'node_modules/', '.vercel/', '.env'];
+
+function _engRunnerScopeFor(task, sharedRequested) {
+  const business = _engTaskBusiness(task);
+  if (business === 'unassigned') return { error: 'runner_requires_business' };
+  const shared = (Array.isArray(sharedRequested) ? sharedRequested : []).filter(p => ENG_SHARED_PATHS.includes(p));
+  const prefixes = ENG_BUSINESS_PATHS[business] || [];
+  if (!prefixes.length && !shared.length) return { error: 'runner_business_has_no_paths' };
+  return { scope: { eligible: true, gate: ENG_RUNNER_GATE, business, path_prefixes: prefixes, shared_paths: [...new Set(shared)], authorized_at: new Date().toISOString() } };
+}
+function _engRunnerEligible(t) {
+  const r = t && t.agent_capability_scope && t.agent_capability_scope.runner;
+  return !!r && r.eligible === true && r.gate === ENG_RUNNER_GATE && _engBusinessSlug(r.business) === r.business && Array.isArray(r.path_prefixes);
+}
+// Checks changed repository paths against the task's runner scope. The
+// business prefixes come from the server map at check time (authoritative);
+// shared grants are re-validated against ENG_SHARED_PATHS.
+function _engRunnerPathCheck(paths, runner) {
+  const prefixes = ENG_BUSINESS_PATHS[runner && runner.business] || [];
+  const shared = ((runner && runner.shared_paths) || []).filter(p => ENG_SHARED_PATHS.includes(p));
+  const denied = [], outside = [];
+  for (const raw of paths || []) {
+    const p = String(raw || '');
+    if (!p || p.startsWith('/') || p.includes('..') || p.includes('\\') || p.includes('\0')) { denied.push(p); continue; }
+    if (ENG_DENIED_PATHS.some(d => p === d || p.startsWith(d.endsWith('/') ? d : d + '/') || (!d.endsWith('/') && p.startsWith(d)))) { denied.push(p); continue; }
+    if (shared.includes(p) || prefixes.some(pre => p.startsWith(pre))) continue;
+    outside.push(p);
+  }
+  return { ok: !denied.length && !outside.length, denied, outside };
+}
+// Read-only GitHub check of a runner branch: files changed against main, head
+// commit, and (when the token allows) the pull request itself. Uses the same
+// server-side read-only GITHUB_TOKEN / GITHUB_REPO as commit verification.
+async function _engGithubBranchFacts(branch, prNumber) {
+  const repo = process.env.GITHUB_REPO, token = process.env.GITHUB_TOKEN;
+  if (!repo || !token) return { ok: false, error: 'github_check_not_configured' };
+  const H = { Authorization: `Bearer ${token}`, 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json' };
+  try {
+    const c = await fetch(`https://api.github.com/repos/${repo}/compare/main...${encodeURIComponent(branch)}`, { headers: H });
+    if (!c.ok) return { ok: false, error: `github_compare_failed_${c.status}` };
+    const cj = await c.json();
+    const files = (cj.files || []).map(f => f.filename);
+    const commits = cj.commits || [];
+    const head_sha = commits.length ? commits[commits.length - 1].sha : null;
+    let pr = { verified: false };
+    const pr_r = await fetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, { headers: H });
+    if (pr_r.ok) {
+      const pj = await pr_r.json();
+      pr = { verified: true, matches: pj.head?.ref === branch && pj.base?.ref === 'main', state: pj.state, merged: !!pj.merged };
+    } else {
+      pr = { verified: false, reason: `github_pulls_${pr_r.status}` };
+    }
+    return { ok: true, repo, files, head_sha, ahead_by: cj.ahead_by, truncated: (cj.files || []).length >= 300, pr };
+  } catch (e) {
+    return { ok: false, error: 'github_unreachable' };
   }
 }
 
@@ -1487,6 +1608,201 @@ async function engineeringAdviserPostFollowup(req, res) {
   }
 }
 
+// ── MMMOS Engineering Integration R2: ChatGPT connection (MCP + minimal OAuth) ──
+// ChatGPT connects to remote MCP servers that use OAuth (no static API keys).
+// This is the smallest such server MMMOS needs, on top of the R1 adviser
+// actions — no new tables:
+//   /.well-known/oauth-protected-resource, /.well-known/oauth-authorization-server
+//   /oauth/register   dynamic client registration (ChatGPT redirect hosts only)
+//   /oauth/authorize  the CEO signs in with the existing CEO PIN (same lockout)
+//                     and approves; MMMOS then creates a NEW adviser credential
+//   /oauth/token      PKCE (S256) code exchange; the access token IS that
+//                     adviser credential, revocable in Engineering Workers
+//   /api/mcp          JSON-RPC tools: submit / results / follow-up (R1 actions)
+// Client ids and codes are sealed with AES-256-GCM under a key derived from the
+// server-only CEO session secret, so nothing has to be stored. Codes expire in
+// 5 minutes and are bound to client, redirect URI and PKCE challenge.
+const ENG_OAUTH_REDIRECT_HOSTS = ['chatgpt.com', 'chat.openai.com'];
+const ENG_OAUTH_CODE_TTL_MS = 5 * 60 * 1000;
+const ENG_MCP_PROTOCOL = '2025-06-18';
+function _engOrigin(req) {
+  const h = (req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || 'mmm-static.vercel.app';
+  const host = String(h).split(',')[0].trim();
+  const local = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
+  return `${local ? 'http' : 'https'}://${host}`;
+}
+async function _engOAuthKey() {
+  const cfg = await _ceoLoadAuthConfig();
+  return createHmac('sha256', cfg.sessionSecret).update('mmmos-engineering-oauth-v1').digest();
+}
+async function _engSeal(obj) {
+  const key = await _engOAuthKey(); const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([c.update(JSON.stringify(obj), 'utf8'), c.final()]);
+  return Buffer.concat([iv, c.getAuthTag(), enc]).toString('base64url');
+}
+async function _engUnseal(tok) {
+  try {
+    const buf = Buffer.from(String(tok || ''), 'base64url');
+    if (buf.length < 29) return null;
+    const key = await _engOAuthKey();
+    const d = createDecipheriv('aes-256-gcm', key, buf.subarray(0, 12));
+    d.setAuthTag(buf.subarray(12, 28));
+    return JSON.parse(Buffer.concat([d.update(buf.subarray(28)), d.final()]).toString('utf8'));
+  } catch { return null; }
+}
+function _engRedirectAllowed(uri) {
+  try {
+    const u = new URL(uri);
+    if (u.protocol === 'https:' && ENG_OAUTH_REDIRECT_HOSTS.includes(u.hostname)) return true;
+    return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1'); // local testing only
+  } catch { return false; }
+}
+const _engHtml = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+function _engSendJson(res, status, obj, extraHeaders) {
+  for (const [k, v] of Object.entries(extraHeaders || {})) res.setHeader(k, v);
+  return res.status(status).json(obj);
+}
+
+async function engineeringOAuthProtectedResource(req, res) {
+  const o = _engOrigin(req);
+  return _engSendJson(res, 200, { resource: `${o}/api/mcp`, authorization_servers: [o], bearer_methods_supported: ['header'], scopes_supported: ['engineering'], resource_name: 'MMMOS Engineering' });
+}
+async function engineeringOAuthMetadata(req, res) {
+  const o = _engOrigin(req);
+  return _engSendJson(res, 200, {
+    issuer: o, authorization_endpoint: `${o}/oauth/authorize`, token_endpoint: `${o}/oauth/token`, registration_endpoint: `${o}/oauth/register`,
+    response_types_supported: ['code'], grant_types_supported: ['authorization_code'], code_challenge_methods_supported: ['S256'],
+    token_endpoint_auth_methods_supported: ['none'], scopes_supported: ['engineering'],
+  });
+}
+async function engineeringOAuthRegister(req, res) {
+  if (req.method !== 'POST') return _engSendJson(res, 405, { error: 'invalid_request', error_description: 'POST only' });
+  const body = req.body || {};
+  const uris = Array.isArray(body.redirect_uris) ? body.redirect_uris.filter(u => typeof u === 'string').slice(0, 5) : [];
+  if (!uris.length || !uris.every(_engRedirectAllowed)) return _engSendJson(res, 400, { error: 'invalid_redirect_uri', error_description: 'Only ChatGPT redirect URIs are accepted.' });
+  const name = typeof body.client_name === 'string' ? body.client_name.replace(/[<>]/g, '').slice(0, 80) : 'ChatGPT';
+  const iat = Math.floor(Date.now() / 1000);
+  const client_id = 'mmmos_' + await _engSeal({ t: 'client', redirect_uris: uris, name, iat });
+  return _engSendJson(res, 201, { client_id, client_id_issued_at: iat, client_name: name, redirect_uris: uris, token_endpoint_auth_method: 'none', grant_types: ['authorization_code'], response_types: ['code'] });
+}
+async function _engOAuthClient(client_id) {
+  if (typeof client_id !== 'string' || !client_id.startsWith('mmmos_')) return null;
+  const c = await _engUnseal(client_id.slice(6));
+  return c && c.t === 'client' && Array.isArray(c.redirect_uris) ? c : null;
+}
+function _engAuthorizePage(p, message) {
+  const hidden = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'resource']
+    .map(k => `<input type="hidden" name="${k}" value="${_engHtml(p[k] || '')}">`).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect ChatGPT to MMMOS Engineering</title>
+<style>body{font-family:-apple-system,Segoe UI,sans-serif;background:#0f1419;color:#e4e8ed;margin:0;padding:24px}main{max-width:460px;margin:40px auto;background:#1a2129;border:1px solid #2c3540;border-radius:12px;padding:24px}
+h1{font-size:20px;margin:0 0 12px}p,li{font-size:14px;line-height:1.5;color:#b8c2cc}ul{padding-left:18px}label{display:block;font-size:13px;margin:16px 0 6px}
+input[type=password]{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #3a4552;background:#0f1419;color:#fff;font-size:16px}
+.row{display:flex;gap:10px;margin-top:18px}button{flex:1;padding:11px;border-radius:8px;border:1px solid #3a4552;font-size:14px;font-weight:600;cursor:pointer}
+.ok{background:#c9a84c;color:#1a1300;border-color:#c9a84c}.no{background:transparent;color:#e4e8ed}.msg{background:#3a1d1d;border:1px solid #6b2b2b;padding:10px;border-radius:8px;font-size:13px;color:#f0b4b4}</style></head>
+<body><main><h1>Connect ChatGPT to MMMOS Engineering</h1>
+<p><b>${_engHtml(p.client_name || 'ChatGPT')}</b> is asking to act as your <b>CEO Adviser</b>. If you approve, it will be able to:</p>
+<ul><li>submit engineering tasks (each waits for your authorization in Engineering Review),</li><li>read results of tasks it submitted,</li><li>post follow-up instructions.</li></ul>
+<p>It will <b>not</b> be able to authorize, approve, release, deploy or run anything. You can revoke it any time in Engineering Workers.</p>
+${message ? `<p class="msg">${_engHtml(message)}</p>` : ''}
+<form method="post" action="/oauth/authorize" autocomplete="off">${hidden}
+<label for="pin">CEO PIN</label><input id="pin" name="pin" type="password" inputmode="numeric" required>
+<div class="row"><button class="no" type="submit" name="decision" value="deny" formnovalidate>Deny</button><button class="ok" type="submit" name="decision" value="approve">Approve</button></div>
+</form></main></body></html>`;
+}
+async function engineeringOAuthAuthorize(req, res) {
+  const p = Object.assign({}, req.method === 'POST' ? (req.body || {}) : (req.query || {}));
+  const client = await _engOAuthClient(p.client_id);
+  const redirectOk = client && typeof p.redirect_uri === 'string' && client.redirect_uris.includes(p.redirect_uri);
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com https://chat.openai.com; frame-ancestors 'none'");
+  if (!redirectOk) { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.status(400).send('<!doctype html><title>Invalid request</title><p>This connection request is not valid. Start again from ChatGPT.</p>'); }
+  const back = (params) => { const u = new URL(p.redirect_uri); for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, v); res.setHeader('Location', u.toString()); return res.status(302).end(); };
+  if ((p.response_type && p.response_type !== 'code') || p.code_challenge_method !== 'S256' || !/^[A-Za-z0-9_-]{43,128}$/.test(String(p.code_challenge || ''))) {
+    return back({ error: 'invalid_request', error_description: 'PKCE S256 is required', state: p.state });
+  }
+  const page = (msg) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.status(200).send(_engAuthorizePage({ ...p, client_name: client.name }, msg)); };
+  if (req.method !== 'POST') return page(null);
+  if (p.decision !== 'approve') return back({ error: 'access_denied', state: p.state });
+  // Verify the PIN through the existing CEO login (same hash, same lockout).
+  let login = null;
+  await ceoLogin({ method: 'POST', body: { pin: String(p.pin || '') }, query: {}, headers: {} },
+    { status(c) { this.c = c; return this; }, json(o) { login = { status: this.c, ...o }; return this; }, setHeader() {}, end() {} });
+  if (!login || !login.ok) return page(login && login.error === 'temporarily_locked' ? 'Too many attempts. Try again later.' : 'That PIN was not accepted.');
+  const rawCredential = randomBytes(32).toString('hex');
+  const adviser = await sbInsert('engineering_advisers', { label: `ChatGPT connector (${new Date().toISOString().slice(0, 10)})`, credential_hash: _agentHashHex(rawCredential), active: true, created_by: 'ceo' });
+  if (!adviser) return page('Could not create the connection. Try again.');
+  const code = await _engSeal({ t: 'code', cred: rawCredential, adviser_id: adviser.id, client_id: p.client_id, redirect_uri: p.redirect_uri, cc: p.code_challenge, exp: Date.now() + ENG_OAUTH_CODE_TTL_MS });
+  return back({ code, state: p.state });
+}
+async function engineeringOAuthToken(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'POST') return _engSendJson(res, 405, { error: 'invalid_request' });
+  const b = req.body || {};
+  if (b.grant_type !== 'authorization_code') return _engSendJson(res, 400, { error: 'unsupported_grant_type' });
+  const c = await _engUnseal(b.code);
+  if (!c || c.t !== 'code' || Date.now() > c.exp) return _engSendJson(res, 400, { error: 'invalid_grant', error_description: 'code invalid or expired' });
+  if (b.client_id !== c.client_id || b.redirect_uri !== c.redirect_uri) return _engSendJson(res, 400, { error: 'invalid_grant', error_description: 'client or redirect mismatch' });
+  const verifier = String(b.code_verifier || '');
+  if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier) || createHash('sha256').update(verifier).digest('base64url') !== c.cc) return _engSendJson(res, 400, { error: 'invalid_grant', error_description: 'PKCE verification failed' });
+  const adviser = await _engineeringAdviserAuthenticate(c.cred);
+  if (!adviser || adviser.id !== c.adviser_id) return _engSendJson(res, 400, { error: 'invalid_grant', error_description: 'connection was revoked' });
+  return _engSendJson(res, 200, { access_token: c.cred, token_type: 'Bearer', scope: 'engineering' });
+}
+
+const ENG_MCP_TOOLS = [
+  { name: 'submit_engineering_task', title: 'Submit engineering task',
+    description: 'Submit an engineering task to MMMOS. It lands in CEO Engineering Review and runs only after the CEO authorizes it. Name exactly one business and write the authorization boundary (what may and may not be changed). Plain text only: no < or > characters.',
+    inputSchema: { type: 'object', additionalProperties: false, required: ['problem', 'expected_result', 'authorization_boundary', 'business'], properties: {
+      problem: { type: 'string', maxLength: 5000 }, expected_result: { type: 'string', maxLength: 5000 }, authorization_boundary: { type: 'string', maxLength: 5000 },
+      business: { type: 'string', enum: ENG_BUSINESSES }, priority: { type: 'string', enum: ['P1', 'P2', 'P3', 'high', 'medium', 'low'] },
+      acceptance_criteria: { type: 'string', maxLength: 5000 }, parent_task_id: { type: 'string' }, submission_idempotency_key: { type: 'string', maxLength: 200 } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, action: engineeringAdviserSubmitTask },
+  { name: 'get_engineering_results', title: 'Get engineering results',
+    description: 'Read results for a task you submitted: status, CEO decision, pull request, evidence, follow-ups and private files (1-hour download links). Without task_id, lists your recent tasks. Pass next_cursor back as cursor for more.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: { task_id: { type: 'string' }, cursor: { type: ['integer', 'string'] } } },
+    annotations: { readOnlyHint: true, openWorldHint: false }, action: engineeringAdviserGetResults },
+  { name: 'post_engineering_followup', title: 'Post engineering follow-up',
+    description: 'Post a correction, question, note or acceptance on a task you submitted. The engineering runner reads it on its next run. Plain text only.',
+    inputSchema: { type: 'object', additionalProperties: false, required: ['task_id', 'message'], properties: {
+      task_id: { type: 'string' }, message: { type: 'string', maxLength: 5000 }, kind: { type: 'string', enum: ['correction', 'question', 'note', 'acceptance'] } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, action: engineeringAdviserPostFollowup },
+];
+async function engineeringMcp(req, res) {
+  const o = _engOrigin(req);
+  const challenge = { 'WWW-Authenticate': `Bearer resource_metadata="${o}/.well-known/oauth-protected-resource"` };
+  if (req.method !== 'POST') return _engSendJson(res, 405, { error: 'POST only (MCP streamable HTTP, JSON responses)' }, { Allow: 'POST' });
+  const cred = _engAdviserCredentialFrom({ headers: req.headers, body: {} });
+  const adviser = await _engineeringAdviserAuthenticate(cred);
+  if (!adviser) return _engSendJson(res, 401, { error: 'unauthorized' }, challenge);
+  const msg = req.body;
+  if (!msg || Array.isArray(msg) || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
+    return _engSendJson(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request (single JSON-RPC message expected)' } });
+  }
+  const reply = (result) => _engSendJson(res, 200, { jsonrpc: '2.0', id: msg.id ?? null, result });
+  const fail = (code, message) => _engSendJson(res, 200, { jsonrpc: '2.0', id: msg.id ?? null, error: { code, message } });
+  if (msg.id === undefined) return res.status(202).end(); // notification (e.g. notifications/initialized)
+  if (msg.method === 'initialize') {
+    return reply({ protocolVersion: (msg.params && msg.params.protocolVersion) || ENG_MCP_PROTOCOL, capabilities: { tools: { listChanged: false } },
+      serverInfo: { name: 'mmmos-engineering', title: 'MMMOS Engineering', version: 'r2' },
+      instructions: 'You are the MMMOS CEO Adviser. Submit engineering tasks, read results of tasks you submitted, and post follow-ups. You cannot authorize, approve, release or run anything; the CEO decides in MMMOS.' });
+  }
+  if (msg.method === 'ping') return reply({});
+  if (msg.method === 'tools/list') return reply({ tools: ENG_MCP_TOOLS.map(({ action, ...t }) => t) });
+  if (msg.method === 'tools/call') {
+    const tool = ENG_MCP_TOOLS.find(t => t.name === msg.params?.name);
+    if (!tool) return fail(-32602, 'Unknown tool');
+    const args = msg.params?.arguments && typeof msg.params.arguments === 'object' ? msg.params.arguments : {};
+    let out = null, status = 200;
+    await tool.action({ method: 'POST', body: { ...args }, query: {}, headers: { authorization: `Bearer ${cred}` } },
+      { status(c) { status = c; return this; }, json(o2) { out = o2; return this; }, setHeader() {}, end() { return this; } });
+    return reply({ content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out || {}, isError: !(out && out.ok) || status >= 400 });
+  }
+  return fail(-32601, 'Method not found');
+}
+
 // ── Engineering Agent Gateway (v16.36.0 — Phase 4D, CEO-approved 2026-08-16) ──
 // The ONLY trusted entry point through which a future bounded Engineering Agent
 // may act. Reuses Phase 4B authorization/claim/lease verification VERBATIM — no
@@ -1522,6 +1838,10 @@ const AGENT_GATEWAY_ALLOWED_OPS = new Set([
   'create_artifact_upload', // signed upload URL into this task's own private folder
   'submit_artifact',        // registers an uploaded file as evidence (server checks it exists)
   'read_adviser_followups', // follow-up instructions the CEO Adviser posted on this task
+  // MMMOS Engineering Integration R2 — runner support. Same verification chain.
+  'read_runner_scope',      // the business folders / shared files this task may change
+  'renew_lease',            // extend this claim's lease (capped at 8 hours from the claim)
+  'submit_pull_request',    // record the task's PR; server checks the branch's files against the allowlist
 ]);
 
 // v16.37.0 — Phase 4E: manifest is now DERIVED PER-TASK from that task's own
@@ -1841,6 +2161,79 @@ async function engineeringAgentGateway(req, res) {
     } else if (op === 'read_adviser_followups') {
       const rowsF = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(String(task_id))}&evidence_type=eq.adviser_followup&select=id,title,content,metadata,created_at&order=created_at.asc&limit=100`);
       result = { followups: (rowsF || []).map(f => ({ id: f.id, kind: f.metadata?.kind || 'note', title: f.title, message: f.content, created_at: f.created_at })) };
+    } else if (op === 'read_runner_scope') {
+      // R2 — what this task may change. Business prefixes come from the server map.
+      const r = task.agent_capability_scope?.runner || null;
+      result = {
+        runner_eligible: _engRunnerEligible(task),
+        business: r ? r.business : _engTaskBusiness(task),
+        path_prefixes: r ? (ENG_BUSINESS_PATHS[r.business] || []) : [],
+        shared_paths: r ? (r.shared_paths || []).filter(p => ENG_SHARED_PATHS.includes(p)) : [],
+        denied_paths: ENG_DENIED_PATHS,
+        lease_expires_at: task.lease_expires_at,
+        rules: 'Work only in a separate git worktree (never ~/mmm-static). Push a branch and open a PR. Never merge, deploy, or run .auto-deploy.sh / vercel.',
+      };
+    } else if (op === 'renew_lease') {
+      // R2 — long tasks outlive the 30-minute lease. Renewal needs the same
+      // verified claim as every op, works only while the lease is still live,
+      // and stops 8 hours after the original claim.
+      const claimedAt = new Date(task.agent_claimed_at).getTime();
+      if (Date.now() - claimedAt > ENG_RUNNER_MAX_CLAIM_MS) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'claim_older_than_8h' });
+        return res.status(409).json({ ok: false, error: 'claim_older_than_8h' });
+      }
+      const nowIso = new Date().toISOString();
+      const newExpiry = new Date(Math.min(Date.now() + AGENT_LEASE_MS, claimedAt + ENG_RUNNER_MAX_CLAIM_MS)).toISOString();
+      const upd = await sbPatch('engineering_tasks',
+        `id=eq.${encodeURIComponent(task_id)}&agent_run_id=eq.${encodeURIComponent(task.agent_run_id)}&lease_expires_at=gt.${encodeURIComponent(nowIso)}`,
+        { lease_expires_at: newExpiry });
+      if (!upd) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'lease_not_renewable' });
+        return res.status(409).json({ ok: false, error: 'lease_not_renewable' });
+      }
+      await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { lease_expires_at: newExpiry });
+      result = { lease_expires_at: newExpiry };
+    } else if (op === 'submit_pull_request') {
+      // R2 — the runner's deliverable is a pull request, never a merge. The
+      // server reads the branch from GitHub itself (read-only token) and checks
+      // every changed file against the task's business allowlist. A PR that
+      // touches anything outside it is recorded as a violation and refused.
+      const repo = process.env.GITHUB_REPO || '';
+      const prUrl = typeof body.pr_url === 'string' ? body.pr_url.trim() : '';
+      const branch = typeof body.branch === 'string' ? body.branch.trim() : '';
+      const m = repo ? new RegExp(`^https://github\\.com/${repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pull/(\\d{1,7})$`).exec(prUrl) : null;
+      if (!m) return res.status(400).json({ ok: false, error: 'pr_url must be a pull request URL in the canonical repository' });
+      if (!/^[A-Za-z0-9._\/-]{1,200}$/.test(branch) || branch === 'main' || branch.includes('..')) return res.status(400).json({ ok: false, error: 'branch must be the PR head branch (not main)' });
+      const facts = await _engGithubBranchFacts(branch, m[1]);
+      if (!facts.ok) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: facts.error });
+        return res.status(502).json({ ok: false, error: facts.error });
+      }
+      if (facts.pr.verified && (!facts.pr.matches || facts.pr.merged)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'pr_does_not_match_branch' });
+        return res.status(409).json({ ok: false, error: 'pr_does_not_match_branch' });
+      }
+      const runner = task.agent_capability_scope?.runner;
+      const check = _engRunnerEligible(task) ? _engRunnerPathCheck(facts.files, runner) : null;
+      const within = check ? check.ok && !facts.truncated : null;
+      await sbInsert('brain_evidence', {
+        task_id: String(task_id), run_id: agent_run_id, evidence_type: 'pull_request',
+        title: `Pull request #${m[1]}${within === false ? ' — OUTSIDE ALLOWED FILES' : ''}`,
+        content: `Branch ${branch} · ${facts.files.length} file(s) changed · head ${facts.head_sha ? facts.head_sha.slice(0, 12) : 'unknown'}`
+          + (check && !check.ok ? ` · not allowed: ${[...check.denied, ...check.outside].slice(0, 20).join(', ')}` : ''),
+        url: prUrl,
+        metadata: { pr_number: Number(m[1]), branch, head_sha: facts.head_sha, files: facts.files.slice(0, 100), files_truncated: facts.truncated,
+          within_allowlist: within, denied: check ? check.denied : [], outside: check ? check.outside : [],
+          pr_verified: facts.pr.verified, pr_state: facts.pr.state || null, submitted_at: new Date().toISOString(), non_authoritative: true },
+        engine: task.affected_engine,
+      });
+      if (within === false) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'paths_outside_business_allowlist', denied: check.denied, outside: check.outside });
+        return res.status(409).json({ ok: false, error: 'paths_outside_business_allowlist', denied: check.denied, outside: check.outside, truncated: facts.truncated });
+      }
+      await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { pr_number: Number(m[1]), files: facts.files.length });
+      result = { accepted: true, pr_number: Number(m[1]), head_sha: facts.head_sha, files: facts.files, within_allowlist: within, pr_verified: facts.pr.verified,
+        note: 'Pull request recorded as evidence. It is never merged or deployed by MMMOS; the CEO decides.' };
     } else if (op === 'submit_commit_sha') {
       // v16.56.0 — CEO Decision #17 Automatic Git Commit Capture Fix. Root
       // cause: no automatic mechanism anywhere populated
@@ -21118,6 +21511,14 @@ export default async function handler(req, res) {
     if (action === 'engineering_adviser_submit_task')                 return await engineeringAdviserSubmitTask(req, res);  // adviser credential
     if (action === 'engineering_adviser_get_results')                 return await engineeringAdviserGetResults(req, res);  // adviser credential
     if (action === 'engineering_adviser_post_followup')               return await engineeringAdviserPostFollowup(req, res);// adviser credential
+    // MMMOS Engineering Integration R2.
+    if (action === 'engineering_worker_read_tasks')                   return await engineeringWorkerReadTasks(req, res);    // worker credential (B10)
+    if (action === 'engineering_oauth_protected_resource')            return await engineeringOAuthProtectedResource(req, res); // public metadata
+    if (action === 'engineering_oauth_metadata')                      return await engineeringOAuthMetadata(req, res);          // public metadata
+    if (action === 'engineering_oauth_register')                      return await engineeringOAuthRegister(req, res);          // ChatGPT redirect hosts only
+    if (action === 'engineering_oauth_authorize')                     return await engineeringOAuthAuthorize(req, res);         // CEO PIN + approval
+    if (action === 'engineering_oauth_token')                         return await engineeringOAuthToken(req, res);             // PKCE code exchange
+    if (action === 'engineering_mcp')                                 return await engineeringMcp(req, res);                    // adviser credential (Bearer)
     // v13.91.0 — MMMOS Stabilization Roadmap
     if (action === 'roadmap_load')               return await roadmapLoad(req, res);
     if (action === 'roadmap_approve_phase')      return await roadmapApprovePhase(req, res);
@@ -22023,16 +22424,28 @@ ${decisionText}
 }
 
 // ── Engineering Task: List ──────────────────────────────────────────────────
+// R2 (B10): engineering task reads are CEO-only. Before R2 this action answered
+// anyone, with every column (packets, boundaries, claim state and the agent
+// token hash). Token hashes are never returned to anyone now.
+function _engPublicTaskRow(t) {
+  if (!t || typeof t !== 'object') return t;
+  const { agent_authorization_token_hash, ...rest } = t;
+  return rest;
+}
 async function engineeringTaskList(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   try {
-    const status = (req.query && req.query.status) || null;
+    const src = (req.method === 'POST' ? req.body : req.query) || {};
+    const status = src.status || null;
+    const limit = Math.min(Math.max(parseInt(src.limit, 10) || 0, 0), 500);
     let url = `${SUPABASE_URL}/rest/v1/engineering_tasks?select=*&order=created_at.desc`;
     if (status) url += `&status=eq.${encodeURIComponent(status)}`;
+    if (limit) url += `&limit=${limit}`;
     const r = await fetch(url, {
       headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }
     });
     if (!r.ok) throw new Error(`Supabase error: ${r.status}`);
-    const tasks = await r.json();
+    const tasks = (await r.json()).map(_engPublicTaskRow);
     return res.status(200).json({ ok: true, tasks, total: tasks.length });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
@@ -22260,6 +22673,7 @@ async function engineeringTaskCeoReject(req, res) {
 // approval authority in exactly one place, per the standing separation-of-
 // authority rule carried through every phase of this program.
 async function engineeringTaskReviewPacket(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' }); // R2 (B10)
   try {
     const id = (req.method === 'POST' ? req.body : req.query)?.id;
     if (!id) return res.status(400).json({ ok: false, error: 'id required' });
@@ -22269,7 +22683,7 @@ async function engineeringTaskReviewPacket(req, res) {
       sbGetSafe(`brain_test_runs?task_id=eq.${encodeURIComponent(id)}&order=created_at.desc&limit=20`),
       sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(id)}&order=created_at.desc&limit=20`),
     ]);
-    const task = taskRows[0];
+    const task = _engPublicTaskRow(taskRows[0]);
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
     return res.status(200).json({
       ok: true,

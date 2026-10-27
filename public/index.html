@@ -29270,10 +29270,11 @@ async function _ebV2Load(action,params=''){
       // have a completed production release, so the CEO can see and act on
       // Production Release authorization — a SEPARATE gate from task
       // approval (v16.40.0 MMMOS Production Deployment Control).
+      // R2 (B10): engineering task reads are CEO-session-gated server actions now.
       const [lr,dr,orr]=await Promise.all([
-        fetch('/api/ops?action=engineering_task_list&status=ready_for_ceo'),
-        fetch('/api/ops?action=engineering_task_list&status=done'),
-        fetch('/api/ops?action=engineering_task_list&status=open'),
+        _ceoAuthedFetch('/api/ops?action=engineering_task_list',{status:'ready_for_ceo'}),
+        _ceoAuthedFetch('/api/ops?action=engineering_task_list',{status:'done'}),
+        _ceoAuthedFetch('/api/ops?action=engineering_task_list',{status:'open'}),
       ]);
       const [lj,dj,orj]=await Promise.all([lr.json(),dr.json(),orr.json()]);
       const awaitingTasks=lj.tasks||[];
@@ -29303,8 +29304,8 @@ async function _ebV2Load(action,params=''){
       // decision, boundary, or claim state.
       const needsReauth=(orj.tasks||[]).filter(t=>t.status==='open' && t.agent_authorized_at && !t.agent_claimed_at);
       const [awaitingPackets,donePackets]=await Promise.all([
-        Promise.all(awaitingTasks.map(t=>fetch('/api/ops?action=engineering_task_review_packet&id='+encodeURIComponent(t.id)).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
-        Promise.all(doneTasks.map(t=>fetch('/api/ops?action=engineering_task_review_packet&id='+encodeURIComponent(t.id)).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
+        Promise.all(awaitingTasks.map(t=>_ceoAuthedFetch('/api/ops?action=engineering_task_review_packet',{id:t.id}).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
+        Promise.all(doneTasks.map(t=>_ceoAuthedFetch('/api/ops?action=engineering_task_review_packet',{id:t.id}).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
       ]);
       const pendingRelease=donePackets.filter(p=>p.ok && !(p.production_deployments||[]).some(d=>d.status==='deployed'));
       data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth,needsReauth,retroactiveReleases};
@@ -29317,12 +29318,14 @@ async function _ebV2Load(action,params=''){
       // pairing connection requests in parallel. Neither call ever returns
       // any credential/hash material — see engineeringWorkerList and
       // engineeringWorkerPairingListPending in api/ops.js.
-      const [wr,pr]=await Promise.all([
+      // MMMOS Engineering Integration R2: also loads CEO Adviser (ChatGPT) identities.
+      const [wr,pr,ar]=await Promise.all([
         _ceoAuthedFetch('/api/ops?action=engineering_worker_list',{}),
         _ceoAuthedFetch('/api/ops?action=engineering_worker_pairing_list_pending',{}),
+        _ceoAuthedFetch('/api/ops?action=engineering_adviser_list',{}),
       ]);
-      const [wj,pj]=await Promise.all([wr.json(),pr.json()]);
-      data={ok:wj.ok,error:wj.error,workers:wj.workers||[],pending:(pj.ok?(pj.requests||[]):[])};
+      const [wj,pj,aj]=await Promise.all([wr.json(),pr.json(),ar.json().catch(()=>({ok:false}))]);
+      data={ok:wj.ok,error:wj.error,workers:wj.workers||[],pending:(pj.ok?(pj.requests||[]):[]),advisers:(aj&&aj.ok?(aj.advisers||[]):[]),advisersOk:!!(aj&&aj.ok)};
     }
     _ebV2Cache[key]=data;
   } catch(e){ _ebV2Cache[key]={ok:false,error:e.message}; }
@@ -30576,6 +30579,7 @@ function renderEngineeringBrain(){
           <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · ${escHTML(_engAuthSource(t))} · not yet authorized for agent execution</div>
           ${_engAuthDetails(t)}
           <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(56,189,248,0.5);background:rgba(56,189,248,0.15);color:#38bdf8;font-size:11px;font-weight:700;cursor:pointer">🔑 Authorize Agent</button>
+          ${_engRunnerButton(t)}
         </div>`).join('')}
       </div>`:''}
       ${needsReauth.length?`<div style="margin-bottom:18px">
@@ -30585,6 +30589,7 @@ function renderEngineeringBrain(){
           <div style="font-size:10px;color:var(--dim);margin-bottom:8px">${escHTML(t.affected_engine||'—')} · ${escHTML(_engAuthSource(t))} · previously authorized, never claimed · minting a new token invalidates the old one</div>
           ${_engAuthDetails(t)}
           <button onclick="_engReviewAuthorizeAgent('${t.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(245,158,11,0.5);background:rgba(245,158,11,0.15);color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer">🔁 Re-authorize Agent</button>
+          ${_engRunnerButton(t)}
         </div>`).join('')}
       </div>`:''}
       ${retroactiveReleases.length?`<div style="margin-bottom:18px">
@@ -30819,6 +30824,7 @@ function renderEngineeringBrain(){
         </div>
         ${w.active?`<button onclick="_engWorkerRevoke('${w.id}','${(w.label||'').replace(/'/g,"\\'")}')" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">🚫 Revoke</button>`:''}
       </div>`).join('')}
+      ${_engAdviserSection(j)}
       `;
     }
   }
@@ -30834,7 +30840,8 @@ async function _ebLoad(){
     const H={apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY};
     const [brainRows,taskRows]=await Promise.all([
       fetch(SUPABASE_URL+'/rest/v1/engineering_brain?select=*&order=section,sort_order',{headers:H}).then(r=>r.json()),
-      fetch(SUPABASE_URL+'/rest/v1/engineering_tasks?select=*&order=created_at.desc&limit=50',{headers:H}).then(r=>r.json()),
+      // R2 (B10): tasks come from the CEO-gated server action, not the public key.
+      _ceoAuthedFetch('/api/ops?action=engineering_task_list',{limit:50}).then(r=>r.json()).then(j=>(j&&Array.isArray(j.tasks))?j.tasks:[]),
     ]);
     const sections={};
     if(Array.isArray(brainRows)){
@@ -30884,6 +30891,16 @@ function _engAuthSource(t){
   if(p.derived_from==='ceo_decision_paste') return 'From a pasted CEO decision';
   if(t&&t.origin_decision_id) return 'Decision-routed';
   return 'Task Generator';
+}
+// R2: second, separate button — the CEO's explicit choice to let the automatic
+// runner take this task. Shown only when the task names a business the runner
+// has folders for; the server re-checks everything.
+const _ENG_RUNNER_BUSINESSES=['mmmos','nextwave','srv_studio','srv_farsi'];
+function _engRunnerButton(t){
+  const p=(t&&t.packet)||{};
+  if(!_ENG_RUNNER_BUSINESSES.includes(p.business)) return '';
+  if(!(p.origin_decision&&p.origin_decision.authorization_boundary)) return '';
+  return `<button data-eng-runner-btn onclick="_engReviewAuthorizeAgent('${escHTML(t.id)}','runner')" style="width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.12);color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer">🤖 Authorize for Runner — ${escHTML(p.business)} folders only, ends in a pull request</button>`;
 }
 function _engAuthDetails(t){
   const p=(t&&t.packet)||{};
@@ -30952,10 +30969,15 @@ async function _engWorkerRevoke(id,label){
     _ebV2Load('b2_workers');
   }catch(e){alert('Error: '+e.message);}
 }
-async function _engReviewAuthorizeAgent(id){
-  if(!confirm('Authorize an Engineering Agent to claim this task? A one-time token will be shown — copy it immediately, it will not be shown again.'))return;
+async function _engReviewAuthorizeAgent(id,mode){
+  // R2: mode 'runner' is the explicit CEO choice that lets the automatic
+  // Claude Code runner pick this task up. Without it the task stays manual-only.
+  const runner=mode==='runner';
+  if(runner){
+    if(!confirm('Authorize the automatic Claude Code runner for this task?\n\n• It may change ONLY this business\'s own folders (no shared files, no release or schema files).\n• It works in a separate copy of the code and ends with a pull request.\n• It never merges or deploys — you still approve every release.'))return;
+  }else if(!confirm('Authorize an Engineering Agent to claim this task? A one-time token will be shown — copy it immediately, it will not be shown again.'))return;
   try{
-    const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_ceo_authorize_agent',{id,capability_scope:{read_paths:[],write_paths:[],validation_ops:[]}});
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_ceo_authorize_agent',Object.assign({id,capability_scope:{read_paths:[],write_paths:[],validation_ops:[]}},runner?{runner_eligible:true}:{}));
     const j=await r.json();
     if(!j.ok){
       // v16.48.0 — CEO Session Auth Handoff Fix. Root cause: this action already used
@@ -30980,11 +31002,61 @@ async function _engReviewAuthorizeAgent(id){
         try{ logout(); }catch(e){}
         return;
       }
-      alert('Authorize agent failed: '+j.error);return;
+      const why={runner_requires_business:'the task has no business assigned',runner_business_has_no_paths:'this business has no folders the runner may change yet'}[j.error];
+      alert('Authorize agent failed: '+(why||j.error));return;
     }
-    prompt('Agent token (copy now — shown once only):',j.agent_token);
+    if(runner) alert('Authorized for the runner. It will pick this task up on its next run and report back with a pull request.');
+    else prompt('Agent token (copy now — shown once only):',j.agent_token);
     _ebV2Cache['b2_engreview']=null;
     _ebV2Load('b2_engreview');
+  }catch(e){alert('Error: '+e.message);}
+}
+// ── MMMOS Engineering Integration R2: CEO Adviser (ChatGPT) credentials ─────────
+// Shown in the Engineering Workers panel. Create shows the credential exactly
+// once; only its hash is stored. Revoke takes effect on the adviser's next call.
+// All values are escaped (escHTML) — labels can come from the CEO's own input.
+function _engAdviserSection(j){
+  const advisers=(j&&j.advisers)||[];
+  const card='border-radius:12px;padding:14px 16px;margin-bottom:10px';
+  return `<div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;margin:22px 0 8px 0">CEO ADVISER (CHATGPT)</div>
+      <div style="background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.25);${card};font-size:11px;color:#8b9cc4;line-height:1.5">
+        The CEO Adviser can submit engineering tasks, read results of tasks it submitted, and post follow-ups. It cannot authorize, approve, release or run anything — every task it submits waits here for your decision.
+        <div style="margin-top:10px"><button onclick="_engAdviserCreate()" style="padding:7px 14px;border-radius:8px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.12);color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer">➕ Create adviser credential</button></div>
+      </div>
+      ${j&&j.advisersOk===false?'<div style="font-size:11px;color:#ef4444;margin-bottom:10px">Could not load advisers.</div>':''}
+      ${advisers.length===0?'<div style="font-size:12px;color:var(--dim);padding:0 0 10px 0">No adviser credential exists. ChatGPT cannot reach MMMOS.</div>':''}
+      ${advisers.map(a=>`<div data-eng-adviser style="background:${a.active?'rgba(201,168,76,0.04)':'rgba(255,255,255,0.02)'};border:1px solid ${a.active?'rgba(201,168,76,0.3)':'var(--border)'};${card}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:800;color:#fff">${escHTML(a.label||'CEO Adviser')}</div>
+          <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:${a.active?'#22c55e18':'#6b728018'};border:1px solid ${a.active?'#22c55e40':'#6b728040'};color:${a.active?'#22c55e':'#6b7280'};font-weight:700">${a.active?'ACTIVE':'REVOKED'}</span>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-bottom:${a.active?'10px':'0'}">created ${a.created_at?new Date(a.created_at).toLocaleString():'—'}${a.last_seen_at?(' · last used '+new Date(a.last_seen_at).toLocaleString()):' · never used yet'}${a.revoked_at?(' · revoked '+new Date(a.revoked_at).toLocaleString()):''}</div>
+        ${a.active?`<button onclick="_engAdviserRevoke('${escHTML(a.id)}')" style="width:100%;padding:7px;border-radius:8px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#ef4444;font-size:11px;font-weight:700;cursor:pointer">🚫 Revoke</button>`:''}
+      </div>`).join('')}`;
+}
+async function _engAdviserCreate(){
+  const label=prompt('Name for this adviser credential:','ChatGPT CEO Adviser');
+  if(label===null)return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_adviser_provision',{label:String(label).slice(0,100)});
+    const j=await r.json();
+    if(!j.ok){
+      if(j.error==='ceo_authorization_required'){alert('Your CEO session has expired. Please log in again, then retry.');try{logout();}catch(e){}return;}
+      alert('Could not create the credential: '+j.error);return;
+    }
+    prompt('Adviser credential — copy it now into the ChatGPT connector. It is shown once only:',j.adviser_credential);
+    _ebV2Cache['b2_workers']=null;
+    _ebV2Load('b2_workers');
+  }catch(e){alert('Error: '+e.message);}
+}
+async function _engAdviserRevoke(id){
+  if(!confirm('Revoke this adviser credential? ChatGPT will lose access on its next call. Tasks it already submitted stay as they are.'))return;
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_adviser_revoke',{id});
+    const j=await r.json();
+    if(!j.ok){alert('Revoke failed: '+j.error);return;}
+    _ebV2Cache['b2_workers']=null;
+    _ebV2Load('b2_workers');
   }catch(e){alert('Error: '+e.message);}
 }
 async function _engReviewApprove(id){
