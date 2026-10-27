@@ -20737,7 +20737,7 @@ const SRV_FARSI_SHORT_MIN_SEC=25, SRV_FARSI_SHORT_MAX_SEC=35, SRV_FARSI_SHORT_DE
 const SRV_FARSI_SHORT_SOURCE_MIN_SEC=120;
 // Build label shown in the Short panel. A tab that loaded the app before a new preview/production build keeps running
 // the old code until it is reloaded; Create checks the deployed page first and refuses to run from an outdated tab.
-const SRV_FARSI_UI_BUILD='srvf-2026-10-27-h';
+const SRV_FARSI_UI_BUILD='srvf-2026-10-27-i';
 async function _srvFarsiPageIsCurrent(){
   try{ const r=await fetch(location.pathname||'/',{cache:'no-store'}); if(!r.ok)return null; const t=await r.text();
     return t.indexOf("const SRV_FARSI_UI_BUILD='"+SRV_FARSI_UI_BUILD+"'")>=0; }catch(_){ return null; } // null = could not check (do not block)
@@ -23780,8 +23780,8 @@ async function _srvRenderVideo(opts){
 
   // ── SRV Farsi V2 Phase 2 composed-cover frame (canvas port of VISUAL_BASELINE_v1) ──
   let _farsiPal=null,_farsiAtmo=null,_farsiAtmoKind=null,_farsiGrainPattern=null,_farsiT_ATMO=20,_farsiCamShots=null,_farsiFace=null,_farsiFlake=null;
+  let _farsiAvatarPre=null; // Long: colour-lifted + warm-graded cover photo, built once per render (ImageBitmap)
   let _farsiSprite=null, _farsiShortBg=null; // cached glow sprite + blurred Short backdrop
-  let _farsiAvatarPre=null; // Long: colour-lifted copy of the cover photo, built once per render
   let _farsiLongVeil=null; // cached title-side veil for the frameless Long cover (static, built once per render)
   // v2-phase2 — intensity scalar (soft/standard/vivid) modulates atmo density + zoom amplitude;
   // background archetype (a/b) modulates gradient direction. Both are tracked anti-repetition
@@ -23804,6 +23804,16 @@ async function _srvRenderVideo(opts){
     const _gctx=_gc.getContext('2d');
     _gctx.fillStyle='rgba(255,255,255,0.35)'; _gctx.fillRect(0,0,1,1);
     _farsiGrainPattern=ctx.createPattern(_gc,'repeat');
+  }
+  // Long: the cover photo with its colour lift + warm grade applied once, held as an ImageBitmap so the browser keeps it
+  // on the graphics card (re-filtering the full-width photo every frame, or re-uploading a plain canvas, is too slow).
+  if(isFarsiComposed&&!isShort&&_avatarImg){
+    const _pc=document.createElement('canvas'); _pc.width=_avatarImg.naturalWidth; _pc.height=_avatarImg.naturalHeight;
+    const _px=_pc.getContext('2d');
+    _px.filter='contrast(1.07) saturate(1.10) brightness(1.03)'; _px.drawImage(_avatarImg,0,0); _px.filter='none';
+    _px.globalCompositeOperation='soft-light'; _px.globalAlpha=SRV_FARSI_WARM_GRADE_ALPHA; _px.fillStyle=_farsiPal.tint; _px.fillRect(0,0,_pc.width,_pc.height);
+    _px.globalAlpha=1; _px.globalCompositeOperation='source-over';
+    try{ _farsiAvatarPre=(typeof createImageBitmap==='function')?await createImageBitmap(_pc):_pc; }catch(_){ _farsiAvatarPre=_pc; }
   }
   // Soft glow sprite, built once: particles and bokeh are stamped from it (no per-particle blur filter,
   // so a denser, faster field still renders in real time).
