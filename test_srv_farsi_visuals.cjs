@@ -22,8 +22,22 @@ ok('old gray-blue Emotional colours are gone',!/#5f7290|#23283a|#9aa9c2/.test(h)
 const comp=(()=>{const s=h.indexOf('  function _drawFarsiComposedFrame(');return h.slice(s,h.indexOf('\n  // ── Main frame renderer',s));})();
 ok('Long: photo drawn edge-to-edge with no border and no rounded frame',/_drawFarsiPanel\(panelX,panelTop,panelW,panelH,zoom,0,\{aim:/.test(comp)&&!/_drawFarsiPanel\(panelX[^\n]*border:true/.test(comp)&&/panelH=H, panelTop=0/.test(comp));
 ok('Long: no framed-panel call remains',!/_drawFarsiPanel\([^)]*,18,true,true\)/.test(comp));
-ok('Long: title side is a masked veil that dissolves into the photo',/_farsiLongVeil/.test(comp)&&/destination-in/.test(comp));
-ok('photo never shrinks below its edge while animating (zoom floor 1, pan limited to the zoom margin)',/const z=Math\.max\(1,zoom\|\|1\)/.test(panel)&&/\*\(z-1\)\*0\.9/.test(panel));
+ok('Long: the title goes on the free side — face in the left half → title right, face right → title left (Short keeps its layout)',
+    /const isMirror=\(!isShort&&typeof avatarFocusX==='number'\)\?\(avatarFocusX<0\.5\):!!mirror;/.test(comp)&&/const titleSide=isMirror\?'right':'left';/.test(comp));
+ok('Long: medium/close shots keep the face on its own side (not re-centred under the title); Short unchanged',
+    /const fxT=o\.keepFaceSide\?fx-\(aim\.x-0\.5\)\*\(pw\/\(sc\*zz\)\)\/iw:fx;/.test(panel)&&/prefilter:true,keepFaceSide:true\}/.test(comp)&&(comp.match(/keepFaceSide/g)||[]).length===1);
+{ // every library cover, real formulas: the face never sits under the title, wide or close shot
+  const ci=h.indexOf('{id:"srv_farsi"'), la=h.indexOf('avatarLibrary:',ci); let dd=0,jj=h.indexOf('{',la); const s0=jj; for(;jj<h.length;jj++){if(h[jj]==='{')dd++;else if(h[jj]==='}'){dd--;if(!dd)break;}}
+  const lib=new Function('return '+h.slice(s0,jj+1))(); const W=1920,H=1080,iw=1672,ih=941; let worst=0,n=0;
+  for(const pool of Object.values(lib))for(const e of pool){ n++;
+    const left=e.fx>=0.5, ax=left?0.34+0.60*0.66:0.40*0.66, cover=Math.max(W/iw,H/ih), sc=Math.min(Math.max(cover,Math.min(cover*1.7,1.5)),Math.max(cover,(0.21*0.66*W)/(e.fw*iw)));
+    const sw=W/sc, sx=Math.min(iw-sw,Math.max(0,iw*e.fx-sw*ax)), bcx=(sx+sw/2)/iw; const t=left?[0.036*W,0.434*W]:[0.566*W,0.964*W];
+    for(const z of [1.06,1.13*1.06*1.06,1.26*1.06*1.06*1.055]){ const fxT=e.fx-(ax-0.5)*(W/(sc*z))/iw; const pull=z<1.1?0.25:1;
+      const w=W/(sc*z); let x=Math.min(Math.max((bcx+(fxT-bcx)*pull)*iw,w/2),iw-w/2); const fX=(iw*e.fx-(x-w/2))*sc*z, fW=e.fw*iw*sc*z;
+      worst=Math.max(worst,Math.min(fX+fW*0.75,t[1])-Math.max(fX-fW*0.75,t[0])); } }
+  ok('Long: across all '+n+' library covers the face never sits under the title (wide, medium and close shots)',n===37&&worst<=2,'worst overlap '+Math.max(0,worst).toFixed(1)+' px'); }
+ok('Long: no dark veil behind the title — the cover photo runs full-width under it (face keeps its screen position and size; lighter edge vignette)',!/ctx\.drawImage\(_farsiLongVeil/.test(comp)&&/const panelW=W, panelH=H, panelTop=0, panelX=0;/.test(comp)&&/aim:\{x:isMirror\?0\.40\*0\.66:0\.34\+0\.60\*0\.66,y:0\.40,face:0\.21\*0\.66\}/.test(comp)&&/vignette:0\.16,prefilter:true,keepFaceSide:true\}/.test(comp)&&/if\(o\.prefilter\)\{/.test(panel)&&/else ctx\.filter='contrast\(1\.07\) saturate\(1\.10\) brightness\(1\.03\)';/.test(panel)&&/x\.fillStyle=_farsiPal\.tint; x\.fillRect\(0,0,iw,ih\);/.test(panel)&&/if\(o\.prefilter\)\{ const R=faceR\*2\.4; ctx\.fillRect\(faceX-R,faceY-R,R\*2,R\*2\); \}/.test(panel)&&/ctx\.imageSmoothingQuality=o\.prefilter\?'medium':'high';/.test(panel)&&/_farsiAvatarPre=\(typeof createImageBitmap==='function'\)\?await createImageBitmap\(_pc\):_pc;/.test(h)&&/else ctx\.fillRect\(px-pw,py-ph,pw\*3,ph\*3\);/.test(panel));
+ok('still cover frame keeps the zoom floor 1 (no edge revealed)',/const z=Math\.max\(1,zoom\|\|1\)/.test(panel));
 ok('Long: romanized line is a restrained sans (no monospace caps block)',/500 \$\{Math\.round\(W\*0\.0195\)\}px 'Vazirmatn'/.test(comp)&&!/IBM Plex Mono', monospace`;\s*\n\s*ctx\.fillStyle='rgba\(253,246,232,0\.82\)'/.test(comp));
 ok('Long/Short: title type is cream, not pure white',(comp.match(/#fdf6e8/g)||[]).length>=2&&!/fillStyle='#fff(fff)?'/.test(comp));
 { const shortSec=comp.slice(comp.indexOf('// ── SHORT (visual benchmark)'));
@@ -96,7 +110,7 @@ const picker=top('_srvFarsiAvatarPickerHtml');
 ok('Build stage shows the cover picker above the build button (VA and Admin share this lifecycle view)',/\$\{_srvFarsiAvatarPickerHtml\(task\)\}\n\s*<div[^\n]*STEP 3 — BUILD PACKAGE/.test(h));
 ok('picker shows visual thumbnails (no filenames) for the whole artist library',/<img src="\$\{escHTML\(a\.thumb\|\|a\.src\)\}"/.test(picker)&&/lib\.map\(/.test(picker)&&!/\.jpg/.test(picker));
 // ── Fix pass: face-first framing (the real expressions from the painter) ──
-{ const a=panel.indexOf('const fx='),b=panel.indexOf('const z=Math.max');
+{ const a=panel.indexOf('const fx='),b=panel.indexOf('ctx.imageSmoothingEnabled=true',panel.indexOf('const fx='));
   const frame=new Function('iw','ih','px','py','pw','ph','aim','avatarFocusX','avatarFocusY','avatarFaceW','let faceX=px+pw*aim.x, faceY=py+ph*aim.y, faceR=pw*0.2;'+panel.slice(a,b)+'\nreturn {sx,sy,sw,sh,sc,cover,faceX,faceY,faceW:fw*iw*sc};');
   const LONG={x:0.60,y:0.40,face:0.21}, CARD={x:0.5,y:0.37,face:0.30};
   const inside=(r,iw,ih)=>r.sx>=-1e-6&&r.sy>=-1e-6&&r.sx+r.sw<=iw+1e-6&&r.sy+r.sh<=ih+1e-6;
@@ -116,23 +130,86 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   ok('face framing: enlargement is capped so the photo never goes soft',notSoft);
   ok('every pool entry carries a face box (fx, fy, fw)',plist.every(([k,pool])=>pool.every(e=>typeof e==='object'&&[e.fx,e.fy,e.fw].every(v=>typeof v==='number'&&v>0&&v<1))));
   ok('face light + face-centred vignette keep the face the brightest, clearest area',/createRadialGradient\(faceX,faceY,0,faceX,faceY,faceR\*2\.4\)/.test(panel)&&/createRadialGradient\(faceX,faceY,faceR\*1\.7/.test(panel));
-  ok('camera moves about the face (zoom + pan pivot on the face, not the panel centre)',/ctx\.translate\(faceX\+\(o\.panX\|\|0\)\*mx,faceY\+\(o\.panY\|\|0\)\*my\); ctx\.scale\(z,z\); ctx\.translate\(-faceX,-faceY\)/.test(panel));
-  ok('photo is drawn with high-quality smoothing and real colour',/imageSmoothingQuality='high'/.test(panel)&&!/ctx\.filter='[^']*grayscale/.test(panel)); }
-// ── Fix pass: motion ──
+  ok('camera is face-centred: the still frame zooms about the face; medium/close shots centre on the face like SRV English (pull 1)',/ctx\.translate\(faceX,faceY\); ctx\.scale\(z,z\); ctx\.translate\(-faceX,-faceY\);/.test(panel)&&/bcx\+\(fxT-bcx\)\*F\.pull/.test(panel));
+  ok('photo is drawn with high-quality smoothing and real colour',/imageSmoothingQuality=o\.prefilter\?'medium':'high'/.test(panel)&&!/ctx\.filter='[^']*grayscale/.test(panel)); }
+// ── Motion / text shadow / snow (CEO 2026-10-27): SRV English motion feel, no text shadow, small top-down snow ──
 { const atmo=(()=>{const s2=h.indexOf('  function _drawFarsiAtmo(');return h.slice(s2,h.indexOf('\n  }\n',s2));})();
-  const sp=atmo.match(/p\.y0-\(([\d.]+)\+([\d.]+)\*d\)\*t/);
-  const lo=sp&&parseFloat(sp[1]), hi=sp&&parseFloat(sp[1])+parseFloat(sp[2]);
-  ok('calm: particles drift slowly (at most 5% of the frame height per second; fix pass was 8.5-23.5%)',sp&&hi<=0.05&&lo>0,sp&&('now '+lo+' to '+hi.toFixed(3)));
-  ok('calm: restrained particle density (24-26; fix pass was 42-46)',/_srvFarsiMoodKey\(mood\)==='happy'\?26:24/.test(h));
-  ok('calm: 5 slow bokeh orbs (fix pass 7) moving at most 0.6% of the width per second',/for\(let i=0;i<5;i\+\+\)/.test(atmo)&&/dir\*\(0\.004\+0\.002\*\(i%3\)\)\*t/.test(atmo));
-  ok('calm: rain falls at 0.20 of the height per second (fix pass 0.46)',/d\.y0\+0\.20\*t/.test(atmo));
-  ok('calm: slow twinkle, no per-particle blur filter',/t\*\(0\.35\+0\.15\*p\.harmonic\)/.test(atmo)&&!/ctx\.filter=`blur/.test(atmo));
-  const z=comp.match(/const zoom=1\.045\+_live\*\(\(([\d.]+)\*_farsiIntensityMul\)\*_cyc\((\d+),0\)\);/);
-  ok('calm: one slow push/pull (±2.5% over 26s), no fast breath',z&&parseFloat(z[1])===0.025&&parseInt(z[2])===26&&!/_cyc\(4\.3/.test(comp),z&&('±'+(z[1]*100)+'% / '+z[2]+'s'));
-  ok('calm: zoom never drops below 1 at any intensity (no photo edge revealed)',z&&1.045-parseFloat(z[1])*1.3>=1);
-  ok('calm: barely-there drift (pan ≤35% of the zoom margin, 37-43s periods), no light sweep',/const panX=_live\*0\.35\*_cyc\(37,0\.6\), panY=_live\*0\.25\*_cyc\(43,2\.1\);/.test(comp)&&/const sweep=undefined;/.test(comp));
-  ok('calm: the Long title holds still once it has slid in',/const _drift=0;/.test(comp));
-  ok('calm: Short backdrop moves slowly (41-53s periods)',/_cyc\(41,0\)/.test(comp)&&/_cyc\(47,1\)/.test(comp)&&/_cyc\(45,0\)/.test(comp)); }
+  const v2=fs.readFileSync(require('path').join(require('path').dirname(process.argv[2]||'public/index.html'),'srv-studio-v2/srv2-render.mjs'),'utf8');
+  const V2M=new Function('return '+v2.match(/export const SRV2_MOTION = (\{[\s\S]*?\});/)[1])(), V2T=new Function('return '+v2.match(/export const SRV2_LONG_TIMING = (\{[^}]*\})/)[1])();
+  const FS=new Function(h.slice(h.indexOf('const SRV_FARSI_SNOW='),h.indexOf('};',h.indexOf('const SRV_FARSI_SNOW='))+2)+';return SRV_FARSI_SNOW;')();
+  // exact SRV English camera: run the SRV English module and the SRV Farsi copies on the same inputs
+  const V2=await import(require('path').resolve(require('path').dirname(process.argv[2]||'public/index.html'),'srv-studio-v2/srv2-render.mjs'));
+  const camSrc=['_srvFarsiCamRng','_srvFarsiCamSeed','_srvFarsiCamEase','_srvFarsiCamFade','_srvFarsiCamTimeline','_srvFarsiCamera','_srvFarsiCamRect'].map(top).join('\n');
+  const CAMC=h.slice(h.indexOf('const SRV_FARSI_CAM='),h.indexOf('};',h.indexOf('const SRV_FARSI_CAM='))+2);
+  const FC=new Function(CAMC+'\n'+camSrc+';return {C:SRV_FARSI_CAM,rng:_srvFarsiCamRng,seed:_srvFarsiCamSeed,tl:_srvFarsiCamTimeline,cam:_srvFarsiCamera,rect:_srvFarsiCamRect};')();
+  ok('motion: SRV English framings, shot timing (20–28 s, 1.5 s dissolve, 6 % push) and camera numbers copied exactly',
+    JSON.stringify(FC.C.framings)===JSON.stringify(V2.SRV2_FRAMINGS)&&FC.C.shotMin===V2.SRV2_LONG_TIMING.shotMin&&FC.C.shotMax===V2.SRV2_LONG_TIMING.shotMax&&FC.C.xfade===V2.SRV2_LONG_TIMING.xfade&&FC.C.push===V2.SRV2_LONG_TIMING.push&&
+    ['overscan','breathe','breatheSec','breathe2','breathe2Sec','swaySec','sway2Sec','liftSec','swayAmt','shortZoomShare'].every(k=>FC.C[k]===V2.SRV2_MOTION[k]));
+  const rA=V2.srv2Rng('x|y'), rB=FC.rng('x|y'); let same=true; for(let i=0;i<50;i++)if(rA()!==rB())same=false;
+  ok('motion: identical shot timeline to srv2LongTimeline (same seeds, durations 45–360 s)',same&&[45,123.4,203.5,240,360].every(d=>['a|t','duet_06|تو جانِ منی','x'].every(sd=>JSON.stringify(FC.tl(d,sd))===JSON.stringify(V2.srv2LongTimeline({duration:d,seed:sd}).shots))));
+  let camSame=true; for(let t=0;t<300;t+=0.37){const a=V2.srv2Camera(t,4242),b=FC.cam(t,4242);if(Math.abs(a.zoom-b.zoom)>1e-12||Math.abs(a.mx-b.mx)>1e-12||Math.abs(a.my-b.my)>1e-12)camSame=false;}
+  ok('motion: identical breathing + sway to srv2Camera at every instant',camSame);
+  let rectSame=true; for(const [s1,cx,cy,mx,my,sr] of [[1.06,0.5,0.4,0.3,-0.2,1.06],[1.3,0.55,0.36,-0.8,0.4,1.2],[1.12,0.2,0.9,0.8,0.8,1]]){const W=1920,H=1080,iw=1672,ih=941,base=Math.max(W/iw,H/ih);
+    const a=V2.srv2CameraRect(iw,ih,W,H,s1,cx,cy,mx,my,sr),b=FC.rect(iw,ih,W,H,base,s1,cx,cy,mx,my,sr);for(const k of ['x','y','w','h'])if(Math.abs(a[k]-b[k])>1e-9)rectSame=false;}
+  ok('motion: identical camera rectangle to srv2CameraRect (with SRV English\'s cover-fit base)',rectSame);
+  const pnl=(()=>{const s2=h.indexOf('  function _drawFarsiPanel(');return h.slice(s2,h.indexOf('\n  }\n',s2));})();
+  ok('motion: Long = SRV English shots (srv2ShotCameraRect: framing × eased push × overscan × breathing, sway inside the margin) + cross-dissolves',
+    /const zz=F\.z\*\(1\+C\.push\*_srvFarsiCamEase\(pp\)\)\*C\.overscan\*cam\.zoom;/.test(pnl)&&/_srvFarsiCamRect\(iw,ih,pw,ph,sc,zz,bcx\+\(fxT-bcx\)\*F\.pull,bcy\+\(fy\+F\.dy-bcy\)\*F\.pull,cam\.mx,cam\.my,F\.z\*C\.overscan\)/.test(pnl)&&
+    /layers\.push\(\{r:shotRect\(pv\),a:1-_srvFarsiCamFade\(tt,cur\.start-hx,cur\.start\+hx\)\}\)/.test(pnl)&&/layers\.push\(\{r:shotRect\(nx\),a:_srvFarsiCamFade\(tt,nx\.start-hx,nx\.start\+hx\)\}\)/.test(pnl));
+  { let inside=true; const iw=1672,ih=941,pw=1267,ph=1080,cover=Math.max(pw/iw,ph/ih),sc=Math.max(cover,1.3),C=FC.C;
+    const shots=FC.tl(240,'edge'); for(let t=0;t<240;t+=0.25){const cam=FC.cam(t,99);for(const sh of shots){const F=C.framings[sh.framing];const pp=Math.max(-0.1,Math.min(1.1,(t-sh.start)/Math.max(1,sh.end-sh.start)));
+      const zz=F.z*(1+C.push*(pp<0?0:pp>1?1:pp*pp*(3-2*pp)))*C.overscan*cam.zoom;for(const [fx,fy] of [[0.3,0.3],[0.55,0.36],[0.8,0.5]]){const r=FC.rect(iw,ih,pw,ph,sc,zz,0.5+(fx-0.5)*F.pull,0.45+(fy+F.dy-0.45)*F.pull,cam.mx,cam.my,F.z*C.overscan);if(r.x<-1e-6||r.y<-1e-6||r.x+r.w>iw+1e-6||r.y+r.h>ih+1e-6)inside=false;}}}
+    ok('motion: the moving frame never leaves the photo (every shot, every instant of a 4-min song, three face positions)',inside); }
+  ok('motion: Short card = srv2CardCameraRect (eased 6 % push over the Short × 45 % breathing, sway inside the margin)',
+    /const zz=\(1\+C\.push\*_srvFarsiCamEase\(o\.cam\.p\)\)\*\(1\+\(cam\.zoom-1\)\*C\.shortZoomShare\);/.test(pnl)&&/_srvFarsiCamRect\(iw,ih,pw,ph,sc,zz,bcx,bcy,cam\.mx,cam\.my,1\)/.test(pnl));
+  ok('motion: the composed frame drives it (timeline from the song length, seed from cover + title); cover/thumbnail keeps the still 1.045 framing',
+    /_farsiCamShots=_srvFarsiCamTimeline\(targetDur,/.test(comp)&&/const _cam=_live\?_srvFarsiCamera\(t,_camSeed\):null;/.test(comp)&&/const zoom=1\.045, panX=0, panY=0;/.test(comp)&&(comp.match(/cam:_camOpt[,}]/g)||[]).length===2);
+  ok('motion: copied into SRV Farsi, not imported (no SRV Studio module reference in the SRV Farsi path)',!/srv2-render|SRV2_MOTION\b/.test(comp)&&!/srv2-render|SRV2_MOTION\b/.test(atmo)&&!/srv2-render/.test(pnl));
+  ok('motion: the face-aware base composition is unchanged (its centre/scale are SRV English\'s "wide" base)',/bcx=\(sx\+sw\/2\)\/iw, bcy=\(sy\+sh\/2\)\/ih;/.test(pnl)&&/sc=Math\.min\(Math\.max\(cover,Math\.min\(cover\*1\.7,1\.5\)\),Math\.max\(cover,\(aim\.face\*pw\)\/\(fw\*iw\)\)\);/.test(pnl));
+  ok('encoding: SRV Farsi records at SRV English\'s bitrate (8 Mbps Long, 6 Mbps Short); every other channel unchanged at 1 Mbps',/videoBitsPerSecond: isFarsiComposed \? \(isShort \? 6_000_000 : 8_000_000\) : 1_000_000/.test(h));
+  // text shadow
+  const sh=(comp.match(/shadowColor/g)||[]).length;
+  ok('text: no shadow on the Farsi title, Latin title, header or SRV FARSI brand (only the Short card keeps its drop shadow)',sh===1&&/ctx\.save\(\); ctx\.shadowColor='rgba\(0,0,0,0\.55\)'; ctx\.shadowBlur=Math\.round\(W\*0\.05\); ctx\.shadowOffsetY=Math\.round\(W\*0\.014\);\n\s*ctx\.fillStyle='#140a07'; ctx\.beginPath\(\);/.test(comp),'shadowColor uses: '+sh);
+  ok('text: no replacement glow / drop-shadow filter on text',!/filter='drop-shadow|shadowBlur=Math\.round\(W\*0\.01/.test(comp));
+  ok('Long title: drawn once in plain cream with a 1.2 px (@1920) edge softening so downscaled video shows no dark ring; the filter is reset right after',
+    /ctx\.font=_titleFontStr\(_titleFit\.fontSize\); ctx\.fillStyle='#fdf6e8';\n(?:\s*\/\/[^\n]*\n)+\s*ctx\.filter='blur\('\+\(1\.2\*W\/1920\)\.toFixed\(2\)\+'px\)';\n\s*const titleBottomY=_srvDrawPreSplitLinesTop\(ctx,_titleFit\.lines,tx,titleTopY,_titleLineH\);\n\s*ctx\.filter='none';/.test(comp)&&(comp.match(/_srvDrawPreSplitLinesTop\(/g)||[]).length===1&&!/strokeText/.test(comp));
+  ok('Short title untouched (no edge filter in the Short)',!/_fit\.lines\.forEach[^\n]*\n?[^\n]*blur/.test(comp)&&(comp.match(/ctx\.filter='blur/g)||[]).length===1);
+  // snow: run the real _drawFarsiAtmo with a recording canvas
+  const rec=[];const ctx={save(){},restore(){},drawImage(img,x,y,w,hh){rec.push({x,y,w,h:hh,a:this.globalAlpha});},beginPath(){},moveTo(){},lineTo(){},stroke(){},set globalAlpha(v){this._a=v;},get globalAlpha(){return this._a;},globalCompositeOperation:''};
+  const genP=new Function(top('_srvMulberry32')+top('_srvFarsiGenParticles')+';return _srvFarsiGenParticles;')();
+  const mk=(mood,W,H)=>new Function('ctx','W','H','_farsiAtmo','_farsiAtmoKind','_farsiGlowSprite','SRV_FARSI_SNOW','_farsiFlake','_farsiFace',atmo.trim()+'\n  }\nreturn _drawFarsiAtmo;')(ctx,W,H,genP(mood,7,mood==='happy'?FS.count.happy:FS.count.other),'particle',()=>({}),FS,{},null);
+  let down=0,up=0,big=0,n=0,maxR=0,enterTop=0;const W=1920,H=1080;
+  for(const mood of ['happy','romantic']){const draw=mk(mood,W,H);
+    for(let t=5;t<200;t+=7){rec.length=0;draw(t);const A=rec.slice();rec.length=0;draw(t+0.5);const B=rec.slice();
+      A.forEach((p,i)=>{const q=B[i];const dy=(q.y+q.h/2)-(p.y+p.h/2);if(Math.abs(dy)>H*0.5)return;dy>0?down++:up++;n++;maxR=Math.max(maxR,p.w/2);if(p.w/2>Math.min(W,H)/1080*4.6+1e-9)big++;});}
+    rec.length=0;for(let t=0;t<120;t+=0.5){rec.length=0;draw(t);rec.forEach(p=>{if(p.y+p.h<0)enterTop++;});} }
+  ok('snow: every flake moves TOP → DOWN (none rises)',up===0&&down>0,'down '+down+', up '+up);
+  ok('snow: flakes re-enter from ABOVE the frame',enterTop>0);
+  ok('snow: small but visible flakes — radius 2.2–4.6 px per 1080 px (no blobs), opacity 0.45–0.85 with a crisp core',big===0&&maxR<=4.6+1e-9&&maxR>=3&&FS.alpha[0]===0.45&&FS.alpha[1]===0.85&&/addColorStop\(0\.45,'rgba\(255,250,240,0\.95\)'\)/.test(atmo),'max radius '+maxR.toFixed(1)+' px @1080p');
+  ok('snow: gentle fall 1.5–3% of the height per second, slight drift, no swirl',FS.fall[0]===0.015&&FS.fall[1]===0.030&&FS.sway<=0.005&&FS.drift<=0.003);
+  ok('snow: the large bokeh "orbs" are gone',!/for\(let i=0;i<5;i\+\+\)/.test(atmo)&&!/W\*\(0\.11\+0\.045/.test(atmo));
+  ok('snow: light density (42-46 flakes), faded out near the face (as SRV English), Emotional keeps its falling rain',FS.count.happy===46&&FS.count.other===42&&/a\*=Math\.max\(0,Math\.min\(1,\(dd-0\.55\)\/0\.6\)\)/.test(atmo)&&/d\.y0\+0\.20\*t/.test(atmo));
+  ok('Long title holds still once it has slid in',/const _drift=0;/.test(comp));
+  // hidden-tab render guard
+  const guard=top('_srvFarsiRenderWatch')+top('_srvFarsiRenderVisible');
+  const doc={hidden:false,_l:null,addEventListener(e,f){this._l=f;},removeEventListener(){this._l=null;}};let now=0;
+  const run=async(hideMs)=>{const f=new Function('document','performance','_srvRenderVideo','SRV_FARSI_HIDDEN_MAX_MS',guard+';return _srvFarsiRenderVisible;')(doc,{now:()=>now},async()=>{now+=1000;if(hideMs){doc.hidden=true;doc._l();now+=hideMs;doc.hidden=false;doc._l();}now+=1000;return {blob:'ok'};},1500);
+    try{return (await f({})).blob;}catch(e){return 'ERR '+e.message;}};
+  const r1=await run(0), r2=await run(188000);
+  ok('render guard: a render with the tab in front is accepted',r1==='ok');
+  ok('render guard: a render made while the tab was hidden is refused with a clear message (nothing uploaded)',/^ERR the video froze because this tab was in the background for 188 s/.test(r2)&&/Nothing was uploaded/.test(r2),r2.slice(0,90));
+  const bt=top('_srvFarsiBuildTrigger');
+  ok('render guard: both SRV Farsi renders (Long + Short) go through it; the operator is told to keep the tab in front',(bt.match(/await _srvFarsiRenderVisible\(\{/g)||[]).length===2&&!/await _srvRenderVideo\(/.test(bt)&&/keep this tab open and in front/.test(bt)); }
+{ const bt=top('_srvFarsiBuildTrigger');
+  // outdated tab (CEO 2026-10-27: a Rebuild from a tab opened before the release rendered with the old look)
+  const iCheck=bt.indexOf('if(await _srvFarsiPageIsCurrent()===false)'), iAudio=bt.indexOf('let audio=_srvAudioData[pkgId];'), iRender=bt.indexOf('await _srvFarsiRenderVisible(');
+  ok('outdated tab: Build checks the deployed version FIRST and refuses (nothing rendered, uploaded or changed) with "reload"',iCheck>0&&iCheck<iAudio&&iCheck<iRender&&/older version of MMMOS[\s\S]{0,160}Reload the page[\s\S]{0,60}nothing was rendered or changed/.test(bt.slice(iCheck,iCheck+600))&&/return;\n  \}\n  let audio/.test(bt));
+  ok('versioning: each render records renderer version + time + build, set together with the new URL after the upload (unique file per render)',['Long','Short'].every(K=>new RegExp('pkg\\._srv'+K+'VideoUrl='+K.toLowerCase()+'Url;\\n\\s*pkg\\._srv'+K+'RenderVersion=SRV_FARSI_RENDERER_VERSION; pkg\\._srv'+K+'RenderedAt=').test(bt))&&/const path = `\$\{pkgId\}\/\$\{kind\}_\$\{Date\.now\(\)\}_\$\{safeName\}`;/.test(top('_srvUploadToStorage')));
+  const note=new Function('SRV_FARSI_RENDERER_VERSION','escHTML',top('_srvFarsiRenderNoteHtml')+';return _srvFarsiRenderNoteHtml;')('srvf-render-2026-10-27',x=>String(x));
+  ok('Approve: a video from the current renderer is marked current; an older or unrecorded one is flagged with "Rebuild"',
+    /data-srvf-render="current"/.test(note({_srvLongVideoUrl:'u',_srvLongRenderVersion:'srvf-render-2026-10-27',_srvLongRenderedAt:'2026-10-27T18:00:00Z'},true))&&
+    /data-srvf-render="old"[\s\S]*before 27 Oct 2026[\s\S]*Rebuild/.test(note({_srvLongVideoUrl:'u'},true))&&/data-srvf-render="old"/.test(note({_srvShortVideoUrl:'u',_srvShortRenderVersion:'srvf-render-2026-10-25'},false))&&note({},true)==='');
+  ok('Approve shows the render note above the cover line',/\$\{_srvFarsiRenderNoteHtml\(pkg,isLongApprove\)\}/.test(h)); }
 // ── Fix pass: text animation ──
 { ok('ease-out slide helper; the cover/thumbnail capture is always the settled frame',/const _in=function\(a,b\)\{ if\(skipFade\)return 1;/.test(comp)&&/const _live=skipFade\?0:1;/.test(comp));
   const long=comp.slice(comp.indexOf('if(!isShort){'),comp.indexOf('// ── SHORT (visual benchmark)'));
