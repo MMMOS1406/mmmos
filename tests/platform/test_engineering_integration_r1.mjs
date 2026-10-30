@@ -16,6 +16,8 @@ const db = {
   engineering_tasks: [], engineering_workers: [], engineering_advisers: [], brain_evidence: [],
   brain_agent_runs: [], engineering_brain: [], brain_knowledge: [], brain_learning_memory: [],
   ceo_auth_config: [{ key: 'ceo_session_secret_production', value: SESSION_SECRET }, { key: 'ceo_pin_hash_production', value: sha('0000') }],
+  // R2: adviser provisioning is behind the fail-closed eng_adviser_connect switch.
+  mmm_platform_flags: [{ flag: 'eng_adviser_connect', enabled: true }],
 };
 const storage = { objects: new Map(), signedUploads: new Set() }; // key = path in engineering-artifacts
 const calls = [];
