@@ -1,0 +1,11 @@
+MMMOS-R2-POST-RELEASE-027 — findings (partial; session stopped at usage limit)
+Production: dpl_FLAa1VzaexmJYMcsdaF1wLneAo6m, main c3a82a7. B10 + B10b applied. eng_adviser_connect / eng_runner OFF (no rows). Rollback: dpl_3BExoDybimfC8SkwYTPTo3YnMNpE.
+Old R2 previews (public, production DB, NO switches — approval PIN form AND runner mode active):
+  dpl_Cf3YjUSkLMxsqTbatnmq5xZ73BRR (5289581, mmm-static-3zo0af4u8)
+  dpl_Fa41jbcwyVFE1xaPT7hp6ey6gU12 (daa136d, mmm-static-qkhc5ge3m)
+  dpl_HSKNmwqL6XwR3vfCwyfYByuv4tMp (fc523ad, mmm-static-bofb8bk56)
+  Recommendation: remove all three (needs authorization) and/or enable Vercel preview protection.
+CEO-015 branch (local only, cdffbbf): 107 behind main, base 05ea7a0 (pre-R1). Trial merge clean (overlap: tests/preservation/stub-server.mjs).
+  No engineering reads touched. Do NOT push as-is (old server code would get a public preview on the prod DB); rebase onto c3a82a7 first, re-run preservation.
+Runner login controls: tools/engineering-runner/hooks/pre-push (prepared, NOT installed, NOT yet tested).
+NOT DONE: hook tests, Claude Code deny-rule file, GitHub ruleset JSON, connector wording fix.
