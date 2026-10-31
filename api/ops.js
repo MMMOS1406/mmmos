@@ -1119,7 +1119,21 @@ async function engineeringWorkerSubmitTask(req, res) {
 // signed URLs. Folder layout keeps businesses apart:
 //   <business>/<task_id>/<run_id>/<timestamp>-<file name>
 const ENG_ARTIFACTS_BUCKET = 'engineering-artifacts';
-const ENG_ARTIFACT_KINDS = new Set(['video', 'screenshot', 'source', 'checkpoint', 'qa_report', 'other']);
+const ENG_ARTIFACT_KINDS = new Set(['video', 'screenshot', 'source', 'checkpoint', 'qa_report', 'other',
+  'thumbnail', 'script', 'narration']); // 033 — video projects: thumbnails, scripts, narration
+// 033 — artifacts up to this size are hashed by the server itself (SHA-256); larger ones keep the
+// uploader's claimed checksum, marked unverified. Never trusted over the server's own hash.
+const ENG_ARTIFACT_HASH_MAX = 25 * 1024 * 1024;
+async function _engArtifactSha256(objectPath) {
+  try {
+    const enc = objectPath.split('/').map(encodeURIComponent).join('/');
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${ENG_ARTIFACTS_BUCKET}/${enc}`, { headers: _engStorageHeaders() });
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > ENG_ARTIFACT_HASH_MAX) return null;
+    return createHash('sha256').update(buf).digest('hex');
+  } catch (e) { return null; }
+}
 const ENG_BUSINESSES = ['mmmos', 'srv_farsi', 'srv_english', 'srv_studio', 'ai_creation_studio', 'nextwave', 'smm', 'finance'];
 const ENG_ARTIFACT_DOWNLOAD_TTL_S = 60 * 60; // 1 hour
 
@@ -1265,7 +1279,16 @@ const ENG_BUSINESS_PATHS = {
 };
 const ENG_SHARED_PATHS = ['api/ops.js', 'public/index.html', 'public/shell.js'];
 const ENG_DENIED_PATHS = ['.auto-deploy.sh', '.auto-deploy.plist', '.last-deploy-md5', '.pause-deploy', 'vercel.json',
-  'package.json', 'package-lock.json', '.gitignore', 'migrations/', '.github/', 'node_modules/', '.vercel/', '.env'];
+  'package.json', 'package-lock.json', '.gitignore', 'migrations/', '.github/', 'node_modules/', '.vercel/', '.env',
+  // 033 — anything that changes how Vercel builds or installs (a branch's vercel.json / npm config
+  // overrides project settings and runs during the preview build, which has production secrets).
+  'vercel.ts', 'vercel.mjs', '.vercelignore', '.npmrc', '.nvmrc', '.node-version', '.yarnrc', '.yarnrc.yml',
+  'yarn.lock', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'bun.lockb', 'bun.lock', 'middleware.js', 'middleware.ts'];
+// 033 — a runner task's branch must carry the task's own id: runner/<first 8 chars of task id>-<anything>.
+function _engRunnerBranchFor(taskId, branch) {
+  const id8 = String(taskId || '').toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 8);
+  return id8.length === 8 && new RegExp(`^runner/${id8}(-[A-Za-z0-9._-]{1,80})?$`).test(String(branch || ''));
+}
 
 function _engRunnerScopeFor(task, sharedRequested) {
   const business = _engTaskBusiness(task);
@@ -1583,6 +1606,7 @@ async function engineeringAdviserGetResults(req, res) {
         entries.push({ group: 'artifacts', item: {
           id: e.id, title, description: c.text, description_truncated: c.truncated, artifact_kind: e.metadata.artifact_kind,
           size_bytes: e.metadata.size_bytes, mime_type: e.metadata.mime_type, created_at: e.created_at,
+          sha256: e.metadata.sha256 || null, sha256_verified: e.metadata.sha256_verified === true,
           download_url: await _engArtifactSignedDownload(e.metadata.object_path),
           download_url_expires_in_s: ENG_ARTIFACT_DOWNLOAD_TTL_S,
         } });
@@ -2009,7 +2033,7 @@ async function engineeringAgentGateway(req, res) {
       return res.status(400).json({ ok: false, error: 'task_id, agent_run_id, op, and either agent_token or worker_credential are required' });
     }
 
-    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_run_id,claimed_by_worker_id,lease_expires_at,agent_capability_scope,status,ceo_decision,git_commit_sha,release_kind&limit=1`);
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_claimed_by,agent_run_id,claimed_by_worker_id,lease_expires_at,agent_capability_scope,status,ceo_decision,git_commit_sha,release_kind&limit=1`);
     const task = rows?.[0];
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
 
@@ -2060,6 +2084,13 @@ async function engineeringAgentGateway(req, res) {
     if (!authOk || !claimOk || !leaseOk) {
       await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'verification_failed' });
       return res.status(401).json({ ok: false, error: 'agent_gateway_verification_failed' });
+    }
+
+    // 033 — emergency stop: switching eng_runner OFF stops a runner that already
+    // holds a claim, not only new claims. Manual (worker:) claims are unaffected.
+    if (String(task.agent_claimed_by || '').startsWith('runner:') && !(await _engPlatformFlag('eng_runner'))) {
+      await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'runner_disabled' });
+      return res.status(409).json({ ok: false, error: 'runner_disabled' });
     }
 
     // Capability check — the whitelist is the entire source of truth. Any op
@@ -2225,6 +2256,14 @@ async function engineeringAgentGateway(req, res) {
         await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_not_found', object_path: objectPath });
         return res.status(404).json({ ok: false, error: 'artifact_not_found', message: 'Upload the file first, then register it.' });
       }
+      const claimedSha = body.sha256 === undefined || body.sha256 === null || body.sha256 === '' ? null : String(body.sha256).trim().toLowerCase();
+      if (claimedSha !== null && !/^[0-9a-f]{64}$/.test(claimedSha)) return res.status(400).json({ ok: false, error: 'sha256 must be 64 hex characters' });
+      const serverSha = info.size <= ENG_ARTIFACT_HASH_MAX ? await _engArtifactSha256(objectPath) : null;
+      if (serverSha && claimedSha && serverSha !== claimedSha) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_checksum_mismatch', object_path: objectPath });
+        return res.status(409).json({ ok: false, error: 'artifact_checksum_mismatch', sha256: serverSha });
+      }
+      const sha256 = serverSha || claimedSha;
       const title = af.values.title || objectPath.split('/').pop();
       const description = af.values.description;
       await sbInsert('brain_evidence', {
@@ -2233,13 +2272,14 @@ async function engineeringAgentGateway(req, res) {
         metadata: {
           bucket: ENG_ARTIFACTS_BUCKET, object_path: objectPath, artifact_kind: kind,
           size_bytes: info.size, mime_type: info.mimetype, business: _engTaskBusiness(task),
+          sha256, sha256_verified: !!serverSha,
           submitted_at: new Date().toISOString(), non_authoritative: true,
         },
         engine: task.affected_engine,
       });
       // C5: successful registrations are audited too, not only denials.
       await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { object_path: objectPath, artifact_kind: kind, size_bytes: info.size });
-      result = { accepted: true, object_path: objectPath, artifact_kind: kind, size_bytes: info.size, mime_type: info.mimetype, note: 'Artifact stored permanently and recorded as non-authoritative evidence.' };
+      result = { accepted: true, object_path: objectPath, artifact_kind: kind, size_bytes: info.size, mime_type: info.mimetype, sha256, sha256_verified: !!serverSha, note: 'Artifact stored permanently and recorded as non-authoritative evidence.' };
     } else if (op === 'read_adviser_followups') {
       const rowsF = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(String(task_id))}&evidence_type=eq.adviser_followup&select=id,title,content,metadata,created_at&order=created_at.asc&limit=100`);
       result = { followups: (rowsF || []).map(f => ({ id: f.id, kind: f.metadata?.kind || 'note', title: f.title, message: f.content, created_at: f.created_at })) };
@@ -2286,6 +2326,10 @@ async function engineeringAgentGateway(req, res) {
       const m = repo ? new RegExp(`^https://github\\.com/${repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pull/(\\d{1,7})$`).exec(prUrl) : null;
       if (!m) return res.status(400).json({ ok: false, error: 'pr_url must be a pull request URL in the canonical repository' });
       if (!/^[A-Za-z0-9._\/-]{1,200}$/.test(branch) || branch === 'main' || branch.includes('..')) return res.status(400).json({ ok: false, error: 'branch must be the PR head branch (not main)' });
+      if (_engRunnerEligible(task) && !_engRunnerBranchFor(task_id, branch)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'branch_not_bound_to_task', branch });
+        return res.status(400).json({ ok: false, error: 'branch_not_bound_to_task', expected_prefix: `runner/${String(task_id).slice(0, 8)}-` });
+      }
       const facts = await _engGithubBranchFacts(branch, m[1]);
       if (!facts.ok) {
         await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: facts.error });
@@ -22193,6 +22237,9 @@ async function engineeringBrainLoad(req, res) {
 
 // ── Engineering Brain: Seed ──────────────────────────────────────────────────
 async function engineeringBrainSeed(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     // Upsert all seed entries in batches of 25
     const batchSize = 25;
@@ -22223,6 +22270,9 @@ async function engineeringBrainSeed(req, res) {
 
 // ── Engineering Brain: Save (single entry upsert) ──────────────────────────
 async function engineeringBrainSave(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const { section, key, title, data, sort_order } = body;
@@ -22353,6 +22403,9 @@ async function _insertEngineeringTaskRow({ problem, expected_result, affected_en
 }
 
 async function engineeringTaskCreate(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const { problem, expected_result, affected_engine, priority, acceptance_criteria, release_kind, git_commit_sha } = body;
@@ -22377,6 +22430,9 @@ async function engineeringTaskCreate(req, res) {
 // authorization are all untouched by this function). The manual form
 // (engineeringTaskCreate) is completely unchanged and still works standalone.
 async function engineeringTaskCreateFromDecision(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const decisionText = String(body.decision_text || '').trim();
@@ -22538,6 +22594,9 @@ async function engineeringTaskList(req, res) {
 
 // ── Engineering Task: Update ────────────────────────────────────────────────
 async function engineeringTaskUpdate(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const { id, status, problem, expected_result, affected_engine, priority, acceptance_criteria, git_commit_sha } = body;
@@ -23388,6 +23447,9 @@ async function productionDeploymentReconcile(req, res) {
 // ── Engineering Task: Home List ────────────────────────────────────────────── v15.0.0
 // Returns compact task list for Home card: ready_for_ceo first, then in_progress + testing. Max 10.
 async function engineeringTaskHomeList(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const statuses = ['ready_for_ceo', 'in_progress', 'testing', 'open'];
     const url = `${SUPABASE_URL}/rest/v1/engineering_tasks?status=in.(${statuses.join(',')})&select=id,problem,status,priority,affected_engine,updated_at,ceo_decision,ceo_decision_at&order=updated_at.desc&limit=10`;

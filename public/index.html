@@ -7829,7 +7829,7 @@ if(!window._etHome) window._etHome = { rfc: 0, inprog: 0, pending: 0 };
 
 async function loadEngTasksHome(){
   try{
-    const r=await fetch('/api/ops?action=engineering_task_home_list');
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_home_list',{}); // 033: CEO session required
     const d=await r.json();
     if(d.ok){
       const tasks=d.tasks||[];
@@ -29822,42 +29822,42 @@ function renderEngineeringBrain(){
         const testChecks=(p.testing_checklist||[]);
         const isRFC=t.status==='ready_for_ceo';
         const actionRow=isRFC?`<div style="display:flex;gap:6px;margin-top:10px">
-            <button onclick="_ebCeoApprove('${t.id}')" style="flex:1;padding:7px 0;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);border-radius:7px;color:#22c55e;font-size:10px;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif">✅ Approve</button>
-            <button onclick="_ebCeoReject('${t.id}')" style="flex:1;padding:7px 0;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);border-radius:7px;color:#ef4444;font-size:10px;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif">❌ Reject</button>
-            <button onclick="var el=document.getElementById('ebpkt_'+this.dataset.id);if(el)el.style.display=el.style.display==='none'?'block':'none'" data-id="${t.id}" style="padding:7px 14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);border-radius:7px;color:var(--dim);font-size:10px;font-weight:700;cursor:pointer">👁 Details</button>
+            <button onclick="_ebCeoApprove('${_engAttr(t.id)}')" style="flex:1;padding:7px 0;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);border-radius:7px;color:#22c55e;font-size:10px;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif">✅ Approve</button>
+            <button onclick="_ebCeoReject('${_engAttr(t.id)}')" style="flex:1;padding:7px 0;background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.30);border-radius:7px;color:#ef4444;font-size:10px;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif">❌ Reject</button>
+            <button onclick="var el=document.getElementById('ebpkt_'+this.dataset.id);if(el)el.style.display=el.style.display==='none'?'block':'none'" data-id="${_engAttr(t.id)}" style="padding:7px 14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);border-radius:7px;color:var(--dim);font-size:10px;font-weight:700;cursor:pointer">👁 Details</button>
           </div>`:'';
         return `<div style="background:rgba(255,255,255,0.03);border:1px solid ${isRFC?'rgba(201,168,76,0.35)':'var(--border)'};border-radius:12px;padding:14px 16px;margin-bottom:10px">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px">
             <div style="flex:1">
-              <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">${t.affected_engine} — ${t.problem.slice(0,80)}${t.problem.length>80?'…':''}</div>
+              <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">${escHTML(t.affected_engine||'')} — ${escHTML(String(t.problem||'').slice(0,80))}${String(t.problem||'').length>80?'…':''}</div>
               <div style="font-size:10px;color:var(--dim)">${new Date(t.created_at).toLocaleDateString()}</div>
             </div>
-            <div style="display:flex;gap:4px;flex-shrink:0">
-              <span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:${pc}22;color:${pc};border:1px solid ${pc}44">${t.priority.toUpperCase()}</span>
+            <div style="display:flex;gap:4px;flex-shrink:0">${_engLifecycleChip(t)}
+              <span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:${pc}22;color:${pc};border:1px solid ${pc}44">${escHTML(String(t.priority||'').toUpperCase())}</span>
               ${isRFC
                 ? `<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:${sc}22;color:${sc};border:1px solid ${sc}44">NEEDS CEO</span>`
-                : `<select onchange="_ebUpdateStatus('${t.id}',this.value)" style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:${sc}22;color:${sc};border:1px solid ${sc}44;cursor:pointer">
+                : `<select onchange="_ebUpdateStatus('${_engAttr(t.id)}',this.value)" style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:${sc}22;color:${sc};border:1px solid ${sc}44;cursor:pointer">
                     ${['open','in_progress','testing','blocked'].map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s.replace(/_/g,' ').toUpperCase()}</option>`).join('')}
                   </select>`}
             </div>
           </div>
-          <div style="font-size:11px;color:var(--dim);margin-bottom:8px">${t.expected_result}</div>
-          ${t.acceptance_criteria?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:8px;font-style:italic">Criteria: ${t.acceptance_criteria}</div>`:''}
+          <div style="font-size:11px;color:var(--dim);margin-bottom:8px">${escHTML(t.expected_result||'')}</div>
+          ${t.acceptance_criteria?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:8px;font-style:italic">Criteria: ${escHTML(t.acceptance_criteria)}</div>`:''}
           ${actionRow}
-          <div id="ebpkt_${t.id}" style="display:none">
+          <div id="ebpkt_${_engAttr(t.id)}" style="display:none">
             ${p.prior_knowledge&&p.prior_knowledge.length?`
             <div style="margin-top:8px;padding:10px 12px;background:rgba(6,182,212,0.06);border:1px solid rgba(6,182,212,0.25);border-radius:8px">
               <div style="font-size:9px;font-weight:800;color:#06b6d4;letter-spacing:1px;text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:7px">🧠 BRAIN KNOWLEDGE — ${p.prior_knowledge.length} entries auto-loaded</div>
-              ${p.prior_knowledge.map(k=>`<div style="padding:5px 0;border-bottom:1px solid rgba(6,182,212,0.1)"><div style="font-size:10px;font-weight:700;color:rgba(6,182,212,0.9)">${k.title}</div><div style="font-size:9px;color:rgba(255,255,255,0.45);margin-top:2px;font-family:'JetBrains Mono',monospace">${(k.content||'').slice(0,200)}</div></div>`).join('')}
+              ${p.prior_knowledge.map(k=>`<div style="padding:5px 0;border-bottom:1px solid rgba(6,182,212,0.1)"><div style="font-size:10px;font-weight:700;color:rgba(6,182,212,0.9)">${escHTML(k.title||'')}</div><div style="font-size:9px;color:rgba(255,255,255,0.45);margin-top:2px;font-family:'JetBrains Mono',monospace">${escHTML((k.content||'').slice(0,200))}</div></div>`).join('')}
             </div>`:''}
             ${p.task_protocol&&p.task_protocol.length?`
             <details open style="margin-top:8px">
               <summary style="font-size:10px;font-weight:700;color:#c9a84c;cursor:pointer;list-style:none;display:block;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06)">▾ Engineering Packet — ${regChecks.length} regression checks · ${testChecks.length} test steps</summary>
               <div style="margin-top:10px;padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--dim)">
                 <div style="font-weight:700;color:#c9a84c;margin-bottom:6px">TASK PROTOCOL</div>
-                ${(p.task_protocol||[]).map(s=>`<div style="padding:2px 0;color:rgba(255,255,255,0.6)">${s}</div>`).join('')}
-                ${testChecks.length?`<div style="font-weight:700;color:#22c55e;margin:10px 0 6px">TESTING CHECKLIST</div>${testChecks.map((c,i)=>`<div style="padding:2px 0;color:rgba(255,255,255,0.5)">${i+1}. ${c}</div>`).join('')}`:''}
-                ${regChecks.length?`<div style="font-weight:700;color:#f59e0b;margin:10px 0 6px">REGRESSION CHECKLIST</div>${regChecks.map((c,i)=>`<div style="padding:2px 0;color:rgba(255,255,255,0.5)">${i+1}. ${c}</div>`).join('')}`:''}
+                ${(p.task_protocol||[]).map(s=>`<div style="padding:2px 0;color:rgba(255,255,255,0.6)">${escHTML(s)}</div>`).join('')}
+                ${testChecks.length?`<div style="font-weight:700;color:#22c55e;margin:10px 0 6px">TESTING CHECKLIST</div>${testChecks.map((c,i)=>`<div style="padding:2px 0;color:rgba(255,255,255,0.5)">${i+1}. ${escHTML(c)}</div>`).join('')}`:''}
+                ${regChecks.length?`<div style="font-weight:700;color:#f59e0b;margin:10px 0 6px">REGRESSION CHECKLIST</div>${regChecks.map((c,i)=>`<div style="padding:2px 0;color:rgba(255,255,255,0.5)">${i+1}. ${escHTML(c)}</div>`).join('')}`:''}
               </div>
             </details>`:''}
           </div>
@@ -31010,7 +31010,7 @@ async function _ebSeed(){
   const btn=document.querySelector('[onclick="_ebSeed()"]');
   if(btn){btn.textContent='Seeding…';btn.disabled=true;}
   try{
-    const r=await fetch('/api/ops?action=engineering_brain_seed',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_brain_seed',{}); // 033: CEO session required
     const d=await r.json();
     if(d.ok){
       alert(`✅ Engineering Brain seeded: ${d.seeded} entries loaded into database.`);
@@ -31045,6 +31045,23 @@ function _engAuthSource(t){
 // HTML attribute. Click handlers read values from data-* attributes instead of
 // having text spliced into inline script.
 function _engAttr(s){return escHTML(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+// 033 — one lifecycle vocabulary for every engineering task, derived only from fields the server already returns.
+// Draft / Authorized / Running / Blocked / PM Review / CEO Review / Approved / Closed.
+function _engLifecycle(t){
+  t=t||{};const st=String(t.status||'').toLowerCase();const now=Date.now();
+  if(['done','complete','completed','closed','rejected','cancelled'].includes(st))return 'Closed';
+  if(st==='blocked')return 'Blocked';
+  if(st==='ready_for_ceo')return 'CEO Review';
+  if(st==='approved'||String(t.ceo_decision||'').toLowerCase()==='approved')return 'Approved';
+  if(st==='testing')return 'PM Review';
+  if((t.lease_expires_at&&new Date(t.lease_expires_at).getTime()>now)||st==='in_progress')return 'Running';
+  if(t.agent_authorized_at&&!t.agent_authorization_revoked_at)return 'Authorized';
+  return 'Draft';
+}
+function _engLifecycleChip(t){
+  const l=_engLifecycle(t);const c={'Draft':'#6b7280','Authorized':'#3b82f6','Running':'#06b6d4','Blocked':'#ef4444','PM Review':'#a855f7','CEO Review':'#c9a84c','Approved':'#22c55e','Closed':'#4b5563'}[l]||'#6b7280';
+  return `<span data-eng-lifecycle="${_engAttr(l)}" style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:${c}22;color:${c};border:1px solid ${c}44">${escHTML(l.toUpperCase())}</span>`;
+}
 const _ENG_RUNNER_BUSINESSES=['mmmos','nextwave','srv_studio','srv_farsi'];
 function _engRunnerButton(t){
   const p=(t&&t.packet)||{};
@@ -31459,10 +31476,7 @@ async function _ebCreateTaskFromDecision(){
   const resultEl=document.getElementById('eb-packet-result');
   if(resultEl)resultEl.innerHTML='<div style="color:var(--dim);font-size:12px;text-align:center;padding:20px">Deriving engineering task from decision…</div>';
   try{
-    const r=await fetch('/api/ops?action=engineering_task_create_from_decision',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({decision_text:decisionText}),
-    });
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_create_from_decision',{decision_text:decisionText}); // 033: CEO session required
     const d=await r.json();
     if(d.ok&&d.task){
       _ebTasks.unshift(d.task);
@@ -31487,10 +31501,7 @@ async function _ebCreateTask(){
   const resultEl=document.getElementById('eb-packet-result');
   if(resultEl)resultEl.innerHTML='<div style="color:var(--dim);font-size:12px;text-align:center;padding:20px">Generating Engineering Packet…</div>';
   try{
-    const r=await fetch('/api/ops?action=engineering_task_create',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({problem,expected_result:expected,affected_engine:engine,priority:priority||'medium',acceptance_criteria:criteria||''}),
-    });
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_create',{problem,expected_result:expected,affected_engine:engine,priority:priority||'medium',acceptance_criteria:criteria||''}); // 033: CEO session required
     const d=await r.json();
     if(d.ok&&d.task){
       _ebTasks.unshift(d.task);
@@ -31535,10 +31546,7 @@ async function _ebCeoReject(id){
 }
 async function _ebUpdateStatus(id,status){
   try{
-    const r=await fetch('/api/ops?action=engineering_task_update',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id,status}),
-    });
+    const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_update',{id,status}); // 033: CEO session required
     const d=await r.json();
     if(d.ok){
       const idx=_ebTasks.findIndex(t=>t.id===id);
