@@ -15715,6 +15715,39 @@ function _srvStudioV2LoadFlag(){
 }
 _srvStudioV2LoadFlag();
 
+// ── SRV-STUDIO-V2-033: Monthly Mix Builder (OFF unless app_settings.srv_studio_v2_mix.enabled) ──
+// The builder lives in /srv-studio-v2/srv2-mix.mjs and opens as a full-screen overlay (independent of #mainContent,
+// so a tab re-render never interrupts a 30-minute build). The server re-checks everything (action srv_studio_v2_mix).
+const _srvStudioV2MixFlag={state:'unloaded'};
+function _srvStudioV2MixOn(){return _srvStudioV2On()&&_srvStudioV2MixFlag.state==='on';}
+function _srvStudioV2LoadMixFlag(){
+  if(_srvStudioV2MixFlag.state!=='unloaded')return;
+  _srvStudioV2MixFlag.state='loading';
+  fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.srv_studio_v2_mix&select=value`,{headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}})
+    .then(function(r){return r.ok?r.json():[];}).then(function(rows){
+      let c=null;try{c=rows&&rows[0]?JSON.parse(rows[0].value):null;}catch(_){c=null;}
+      _srvStudioV2MixFlag.state=c&&c.enabled===true?'on':'off';
+      if(_srvStudioV2MixFlag.state==='on')_srvStudioV2Rerender();
+    }).catch(function(){_srvStudioV2MixFlag.state='off';});
+}
+_srvStudioV2LoadMixFlag();
+let _srv2MixModP=null;
+async function _srvEnglishV2MixOpen(){
+  if(!_srvStudioV2MixOn()){alert('The Monthly Mix Builder is not switched on.');return false;}
+  if(document.getElementById('srv2-mix-overlay'))return true;
+  if(!_srv2MixModP)_srv2MixModP=import('/srv-studio-v2/srv2-mix.mjs').catch(function(e){_srv2MixModP=null;throw e;});
+  const mod=await _srv2MixModP;
+  const st=document.createElement('style');st.id='srv2-mix-css';st.textContent=mod.SRV2_MIX_CSS;if(!document.getElementById('srv2-mix-css'))document.head.appendChild(st);
+  const ov=document.createElement('div');ov.id='srv2-mix-overlay';ov.className='mx-overlay';ov.setAttribute('role','dialog');ov.setAttribute('aria-label','SRV Studio Monthly Mix');document.body.appendChild(ov);
+  window.__srv2Mix=mod.mount(ov,{
+    op:async function(body){try{const r=await _publishAuthedFetch('/api/ops?action=srv_studio_v2_mix',body);return await r.json();}catch(e){return {ok:false,error:'network',message:String(e&&e.message||e)};}},
+    supabaseUrl:SUPABASE_URL,supabaseKey:SUPABASE_KEY,avatars:_srvEnglishV2AvatarLibrary(),
+    user:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||null,
+    close:function(){ov.remove();window.__srv2Mix=null;},
+  });
+  return true;
+}
+
 // ── Identity ─────────────────────────────────────────────────────────────────
 function _srvEnglishIsTask(t){return !!t&&t.engine==='SRV English';}
 function _srvEnglishTaskUid(task){
@@ -16660,6 +16693,7 @@ function _srvEnglishV2Badges(task){
   const b=[];
   b.push('<span style="font-size:9px;font-weight:800;color:#8b5cf6;font-family:\'JetBrains Mono\',monospace;letter-spacing:1px;padding:2px 7px;background:rgba(139,92,246,0.14);border-radius:5px">V2</span>');
   if(_srvEnglishIsTestTask(task))b.push('<span style="font-size:9px;font-weight:800;color:#f59e0b;font-family:\'JetBrains Mono\',monospace;letter-spacing:1px;padding:2px 7px;background:rgba(245,158,11,0.14);border-radius:5px">TEST TASK</span>');
+  if(_srvStudioV2MixOn())b.push('<button onclick="_srvEnglishV2MixOpen()" style="font-size:9px;font-weight:800;color:#c9a84c;font-family:\'JetBrains Mono\',monospace;letter-spacing:1px;padding:2px 7px;background:rgba(201,168,76,0.14);border:1px solid rgba(201,168,76,0.4);border-radius:5px;cursor:pointer">🎚 MONTHLY MIX</button>'); // 033
   return '<span style="display:inline-flex;gap:6px;margin-left:8px;vertical-align:middle">'+b.join('')+'</span>';
 }
 function _srvEnglishV2ReviewHtml(task,pkg,taskId,pkgId){

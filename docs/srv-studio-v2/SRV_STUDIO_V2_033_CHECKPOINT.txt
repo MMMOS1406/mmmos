@@ -1,0 +1,329 @@
+START CHECKPOINT SRV-STUDIO-V2-033
+
+SRV-STUDIO-V2-033
+MONTHLY MIX BUILDER
+PRODUCTION IMPLEMENTATION CHECKPOINT
+
+PROJECT: SRV Studio V2 (engine "SRV English", channel SRV Studio UC0nzWQX6AaUqlF5FozNpWPg)
+DATE: 2026-10-31
+EXECUTION ORDER: SRV-STUDIO-V2-033 (CEO-approved engineering implementation only)
+REPORT TO: ChatGPT / PM for departmental review
+
+EXECUTIVE SUMMARY
+The Monthly Mix Builder is implemented, tested end to end in real Chrome against an
+isolated stub, and committed locally. Nothing was deployed. No migration was applied,
+no real YouTube request was made, and no playlist was created.
+- Full-length build: a 29:51 mix with 8 songs at 1920x1080, H.264 + AAC.
+- Size and memory: 472.8 MB (472,846,525 bytes) (under the 500 MB storage limit). Chrome peak 1.04 GB, compared with
+  1.45 GB in 032. Never more than 2 songs decoded at once.
+- Audio, measured with ffmpeg on the delivered file: -14.2 LUFS integrated, -1.0 dBTP true peak.
+  No silence at any join.
+- Upload test: the 473 MB private upload ran through the real server policy against a fake
+  YouTube resumable endpoint. It survived an injected connection reset, an HTTP 503 and a storage
+  interruption. It was uploaded PRIVATE, without publishAt, and was refused when a duplicate was attempted.
+- Readiness: engineering requirements are met. Production use is blocked on today's catalogue.
+  Only 5 public SRV Studio Longs exist (about 19 minutes), short of the about 26-minute
+  minimum, so the builder correctly reports "Not ready - insufficient eligible
+  music" until roughly 3 more Longs are public.
+- Recommendation: release behind the flag (OFF) when the CEO authorizes. Enable it once
+  8 or more public Longs exist and the "SRV Studio Mixes" playlist ID is configured.
+
+WORK COMPLETED
+1. Baseline and protection
+   - Started from local 032 preview commit 0dc1386; its parent is production main c3a82a7.
+   - New branch srv-studio/v2-033-mix-builder. Baseline failures were recorded on clean main
+     before comparison.
+2. Audio engine (lib/srvStudioV2MixAudio.mjs, new)
+   - Measures true duration.
+   - Trims lead silence at -50 dBFS (max 3 s) and trailing silence (max 8 s).
+   - Long-soundtrack sources: also removes the Long's built-in 3 s fade-out, measured from
+     the audio (fade start = first 400 ms window 1.5 dB under the preceding level), so joins
+     never have a double fade. Original MP3s keep their own ending.
+   - About 6 s equal-power crossfades (configurable).
+   - Per-song BS.1770 loudness normalisation toward -14 LUFS, with boost capped at +9 dB to keep
+     dynamics.
+   - Look-ahead true-peak limiter: 5 ms look-ahead, 120 ms release, ceiling -2 dBTP before
+     AAC so the delivered file stays at or below -1 dBTP.
+   - 4x oversampled true-peak meter.
+   - Rolling segment mixer, proven sample-identical to the one-shot reference mixer.
+   - Audio is encoded once (MediaRecorder AAC). There are no intermediate encodes.
+3. Audio sources
+   - Uses the original Suno MP3 when it was retained (order 029), otherwise the Long video's
+     AAC soundtrack.
+   - The source used is recorded per track (original-mp3 / long-video-aac) and shown to the VA.
+   - Order 029 retention verified: no existing Long has an MP3, because none was built
+     after 029. Every new Long will.
+   - The VA never downloads or supplies audio.
+4. VA lifecycle (public/srv-studio-v2/srv2-mix.mjs, new; entry button in index.html)
+   Generate Mix -> Select Songs -> Arrange & Preview -> Visual -> Metadata -> Build ->
+   Approve -> Private Upload -> Done.
+   - Month picker.
+   - Server eligibility list showing title, duration, thumbnail, package, YouTube ID, visibility,
+     audio source and the reason for any ineligible song.
+   - "Suggest ~30 min" picks 5-8 songs.
+   - Reorder, remove and replace.
+   - Live total with transitions, chapter timestamps and transition preview through the real
+     crossfade and limiter.
+   - Draft save/restore on the server, with a local fallback.
+   - Primary image chosen from the approved 19-image library.
+   - Editable title, description and tags.
+   - Build with progress, cancel and retry.
+   - Approve; resumable upload; Done screen with release instructions, "I made it public",
+     retry playlist and retry thumbnail.
+   - Full-screen overlay outside #mainContent, so app re-renders cannot interrupt a build.
+5. Mix renderer (dedicated path in srv2-mix.mjs)
+   - 1920x1080 at 30 fps, H.264 + AAC.
+   - Reuses the approved Long scene, grade, motion and thumbnail painter read-only.
+     srv2-render.mjs is unchanged (test-enforced).
+   - Accurate "Now Playing" chapter captions.
+   - 1280x720 JPEG YouTube thumbnail with month badge.
+   - Rolling decode: a song is prepared only when the previous segment starts playing,
+     with at most 2 songs in memory.
+   - Bitrate is planned from duration to stay at or under 500 MB.
+   - Progress, cancel, error reporting and safe retry.
+6. Mix package and data model (app_settings keys, no schema change)
+   - srv_studio_v2_mix: config {enabled, channelId, playlistId|null, maxBytes}.
+   - srv_studio_v2_mixes: mix records.
+   - srv_studio_v2_mix_ledger: an isolated upload ledger.
+   - Each record holds:
+     - Identity: mixId (month plus ordered packages), monthKey, title.
+     - Sources, ordered: package IDs, task IDs, YouTube IDs, titles, audio source,
+       durations, trims, gains.
+     - Timing: crossfade, chapter timestamps.
+     - Content: image, description, tags.
+     - Build and upload: render stats, output file (path, bytes, MIME, thumbnail), upload
+       state, playlist.
+     - Release: planned release slot, public confirmation.
+     - History: audit trail (who, when, action).
+   - Source Long packages are only read, never written (test-enforced).
+   - The Long/Short ledger is untouched.
+7. Private YouTube upload (server action srv_studio_v2_mix in api/ops.js; lib/srvStudioV2MixServer.mjs)
+   - Access:
+     - Requires a signed-in VA (operator) or CEO session.
+     - Behind the publish gate, the V2 flag and the mix flag.
+     - Exact SRV Studio connection with the channel ID verified.
+   - Before upload:
+     - The record is validated again.
+     - Lineage is checked again at upload: every source must still be a public SRV Studio Long
+       with the same YouTube ID.
+     - The stored file's size and MIME type are checked against the record and the 500 MB limit.
+   - Upload:
+     - YouTube resumable session, PRIVATE, containsSyntheticMedia true, never publishAt.
+     - The session URL is sealed with AES-256-GCM and never returned to the browser.
+     - One 64 MiB chunk per server call (fits short function windows). Each call checks the
+       confirmed offset first.
+     - Retries cover resets and 5xx. An expired session is closed and restarted, with no
+       duplicate video.
+     - On completion the video is verified as SRV Studio and PRIVATE before it is recorded.
+   - Duplicates: blocked by the record lock and by the ledger, one mix per month.
+   - Browser to storage: Supabase TUS resumable upload in 6 MB chunks, resuming after interruptions.
+8. Monthly scheduling
+   - Last Saturday of the month, 2:00 PM America/New_York, with DST handled
+     (EDT 18:00Z / EST 19:00Z).
+   - Never collides with the Friday Long or Sunday Short slots.
+   - Shown to the VA as a manual release instruction.
+   - No automatic publishing and no publishAt.
+   - "I made it public" records YouTube's real answer and marks the mix public only when the
+     API confirms it.
+9. Playlist
+   - Mixes go to a playlist named "SRV Studio Mixes" via a configurable playlist ID, which is
+     currently null, so the step shows "not configured" plus a manual step.
+   - When configured: ownership is verified as SRV Studio, a duplicate add is skipped, and
+     failures are recoverable with Retry playlist.
+   - Other channels' playlists are never written.
+   - The Long and Short playlists are unchanged.
+   - No playlist was created.
+10. Defects found and fixed during validation
+   - The thumbnail was generated but not saved. It is now stored and set on the private video.
+   - The Done screen could appear before the record reloaded.
+   - A browser-tab crash came from pre-rendering all segments. The rolling feeder fixed it.
+   - The encoded true peak reached -0.3 dBTP. The ceiling is now -2 dBTP before encode.
+   - The fade trim was modelled instead of measured. It is now measured.
+   - Edited titles were not restored with drafts.
+
+WORK NOT COMPLETED (by order - not authorized in this phase)
+- Production deployment, merge or push.
+- Creating the srv_studio_v2_mix config row in production.
+- Creating the "SRV Studio Mixes" playlist.
+- Any real YouTube upload.
+- First real mix: blocked on catalogue size (5 public Longs, about 19 min; about 26 min needed).
+
+PASS / FAIL / BLOCKED RESULTS
+Requirements (order section 10):
+A Mix Builder UI and lifecycle .................. PASS (Chrome end-to-end, all 9 steps)
+B Eligible song selection ....................... PASS (Shorts, other channels, unbuilt and private excluded with reasons)
+C Public visibility verification ................ PASS (YouTube API status at eligibility and again at upload)
+D Original MP3 and AAC fallback .................. PASS (both used in one mix; source recorded per track)
+E Audio loudness and limiting .................... PASS (-14.2 LUFS, -1.0 dBTP on the delivered file)
+F Crossfades and gap detection ................... PASS (equal-power 6 s; ffmpeg silencedetect: no silence at joins)
+G Duration and chapter accuracy .................. PASS (output duration = plan within 0.6 s; chapters checked against timeline)
+H Cinematic video rendering ...................... PASS (1920x1080 H.264, 0.25% dropped frames)
+I Memory and file-size limits .................... PASS (peak 1.04 GB vs 1.45 GB baseline; 472.8 MB (472,846,525 bytes) <= 500 MB)
+J Metadata and thumbnail generation .............. PASS (title, description, tracklist, links, AI disclosure, tags, 1280x720 JPEG)
+K Source-package immutability .................... PASS (packages byte-identical before and after the full lifecycle)
+L Private-only upload policy ..................... PASS (PRIVATE, no publishAt, channel verified)
+M Large-file resumable upload simulation ......... PASS (473 MB; reset + 503 + storage interruption survived; 9 chunk calls)
+N Duplicate prevention and retry ................. PASS (record lock + ledger; one per month; expired session restart)
+O Monthly scheduling and DST ..................... PASS (EDT/EST months; no Friday/Sunday collisions)
+P Playlist isolation and verification ........... PASS (other-channel playlist refused; no duplicates; not_configured fallback)
+Q Authentication and authorization .............. PASS (VA/CEO session, publish gate, V2 flag, mix flag, exact SRV Studio connection)
+R Existing SRV Studio Long and Short regression .. PASS (V2 suites + Long/Short browser harnesses green; baseline failures unchanged)
+
+Test evidence:
+- 033 server policy: 40/40.
+- 033 audio engine: 20/20.
+- 032 mix: 24/24.
+- 033 Chrome end-to-end (full 30-min build): 26/26.
+- 032 preview harness: 27/27.
+- Browser harnesses: 028 production 8/8, 029 19/19, 030 20/20, all with 0 production requests.
+- SRV Studio V2 suites (023, 030, 031, 031 OAuth, e4 security): all pass.
+- Platform: 8 suites, all pass. Covers publish auth, state, release and client isolation, packages backup, R1, R2.
+- SRV Farsi analytics and playlist OAuth suites: all pass.
+
+Baseline failures (identical on clean main c3a82a7, not caused by 033):
+- 15 SRV guard checks:
+  - avatars 4, isolation 2, lifecycle 4, motion 1, music 1, pilot 1, render 2.
+  - They compare SRV Farsi functions changed by Farsi PRs #63-#65 against an older pin.
+- 8 preservation checks: the same 8 on clean main (CEO-008 shell scope and R2 integrations screens).
+
+Expected change, not a regression:
+- test_srv_farsi_short_publish: 1 check flags _srvEnglishV2Badges. That is the SRV Studio
+  function that now shows the Monthly Mix button (only when the mix flag is on).
+- The Farsi-owned test was not modified.
+
+SECURITY AND BUSINESS ISOLATION
+- Changes are limited to SRV Studio (SRV English).
+- No change to SRV Farsi, NextWave, AI Creation Studio, SMM or shared MMMOS services.
+- Shared files touched, additive only:
+  - api/ops.js: one new SRV-only action, plus one line in the publish-gated list.
+  - public/index.html: SRV Studio mix flag, the overlay opener and one button inside the
+    SRV Studio badge row.
+  - lib/srvStudioV2Playlists.mjs: one appended helper.
+- Feature is OFF unless app_settings.srv_studio_v2_mix.enabled = true (server/admin-write
+  key) AND the V2 flag is on. The server re-checks every operation.
+- No credentials in code or logs. The upload session is sealed.
+- No RLS bypass. No change to existing video visibility.
+- No new vendor or recurring cost. The render runs in the VA's browser.
+
+PRODUCTION CHANGES
+None.
+- No deploy, merge or push.
+- No migration or production DB write.
+- No YouTube or playlist request.
+- Production remains main c3a82a7.
+
+GITHUB BRANCH
+srv-studio/v2-033-mix-builder (local only; not pushed - pushing would create a Vercel
+preview wired to production Supabase)
+
+PULL REQUEST
+None (not authorized in this phase)
+
+COMMIT SHA
+Implementation 18bd6d3 (local, on top of 0dc1386). This report is committed directly after it.
+
+DURABLE REPORT PATH
+docs/srv-studio-v2/SRV_STUDIO_V2_033_CHECKPOINT.txt (report commit on the same branch)
+Local copy: ~/MMM/srv-studio-v2-discovery/srv-studio-v2-033-checkpoint.txt
+
+ARTIFACTS AND EVIDENCE
+Changed and new files:
+- api/ops.js
+- public/index.html
+- lib/srvStudioV2Mix.mjs
+- lib/srvStudioV2MixAudio.mjs (new)
+- lib/srvStudioV2MixServer.mjs (new)
+- lib/srvStudioV2Playlists.mjs
+- public/srv-studio-v2/srv2-mix.mjs (new)
+- public/srv-studio-v2/lib/ (byte-identical copies, test-enforced)
+- tests/srv/test_srv_studio_v2_033_server.mjs (new)
+- tests/srv/test_srv_studio_v2_033_audio.mjs (new)
+- tests/srv/test_srv_studio_v2_032_mix.mjs
+- tests/srv/studio-v2-preview/server.mjs
+- tests/srv/studio-v2-preview/headless-033.mjs (new)
+- this report
+
+Full-length measurements (final run):
+- Output: 1791.3 s (29:51). 472.8 MB (472,846,525 bytes) video plus a 149 KB thumbnail.
+- Render: 1797 s wall time (real time).
+- Frames: 0.25% dropped.
+- Memory: Chrome peak 1.04 GB; max 2 songs decoded.
+- Audio: -14.2 LUFS, -1.0 dBTP; limiter active 199 s.
+- Upload: 9 chunk calls.
+
+Real-file trimming check: "But the photograph lied" Long soundtrack.
+- 0.7 s lead silence removed.
+- 1.0 s trailing silence removed.
+- 3.5 s built-in fade removed.
+
+Storage and operating cost:
+- About 475 MB per mix in srv-assets (12 mixes/year is about 5.7 GB).
+- No new vendor.
+- YouTube quota: about 1,600 units per upload (1 per month).
+- The VA's browser downloads about 1.9 GB of Long MP4s per mix while sources are
+  soundtracks. This falls to about 70 MB once Longs carry retained MP3s.
+
+Database migration plan: none required.
+- Uses three app_settings keys. They are already write-locked to the server/admin path by
+  the existing srv_studio_v2_* M1 policy.
+- Release step: create srv_studio_v2_mix {"enabled":false,"channelId":"UC0nzWQX6AaUqlF5FozNpWPg",
+  "playlistId":null,"maxBytes":524288000} via the admin path. Then set enabled true when
+  authorized.
+
+Feature flag and rollback:
+- Flag OFF by default. To disable, set srv_studio_v2_mix.enabled=false; it takes effect
+  immediately with no deploy.
+- Code rollback: revert to main c3a82a7 via Vercel Git. Mix records and ledger keys are
+  independent and can stay.
+
+REMAINING RISKS
+1. Catalogue: only about 19 minutes of public music today. The first mix needs about 3 more
+   public Longs.
+2. The VA must keep the builder tab in front for about 31 minutes. Background tabs throttle
+   rendering, so a warning is shown and recorded.
+3. The browser downloads about 1.9 GB per mix while sources are Long soundtracks.
+4. Mix size is about 475 MB, close to the 500 MB bucket limit. The bitrate is planned to stay
+   under it, and longer mixes get a lower bitrate.
+5. Pre-existing, not changed by 033:
+   - The srv-assets bucket accepts anon writes to any path. The server re-checks size and
+     path, but bucket hardening is a separate shared-system item.
+   - The SMM rerender hook can clobber #mainContent. The builder avoids it via the overlay.
+6. True-peak margin: the delivered AAC measured -1.0 dBTP in the final run and -1.4 in
+   the previous run. Both meet the target of -1 dBTP or lower, but the final run is exactly at the
+   limit, because the AAC encoder adds about 1 dB above the limiter's -2 dBTP. A -2.5 dBTP ceiling
+   would give margin at the cost of 0.5 dB on peaks only. This is routine tuning, not a CEO item.
+7. The real YouTube resumable endpoint and thumbnails.set have not been exercised live.
+   That is by order, and covered by the acceptance test below.
+
+PROPOSED SAFE PRIVATE-UPLOAD ACCEPTANCE TEST (after CEO release authorization)
+1. Deploy behind the flag (OFF) and confirm no change to the Long/Short flows.
+2. CEO creates "SRV Studio Mixes" in YouTube Studio (SRV Studio). Engineering stores the
+   playlist ID in the config.
+3. Enable the mix flag for one session. Build one real mix when eligible.
+   Alternatively, with CEO approval, run a one-off private acceptance mix that never goes public.
+4. Upload PRIVATE.
+5. Verify on YouTube:
+   - channel, privacy, title, description, chapters, thumbnail, playlist membership
+   - no publishAt
+6. Leave it private, or delete it per CEO instruction.
+7. Turn the flag off if anything deviates.
+
+PM DECISIONS REQUIRED
+- Review this checkpoint and the release package.
+- Decide whether to request CEO release authorization now (flag OFF) or wait until the
+  catalogue reaches about 30 minutes.
+
+CEO DECISIONS REQUIRED
+1. Production release authorization: merge to main, deploy and create the mix config row
+   with enabled=false. Not requested for routine engineering.
+2. Create the "SRV Studio Mixes" playlist on SRV Studio and authorize storing its ID.
+3. Authorize the private-upload acceptance test, and decide whether the test mix may be
+   real (first monthly mix) or a private-only test.
+
+NEXT ACTION
+PM departmental review of this checkpoint. Then decide on the CEO release request.
+
+ACTION OWNER
+ChatGPT / PM (review). Claude Code stands by for release execution on CEO authorization.
+
+END CHECKPOINT SRV-STUDIO-V2-033
