@@ -39,3 +39,20 @@ MMMOS-R2-POST-RELEASE-027 — findings and evidence (2026-10-30)
    tools/engineering-agent/index.js (versioned copy of ~/MMM/engineering-agent/index.js, no secrets).
    Switched-off runner now reads "The automatic runner is switched off in MMMOS (eng_runner is OFF)".
    Verified against production. The live connector on the Mac is unchanged.
+
+6. SECURITY CLEANUP 028 (CEO-authorized, executed 2026-10-30)
+   Removed with `vercel remove` (exact URLs, scope mmmos1406s-projects):
+     dpl_Cf3YjUSkLMxsqTbatnmq5xZ73BRR  5289581  mmm-static-3zo0af4u8
+     dpl_Fa41jbcwyVFE1xaPT7hp6ey6gU12  daa136d  mmm-static-qkhc5ge3m
+     dpl_HSKNmwqL6XwR3vfCwyfYByuv4tMp  fc523ad  mmm-static-bofb8bk56
+   Pre-check: none was production (dpl_FLAa1VzaexmJYMcsdaF1wLneAo6m), the rollback target
+   (dpl_3BExoDybimfC8SkwYTPTo3YnMNpE), or the current R2 branch preview (dpl_GMcMnh1Nd7ZP5eSGTEhPY7augRRZ,
+   eff7a2b, switches respected). None had domain aliases.
+   Verification: all three return 404 for /, /api/mcp and /api/ops. Production 200 on /, list_tasks,
+   roadmap_load. Rollback target still READY and serving (200).
+   Flags: only state_merge_only=true; eng_adviser_connect OFF, eng_runner OFF. 0 advisers,
+   0 runner-eligible tasks, 0 claims. Public key still refused on engineering_tasks and brain_agent_runs.
+   Untouched: CEO-015 branch, runner login controls (not installed), connector wording (dev branch only),
+   business engines, Task 125, .pause-deploy.
+   Remaining risk: Vercel preview protection is OFF project-wide (other branch previews stay public and use
+   the production database).
