@@ -1,0 +1,21 @@
+# SHA-256 manifest — MMMOS-R2-CHECKPOINT-036 (2026-10-31T20:33Z)
+# production main 663d6aa; checkpoint branch mmmos-eng/r2-checkpoint-036 @ 9c3fc83
+f3714ddf581a2ac80e182860abe4b2e2627c68cb443866af02c84e83a4220f64  9c3fc83:docs/platform/R2_CHECKPOINT_036.md
+ffef30375cb1b941048fd1e698ef60ffe5b993b529f098e72f56f303612a8a34  9c3fc83:tools/engineering-runner/pr-opener/github-app-manifest.json
+3aeff5905b2369d2a442ddf012bcaab3e74c48de10ce834866ad96a9ea4761b1  9c3fc83:tools/engineering-runner/probe/evaluate-probe.mjs
+0bffee97e4ad52676c0127aacb5b4b304a2675f5c524de641acf1326e0b0e857  9c3fc83:tools/engineering-runner/release/actions-settings-before-036.json
+05892f14d1109335a5219549097760a87ac30dc69a37e37cb66ef5f4b38eb549  9c3fc83:tools/engineering-runner/release/verify-postrelease-2026-10-31.txt
+006ff4766d421b1fb833dc8cf0e23e72d0d4186a904a81a718ade1377aa6988a  663d6aa:docs/platform/R2_READINESS_035.md
+f28f38eae8970016c5a5e2b0ecdccd90b2d6a31972e7176da1c7dff0da781d32  663d6aa:docs/platform/R2_CONSOLIDATED_034.md
+9f79695d2228b696e3917f5c1cb9bac05cc13b7d046cd50cb48c7cf67149630d  663d6aa:docs/platform/R2_MASTER_033_CHECKPOINT.md
+78c54db4579ae815d30dc767eba57d0111052004a32fdca4fe72318a099125ea  663d6aa:docs/platform/SECURITY_RESOLUTION_032.md
+e6e8d06051d6241f8bbf6427a0bc4e97f04b2fdc2bf6529f86dcf030d9491661  663d6aa:docs/platform/RUNNER_VALIDATION_031.md
+241308c9ba9b4116a5a8dd6f91a3d4d0c7b21bdb5ff5cc184351196c12269ba4  663d6aa:docs/platform/RUNNER_ISOLATION.md
+4cf49168090808aeeaa14e47ff40ae43717430a74d5f833c1e920023b49b6ba6  663d6aa:api/ops.js
+22b54a8397c3009a5b727b9f73cbc599992a5656d033a172bcf3b283279af5c2  663d6aa:public/index.html
+# local (not in git)
+fab60a97136d581ae43d0fe2ea999bcef5dc2a5672112d15876d3e28ca4570e6  local:~/mmmos-runner/.claude/settings.json
+599b86b8ce8337f86f97ed0f290ebfb3a0269b4bc5ae9df6f0a6fec90448bcb5  local:~/MMM/engineering-agent/hooks/pre-push
+93bc02c6a9b3754b06efdefd946ec00c4d0a8ecd3f15f6163906e30c900c9a0e  local:~/MMM/engineering-agent/runner-guard.mjs
+d8b494daae19731d515d758d8a8d37df4326f2b1342692f7e4dbc21cfc30363e  local:~/mmmos-runner-keys/id_ed25519.pub
+5c9033defd219b6020794747ff5a4d09c63c4a6d828f9708a09e35afa39c80a0  local:~/mmmos-runner-keys/known_hosts
