@@ -1,0 +1,24 @@
+{
+  "_comment": "MMMOS Engineering Runner — Claude Code permission deny rules (R2 post-release 027). PREPARED, NOT INSTALLED. Install into the settings of the folder the runner task runs from, only with CEO authorization. Deny rules are enforced by Claude Code itself, not by the model.",
+  "permissions": {
+    "deny": [
+      "Bash(vercel:*)",
+      "Bash(npx vercel:*)",
+      "Bash(npx --yes vercel:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh api:*)",
+      "Bash(gh repo:*)",
+      "Bash(gh secret:*)",
+      "Bash(gh workflow:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --no-verify:*)",
+      "Bash(git config core.hooksPath:*)",
+      "Bash(launchctl:*)",
+      "Bash(bash /Users/abdulmahmady/mmm-static/.auto-deploy.sh:*)",
+      "Edit(/Users/abdulmahmady/mmm-static/**)",
+      "Write(/Users/abdulmahmady/mmm-static/**)"
+    ]
+  }
+}
