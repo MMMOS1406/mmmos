@@ -1,0 +1,126 @@
+START CHECKPOINT 036
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-10-31 (re-verified live for Order 037)
+EXECUTION ORDER: MMMOS-R2-EXECUTION-036 (CEO-approved H1-H7; H8 on hold). Reissued in the standard format by Order 037.
+
+EXECUTIVE SUMMARY:
+The R2 security release is LIVE in production and verified.
+- All 17 anonymous engineering reads now return 401. Before the release, 14 of them returned 200.
+- Production is dpl_8HGJvLgayKZ2ZwKyVh4NQmTUB8s6 on main 663d6aa.
+- GitHub Actions is disabled for MMMOS1406/mmmos.
+- A private staging repo with a staging-only runner deploy key is created and tested.
+- A runner-branch ruleset is applied.
+- The PR-opener code is live but inactive: it refuses until a GitHub App is installed.
+H5 (archive), H6 (probe), H7 (revocations) and the H4 GitHub App are BLOCKED. Each needs one CEO step (listed below). None is claimed complete.
+eng_runner and eng_adviser_connect remain OFF.
+Release 2 is NOT fully integrated: no ChatGPT connection (H8 on hold) and no runner activation.
+
+WORK COMPLETED:
+- H1 security release. PR #69 merged into the PR #68 branch (362f9bc). PR #68 merged to main (54f5e97, production dpl_HaeJiHGogBDSjYXe1YshBXsf65Ym, build log "MMMOS RELEASE GUARD: env=production ref=main").
+  - It requires the CEO session on 6 engineering actions and on all 25 brain_v2 actions (31 total).
+  - It also adds: runner emergency stop for in-flight claims, task-bound runner branches, denied build/install files, artifact SHA-256, lifecycle UI, task-list escaping, and the inactive PR-opener op.
+- PR #67 runner safeguards merged to main (663d6aa, production dpl_8HGJvLgayKZ2ZwKyVh4NQmTUB8s6). Tooling and docs only.
+- H2: GitHub Actions disabled for MMMOS1406/mmmos only. Previous setting saved: {"enabled":true,"allowed_actions":"all"}. The only workflow file is kept on branch decision18-materialize.
+- H3: staging and runner identity.
+  - Private repo MMMOS1406/mmmos-runner-staging: Actions off, issues/wiki off, no webhooks, no Vercel link.
+  - Runner deploy key id 168324989 (ed25519, SHA256:A9hswUzi..., staging-only, write). Private key in ~/mmmos-runner-keys, mode 600, never printed.
+  - GitHub SSH host key pinned after matching GitHub's published fingerprint.
+  - Runner clone: fetch from public main over HTTPS with no credential; push to staging over SSH with that key only; credential.helper empty.
+- H4, part: ruleset 26286416 "runner-app-refs-only" applied. It blocks creation/update/deletion on every branch except runner/** for everyone but repository admins.
+  - It was corrected before applying: the prepared admin bypass would have blocked your own feature-branch pushes.
+  - The App manifest is prepared.
+- H7 preparation: draft PR #70 adds an "Unused agent authorizations" section with Revoke / Revoke all to Engineering Review. It uses the existing CEO-gated revoke action.
+- Order 037: the reporting standard is adopted and saved (docs/platform/CHECKPOINT_REPORTING_STANDARD.md).
+
+WORK NOT COMPLETED:
+- H4: GitHub App "MMMOS Runner PR Opener" not created. It needs the CEO in GitHub's web UI. The opener stays inactive: no ENG_PR_* settings exist.
+- H5: checkpoint archive task not created. Creating and authorizing a task requires the CEO session. The artifact bucket holds 0 objects, and nothing is claimed as stored in MMMOS.
+- H6: runner probe not run. Claude Code's safety classifier refused changing the runner task prompt, and was not worked around.
+- H7: the 12 authorizations are still live. No app control called the CEO-gated revoke; it is now built in draft PR #70, which is not released.
+
+PASS / FAIL / BLOCKED RESULTS:
+- PASS: live anonymous-denial verifier on production. 17/17 reads 401; "/" and OAuth metadata 200 (re-run for Order 037: RESULT PASS).
+- PASS: live worker credential still lists its tasks (eb_worker_list_authorized_tasks).
+- PASS: live runtime errors since release. Only the pre-existing Node url.parse deprecation warning.
+- PASS: main + PR #67 trial before merge. Runner guard-denied 3/3, runner settings 30/30, push hook 12/12, R2 91/91, 033 35/35, PR opener 28/28.
+- PASS: live runner controls. "claude sandbox status" enabled/strict from settings; hooksPath bound; mmmos.runner=true; credential helper empty.
+- PASS: H3 push tests.
+  - runner branch to staging: allowed;
+  - main to staging: refused by the push guard;
+  - the key against MMMOS1406/mmmos: refused by GitHub ("denied to deploy key");
+  - HTTPS without credential: fails;
+  - Vercel built nothing from staging.
+- PASS: ruleset 26286416 owner check. Owner can create and delete a feature branch; main is still PR-only.
+- PASS: PR #70 revoke control 10/10. Platform suites: 43 identical to the pre-release baseline, all new suites green, 1 expected old diff-scope self-check difference. Browser 26/26 and 9/9.
+- NOT RUN: live CEO-session screen check (needs the CEO signed in; covered by stand-in tests).
+- BLOCKED: H4 App, H5, H6, H7 (see WORK NOT COMPLETED).
+
+SECURITY AND BUSINESS ISOLATION:
+- Changed on main: engineering/brain routes in api/ops.js, Engineering UI code in public/index.html, engineering tests, docs, and tools/engineering-runner/.
+- No business-engine code, lib/, migrations or vercel.json changed.
+- Isolation suites unchanged: release 13/13, state 33/33, client e2e 11/11.
+- Task 125 untouched. .pause-deploy present. CEO-015 cdffbbf untouched.
+- No change to NextWave V1, NextWave V2, NextWave Finance Pilot, SRV Farsi, SRV Studio, AI Creation Studio or SMM.
+- Switches: only state_merge_only is ON; eng_runner OFF; eng_adviser_connect OFF. 0 advisers, 0 runner-eligible tasks, 0 leases.
+- Runner task: cwd /Users/abdulmahmady/mmmos-runner, no schedule, never run.
+- No publishing, no uploads, no spending.
+- The runner never uses the CEO's GitHub login. The main repo has 0 deploy keys.
+
+PRODUCTION CHANGES:
+YES (in 036, CEO-approved H1). None since; Order 037 made no production change.
+- 54f5e97 = PR #68 (with #69) -> dpl_HaeJiHGogBDSjYXe1YshBXsf65Ym
+- 663d6aa = PR #67 -> dpl_8HGJvLgayKZ2ZwKyVh4NQmTUB8s6 (current)
+- Database migrations: NONE (last applied is still 20261030211025).
+- Repository settings: Actions disabled; ruleset 26286416 added.
+- New repository: MMMOS1406/mmmos-runner-staging (private, free).
+- Rollback: promote dpl_FLAa1VzaexmJYMcsdaF1wLneAo6m (pre-release production, main c3a82a7).
+
+GITHUB BRANCH: mmmos-eng/r2-checkpoint-036 (checkpoint and evidence); production main 663d6aa
+PULL REQUEST: #68 merged (54f5e97); #69 merged (362f9bc); #67 merged (663d6aa); #70 OPEN draft (H7 revoke control)
+COMMIT SHA: production main 663d6aa; this file = the commit that adds docs/platform/R2_CHECKPOINT_036.txt on mmmos-eng/r2-checkpoint-036
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_036.txt (this report, standard format)
+- docs/platform/R2_CHECKPOINT_036.md (detailed report) and docs/platform/R2_CHECKPOINT_036.sha256 (manifest)
+- docs/platform/CHECKPOINT_REPORTING_STANDARD.md
+- All on branch mmmos-eng/r2-checkpoint-036 (pushed to GitHub).
+- NOT registered in the MMMOS database or artifact storage (H5 blocked).
+
+ARTIFACTS AND EVIDENCE:
+- tools/engineering-runner/release/verify-postrelease-2026-10-31.txt (production verifier output)
+- tools/engineering-runner/release/verify-prerelease-baseline-2026-10-31.txt (on main)
+- tools/engineering-runner/release/actions-settings-before-036.json
+- tools/engineering-runner/pr-opener/github-app-manifest.json
+- tests/platform/test_engineering_revoke_control_036.mjs (on PR #70)
+- Earlier checkpoints 027-035 on main under docs/platform/.
+
+REMAINING RISKS:
+- The 12 old agent authorizations stay live until H7. None has a lease, and the runner path excludes them.
+- The PR opener is inactive until the GitHub App exists, so the runner cannot open PRs.
+- The live in-session runner probe has not run.
+- Preview builds still receive production secrets. This only matters for branches pushed to the canonical repo, which the runner cannot push to.
+- Connector tools eb_create_task / eb_update_task / eb_load_task have been refused since B10 (safe, but broken).
+- Business-engine actions have not had a login audit.
+- Durable copies are in a public repository. They are versioned, but not private.
+
+PM DECISIONS REQUIRED:
+1. Approve releasing draft PR #70: Engineering UI only, using the existing CEO-gated revoke.
+2. Accept H5 and H6 as one-time CEO steps (below), or defer them.
+3. Order a separate read-only authentication audit of the business-engine actions.
+
+CEO DECISIONS REQUIRED:
+1. H5: sign in to MMMOS, paste the prepared decision line into Engineering Brain > Task Generator, then click Authorize (manual) on the new "Checkpoint archive" task.
+2. H6: start one new Claude Code session with folder /Users/abdulmahmady/mmmos-runner and paste the single line from ~/mmmos-runner/reports/RUN_PROBE_031.txt.
+3. H4: create the GitHub App from tools/engineering-runner/pr-opener/github-app-manifest.json, install it on mmmos and mmmos-runner-staging only, and keep its key yourself (never in chat).
+4. H7: after PR #70 is released, open Engineering Review > "Unused agent authorizations (12)" > Revoke all 12 > confirm.
+
+NEXT ACTION: The PM reviews this checkpoint and decides on PR #70 release and the CEO steps. After each CEO step, Claude Code completes and verifies that item, then delivers Checkpoint 038 in this format:
+- H5: archive with server-verified SHA-256 and recovery check.
+- H6: graded probe.
+- H7: revocation verified, worker access intact.
+- H4: App installed, opener still inactive.
+
+ACTION OWNER: ChatGPT PM (review and decisions) -> CEO (four steps above) -> Claude Code (execution, verification, Checkpoint 038)
+
+END CHECKPOINT 036
