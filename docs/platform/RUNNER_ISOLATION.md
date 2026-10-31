@@ -16,7 +16,7 @@ This file is the durable record. It does not depend on any chat history.
 | `~/MMM/engineering-agent/hooks/pre-push` | Installed push guard (= `tools/engineering-runner/hooks/pre-push`) | nobody (outside the sandbox write area) |
 | `~/MMM/engineering-agent/runner-guard.mjs` | Installed path/branch guard (= `tools/engineering-runner/runner-guard.mjs`) | nobody |
 
-Checksums at install (sha256): settings `fab60a97136d581a…`, pre-push `599b86b8ce8337f8…`, runner-guard `163d49d7ec03f6fe…`.
+Checksums at install (sha256): settings `fab60a97136d581a…`, pre-push `599b86b8ce8337f8…`, runner-guard `93bc02c6a9b3754b…` (034; was `163d49d7…` in 030).
 
 The old 029 location `~/mmm-static-wt/runner/` (worktrees of the production checkout) is **retired**:
 worktrees share refs and config with `~/mmm-static`. The 029 `core.hooksPath` on `~/mmm-static` was unset.

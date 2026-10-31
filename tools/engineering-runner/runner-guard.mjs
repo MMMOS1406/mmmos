@@ -15,8 +15,12 @@ import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, sep } from 'node:path';
 
+// Superset of the server's ENG_DENIED_PATHS (api/ops.js); tests/platform/test_runner_guard_denied.mjs checks it.
 const DENIED = ['.auto-deploy.sh', '.auto-deploy.plist', '.last-deploy-md5', '.pause-deploy', 'vercel.json',
-  'package.json', 'package-lock.json', '.gitignore', 'migrations/', '.github/', 'node_modules/', '.vercel/', '.env'];
+  'package.json', 'package-lock.json', '.gitignore', 'migrations/', '.github/', 'node_modules/', '.vercel/', '.env',
+  'vercel.ts', 'vercel.mjs', '.vercelignore', '.npmrc', '.nvmrc', '.node-version', '.yarnrc', '.yarnrc.yml',
+  'yarn.lock', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'bun.lockb', 'bun.lock', 'middleware.js', 'middleware.ts',
+  'tools/engineering-runner/', 'tools/engineering-agent/'];
 const args = process.argv.slice(2);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? String(args[i + 1] || '') : ''; };
 const list = (s) => s.split(',').map(x => x.trim()).filter(Boolean);
