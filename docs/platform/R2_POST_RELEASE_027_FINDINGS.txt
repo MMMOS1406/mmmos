@@ -56,3 +56,18 @@ MMMOS-R2-POST-RELEASE-027 — findings and evidence (2026-10-30)
    business engines, Task 125, .pause-deploy.
    Remaining risk: Vercel preview protection is OFF project-wide (other branch previews stay public and use
    the production database).
+
+7. SECURITY HARDENING 029 (CEO-approved, executed 2026-10-30)
+   A. Vercel preview protection: project prj_02VlGBl7NzDWQWFsQUCchRxc7Hth ssoProtection set to
+      {"deploymentType":"preview"} (Vercel Authentication, preview deployments only; Hobby plan, no cost).
+      Verified: R2 preview pages and APIs -> 302 to Vercel sign-in. Production domain mmm-static.vercel.app,
+      git-main alias, production URL (qgbug8823) and rollback target URL (4ozmc5rlm) -> 200; API auth unchanged.
+      Rollback: vercel api /v9/projects/prj_02VlGBl7NzDWQWFsQUCchRxc7Hth --method PATCH with {"ssoProtection":null}.
+   B. Runner login controls: PR MMMOS1406/mmmos#67 (branch mmmos-eng/runner-login-controls, ca22b38), NOT merged.
+      Installed: GitHub ruleset 26252619 on main (deletion, non_fast_forward);
+                 pre-push guard via git config core.hooksPath=/Users/abdulmahmady/MMM/engineering-agent/hooks.
+      Live test: runner worktree push to main refused; runner/* allowed; normal pushes unaffected; main unchanged.
+      NOT installed (stop condition, shared-system change): Claude Code deny rules — the scheduled runner task has
+      no fixed folder; global install would restrict every Claude session on the Mac.
+      Rollback: git -C ~/mmm-static config --unset core.hooksPath; gh api -X DELETE repos/MMMOS1406/mmmos/rulesets/26252619.
+   Flags: eng_adviser_connect OFF, eng_runner OFF; stale runner claims -> 409 runner_disabled.
