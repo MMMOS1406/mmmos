@@ -1,0 +1,203 @@
+START CHECKPOINT SRV-STUDIO-V2-034
+
+SRV-STUDIO-V2-034
+CONTROLLED PRODUCTION RELEASE CHECKPOINT
+
+PROJECT: SRV Studio V2 - Monthly Mix Builder
+DATE: 2026-10-31
+EXECUTION ORDER: SRV-STUDIO-V2-034 Controlled Production Release - Feature OFF (CEO-approved)
+REPORT TO: ChatGPT / PM
+
+EXECUTIVE SUMMARY
+The Monthly Mix Builder is live in production and DISABLED.
+- Release: PR #71 merged normally into main (14e0f74). Vercel production deployment
+  dpl_HGk9xx8ropQunpdCR48AU1mfKGSL is READY on mmm-static.vercel.app.
+- Config: srv_studio_v2_mix was created with enabled=false and playlistId=null on the
+  SRV Studio channel. It is read back and write-locked to the server/admin path.
+- Nothing operated: no real YouTube upload, no playlist created, no mix record or ledger,
+  no public publishing.
+- Audio correction: the limiter ceiling is now -2.5 dBTP. The delivered file measures
+  -14.2 LUFS and -1.7 dBTP.
+- Regressions: no new failures against current main.
+- Merge blocker: ruleset 26286416 blocked every merge into main. With CEO authorization
+  (option B) it was corrected to exclude the default branch.
+
+1. FINAL IMPLEMENTATION COMMIT
+- Release head: 6aeac2c (branch srv-studio/v2-033-mix-builder).
+  - 18bd6d3: 033 implementation.
+  - 347e7ae: 033 report.
+  - 023b16f: merge of main 663d6aa.
+  - 6aeac2c: 034 limiter and scoped test.
+- Production main: 14e0f74 (merge of PR #71).
+
+2. PULL REQUEST AND MERGE RESULT
+- https://github.com/MMMOS1406/mmmos/pull/71
+- Merged 2026-10-31 23:32:37 UTC as a normal merge (no --admin, no bypass).
+- Checks: Vercel and Vercel Preview Comments passed.
+- Diff: 21 files, all SRV Studio.
+
+Blocker and correction (CEO decision B, given in this session):
+- Ruleset 26286416 "runner-app-refs-only" was created 2026-10-31 16:24 EDT by MMMOS 036.
+  It blocked updates to all refs except runner/**, including main, so every PR merge into
+  main needed an admin bypass.
+- Change: conditions.ref_name.exclude went from ["refs/heads/runner/**"] to
+  ["refs/heads/runner/**", "~DEFAULT_BRANCH"].
+- Unchanged: rules (creation, update, deletion), the admin bypass and the active status.
+- Main remains protected by ruleset 26252619: deletion, non_fast_forward and pull_request.
+- Backup of the prior ruleset: ~/MMM/srv-studio-v2-discovery/ruleset-26286416-before.json.
+- Revert: PUT the prior conditions.
+
+3. PRODUCTION DEPLOYMENT
+- New: dpl_HGk9xx8ropQunpdCR48AU1mfKGSL (main 14e0f74). READY 2026-10-31 23:32:59 UTC.
+  Aliases mmm-static.vercel.app and mmm-static-git-main.
+- Previous: dpl_8HGJvLgayKZ2ZwKyVh4NQmTUB8s6 (main 663d6aa). Rollback candidate.
+
+4. DEPLOYMENT READINESS
+- READY.
+- The served /srv-studio-v2/lib/srvStudioV2MixAudio.mjs contains ceilingDbTP -2.5.
+- /api/ops is running: production log shows "[publish-auth] refused srv_studio_v2_mix
+  without a session" for my unauthenticated read-only probe.
+- Runtime errors since deploy: only the long-standing url.parse deprecation warning,
+  first seen 2026-06-16.
+
+5. FINAL REGRESSION RESULTS (release head vs clean main 663d6aa, mocked YouTube, isolated data)
+Mix Builder suites:
+- A Mix server policy 40/40.
+- B Mix audio 21/21.
+- C Selection and eligibility: included in A, plus 032 mix 24/24.
+Chrome end-to-end (D-I): 26/26, including the full 30-min render.
+- 29:51, 473.9 MB, 0.25% dropped frames, Chrome peak 1.30 GB, max 2 songs decoded.
+- F: 1280x720 thumbnail saved and set.
+- G-H: resumable upload with an injected reset and a 503.
+- I: duplicate refused.
+J-L:
+- J Schedule/DST, K playlist ownership, L auth: included in A (40/40).
+- 032 preview harness 27/27.
+SRV Studio Long and Short regression (M-N): all pass.
+- Browser harnesses: 028 production 8/8, 029 19/19, 030 20/20, with 0 production requests.
+- SRV Studio suites: 023, 030, 031, 031 OAuth and e4 security all pass.
+Isolation (O-R):
+- O SRV Farsi isolation: analytics 17/17, playlist OAuth 23/23.
+- P-R NextWave, AI Creation Studio and SMM: no files touched (diff limited to SRV Studio).
+S Platform: 15 suites pass on both main and the release.
+  - publish auth 92, state 33, release 13, client isolation 11, packages backup 11
+  - engineering R1 87, R1 migration 17, R2 91, auth 034 12, PR opener 035 28,
+    R2 master 033 35, UI lifecycle 033 24
+  - runner guard 3, runner push hook 12, runner settings 30
+Failures present on both clean main and the release, not caused by this release:
+- 15 SRV guard checks: avatars 4, isolation 2, lifecycle 4, motion 1, music 1, pilot 1, render 2.
+- 10 preservation behaviour checks.
+Expected differences, verified:
+- SRV Farsi-owned guard flags _srvEnglishV2Badges. The new SRV Studio test proves the
+  only change is the flag-gated Mix button. The Farsi test was not modified.
+- 2 CEO-008 preservation file-scope checks fail for any non-CEO-008 diff.
+New behavioural regressions: NONE.
+
+6. AUDIO LIMITER MEASUREMENTS (delivered AAC, ffmpeg)
+- Ceiling -2.5 dBTP pre-encode (was -2.0).
+- Integrated loudness -14.2 LUFS (unchanged).
+- True peak -1.7 dBTP (was -1.0).
+- No silence at any join.
+- Limiter active 296 s of 1791 s; deepest gain reduction -10.2 dB on the hottest peak.
+- Limiter smoothness test passes, bounded to the ceiling's needs.
+- Crossfades (6 s equal power) and measured fade trimming unchanged.
+
+7. SECURITY AND ISOLATION EVIDENCE
+- Shared-file changes are additive and SRV Studio only.
+  - api/ops.js: one action. It requires a VA/CEO session and is publish-gated
+    (proven in production log). It uses the exact SRV Studio connection.
+  - index.html: flag-gated SRV Studio additions.
+  - lib/srvStudioV2Playlists.mjs: one helper.
+- Behaviour:
+  - Uploads are private only; publishAt is never used.
+  - The upload session is sealed with AES-256-GCM.
+  - Lineage is re-verified at upload.
+  - Duplicates are blocked by the record lock and the ledger.
+  - Playlist ownership is verified.
+  - Source packages are read-only.
+- No RLS bypass. No schema or storage-policy change. The srv-assets anon-write concern is
+  untouched and still separately gated.
+- Shared GitHub configuration: one CEO-authorized ruleset scope correction (see 2).
+
+8. FEATURE-FLAG CONFIGURATION PROOF
+- Before: key srv_studio_v2_mix absent; srv_studio_v2_mixes and srv_studio_v2_mix_ledger absent.
+- Written via the admin SQL path, insert-if-absent, no other key touched:
+  {"enabled":false,"channelId":"UC0nzWQX6AaUqlF5FozNpWPg","playlistId":null,"maxBytes":524288000}
+  at 2026-10-31 23:32:52 UTC.
+- Read back: enabled=false, playlistId=null, channel UC0nzWQX6AaUqlF5FozNpWPg (SRV Studio).
+- Browser key: can read the row. A PATCH matched 0 rows, so it is write-locked.
+- Activation requires enabled=true AND the V2 flag. The server re-checks both on every
+  operation.
+
+9. SRV STUDIO LONG/SHORT HEALTH
+- srv_studio_v2_production config is unchanged (hash a0537ae9; Long + Short, cap 5).
+- Production ledger unchanged (075487c2).
+- SRV Studio YouTube connection unchanged (scope hash 1fde3137, connected 2026-10-25 01:29).
+- Long/Short code paths unchanged and regression-tested (section 5).
+- VA activity continues: one new SRV English package was created at 22:47 UTC, before the merge.
+
+10. OTHER-ENGINE PRESERVATION
+- Package counts unchanged: SRV Farsi 258, NextWave 54, AI Studio 62.
+- The 3 other YouTube connections are unchanged.
+- No files of other engines in the diff.
+
+11. ZERO REAL YOUTUBE UPLOADS
+Confirmed:
+- No mix records or ledger exist.
+- The production upload ledger is unchanged.
+- All upload testing used the local fake YouTube endpoint.
+
+12. ZERO PLAYLIST CREATIONS
+Confirmed: no playlist API calls were made, and playlistId is null.
+
+13. ROLLBACK READINESS
+- Primary: srv_studio_v2_mix.enabled=false (current state).
+- Code: in Vercel, promote dpl_8HGJvLgayKZ2ZwKyVh4NQmTUB8s6 (main 663d6aa). It contains
+  all MMMOS 036 work.
+- Config row: may stay; it is inert when disabled.
+- Ruleset: revert from the saved JSON if the CEO prefers the prior scope.
+
+14. REMAINING RISKS AND BLOCKERS
+- First real mix is blocked by catalogue size: about 19 min public, about 26 min needed
+  (about 3 more public Longs).
+- Before activation, the CEO must create "SRV Studio Mixes" and the playlist ID must be stored.
+- The real YouTube resumable endpoint and thumbnails.set have not been exercised live.
+  This is by order.
+- Operational: the VA keeps the tab in front about 31 min, and the browser downloads about
+  1.9 GB of Long MP4s per mix.
+- Pre-existing: srv-assets anon writes (separately gated).
+- Ruleset 26286416: the main exclusion should be noted in the MMMOS engineering record so
+  the 036 runner design reflects it. Runner refs and other branches are still restricted.
+
+15. RECOMMENDED NEXT OPERATIONAL CHECKPOINT
+- When 8 or more public SRV Studio Longs exist (about 30 min), PM requests CEO
+  activation. Steps:
+  1. CEO creates "SRV Studio Mixes".
+  2. Engineering stores the playlist ID.
+  3. Enable for one supervised session.
+  4. One PRIVATE acceptance upload with full verification.
+  5. Disable or keep on per CEO.
+- Until then: no action; the feature stays OFF.
+
+PRODUCTION CHANGES
+- Main 14e0f74, deployment dpl_HGk9xx8ropQunpdCR48AU1mfKGSL.
+- app_settings srv_studio_v2_mix (enabled=false).
+- GitHub ruleset 26286416 scope correction (CEO-authorized).
+
+DURABLE REPORT PATH
+docs/srv-studio-v2/SRV_STUDIO_V2_034_CHECKPOINT.txt on branch srv-studio/v2-033-mix-builder
+Local copy: ~/MMM/srv-studio-v2-discovery/srv-studio-v2-034-checkpoint.txt
+
+PM DECISIONS REQUIRED
+- Departmental review of this release.
+
+CEO DECISIONS REQUIRED
+- None now. Activation is a future, separate decision.
+
+NEXT ACTION
+PM review. The feature stays OFF until the catalogue is ready.
+
+ACTION OWNER
+ChatGPT / PM (review). Claude Code on standby.
+
+END CHECKPOINT SRV-STUDIO-V2-034
