@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import { writeFile, readFile, unlink, stat as fsStat, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
+import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
@@ -1121,7 +1121,21 @@ async function engineeringWorkerSubmitTask(req, res) {
 // signed URLs. Folder layout keeps businesses apart:
 //   <business>/<task_id>/<run_id>/<timestamp>-<file name>
 const ENG_ARTIFACTS_BUCKET = 'engineering-artifacts';
-const ENG_ARTIFACT_KINDS = new Set(['video', 'screenshot', 'source', 'checkpoint', 'qa_report', 'other']);
+const ENG_ARTIFACT_KINDS = new Set(['video', 'screenshot', 'source', 'checkpoint', 'qa_report', 'other',
+  'thumbnail', 'script', 'narration']); // 033 — video projects: thumbnails, scripts, narration
+// 033 — artifacts up to this size are hashed by the server itself (SHA-256); larger ones keep the
+// uploader's claimed checksum, marked unverified. Never trusted over the server's own hash.
+const ENG_ARTIFACT_HASH_MAX = 25 * 1024 * 1024;
+async function _engArtifactSha256(objectPath) {
+  try {
+    const enc = objectPath.split('/').map(encodeURIComponent).join('/');
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${ENG_ARTIFACTS_BUCKET}/${enc}`, { headers: _engStorageHeaders() });
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > ENG_ARTIFACT_HASH_MAX) return null;
+    return createHash('sha256').update(buf).digest('hex');
+  } catch (e) { return null; }
+}
 const ENG_BUSINESSES = ['mmmos', 'srv_farsi', 'srv_english', 'srv_studio', 'ai_creation_studio', 'nextwave', 'smm', 'finance'];
 const ENG_ARTIFACT_DOWNLOAD_TTL_S = 60 * 60; // 1 hour
 
@@ -1259,7 +1273,7 @@ async function _engPlatformFlag(flag) {
 }
 const ENG_RUNNER_MAX_CLAIM_MS = 8 * 60 * 60 * 1000; // a claim can be renewed for up to 8 hours
 const ENG_BUSINESS_PATHS = {
-  mmmos: ['tests/platform/', 'tests/preservation/', 'docs/platform/', 'sandbox/', 'tools/engineering-runner/'],
+  mmmos: ['tests/platform/', 'tests/preservation/', 'docs/platform/', 'sandbox/'], // 033: tools/engineering-runner/ removed (the runner never edits its own controls)
   nextwave: ['lib/nextwaveV2', 'nextwave_v2_storyboard_eval/', 'test_nextwave'],
   srv_studio: ['lib/srvStudioV2', 'docs/srv-studio-v2/', 'public/srv-studio-v2/', 'tests/srv/test_srv_studio_v2'],
   srv_farsi: ['lib/srvFarsi', 'tests/srv/test_srv_farsi', 'test_srv_farsi'],
@@ -1267,7 +1281,17 @@ const ENG_BUSINESS_PATHS = {
 };
 const ENG_SHARED_PATHS = ['api/ops.js', 'public/index.html', 'public/shell.js'];
 const ENG_DENIED_PATHS = ['.auto-deploy.sh', '.auto-deploy.plist', '.last-deploy-md5', '.pause-deploy', 'vercel.json',
-  'package.json', 'package-lock.json', '.gitignore', 'migrations/', '.github/', 'node_modules/', '.vercel/', '.env'];
+  'package.json', 'package-lock.json', '.gitignore', 'migrations/', '.github/', 'node_modules/', '.vercel/', '.env',
+  // 033 — anything that changes how Vercel builds or installs (a branch's vercel.json / npm config
+  // overrides project settings and runs during the preview build, which has production secrets).
+  'vercel.ts', 'vercel.mjs', '.vercelignore', '.npmrc', '.nvmrc', '.node-version', '.yarnrc', '.yarnrc.yml',
+  'yarn.lock', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'bun.lockb', 'bun.lock', 'middleware.js', 'middleware.ts',
+  'tools/engineering-runner/', 'tools/engineering-agent/'];
+// 033 — a runner task's branch must carry the task's own id: runner/<first 8 chars of task id>-<anything>.
+function _engRunnerBranchFor(taskId, branch) {
+  const id8 = String(taskId || '').toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 8);
+  return id8.length === 8 && new RegExp(`^runner/${id8}(-[A-Za-z0-9._-]{1,80})?$`).test(String(branch || ''));
+}
 
 function _engRunnerScopeFor(task, sharedRequested) {
   const business = _engTaskBusiness(task);
@@ -1305,6 +1329,88 @@ function _engRunnerPathCheck(paths, runner) {
 // repository name is fixed in server code / env — never taken from the caller.
 const ENG_CANONICAL_REPO = 'MMMOS1406/mmmos';
 function _engGithubRepo() { return process.env.GITHUB_REPO || ENG_CANONICAL_REPO; }
+// ── 035 — PR opener (H4). Fail-closed: without the GitHub App settings nothing is called. ──
+// Settings (production env only, never preview): ENG_RUNNER_STAGING_REPO (owner/name),
+// ENG_PR_APP_ID, ENG_PR_APP_INSTALLATION_ID, ENG_PR_APP_PRIVATE_KEY (PEM).
+const ENG_PR_MAX_FILES = 100, ENG_PR_MAX_BYTES = 20 * 1024 * 1024;
+function _engPrOpenerConfig() {
+  const staging = process.env.ENG_RUNNER_STAGING_REPO || '', appId = process.env.ENG_PR_APP_ID || '';
+  const inst = process.env.ENG_PR_APP_INSTALLATION_ID || '', key = process.env.ENG_PR_APP_PRIVATE_KEY || '';
+  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(staging) || !/^\d+$/.test(appId) || !/^\d+$/.test(inst) || !key.includes('PRIVATE KEY')) return null;
+  if (staging === _engGithubRepo()) return null; // the staging repo must be a different repository
+  return { staging, appId, inst, key: key.replace(/\\n/g, '\n') };
+}
+function _engB64url(b) { return Buffer.from(b).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_'); }
+async function _engPrOpenerToken(cfg) {
+  const now = Math.floor(Date.now() / 1000);
+  const head = _engB64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claims = _engB64url(JSON.stringify({ iat: now - 60, exp: now + 540, iss: cfg.appId }));
+  const sig = _engB64url(createSign('RSA-SHA256').update(`${head}.${claims}`).sign(cfg.key));
+  const repoName = (r) => r.split('/')[1];
+  // The installation token is narrowed at mint time to the two repositories and three permissions.
+  const r = await fetch(`https://api.github.com/app/installations/${cfg.inst}/access_tokens`, {
+    method: 'POST', headers: { 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json', Authorization: `Bearer ${head}.${claims}.${sig}` },
+    body: JSON.stringify({ repositories: [repoName(_engGithubRepo()), repoName(cfg.staging)], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } }),
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => ({}));
+  return typeof j.token === 'string' ? j.token : null;
+}
+// Copies the runner's verified change from the staging repo onto a runner/* branch of the canonical
+// repo and opens a DRAFT pull request. Every step is a plain REST call; there is no merge call.
+async function _engPrOpenerRun({ cfg, token, branch, baseSha, title, summary, runner, taskId }) {
+  const main = _engGithubRepo();
+  const H = { 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const gh = async (method, path, body) => {
+    const r = await fetch(`https://api.github.com${path}`, { method, headers: H, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const j = await r.json().catch(() => ({}));
+    return { status: r.status, ok: r.ok, j };
+  };
+  // 1. The base commit must be on canonical main (main is ahead of it or identical).
+  const base = await gh('GET', `/repos/${main}/compare/${baseSha}...main`);
+  if (!base.ok || !['ahead', 'identical'].includes(base.j.status)) return { code: 409, error: 'base_not_on_main' };
+  // 2. What the runner changed, read from the staging repo.
+  const cmp = await gh('GET', `/repos/${cfg.staging}/compare/${baseSha}...${encodeURIComponent(branch)}`);
+  if (!cmp.ok) return { code: 502, error: `staging_compare_failed_${cmp.status}` };
+  const files = cmp.j.files || [];
+  const commits = cmp.j.commits || [];
+  const stagingHead = commits.length ? commits[commits.length - 1].sha : null;
+  if (!files.length || !stagingHead) return { code: 409, error: 'no_changes' };
+  if (files.length >= 300 || files.length > ENG_PR_MAX_FILES) return { code: 409, error: 'too_many_files' };
+  // 3. Every touched path (including a rename's old path) must pass the business allowlist.
+  const paths = [...new Set(files.flatMap(f => [f.filename, f.previous_filename].filter(Boolean)))];
+  const check = _engRunnerPathCheck(paths, runner);
+  if (!check.ok) return { code: 409, error: 'paths_outside_business_allowlist', denied: check.denied, outside: check.outside };
+  // 4. Copy blobs (content-addressed: the new blob sha must equal the staging sha).
+  const tree = []; let bytes = 0;
+  for (const f of files) {
+    if (f.previous_filename && f.previous_filename !== f.filename) tree.push({ path: f.previous_filename, mode: '100644', type: 'blob', sha: null });
+    if (f.status === 'removed') { tree.push({ path: f.filename, mode: '100644', type: 'blob', sha: null }); continue; }
+    const b = await gh('GET', `/repos/${cfg.staging}/git/blobs/${f.sha}`);
+    if (!b.ok || b.j.encoding !== 'base64' || typeof b.j.content !== 'string') return { code: 502, error: 'staging_blob_read_failed' };
+    bytes += Number(b.j.size) || 0;
+    if (bytes > ENG_PR_MAX_BYTES) return { code: 409, error: 'change_too_large' };
+    const nb = await gh('POST', `/repos/${main}/git/blobs`, { content: b.j.content.replace(/\n/g, ''), encoding: 'base64' });
+    if (!nb.ok || nb.j.sha !== f.sha) return { code: 502, error: 'blob_copy_mismatch' };
+    tree.push({ path: f.filename, mode: '100644', type: 'blob', sha: nb.j.sha });
+  }
+  // 5. Tree on top of the base commit, one commit, the runner/* ref, a draft PR.
+  const bc = await gh('GET', `/repos/${main}/git/commits/${baseSha}`);
+  if (!bc.ok || !bc.j.tree || !bc.j.tree.sha) return { code: 502, error: 'base_commit_read_failed' };
+  const nt = await gh('POST', `/repos/${main}/git/trees`, { base_tree: bc.j.tree.sha, tree });
+  if (!nt.ok) return { code: 502, error: 'tree_create_failed' };
+  const message = `Runner: ${title}\n\nTask ${taskId}\nStaging ${cfg.staging}@${stagingHead}\nOpened by MMMOS from a checked runner branch. MMMOS never merges; the CEO decides.`;
+  const nc = await gh('POST', `/repos/${main}/git/commits`, { message, tree: nt.j.sha, parents: [baseSha] });
+  if (!nc.ok) return { code: 502, error: 'commit_create_failed' };
+  let ref = await gh('POST', `/repos/${main}/git/refs`, { ref: `refs/heads/${branch}`, sha: nc.j.sha });
+  if (ref.status === 422) ref = await gh('PATCH', `/repos/${main}/git/refs/heads/${branch}`, { sha: nc.j.sha, force: true });
+  if (!ref.ok) return { code: 502, error: 'branch_create_failed' };
+  const body = `${summary || ''}\n\n---\nTask \`${taskId}\` · staging \`${cfg.staging}@${String(stagingHead).slice(0, 12)}\` · ${paths.length} file(s), all inside the task's business folders.\nOpened by MMMOS. **MMMOS never merges; the CEO decides.**`;
+  const pr = await gh('POST', `/repos/${main}/pulls`, { title: `Runner: ${title}`, head: branch, base: 'main', body, draft: true, maintainer_can_modify: false });
+  if (!pr.ok || !pr.j.number) return { code: 502, error: 'pull_request_create_failed' };
+  return { code: 200, pr_number: pr.j.number, pr_url: pr.j.html_url, commit_sha: nc.j.sha, staging_head_sha: stagingHead, files: paths };
+}
+
 async function _engGithubBranchFacts(branch, prNumber) {
   const repo = _engGithubRepo(), token = process.env.GITHUB_TOKEN;
   const H = { 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
@@ -1585,6 +1691,7 @@ async function engineeringAdviserGetResults(req, res) {
         entries.push({ group: 'artifacts', item: {
           id: e.id, title, description: c.text, description_truncated: c.truncated, artifact_kind: e.metadata.artifact_kind,
           size_bytes: e.metadata.size_bytes, mime_type: e.metadata.mime_type, created_at: e.created_at,
+          sha256: e.metadata.sha256 || null, sha256_verified: e.metadata.sha256_verified === true,
           download_url: await _engArtifactSignedDownload(e.metadata.object_path),
           download_url_expires_in_s: ENG_ARTIFACT_DOWNLOAD_TTL_S,
         } });
@@ -1926,6 +2033,9 @@ const AGENT_GATEWAY_ALLOWED_OPS = new Set([
   'read_runner_scope',      // the business folders / shared files this task may change
   'renew_lease',            // extend this claim's lease (capped at 8 hours from the claim)
   'submit_pull_request',    // record the task's PR; server checks the branch's files against the allowlist
+  // 035 — MMMOS opens the PR itself from the runner's STAGING branch after checking every file.
+  // It can create runner/* branches and draft PRs; it never merges (no merge call exists in this code).
+  'open_runner_pull_request',
 ]);
 
 // v16.37.0 — Phase 4E: manifest is now DERIVED PER-TASK from that task's own
@@ -2011,7 +2121,7 @@ async function engineeringAgentGateway(req, res) {
       return res.status(400).json({ ok: false, error: 'task_id, agent_run_id, op, and either agent_token or worker_credential are required' });
     }
 
-    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_run_id,claimed_by_worker_id,lease_expires_at,agent_capability_scope,status,ceo_decision,git_commit_sha,release_kind&limit=1`);
+    const rows = await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(task_id)}&select=id,problem,expected_result,affected_engine,priority,packet,agent_authorized_at,agent_authorization_token_hash,agent_authorization_revoked_at,agent_claimed_at,agent_claimed_by,agent_run_id,claimed_by_worker_id,lease_expires_at,agent_capability_scope,status,ceo_decision,git_commit_sha,release_kind&limit=1`);
     const task = rows?.[0];
     if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
 
@@ -2062,6 +2172,13 @@ async function engineeringAgentGateway(req, res) {
     if (!authOk || !claimOk || !leaseOk) {
       await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'verification_failed' });
       return res.status(401).json({ ok: false, error: 'agent_gateway_verification_failed' });
+    }
+
+    // 033 — emergency stop: switching eng_runner OFF stops a runner that already
+    // holds a claim, not only new claims. Manual (worker:) claims are unaffected.
+    if (String(task.agent_claimed_by || '').startsWith('runner:') && !(await _engPlatformFlag('eng_runner'))) {
+      await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'runner_disabled' });
+      return res.status(409).json({ ok: false, error: 'runner_disabled' });
     }
 
     // Capability check — the whitelist is the entire source of truth. Any op
@@ -2227,6 +2344,14 @@ async function engineeringAgentGateway(req, res) {
         await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_not_found', object_path: objectPath });
         return res.status(404).json({ ok: false, error: 'artifact_not_found', message: 'Upload the file first, then register it.' });
       }
+      const claimedSha = body.sha256 === undefined || body.sha256 === null || body.sha256 === '' ? null : String(body.sha256).trim().toLowerCase();
+      if (claimedSha !== null && !/^[0-9a-f]{64}$/.test(claimedSha)) return res.status(400).json({ ok: false, error: 'sha256 must be 64 hex characters' });
+      const serverSha = info.size <= ENG_ARTIFACT_HASH_MAX ? await _engArtifactSha256(objectPath) : null;
+      if (serverSha && claimedSha && serverSha !== claimedSha) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'artifact_checksum_mismatch', object_path: objectPath });
+        return res.status(409).json({ ok: false, error: 'artifact_checksum_mismatch', sha256: serverSha });
+      }
+      const sha256 = serverSha || claimedSha;
       const title = af.values.title || objectPath.split('/').pop();
       const description = af.values.description;
       await sbInsert('brain_evidence', {
@@ -2235,13 +2360,14 @@ async function engineeringAgentGateway(req, res) {
         metadata: {
           bucket: ENG_ARTIFACTS_BUCKET, object_path: objectPath, artifact_kind: kind,
           size_bytes: info.size, mime_type: info.mimetype, business: _engTaskBusiness(task),
+          sha256, sha256_verified: !!serverSha,
           submitted_at: new Date().toISOString(), non_authoritative: true,
         },
         engine: task.affected_engine,
       });
       // C5: successful registrations are audited too, not only denials.
       await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { object_path: objectPath, artifact_kind: kind, size_bytes: info.size });
-      result = { accepted: true, object_path: objectPath, artifact_kind: kind, size_bytes: info.size, mime_type: info.mimetype, note: 'Artifact stored permanently and recorded as non-authoritative evidence.' };
+      result = { accepted: true, object_path: objectPath, artifact_kind: kind, size_bytes: info.size, mime_type: info.mimetype, sha256, sha256_verified: !!serverSha, note: 'Artifact stored permanently and recorded as non-authoritative evidence.' };
     } else if (op === 'read_adviser_followups') {
       const rowsF = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(String(task_id))}&evidence_type=eq.adviser_followup&select=id,title,content,metadata,created_at&order=created_at.asc&limit=100`);
       result = { followups: (rowsF || []).map(f => ({ id: f.id, kind: f.metadata?.kind || 'note', title: f.title, message: f.content, created_at: f.created_at })) };
@@ -2277,6 +2403,55 @@ async function engineeringAgentGateway(req, res) {
       }
       await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { lease_expires_at: newExpiry });
       result = { lease_expires_at: newExpiry };
+    } else if (op === 'open_runner_pull_request') {
+      // 035 (H4) — only for a CEO runner-authorized task held by the runner, on its own task-bound branch.
+      if (!String(task.agent_claimed_by || '').startsWith('runner:') || !_engRunnerEligible(task)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'runner_task_required' });
+        return res.status(403).json({ ok: false, error: 'runner_task_required' });
+      }
+      const branch = typeof body.branch === 'string' ? body.branch.trim() : '';
+      const baseSha = typeof body.base_sha === 'string' ? body.base_sha.trim().toLowerCase() : '';
+      if (!_engRunnerBranchFor(task_id, branch)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'branch_not_bound_to_task', branch });
+        return res.status(400).json({ ok: false, error: 'branch_not_bound_to_task', expected_prefix: `runner/${String(task_id).slice(0, 8)}-` });
+      }
+      if (!/^[0-9a-f]{40}$/.test(baseSha)) return res.status(400).json({ ok: false, error: 'base_sha must be the 40-character commit the branch started from' });
+      const pf = _engFields(body, { title: { max: 200, required: true }, summary: { max: 5000 } });
+      if (pf.error) return res.status(400).json({ ok: false, error: pf.error });
+      const prior = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(String(task_id))}&evidence_type=eq.pull_request&select=url,metadata&limit=20`);
+      const opened = (prior || []).find(e => e.metadata && e.metadata.opened_by === 'mmmos');
+      if (opened) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { idempotent: true, pr_number: opened.metadata.pr_number });
+        result = { accepted: true, already_open: true, pr_number: opened.metadata.pr_number, pr_url: opened.url };
+      } else {
+        const cfg = _engPrOpenerConfig();
+        if (!cfg) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'pr_opener_not_configured' });
+          return res.status(503).json({ ok: false, error: 'pr_opener_not_configured', message: 'The MMMOS PR opener is not installed. Nothing was sent to GitHub.' });
+        }
+        const token = await _engPrOpenerToken(cfg);
+        if (!token) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'pr_opener_token_failed' });
+          return res.status(502).json({ ok: false, error: 'pr_opener_token_failed' });
+        }
+        const out = await _engPrOpenerRun({ cfg, token, branch, baseSha, title: pf.values.title, summary: pf.values.summary, runner: task.agent_capability_scope.runner, taskId: task_id });
+        if (out.code !== 200) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: out.error, denied: out.denied, outside: out.outside });
+          return res.status(out.code).json({ ok: false, error: out.error, ...(out.denied ? { denied: out.denied, outside: out.outside } : {}) });
+        }
+        await sbInsert('brain_evidence', {
+          task_id: String(task_id), run_id: agent_run_id, evidence_type: 'pull_request',
+          title: `Pull request #${out.pr_number} (opened by MMMOS)`,
+          content: `Branch ${branch} · ${out.files.length} file(s) · commit ${out.commit_sha.slice(0, 12)} · staging ${out.staging_head_sha.slice(0, 12)}`,
+          url: out.pr_url,
+          metadata: { pr_number: out.pr_number, branch, head_sha: out.commit_sha, staging_head_sha: out.staging_head_sha, base_sha: baseSha, files: out.files.slice(0, 100),
+            within_allowlist: true, opened_by: 'mmmos', draft: true, submitted_at: new Date().toISOString(), non_authoritative: true },
+          engine: task.affected_engine,
+        });
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { pr_number: out.pr_number, files: out.files.length });
+        result = { accepted: true, pr_number: out.pr_number, pr_url: out.pr_url, commit_sha: out.commit_sha, files: out.files, draft: true,
+          note: 'Draft pull request opened by MMMOS. It is never merged or deployed by MMMOS; the CEO decides.' };
+      }
     } else if (op === 'submit_pull_request') {
       // R2 — the runner's deliverable is a pull request, never a merge. The
       // server reads the branch from GitHub itself (read-only token) and checks
@@ -2288,6 +2463,10 @@ async function engineeringAgentGateway(req, res) {
       const m = repo ? new RegExp(`^https://github\\.com/${repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pull/(\\d{1,7})$`).exec(prUrl) : null;
       if (!m) return res.status(400).json({ ok: false, error: 'pr_url must be a pull request URL in the canonical repository' });
       if (!/^[A-Za-z0-9._\/-]{1,200}$/.test(branch) || branch === 'main' || branch.includes('..')) return res.status(400).json({ ok: false, error: 'branch must be the PR head branch (not main)' });
+      if (_engRunnerEligible(task) && !_engRunnerBranchFor(task_id, branch)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'branch_not_bound_to_task', branch });
+        return res.status(400).json({ ok: false, error: 'branch_not_bound_to_task', expected_prefix: `runner/${String(task_id).slice(0, 8)}-` });
+      }
       const facts = await _engGithubBranchFacts(branch, m[1]);
       if (!facts.ok) {
         await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: facts.error });
@@ -21642,6 +21821,9 @@ export default async function handler(req, res) {
     if (action === 'health_check')               return await healthCheck(req, res); // v13.95.0 Phase 5
 
     // ── v13.97.0 Brain v2 — all routed through ops.js to respect 12-function limit ──
+    // 034 — every Engineering Brain v2 action (agent audit trail, deployments, metrics, learning, and all
+    // brain_v2 writes) required no login. CEO session required; the app sends it with _ceoAuthedFetch.
+    if (typeof action === 'string' && action.startsWith('brain_v2_') && !(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
     if (action === 'brain_v2_get_knowledge')     return await brainV2GetKnowledge(req, res);
     if (action === 'brain_v2_save_knowledge')    return await brainV2SaveKnowledge(req, res);
     if (action === 'brain_v2_get_learning')      return await brainV2GetLearning(req, res);
@@ -22225,6 +22407,9 @@ async function engineeringBrainLoad(req, res) {
 
 // ── Engineering Brain: Seed ──────────────────────────────────────────────────
 async function engineeringBrainSeed(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     // Upsert all seed entries in batches of 25
     const batchSize = 25;
@@ -22255,6 +22440,9 @@ async function engineeringBrainSeed(req, res) {
 
 // ── Engineering Brain: Save (single entry upsert) ──────────────────────────
 async function engineeringBrainSave(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const { section, key, title, data, sort_order } = body;
@@ -22385,6 +22573,9 @@ async function _insertEngineeringTaskRow({ problem, expected_result, affected_en
 }
 
 async function engineeringTaskCreate(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const { problem, expected_result, affected_engine, priority, acceptance_criteria, release_kind, git_commit_sha } = body;
@@ -22409,6 +22600,9 @@ async function engineeringTaskCreate(req, res) {
 // authorization are all untouched by this function). The manual form
 // (engineeringTaskCreate) is completely unchanged and still works standalone.
 async function engineeringTaskCreateFromDecision(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const decisionText = String(body.decision_text || '').trim();
@@ -22570,6 +22764,9 @@ async function engineeringTaskList(req, res) {
 
 // ── Engineering Task: Update ────────────────────────────────────────────────
 async function engineeringTaskUpdate(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const body = req.body || {};
     const { id, status, problem, expected_result, affected_engine, priority, acceptance_criteria, git_commit_sha } = body;
@@ -23420,6 +23617,9 @@ async function productionDeploymentReconcile(req, res) {
 // ── Engineering Task: Home List ────────────────────────────────────────────── v15.0.0
 // Returns compact task list for Home card: ready_for_ceo first, then in_progress + testing. Max 10.
 async function engineeringTaskHomeList(req, res) {
+  // 033 — CEO session required: this action was reachable without any login (read or write of
+  // engineering tasks / engineering notes with the service key). The app sends the session token.
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
     const statuses = ['ready_for_ceo', 'in_progress', 'testing', 'open'];
     const url = `${SUPABASE_URL}/rest/v1/engineering_tasks?status=in.(${statuses.join(',')})&select=id,problem,status,priority,affected_engine,updated_at,ceo_decision,ceo_decision_at&order=updated_at.desc&limit=10`;

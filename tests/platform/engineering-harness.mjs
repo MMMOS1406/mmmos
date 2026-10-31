@@ -68,6 +68,8 @@ globalThis.fetch = async (url, opts = {}) => {
   calls.push({ method, url: u });
   if (u.startsWith('https://api.github.com/')) {
     github.calls.push(u);
+    // 035: a test may install a full GitHub simulation; it sees every GitHub call first.
+    if (typeof github.handler === 'function') { const r = await github.handler(u, method, opts); if (r) return r; }
     const c = /\/repos\/([^/]+\/[^/]+)\/compare\/main\.\.\.(.+)$/.exec(u);
     if (c) { const b = github.branches.get(decodeURIComponent(c[2])); if (!b || c[1] !== GITHUB_REPO) return json(404, {}); return json(200, { ahead_by: b.commits.length, commits: b.commits.map(s => ({ sha: s })), files: b.files.map(f => ({ filename: f })) }); }
     const pl = /\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(u);
@@ -79,6 +81,9 @@ globalThis.fetch = async (url, opts = {}) => {
   const UP = '/storage/v1/object/upload/sign/engineering-artifacts/', SG = '/storage/v1/object/sign/engineering-artifacts/';
   if (path.startsWith(UP)) { const p = decodeURIComponent(path.slice(UP.length)); return json(200, { url: `/object/upload/sign/engineering-artifacts/${p}?token=up` }); }
   if (path === '/storage/v1/object/list/engineering-artifacts') { const { prefix, search } = JSON.parse(opts.body); return json(200, [...storage.objects.entries()].filter(([k]) => k.startsWith(prefix + '/') && k.slice(prefix.length + 1).includes(search)).map(([k, v]) => ({ name: k.slice(prefix.length + 1), id: randomUUID(), metadata: v }))); }
+  // 033: object download (only objects given a body; others behave as missing, like a failed read).
+  const OB = '/storage/v1/object/engineering-artifacts/';
+  if (path.startsWith(OB)) { const p = decodeURIComponent(path.slice(OB.length)); const o = storage.objects.get(p); return o && o.body !== undefined ? new Response(o.body, { status: 200 }) : json(404, {}); }
   if (path.startsWith(SG)) { const p = decodeURIComponent(path.slice(SG.length)); return storage.objects.has(p) ? json(200, { signedURL: `/object/sign/engineering-artifacts/${p}?token=dl` }) : json(404, {}); }
   const m = /^\/rest\/v1\/(\w+)\??(.*)$/.exec(path);
   if (!m) return json(404, { error: 'no route ' + path });

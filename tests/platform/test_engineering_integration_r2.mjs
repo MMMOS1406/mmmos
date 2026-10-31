@@ -105,37 +105,38 @@ const gw = (op, extra = {}) => call('engineering_agent_gateway', { ...W, task_id
 // ════ C. Pull request evidence and the business allowlist ═════════════════
 {
   const url = (n) => `https://github.com/${GITHUB_REPO}/pull/${n}`;
-  github.branches.set('runner/ok', { files: ['docs/platform/runner-proof/proof.txt', 'tests/platform/x.mjs'], commits: ['c'.repeat(40)], pr: { number: 900 } });
-  github.branches.set('runner/outside', { files: ['docs/platform/a.txt', 'lib/nextwaveV2Renderer/core.mjs'], commits: ['d'.repeat(40)], pr: { number: 901 } });
-  github.branches.set('runner/denied', { files: ['vercel.json', '.auto-deploy.sh'], commits: ['e'.repeat(40)], pr: { number: 902 } });
-  github.branches.set('runner/big', { files: Array.from({ length: 300 }, (_, i) => `docs/platform/f${i}.txt`), commits: ['f'.repeat(40)], pr: { number: 903 } });
-  github.branches.set('runner/mismatch', { files: ['docs/platform/a.txt'], commits: ['1'.repeat(40)], pr: { number: 904, head: 'someone-else' } });
-  let r = await gw('submit_pull_request', { pr_url: 'https://github.com/evil/repo/pull/1', branch: 'runner/ok' });
+  const BR = (n) => `runner/${taskId.slice(0, 8)}-${n}`; // 033: runner branches carry the task id
+  github.branches.set(BR('ok'), { files: ['docs/platform/runner-proof/proof.txt', 'tests/platform/x.mjs'], commits: ['c'.repeat(40)], pr: { number: 900 } });
+  github.branches.set(BR('outside'), { files: ['docs/platform/a.txt', 'lib/nextwaveV2Renderer/core.mjs'], commits: ['d'.repeat(40)], pr: { number: 901 } });
+  github.branches.set(BR('denied'), { files: ['vercel.json', '.auto-deploy.sh'], commits: ['e'.repeat(40)], pr: { number: 902 } });
+  github.branches.set(BR('big'), { files: Array.from({ length: 300 }, (_, i) => `docs/platform/f${i}.txt`), commits: ['f'.repeat(40)], pr: { number: 903 } });
+  github.branches.set(BR('mismatch'), { files: ['docs/platform/a.txt'], commits: ['1'.repeat(40)], pr: { number: 904, head: 'someone-else' } });
+  let r = await gw('submit_pull_request', { pr_url: 'https://github.com/evil/repo/pull/1', branch: BR('ok') });
   ok('C1 PR outside the canonical repository refused', r.status === 400);
   r = await gw('submit_pull_request', { pr_url: url(900), branch: 'main' });
   ok('C2 main is never a runner branch', r.status === 400);
-  r = await gw('submit_pull_request', { pr_url: url(900), branch: 'runner/ok' });
+  r = await gw('submit_pull_request', { pr_url: url(900), branch: BR('ok') });
   const ev = db.brain_evidence.find(e => e.evidence_type === 'pull_request' && e.metadata.pr_number === 900);
   ok('C3 a PR inside the business folders is accepted and recorded', r.status === 200 && r.body.within_allowlist === true && r.body.pr_verified === true && ev && ev.url === url(900));
-  r = await gw('submit_pull_request', { pr_url: url(901), branch: 'runner/outside' });
+  r = await gw('submit_pull_request', { pr_url: url(901), branch: BR('outside') });
   ok('C4 a PR touching another business is refused and recorded as a violation', r.status === 409 && r.body.outside.includes('lib/nextwaveV2Renderer/core.mjs') && db.brain_evidence.some(e => e.metadata?.pr_number === 901 && e.metadata.within_allowlist === false));
-  r = await gw('submit_pull_request', { pr_url: url(902), branch: 'runner/denied' });
+  r = await gw('submit_pull_request', { pr_url: url(902), branch: BR('denied') });
   ok('C5 release/deploy files are always denied', r.status === 409 && r.body.denied.includes('vercel.json') && r.body.denied.includes('.auto-deploy.sh'));
-  r = await gw('submit_pull_request', { pr_url: url(903), branch: 'runner/big' });
+  r = await gw('submit_pull_request', { pr_url: url(903), branch: BR('big') });
   ok('C6 a diff too large to check fully is refused', r.status === 409 && r.body.truncated === true);
-  r = await gw('submit_pull_request', { pr_url: url(904), branch: 'runner/mismatch' });
+  r = await gw('submit_pull_request', { pr_url: url(904), branch: BR('mismatch') });
   ok('C7 a PR whose head is a different branch is refused', r.status === 409 && r.body.error === 'pr_does_not_match_branch');
   github.pullsStatus = 403;
-  r = await gw('submit_pull_request', { pr_url: url(900), branch: 'runner/ok' });
+  r = await gw('submit_pull_request', { pr_url: url(900), branch: BR('ok') });
   ok('C8 if the token cannot read PRs, the branch is still verified and the PR marked unverified', r.status === 200 && r.body.pr_verified === false && r.body.within_allowlist === true);
   github.pullsStatus = 200;
   // Previews have no GITHUB_TOKEN: the public canonical repo is checked through GitHub's public API.
   const savedTok = process.env.GITHUB_TOKEN, savedRepo = process.env.GITHUB_REPO;
   delete process.env.GITHUB_TOKEN; delete process.env.GITHUB_REPO;
-  r = await gw('submit_pull_request', { pr_url: url(900), branch: 'runner/ok' });
+  r = await gw('submit_pull_request', { pr_url: url(900), branch: BR('ok') });
   const pubEv = db.brain_evidence.filter(e => e.metadata?.pr_number === 900).at(-1);
   ok('C8b without a token the canonical public repo is still checked (github_auth public)', r.status === 200 && r.body.within_allowlist === true && pubEv.metadata.github_auth === 'public');
-  r = await gw('submit_pull_request', { pr_url: url(901), branch: 'runner/outside' });
+  r = await gw('submit_pull_request', { pr_url: url(901), branch: BR('outside') });
   ok('C8c without a token, files outside the allowlist are still refused', r.status === 409);
   process.env.GITHUB_TOKEN = savedTok; process.env.GITHUB_REPO = savedRepo;
   ok('C9 task status never changes from runner evidence', db.engineering_tasks.find(t => t.id === taskId).status === 'open');
