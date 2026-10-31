@@ -81,6 +81,7 @@ git -C ~/mmmos-runner/repo config core.hooksPath /Users/abdulmahmady/MMM/enginee
 git -C ~/mmmos-runner/repo config mmmos.runner true
 git -C ~/mmmos-runner/repo config user.name "MMMOS Engineering Runner"
 git -C ~/mmmos-runner/repo config user.email runner@mmmos.invalid
+git -C ~/mmmos-runner/repo config credential.helper ""   # 031: never use the owner keychain credential
 cp tools/engineering-runner/hooks/pre-push ~/MMM/engineering-agent/hooks/pre-push && chmod 755 ~/MMM/engineering-agent/hooks/pre-push
 cp tools/engineering-runner/runner-guard.mjs ~/MMM/engineering-agent/runner-guard.mjs
 python3 -c "import json;d=json.load(open('tools/engineering-runner/claude-settings.runner.json'));d.pop('_comment');json.dump(d,open('$HOME/mmmos-runner/.claude/settings.json','w'),indent=2)"
@@ -92,7 +93,7 @@ node tests/platform/test_runner_settings.mjs && node tests/platform/test_runner_
 Scheduled task `mmmos-engineering-runner` (manual only): its folder must be `/Users/abdulmahmady/mmmos-runner`
 and its prompt `tools/engineering-runner/RUNNER_PROMPT.txt`. Step 0 of the prompt stops the run anywhere else.
 
-## 6. Open items at 030 checkpoint
+## 6. Open items at 030 checkpoint (see RUNNER_VALIDATION_031.md for the 031 status)
 
 - **Live Claude enforcement probe** (commit dbe34a4 state): a headless run of the real binary
   (`…/claude-code/2.1.309/…/claude -p … --allowedTools Bash Read Write Edit`) in `~/mmmos-runner`
