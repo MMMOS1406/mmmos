@@ -3,8 +3,9 @@
 // The runner MUST run this before every commit and before every push:
 //   node tools/engineering-runner/runner-guard.mjs --prefixes "docs/platform/,tests/platform/" [--shared "api/ops.js"]
 // It refuses (exit 1) unless ALL of these hold:
-//   1. the current directory is a git worktree under ~/mmm-static-wt/runner/  (never ~/mmm-static,
-//      whose public/ folder is watched by the local auto-deploy job)
+//   1. the current directory is inside the dedicated runner clone ~/mmmos-runner/repo (030) and that
+//      clone is marked `git config mmmos.runner true`  (never ~/mmm-static, whose public/ folder is
+//      watched by the local auto-deploy job)
 //   2. the current branch starts with runner/ and is not main
 //   3. every file changed against origin/main (committed, staged, unstaged or untracked) is inside
 //      the task's allowed prefixes / shared files, and none is on the always-denied list
@@ -24,10 +25,14 @@ const shared = list(opt('--shared'));
 const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim();
 const problems = [];
 
-const runnerRoot = join(homedir(), 'mmm-static-wt', 'runner') + sep;
-const prodCheckout = realpathSync(join(homedir(), 'mmm-static')) + sep;
+const real = (p) => { try { return realpathSync(p) + sep; } catch { return ''; } };
+const runnerRoot = real(join(homedir(), 'mmmos-runner', 'repo'));
+const prodCheckout = real(join(homedir(), 'mmm-static')) || '\0';
 const here = realpathSync(process.cwd()) + sep;
-if (!here.startsWith(runnerRoot)) problems.push(`not inside a runner worktree (${runnerRoot})`);
+if (!runnerRoot || !here.startsWith(runnerRoot)) problems.push('not inside the dedicated runner clone (~/mmmos-runner/repo)');
+let marked = '';
+try { marked = git('config', '--get', 'mmmos.runner'); } catch {}
+if (marked !== 'true') problems.push('this clone is not marked as the runner clone (git config mmmos.runner true)');
 if (here.startsWith(prodCheckout)) problems.push('inside ~/mmm-static — the production working directory is never used by the runner');
 let top = '';
 try { top = realpathSync(git('rev-parse', '--show-toplevel')) + sep; } catch { problems.push('not a git checkout'); }

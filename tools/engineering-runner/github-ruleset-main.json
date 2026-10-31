@@ -1,8 +1,13 @@
 {
-  "_comment": "GitHub repository ruleset for MMMOS1406/mmmos main (R2 post-release 027). PREPARED, NOT APPLIED. Applying it is a CEO decision (POST /repos/MMMOS1406/mmmos/rulesets). It blocks deleting main and force pushes to main; normal PR merges keep working.",
+  "_comment": "GitHub repository ruleset for MMMOS1406/mmmos main. APPLIED as ruleset 26252619 (029: deletion + non_fast_forward; 030: + pull_request with 0 approvals). No bypass actors, so it binds the owner's credential too (proven in 030 with a probe ruleset: GH013). Normal PR merges keep working. Re-apply: gh api -X PUT repos/MMMOS1406/mmmos/rulesets/26252619 --input <this file without _comment>.",
   "name": "protect-main-runner-safety",
   "target": "branch",
   "enforcement": "active",
+  "bypass_actors": [],
   "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
-  "rules": [ { "type": "deletion" }, { "type": "non_fast_forward" } ]
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "pull_request", "parameters": { "required_approving_review_count": 0, "dismiss_stale_reviews_on_push": false, "require_code_owner_review": false, "require_last_push_approval": false, "required_review_thread_resolution": false } }
+  ]
 }

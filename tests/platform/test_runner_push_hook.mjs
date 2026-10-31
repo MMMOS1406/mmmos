@@ -44,6 +44,26 @@ try {
   git(wt, 'reset', '-q', '--hard', 'HEAD~1'); writeFileSync(join(wt, 'c.txt'), 'c'); git(wt, 'add', '.'); git(wt, 'commit', '-qm', 'c');
   r = push(wt, '--force', 'origin', 'runner/task1');
   ok('a force (non-fast-forward) push is refused', r.status !== 0 && /force/.test(r.stderr));
+  // 030: an environment variable can add enforcement but never remove it.
+  git(wt, 'config', 'mmmos.runner', 'true');
+  r = spawnSync('git', ['push', 'origin', 'runner/task1:main'], { cwd: wt, encoding: 'utf8', env: { ...process.env, MMMOS_RUNNER_ROOT: join(base, 'nowhere') } });
+  ok('pointing MMMOS_RUNNER_ROOT elsewhere does not switch the guard off (marked clone)', r.status !== 0 && /refusing to push/.test(r.stderr), r.stderr);
+  // 030: a clone marked mmmos.runner=true is enforced wherever it lives.
+  const marked = join(base, 'elsewhere', 'clone');
+  mkdirSync(dirname(marked), { recursive: true });
+  execFileSync('git', ['clone', '-q', remote, marked]);
+  git(marked, 'config', 'user.email', 't@t'); git(marked, 'config', 'user.name', 't'); git(marked, 'config', 'core.hooksPath', HOOKS);
+  git(marked, 'config', 'mmmos.runner', 'true');
+  writeFileSync(join(marked, 'd.txt'), 'd'); git(marked, 'add', '.'); git(marked, 'commit', '-qm', 'd');
+  r = spawnSync('git', ['push', 'origin', 'HEAD:main'], { cwd: marked, encoding: 'utf8', env: { ...process.env, MMMOS_RUNNER_ROOT: '' } });
+  ok('a clone marked mmmos.runner=true is guarded outside the runner folder', r.status !== 0 && /refusing to push to refs\/heads\/main/.test(r.stderr), r.stderr);
+  r = spawnSync('git', ['push', 'origin', 'HEAD:refs/tags/t1'], { cwd: marked, encoding: 'utf8' });
+  ok('pushing a tag from a runner clone is refused', r.status !== 0 && /refs\/tags\/t1/.test(r.stderr), r.stderr);
+  // KNOWN LIMIT (documented in RUNNER_ISOLATION.md): client-side hooks can be skipped. These pushes go
+  // to a scratch branch of the local test remote; the backstop for main is the GitHub ruleset.
+  const skip = (args, ref) => spawnSync('git', [...args, 'origin', `HEAD:refs/heads/${ref}`], { cwd: marked, encoding: 'utf8' }).status === 0;
+  ok('known limit: --no-verify skips the client hook (server ruleset is the backstop)', skip(['push', '--no-verify'], 'skip1'));
+  ok('known limit: -c core.hooksPath skips the client hook (blocked for the runner by deny rule git -c)', spawnSync('git', ['-c', 'core.hooksPath=/dev/null', 'push', 'origin', 'HEAD:refs/heads/skip2'], { cwd: marked, encoding: 'utf8' }).status === 0);
   const remoteMain = execFileSync('git', ['--git-dir', remote, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
   ok('remote main was never changed by the runner worktree', remoteMain === git(normal, 'rev-parse', 'main'));
 } finally { rmSync(base, { recursive: true, force: true }); }
