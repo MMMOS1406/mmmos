@@ -2,6 +2,7 @@
 // segments (identical to the one-shot reference mixer), app copies of the shared modules, app wiring (flag OFF default).
 //   node tests/srv/test_srv_studio_v2_033_audio.mjs
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as M from '../../lib/srvStudioV2Mix.mjs';
@@ -58,7 +59,7 @@ ok('normalisation gain: toward −14 LUFS; boost capped at +9 dB to keep dynamic
   let worst = 0; for (let i = l3.latency + 1; i < b3[0].length; i++) { const env = (j) => Math.abs(b3[0][j]); } // envelope check via RMS windows
   const rmsDb = (c, s, e) => { let x = 0; for (let i = s; i < e; i++) x += c[i] * c[i]; return 10 * Math.log10(x / (e - s) + 1e-12); };
   const w = 480; let jump = 0; for (let s = l3.latency; s + 2 * w < b3[0].length; s += w) jump = Math.max(jump, Math.abs(rmsDb(b3[0], s + w, s + 2 * w) - rmsDb(b3[0], s, s + w)));
-  ok('limiter: smooth release (no 10 ms step larger than the burst itself, no pumping spikes)', jump < 16 && l3.stats().minGainDb > -7.5, { jumpDb: jump, stats: l3.stats() });
+  ok('limiter: smooth release (no 10 ms step larger than the burst itself, no pumping spikes; never more gain reduction than the ceiling needs + 0.5 dB)', jump < 16 && l3.stats().minGainDb > -(20 * Math.log10(1.8) - (A.SRV2_MIX_AUDIO.ceilingDbTP - 0.15)) - 0.5, { jumpDb: jump, stats: l3.stats() });
 }
 // rolling segments == one-shot reference mixer
 {
@@ -82,6 +83,16 @@ ok('normalisation gain: toward −14 LUFS; boost capped at +9 dB to keep dynamic
   const H = fs.readFileSync(path.join(repo, 'public/index.html'), 'utf8');
   ok('app: the builder is behind app_settings.srv_studio_v2_mix (enabled) AND the V2 flag; default OFF', /function _srvStudioV2MixOn\(\)\{return _srvStudioV2On\(\)&&_srvStudioV2MixFlag\.state==='on';\}/.test(H) && /_srvStudioV2MixFlag=\{state:'unloaded'\}/.test(H) && /c&&c\.enabled===true\?'on':'off'/.test(H));
   ok('app: the entry button is added only when the flag is on; it opens an overlay outside #mainContent', /if\(_srvStudioV2MixOn\(\)\)b\.push\('<button onclick="_srvEnglishV2MixOpen\(\)"/.test(H) && /document\.body\.appendChild\(ov\)/.test(H));
+  // SRV Studio-scoped check for the one expected UI change: _srvEnglishV2Badges differs from main only by the
+  // flag-gated Monthly Mix button (the SRV Farsi-owned guard flags this function by name; it is left unchanged).
+  {
+    const fnOf = (src) => { const i = src.indexOf('\nfunction _srvEnglishV2Badges('); if (i < 0) return null; const j = src.indexOf('\nfunction ', i + 10); return src.slice(i, j); };
+    let mainSrc = null; try { mainSrc = execFileSync('git', ['-C', repo, 'show', 'origin/main:public/index.html'], { encoding: 'utf8', maxBuffer: 1 << 28 }); } catch (_) {}
+    const cur = fnOf(H), base = mainSrc && fnOf(mainSrc);
+    const added = cur && base ? cur.split('\n').filter((l) => !base.split('\n').includes(l)) : null;
+    const removed = cur && base ? base.split('\n').filter((l) => !cur.split('\n').includes(l)) : null;
+    ok('SRV Studio badges: the only change from main is the Monthly Mix button, added only when _srvStudioV2MixOn()', added && removed && removed.length === 0 && added.length === 1 && /^\s*if\(_srvStudioV2MixOn\(\)\)b\.push\('<button onclick="_srvEnglishV2MixOpen\(\)"/.test(added[0]), { added, removed });
+  }
   const MX = fs.readFileSync(path.join(repo, 'public/srv-studio-v2/srv2-mix.mjs'), 'utf8');
   ok('builder module: no publishAt, never sets visibility, uses the server action for every upload step', !/publishAt|privacyStatus\s*:\s*'public'/.test(MX) && /op: 'upload_init'/.test(MX) && /op: 'upload_chunk'/.test(MX));
   ok('builder module: the production Long renderer is reused read-only (srv2-render.mjs not modified for mixes)', !/mix/i.test(fs.readFileSync(path.join(repo, 'public/srv-studio-v2/srv2-render.mjs'), 'utf8').replace(/remix/gi, '')));

@@ -12,7 +12,7 @@ export const SRV2_MIX_AUDIO = Object.freeze({
   maxTailTrimSec: 8,        // never trim more than this off the end (silence + fade)
   builtInFadeSec: { 'long-video-aac': 3, 'original-mp3': 0 }, // the Long renderer fades its last 3 s
   maxBoostDb: 9,            // loudness normalisation never adds more than this
-  ceilingDbTP: -2,          // limit to −2 dBTP before lossy (AAC) encoding so the delivered file stays ≤ −1 dBTP
+  ceilingDbTP: -2.5,          // limit to −2.5 dBTP before lossy (AAC) encoding (034: margin for the encoder) so the delivered file stays ≤ −1 dBTP
   limiter: { lookaheadMs: 5, releaseMs: 120 },
 });
 const dbToLin = (db) => Math.pow(10, db / 20);
