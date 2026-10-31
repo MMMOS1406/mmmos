@@ -68,6 +68,8 @@ globalThis.fetch = async (url, opts = {}) => {
   calls.push({ method, url: u });
   if (u.startsWith('https://api.github.com/')) {
     github.calls.push(u);
+    // 035: a test may install a full GitHub simulation; it sees every GitHub call first.
+    if (typeof github.handler === 'function') { const r = await github.handler(u, method, opts); if (r) return r; }
     const c = /\/repos\/([^/]+\/[^/]+)\/compare\/main\.\.\.(.+)$/.exec(u);
     if (c) { const b = github.branches.get(decodeURIComponent(c[2])); if (!b || c[1] !== GITHUB_REPO) return json(404, {}); return json(200, { ahead_by: b.commits.length, commits: b.commits.map(s => ({ sha: s })), files: b.files.map(f => ({ filename: f })) }); }
     const pl = /\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(u);

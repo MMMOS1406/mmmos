@@ -1,0 +1,13 @@
+{
+  "_comment": "PREPARED (035, H3). Nothing here is created until the CEO approves H3. Free (GitHub private repo, deploy key).",
+  "staging_repository": { "name": "MMMOS1406/mmmos-runner-staging", "visibility": "private", "actions": "disabled at creation", "vercel": "never connected", "rulesets": "none needed (runner/* only, nothing deploys from it)" },
+  "runner_identity": { "type": "SSH deploy key (ed25519)", "repository": "MMMOS1406/mmmos-runner-staging only", "read_only": false,
+    "key_location": "~/mmmos-runner-keys/ (outside the runner sandbox write area; mode 600)",
+    "cannot": ["call the GitHub API (deploy keys have no API scope)", "touch MMMOS1406/mmmos", "merge", "change settings or secrets", "deploy (staging is not connected to Vercel)"] },
+  "runner_clone": { "fetch": "https://github.com/MMMOS1406/mmmos.git (public, no credential)", "push": "git@github.com:MMMOS1406/mmmos-runner-staging.git",
+    "git_config": { "credential.helper": "", "core.sshCommand": "ssh -i ~/mmmos-runner-keys/id_ed25519 -o IdentitiesOnly=yes -o IdentityAgent=none" } },
+  "sandbox_network": { "allowedDomains": ["github.com"], "note": "SSH through the sandbox proxy is an implementation test; fallback ssh.github.com:443" },
+  "promotion": "Only the MMMOS PR opener (H4) copies a checked runner branch into MMMOS1406/mmmos as a draft PR.",
+  "tests_at_implementation": ["push runner/<id8>-x to staging: OK", "push to MMMOS1406/mmmos with the key: refused", "API call with the key: impossible", "Vercel shows no deployment for staging pushes"],
+  "rollback": ["gh api -X DELETE repos/MMMOS1406/mmmos-runner-staging/keys/<id>", "rm -rf ~/mmmos-runner-keys", "git -C ~/mmmos-runner/repo remote set-url --push origin https://github.com/MMMOS1406/mmmos.git", "delete the staging repo"]
+}

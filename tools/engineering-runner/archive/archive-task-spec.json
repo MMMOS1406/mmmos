@@ -1,0 +1,11 @@
+{
+  "_comment": "PREPARED (035, H5). The one MMMOS engineering task the CEO authorizes for checkpoint archiving. Created only by the CEO (engineering_task_create now needs the CEO session) or by the adviser once connected. Manual worker path only: runner_eligible must stay false.",
+  "problem": "Checkpoint archive: store MMMOS engineering checkpoint reports and their SHA-256 manifests as permanent private artifacts.",
+  "expected_result": "Each checkpoint file is stored in engineering-artifacts under this task, registered with a server-verified SHA-256, and readable from CEO Engineering Review.",
+  "affected_engine": "MMMOS",
+  "priority": "P3",
+  "business": "mmmos",
+  "authorization_boundary": "Artifacts only: create_artifact_upload, submit_artifact, submit_evidence. No repository changes, no file writes, no runner, no deployment, no other task. Files: docs/platform/*CHECKPOINT*.md, docs/platform/R2_*.md and their .sha256 manifests.",
+  "ceo_authorization": { "runner_eligible": false, "mode": "manual worker" },
+  "recovery_check": "After upload: every file STORED and server-verified; CEO opens Engineering Review and downloads one file; its SHA-256 equals the manifest."
+}
