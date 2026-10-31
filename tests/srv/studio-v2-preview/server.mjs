@@ -270,6 +270,14 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       if (u.pathname === '/__stub/dryrun') return send(res, 200, { count: dryRuns.length, dryRuns });
       if (u.pathname === '/__stub/pilot') { let c = null, l = null; try { c = JSON.parse(store.settings.srv_studio_v2_pilot || 'null'); } catch {} try { l = JSON.parse(store.settings.srv_studio_v2_pilot_ledger || 'null'); } catch {} return send(res, 200, { config: c, ledger: l }); }
       if (u.pathname === '/studio/render') return send(res, 200, fs.readFileSync(path.join(HERE, 'render-studio.html')), { 'Content-Type': 'text/html; charset=utf-8' });
+      // SRV-STUDIO-V2-032 — Monthly Mix Builder preview (isolated): page, shared pure modules, browser module, catalog
+      // snapshot, and optional real song audio from a local folder (SRV2_MIX_REAL_DIR; nothing is fetched from production).
+      if (u.pathname === '/studio/mix') return send(res, 200, fs.readFileSync(path.join(HERE, 'mix-studio.html')), { 'Content-Type': 'text/html; charset=utf-8' });
+      { const lm = u.pathname.match(/^\/__v2\/lib\/(srvStudioV2Mix|srvStudioV2Schedule)\.mjs$/); if (lm) return send(res, 200, fs.readFileSync(path.join(HERE, '../../../lib/' + lm[1] + '.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' }); }
+      if (u.pathname === '/__v2/lib/srvStudioV2Avatars.mjs') return send(res, 200, fs.readFileSync(path.join(HERE, '../../../lib/srvStudioV2Avatars.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' });
+      if (u.pathname === '/__v2/mix-preview.mjs') return send(res, 200, fs.readFileSync(path.join(HERE, 'srv2-mix-preview.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' });
+      if (u.pathname === '/__v2/mix-catalog.json') return send(res, 200, JSON.parse(fs.readFileSync(path.join(HERE, 'mix-catalog.json'), 'utf8')));
+      { const rm = u.pathname.match(/^\/__v2\/mix-real\/([a-z0-9_-]+)\.mp4$/); if (rm) { const dir = process.env.SRV2_MIX_REAL_DIR; const f = dir && path.join(dir, rm[1] + '.mp4'); if (!f || !fs.existsSync(f)) return send(res, 404, { error: 'no local real-audio copy' }); return sendFile(req, res, f, 'video/mp4'); } }
       { const cm = u.pathname.match(/^\/__v2\/compare\/(long|short)-(A|B)\.mp4$/); if (cm) { const f = path.join(COMPARE_DIR, COMPARE[cm[1] + '-' + cm[2]]); if (!fs.existsSync(f)) return send(res, 404, { error: 'comparison video not rendered on this computer' }); return sendFile(req, res, f, 'video/mp4'); } }
       if (u.pathname === '/__v2/test-audio.mp3') { if (!TEST_AUDIO || !fs.existsSync(TEST_AUDIO)) return send(res, 404, { error: 'no sample MP3 on this computer' }); return sendFile(req, res, TEST_AUDIO, 'audio/mpeg'); }
       if (u.pathname === '/__stub/save-render' && req.method === 'POST') {
