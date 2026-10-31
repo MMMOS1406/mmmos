@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const list = (src, name) => { const m = new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`).exec(src); return m ? [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]) : null; };
+const list = (src, name) => { const m = new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`).exec(src); return m ? [...m[1].replace(/\/\/[^\n]*/g, '').matchAll(/'([^']+)'/g)].map(x => x[1]) : null; };
 const server = list(readFileSync(join(root, 'api', 'ops.js'), 'utf8'), 'ENG_DENIED_PATHS');
 const guard = list(readFileSync(join(root, 'tools', 'engineering-runner', 'runner-guard.mjs'), 'utf8'), 'DENIED');
 let pass = 0, fail = 0;
