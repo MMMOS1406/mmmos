@@ -9,8 +9,13 @@
 # It is defence in depth: a Claude Code deny rule also blocks --no-verify.
 ROOT="${MMMOS_RUNNER_ROOT:-$HOME/mmm-static-wt/runner}"
 TOP="$(git rev-parse --show-toplevel 2>/dev/null)"
-case "$(cd "$TOP" 2>/dev/null && pwd -P)/" in
-  "$(cd "$ROOT" 2>/dev/null && pwd -P)"/*) ;;
+ROOT_REAL="$(cd "$ROOT" 2>/dev/null && pwd -P)"
+TOP_REAL="$(cd "$TOP" 2>/dev/null && pwd -P)"
+# No runner folder (or no checkout) → nothing to enforce. An empty ROOT_REAL must
+# never turn into a pattern that matches every path.
+[ -n "$ROOT_REAL" ] && [ -n "$TOP_REAL" ] || exit 0
+case "$TOP_REAL/" in
+  "$ROOT_REAL"/*) ;;
   *) exit 0 ;;
 esac
 ZERO=0000000000000000000000000000000000000000

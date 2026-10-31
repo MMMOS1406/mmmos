@@ -1,0 +1,8 @@
+{
+  "_comment": "GitHub repository ruleset for MMMOS1406/mmmos main (R2 post-release 027). PREPARED, NOT APPLIED. Applying it is a CEO decision (POST /repos/MMMOS1406/mmmos/rulesets). It blocks deleting main and force pushes to main; normal PR merges keep working.",
+  "name": "protect-main-runner-safety",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [ { "type": "deletion" }, { "type": "non_fast_forward" } ]
+}

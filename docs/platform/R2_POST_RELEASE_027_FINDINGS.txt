@@ -1,11 +1,41 @@
-MMMOS-R2-POST-RELEASE-027 — findings (partial; session stopped at usage limit)
-Production: dpl_FLAa1VzaexmJYMcsdaF1wLneAo6m, main c3a82a7. B10 + B10b applied. eng_adviser_connect / eng_runner OFF (no rows). Rollback: dpl_3BExoDybimfC8SkwYTPTo3YnMNpE.
-Old R2 previews (public, production DB, NO switches — approval PIN form AND runner mode active):
-  dpl_Cf3YjUSkLMxsqTbatnmq5xZ73BRR (5289581, mmm-static-3zo0af4u8)
-  dpl_Fa41jbcwyVFE1xaPT7hp6ey6gU12 (daa136d, mmm-static-qkhc5ge3m)
-  dpl_HSKNmwqL6XwR3vfCwyfYByuv4tMp (fc523ad, mmm-static-bofb8bk56)
-  Recommendation: remove all three (needs authorization) and/or enable Vercel preview protection.
-CEO-015 branch (local only, cdffbbf): 107 behind main, base 05ea7a0 (pre-R1). Trial merge clean (overlap: tests/preservation/stub-server.mjs).
-  No engineering reads touched. Do NOT push as-is (old server code would get a public preview on the prod DB); rebase onto c3a82a7 first, re-run preservation.
-Runner login controls: tools/engineering-runner/hooks/pre-push (prepared, NOT installed, NOT yet tested).
-NOT DONE: hook tests, Claude Code deny-rule file, GitHub ruleset JSON, connector wording fix.
+MMMOS-R2-POST-RELEASE-027 — findings and evidence (2026-10-30)
+
+1. PRODUCTION CHECKPOINT (re-verified)
+   Deployment dpl_FLAa1VzaexmJYMcsdaF1wLneAo6m, main c3a82a7 (PR #66). Release guard: env=production ref=main.
+   Migrations applied: b10_engineering_tasks_private (20261030211003), b10b_brain_agent_runs_private (20261030211025).
+   Public key refused on engineering_tasks and brain_agent_runs; server reads normally.
+   Switches: eng_adviser_connect OFF, eng_runner OFF (no rows). 0 advisers, 0 runner-eligible, 12 stale tasks untouched.
+   Tests at release: full suite 41/44 = main (3 expected), R2 91/91, R1 87/87, R1 migration 17/17, B10 13/13,
+   browser 9/9 + 26/26, preservation harness = main except the intended B10 request change.
+   Rollback: promote dpl_3BExoDybimfC8SkwYTPTo3YnMNpE; then B10b/B10 rollback scripts.
+
+2. OLDER RELEASE 2 PREVIEWS (public, production database, NO switches)
+   dpl_Cf3YjUSkLMxsqTbatnmq5xZ73BRR  5289581  mmm-static-3zo0af4u8-mmmos1406s-projects.vercel.app
+   dpl_Fa41jbcwyVFE1xaPT7hp6ey6gU12  daa136d  mmm-static-qkhc5ge3m-mmmos1406s-projects.vercel.app
+   dpl_HSKNmwqL6XwR3vfCwyfYByuv4tMp  fc523ad  mmm-static-bofb8bk56-mmmos1406s-projects.vercel.app
+   Exposure (verified): ChatGPT approval form active (CEO PIN creates an adviser login in production);
+   runner mode active (listing answered mode=runner); CEO "Authorize for Runner" works without the switch;
+   pre-correction Workers panel (attribute break-out). All still need the CEO PIN, a CEO session or the worker key.
+   Recommendation: remove all three (vercel remove <url>), and enable Vercel Deployment Protection for previews.
+   Needs separate authorization. Nothing deleted or changed.
+
+3. RUNNER LOGIN CONTROLS (prepared, NOT installed, runner NOT activated)
+   tools/engineering-runner/hooks/pre-push — in runner worktrees only: push only runner/*, no deletes, no force pushes.
+     Test: tests/platform/test_runner_push_hook.mjs 7/7 (found and fixed a bug: with no runner folder the guard
+     matched every checkout).
+   tools/engineering-runner/claude-settings.runner.json — Claude Code deny rules (vercel, gh pr merge, gh api,
+     push to main, force/--no-verify pushes, hooksPath changes, launchctl, .auto-deploy.sh, edits in ~/mmm-static).
+   tools/engineering-runner/github-ruleset-main.json — main: no deletion, no force push.
+   Install order when authorized: ruleset -> deny rules in the runner task's folder -> core.hooksPath for runner
+   worktrees -> only then consider eng_runner.
+
+4. CEO-015 BRANCH (ceo-015-srv-farsi-workspace @ cdffbbf, local only)
+   107 commits behind main, base 05ea7a0 (before Release 1). Trial merge with main: clean.
+   Overlap: tests/preservation/stub-server.mjs only. Does not touch index.html or engineering reads (no B10 issue).
+   Required: rebase onto c3a82a7, re-record/re-run the preservation baseline, then push. Do NOT push as-is:
+   its preview would run pre-Release-1 server code against the production database.
+
+5. CONNECTOR WORDING
+   tools/engineering-agent/index.js (versioned copy of ~/MMM/engineering-agent/index.js, no secrets).
+   Switched-off runner now reads "The automatic runner is switched off in MMMOS (eng_runner is OFF)".
+   Verified against production. The live connector on the Mac is unchanged.
