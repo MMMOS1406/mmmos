@@ -1,4 +1,5 @@
 MMMOS-R2-RUNNER-VALIDATION-031 — live enforcement probe (owner-started)
+WITHDRAWN 2026-10-31 by order 032 (the CEO should not have to start test sessions). Kept for the record; see docs/platform/SECURITY_RESOLUTION_032.md.
 
 Why you: Claude Code's safety check refuses to let one Claude session launch another session that tries
 blocked actions on purpose. A session YOU start in this folder is the real runner execution environment.

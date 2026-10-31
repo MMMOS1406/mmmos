@@ -1,0 +1,9 @@
+{
+  "_comment": "PREPARED, NOT APPLIED (032) — only needed if the PR-opener App is approved. Every branch except runner/** may be created, updated or deleted only by repository admins, and admins only through a pull request (bypass_mode pull_request). Effect: the App (Contents: write) can write runner/** only and can never merge into main; the owner still merges PRs (gh pr merge may need --admin). Needs separate authorization (changes how every session merges).",
+  "name": "runner-app-refs-only",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [ { "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "pull_request" } ],
+  "conditions": { "ref_name": { "include": ["~ALL"], "exclude": ["refs/heads/runner/**"] } },
+  "rules": [ { "type": "creation" }, { "type": "update" }, { "type": "deletion" } ]
+}

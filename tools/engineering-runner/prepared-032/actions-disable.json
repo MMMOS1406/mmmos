@@ -1,0 +1,4 @@
+{
+  "_comment": "PREPARED, NOT APPLIED (032). Minimum safe change: turn GitHub Actions off for MMMOS1406/mmmos only (repository scope, not account-wide). Nothing on main or any live branch uses Actions; the only workflow is on the stale branch decision18-materialize (Aug 2026, ran once, failed). Apply: gh api -X PUT repos/MMMOS1406/mmmos/actions/permissions --input <this file without _comment>. Rollback: same call with {\"enabled\":true,\"allowed_actions\":\"all\"}. Needs separate authorization (repository automation setting).",
+  "enabled": false
+}
