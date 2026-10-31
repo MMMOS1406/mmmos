@@ -1,0 +1,17 @@
+# SHA-256 manifest — MMMOS-R2-READINESS-035 (2026-10-31T16:29Z)
+# branch mmmos-eng/r2-readiness-035 @ eba68ad (files changed vs PR #68 head 77811dc)
+4cf49168090808aeeaa14e47ff40ae43717430a74d5f833c1e920023b49b6ba6  eba68ad:api/ops.js
+d45584ddaab30844e074a5b1fd89473459d01105f6f444b9194f942722e79ff8  eba68ad:docs/platform/NEXTWAVE_FINANCE_PILOT_DESIGN.md
+006ff4766d421b1fb833dc8cf0e23e72d0d4186a904a81a718ade1377aa6988a  eba68ad:docs/platform/R2_READINESS_035.md
+ded40c593cc2e04ff83cfe750a68cdd92f1b6f310f002973d7939a6242f7842f  eba68ad:tests/platform/engineering-harness.mjs
+7ef20948930637ae8e1772bad8d8c41e85cbdb78aa875b642cf8eb3476054633  eba68ad:tests/platform/test_engineering_pr_opener_035.mjs
+afb60f20383c9440d9811ce8bd720dd13709a91d8d1f037f913c62d85a416c60  eba68ad:tools/engineering-runner/archive/archive-checkpoint.mjs
+24f2c589d5497ad4ea98cd876449e839c43109a021afcbdd857f6ac62b645d2e  eba68ad:tools/engineering-runner/archive/archive-task-spec.json
+62e19f36aa89b5cc3caacff7895f3d09688a0b8b0f7985172c98ac1d7c238640  eba68ad:tools/engineering-runner/probe/RUNNER_PROBE_RUN_PROMPT.txt
+ae174fb11b56d99623af1db1ccc4e5c54edfa8256e8ec0ee7ec60135201a33b1  eba68ad:tools/engineering-runner/probe/evaluate-probe.mjs
+45b44c74617bf34a3371095f9627e656c7dd58905a7909ce090e7ba30a165013  eba68ad:tools/engineering-runner/release/ACTIONS_DISABLE_PLAN.md
+bb3cd5499474153eac4ba27eadd6b8a8c3fdb56b191eb9b8a63cf9dfff509d2b  eba68ad:tools/engineering-runner/release/R2_RELEASE_RUNBOOK.md
+66daa2c6b5dc0b0d167f8e7341f1079c5aad22179cef4f8393be1587639ff1db  eba68ad:tools/engineering-runner/release/verify-anonymous-denied.sh
+80e2bf3380ca09698d3a99fe86230a0bb840f547c273011de64afbccc9c70f29  eba68ad:tools/engineering-runner/release/verify-prerelease-baseline-2026-10-31.txt
+5dfa60c146b2417b5d44751cecae55a9c18162bc799ed6c380ff634a8caf69c9  eba68ad:tools/engineering-runner/staging/staging-config.json
+# PR #68 head 77811dc and PR #67 head a25dc08: see docs/platform/R2_CONSOLIDATED_034.sha256

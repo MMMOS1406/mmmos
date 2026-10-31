@@ -1,0 +1,20 @@
+FAIL engineering_task_home_list 200
+FAIL brain_v2_get_agent_runs 200
+FAIL brain_v2_overview 200
+FAIL brain_v2_get_metrics 200
+FAIL brain_v2_get_deployments 200
+FAIL brain_v2_get_learning 200
+FAIL brain_v2_get_health 200
+FAIL brain_v2_get_validations 200
+FAIL brain_v2_get_knowledge 200
+FAIL brain_v2_get_decisions 200
+FAIL brain_v2_get_experiments 200
+FAIL brain_v2_get_adrs 200
+FAIL brain_v2_autonomous_status 200
+FAIL brain_v2_recommend_next 200
+PASS engineering_task_list 401
+PASS engineering_task_review_packet 401
+PASS engineering_agent_runs_list 401
+PASS / 200
+PASS /.well-known/oauth-authorization-server 200
+RESULT FAIL
