@@ -21655,6 +21655,9 @@ export default async function handler(req, res) {
     if (action === 'health_check')               return await healthCheck(req, res); // v13.95.0 Phase 5
 
     // ── v13.97.0 Brain v2 — all routed through ops.js to respect 12-function limit ──
+    // 034 — every Engineering Brain v2 action (agent audit trail, deployments, metrics, learning, and all
+    // brain_v2 writes) required no login. CEO session required; the app sends it with _ceoAuthedFetch.
+    if (typeof action === 'string' && action.startsWith('brain_v2_') && !(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
     if (action === 'brain_v2_get_knowledge')     return await brainV2GetKnowledge(req, res);
     if (action === 'brain_v2_save_knowledge')    return await brainV2SaveKnowledge(req, res);
     if (action === 'brain_v2_get_learning')      return await brainV2GetLearning(req, res);
