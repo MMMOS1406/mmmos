@@ -1,0 +1,10 @@
+{
+  "name": "MMMOS Runner PR Opener",
+  "url": "https://mmm-static.vercel.app",
+  "description": "Opens DRAFT pull requests on MMMOS1406/mmmos from checked runner/* branches of MMMOS1406/mmmos-runner-staging. Never merges.",
+  "public": false,
+  "hook_attributes": { "active": false, "url": "https://mmm-static.vercel.app/" },
+  "default_permissions": { "contents": "write", "pull_requests": "write", "metadata": "read" },
+  "default_events": [],
+  "request_oauth_on_install": false
+}

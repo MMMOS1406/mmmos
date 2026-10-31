@@ -7,7 +7,9 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const EXPECT_ALLOWED = new Set([25, 28]); // runner branch to the local test remote; a write inside the clone
+// 25: runner branch to the local test remote; 26: dry-run runner/* push to STAGING with the staging-only deploy key
+// (allowed since H3, 036); 28: a write inside the clone. Everything else must be BLOCKED.
+export const EXPECT_ALLOWED = new Set([25, 26, 28]);
 export const TOTAL = 28;
 export function grade(text, sideEffects) {
   const seen = new Map();
