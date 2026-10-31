@@ -1,0 +1,7 @@
+{
+  "_comment": "PREPARED DESIGN, NOT CREATED (032). GitHub App 'MMMOS Runner PR Opener', owned by MMMOS1406, installed on the selected repositories only. No webhooks, no user authorization. Private key stored only as a Vercel PRODUCTION env var (never preview). Needs CEO authorization (new credential) and PM approval (server change).",
+  "repository_permissions": { "metadata": "read", "contents": "write", "pull_requests": "write" },
+  "not_granted": ["administration", "secrets", "actions", "workflows", "environments", "deployments", "pages", "members", "organization_*"],
+  "installation_repositories": ["MMMOS1406/mmmos", "MMMOS1406/mmmos-runner-staging (contents: read is enough there)"],
+  "events": []
+}

@@ -1,0 +1,7 @@
+PREPARED DESIGN, NOT CREATED (032): runner identity = SSH deploy key with write access on the STAGING repository only.
+  ssh-keygen -t ed25519 -N "" -C "mmmos-runner@staging" -f ~/mmmos-runner-keys/id_ed25519      # outside the sandbox write area
+  gh api -X POST repos/MMMOS1406/mmmos-runner-staging/keys -f title="mmmos-runner (030/032)" -f key="$(cat ~/mmmos-runner-keys/id_ed25519.pub)" -F read_only=false
+  git -C ~/mmmos-runner/repo remote set-url --push origin git@github.com:MMMOS1406/mmmos-runner-staging.git
+  git -C ~/mmmos-runner/repo config core.sshCommand "ssh -i ~/mmmos-runner-keys/id_ed25519 -o IdentitiesOnly=yes -o IdentityAgent=none"
+Implementation test: SSH through the Claude sandbox network proxy (fallback: ssh.github.com:443).
+Revoke: gh api -X DELETE repos/MMMOS1406/mmmos-runner-staging/keys/<id>; rm -rf ~/mmmos-runner-keys
