@@ -104,6 +104,9 @@ ok('setup: CEO-authorized runner task claimed', claim.status === 200 && !!RUN, J
   const r = await gw('submit_pull_request', { pr_url: `https://github.com/${GITHUB_REPO}/pull/954`, branch: `runner/${id8}-build` });
   ok('M9 install/build config files are denied (.npmrc, vercel.ts, .vercelignore, .nvmrc, lockfiles, middleware)', r.status === 409 && bad.every(b => r.body.denied.includes(b)), JSON.stringify(r.body));
   const s = await gw('read_runner_scope');
+  github.branches.set(`runner/${id8}-self`, { files: ['tools/engineering-runner/runner-guard.mjs', 'tools/engineering-agent/index.js'], commits: ['9'.repeat(40)], pr: { number: 955 } });
+  const self = await gw('submit_pull_request', { pr_url: `https://github.com/${GITHUB_REPO}/pull/955`, branch: `runner/${id8}-self` });
+  ok('M10b the runner can never change its own controls (tools/engineering-runner/, tools/engineering-agent/)', self.status === 409 && self.body.denied.includes('tools/engineering-runner/runner-guard.mjs') && self.body.denied.includes('tools/engineering-agent/index.js'));
   ok('M10 the runner scope lists the new denied files', s.status === 200 && ['.npmrc', 'vercel.ts', '.vercelignore'].every(b => s.body.denied_paths.includes(b)));
 }
 

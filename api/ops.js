@@ -1271,7 +1271,7 @@ async function _engPlatformFlag(flag) {
 }
 const ENG_RUNNER_MAX_CLAIM_MS = 8 * 60 * 60 * 1000; // a claim can be renewed for up to 8 hours
 const ENG_BUSINESS_PATHS = {
-  mmmos: ['tests/platform/', 'tests/preservation/', 'docs/platform/', 'sandbox/', 'tools/engineering-runner/'],
+  mmmos: ['tests/platform/', 'tests/preservation/', 'docs/platform/', 'sandbox/'], // 033: tools/engineering-runner/ removed (the runner never edits its own controls)
   nextwave: ['lib/nextwaveV2', 'nextwave_v2_storyboard_eval/', 'test_nextwave'],
   srv_studio: ['lib/srvStudioV2', 'docs/srv-studio-v2/', 'public/srv-studio-v2/', 'tests/srv/test_srv_studio_v2'],
   srv_farsi: ['lib/srvFarsi', 'tests/srv/test_srv_farsi', 'test_srv_farsi'],
@@ -1283,7 +1283,8 @@ const ENG_DENIED_PATHS = ['.auto-deploy.sh', '.auto-deploy.plist', '.last-deploy
   // 033 — anything that changes how Vercel builds or installs (a branch's vercel.json / npm config
   // overrides project settings and runs during the preview build, which has production secrets).
   'vercel.ts', 'vercel.mjs', '.vercelignore', '.npmrc', '.nvmrc', '.node-version', '.yarnrc', '.yarnrc.yml',
-  'yarn.lock', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'bun.lockb', 'bun.lock', 'middleware.js', 'middleware.ts'];
+  'yarn.lock', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'bun.lockb', 'bun.lock', 'middleware.js', 'middleware.ts',
+  'tools/engineering-runner/', 'tools/engineering-agent/'];
 // 033 — a runner task's branch must carry the task's own id: runner/<first 8 chars of task id>-<anything>.
 function _engRunnerBranchFor(taskId, branch) {
   const id8 = String(taskId || '').toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 8);
