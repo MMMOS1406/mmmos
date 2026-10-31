@@ -82,6 +82,6 @@ if (dir && fs.existsSync(path.join(dir, 'photograph.f32')) && fs.existsSync(path
 
 // isolation: preview-only — nothing in the app, server or production routing references the mix builder
 const H = fs.readFileSync(path.join(repo, 'public/index.html'), 'utf8'), OPS = fs.readFileSync(path.join(repo, 'api/ops.js'), 'utf8');
-ok('preview only: the app (index.html) and server (api/ops.js) do not load or call the mix builder', !/srvStudioV2Mix|srv2-mix|mix-studio|srv_studio_v2_mix/.test(H + OPS));
-ok('the preview module lives outside public/ (never served by the app)', !fs.existsSync(path.join(repo, 'public/srv-studio-v2/srv2-mix.mjs')) && fs.existsSync(path.join(repo, 'tests/srv/studio-v2-preview/srv2-mix-preview.mjs')));
+ok('033: the app and server reach the mix builder only through the flagged srv_studio_v2_mix action / srv2-mix.mjs module, never through preview files', !/mix-studio|srv2-mix-preview/.test(H + OPS));
+ok('the 032 preview module lives outside public/ (never served); the served srv2-mix.mjs is the 033 production builder', !fs.existsSync(path.join(repo, 'public/srv-studio-v2/srv2-mix-preview.mjs')) && fs.existsSync(path.join(repo, 'tests/srv/studio-v2-preview/srv2-mix-preview.mjs')) && /SRV2_MIX_UI_VERSION = 'srv2-mix-1'/.test(fs.readFileSync(path.join(repo, 'public/srv-studio-v2/srv2-mix.mjs'), 'utf8')));
 console.log(out.join('\n')); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

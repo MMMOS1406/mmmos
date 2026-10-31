@@ -21,6 +21,7 @@ import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
 import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProductionUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
 import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
+import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer.mjs'; // SRV-STUDIO-V2-033 Monthly Mix (off unless app_settings.srv_studio_v2_mix is enabled)
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -240,6 +241,7 @@ const PUBLISH_GATED_ACTIONS = new Set([
   'srv_studio_v2_va_upload', // SRV-STUDIO-V2-023 (it also requires a VA/CEO session itself)
   'srv_studio_v2_production_upload', // SRV-STUDIO-V2-028 (it also requires a VA/CEO session itself)
   'srv_studio_v2_playlist_sync', // SRV-STUDIO-V2-030 (it also requires a VA/CEO session itself)
+  'srv_studio_v2_mix', // SRV-STUDIO-V2-033 (it also requires a VA/CEO session itself)
   'srv_farsi_playlists', // SRV Farsi playlist check (uses the channel token, read-only)
 ]);
 const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
@@ -4842,6 +4844,35 @@ async function srvStudioV2PlaylistSync(req, res) {
     return res.status(out.status).json(out.json);
   } catch (e) {
     return res.status(500).json({ ok: false, playlistSync: true, error: 'playlist_sync_server_error', message: e.message });
+  }
+}
+// SRV-STUDIO-V2-033 — Monthly Mix Builder (list · eligibility · save · upload_init · upload_chunk · playlist · thumbnail · confirm_public).
+// VA/CEO session; OFF unless app_settings.srv_studio_v2_mix is enabled (server/admin-only key). Private-only resumable
+// upload, one chunk per call; the YouTube session URL is sealed (AES-256-GCM) before it is stored. See lib.
+function _srvMixKey() { return createHash('sha256').update(String(SUPABASE_SERVICE_KEY || '') + '|srv2-mix-session-v1').digest(); }
+function _srvMixSeal(text) { const iv = randomBytes(12); const c = createCipheriv('aes-256-gcm', _srvMixKey(), iv); const enc = Buffer.concat([c.update(String(text), 'utf8'), c.final()]); return 'v1.' + Buffer.concat([iv, c.getAuthTag(), enc]).toString('base64url'); }
+function _srvMixUnseal(sealed) { const b = Buffer.from(String(sealed).replace(/^v1\./, ''), 'base64url'); const d = createDecipheriv('aes-256-gcm', _srvMixKey(), b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8'); }
+const _SRV_MIX_PUBLIC = () => SUPABASE_URL + '/storage/v1/object/public/srv-assets/';
+async function srvStudioV2Mix(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, mix: true, error: 'POST only' });
+  const who = await _publisherFromRequest(req);
+  if (!who || (who.role !== 'operator' && who.role !== 'ceo')) return res.status(401).json({ ok: false, mix: true, error: 'publisher_session_required' });
+  try {
+    const out = await srv2RunMixOp({
+      now: () => Date.now(), by: who.role,
+      flagOn: () => srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY }),
+      getSetting: srvStudioV2PilotSetting, casSetting: srvStudioV2PilotCas,
+      listSrvPackages: async () => { const rows = await sbGet('packages?engine=eq.SRV%20English&select=full_package&order=generated_at.desc&limit=1000'); return (rows || []).map((r) => { try { return JSON.parse(r.full_package); } catch (_) { return null; } }).filter(Boolean); },
+      lookupChannel: () => _getYoutubeConnectionByTitle('SRV Studio', { exact: true }),
+      ytFor: async (conn) => srv2MixYouTubeAdapter((await _refreshYoutubeToken(conn.refresh_token)).accessToken),
+      headObject: async (p) => { const r = await fetch(_SRV_MIX_PUBLIC() + p.split('/').map(encodeURIComponent).join('/'), { method: 'HEAD' }); if (!r.ok) return null; return { bytes: Number(r.headers.get('content-length')), type: r.headers.get('content-type') }; },
+      readRange: async (p, start, end) => { const r = await fetch(_SRV_MIX_PUBLIC() + p.split('/').map(encodeURIComponent).join('/'), { headers: { Range: `bytes=${start}-${end - 1}` } }); if (r.status !== 206 && !(r.status === 200 && start === 0)) throw new Error('range HTTP ' + r.status); return Buffer.from(await r.arrayBuffer()); },
+      seal: _srvMixSeal, unseal: _srvMixUnseal,
+      newId: () => 'mx_' + Date.now().toString(36) + randomBytes(4).toString('hex'),
+    }, req.body || {});
+    return res.status(out.status).json(out.json);
+  } catch (e) {
+    return res.status(500).json({ ok: false, mix: true, error: 'mix_server_error', message: e.message });
   }
 }
 // SRV-STUDIO-V2-023 — runs the one CEO-authorized title correction (app_settings.srv_studio_v2_retitle_job, writable
@@ -21490,6 +21521,7 @@ export default async function handler(req, res) {
     if (action === 'srv_english_regen_caption')  return await srvEnglishRegenCaption(req, res); // SRV Studio V2 (flag-gated client)
     if (action === 'srv_studio_v2_pilot_upload') return await srvStudioV2PilotUpload(req, res); // SRV Studio V2 pilot (server-enforced, off unless authorized)
     if (action === 'srv_farsi_playlists') return await srvFarsiPlaylists(req, res); // SRV Farsi read-only playlist check
+    if (action === 'srv_studio_v2_mix')          return await srvStudioV2Mix(req, res); // SRV-STUDIO-V2-033 Monthly Mix (VA/CEO session; off unless configured)
     if (action === 'srv_studio_v2_playlist_sync') return await srvStudioV2PlaylistSync(req, res); // SRV-STUDIO-V2-030 playlist check/add + VA-step eligibility (VA/CEO session)
     if (action === 'srv_studio_v2_va_upload')    return await srvStudioV2VaUpload(req, res);    // SRV-STUDIO-V2-023 VA allowance (VA/CEO session; off unless authorized)
     if (action === 'srv_studio_v2_production_upload') return await srvStudioV2ProductionUpload(req, res); // SRV-STUDIO-V2-028 normal VA production (VA/CEO session; private, Long only)
