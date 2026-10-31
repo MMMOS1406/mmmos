@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import { writeFile, readFile, unlink, stat as fsStat, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
+import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
@@ -1327,6 +1327,88 @@ function _engRunnerPathCheck(paths, runner) {
 // repository name is fixed in server code / env — never taken from the caller.
 const ENG_CANONICAL_REPO = 'MMMOS1406/mmmos';
 function _engGithubRepo() { return process.env.GITHUB_REPO || ENG_CANONICAL_REPO; }
+// ── 035 — PR opener (H4). Fail-closed: without the GitHub App settings nothing is called. ──
+// Settings (production env only, never preview): ENG_RUNNER_STAGING_REPO (owner/name),
+// ENG_PR_APP_ID, ENG_PR_APP_INSTALLATION_ID, ENG_PR_APP_PRIVATE_KEY (PEM).
+const ENG_PR_MAX_FILES = 100, ENG_PR_MAX_BYTES = 20 * 1024 * 1024;
+function _engPrOpenerConfig() {
+  const staging = process.env.ENG_RUNNER_STAGING_REPO || '', appId = process.env.ENG_PR_APP_ID || '';
+  const inst = process.env.ENG_PR_APP_INSTALLATION_ID || '', key = process.env.ENG_PR_APP_PRIVATE_KEY || '';
+  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(staging) || !/^\d+$/.test(appId) || !/^\d+$/.test(inst) || !key.includes('PRIVATE KEY')) return null;
+  if (staging === _engGithubRepo()) return null; // the staging repo must be a different repository
+  return { staging, appId, inst, key: key.replace(/\\n/g, '\n') };
+}
+function _engB64url(b) { return Buffer.from(b).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_'); }
+async function _engPrOpenerToken(cfg) {
+  const now = Math.floor(Date.now() / 1000);
+  const head = _engB64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claims = _engB64url(JSON.stringify({ iat: now - 60, exp: now + 540, iss: cfg.appId }));
+  const sig = _engB64url(createSign('RSA-SHA256').update(`${head}.${claims}`).sign(cfg.key));
+  const repoName = (r) => r.split('/')[1];
+  // The installation token is narrowed at mint time to the two repositories and three permissions.
+  const r = await fetch(`https://api.github.com/app/installations/${cfg.inst}/access_tokens`, {
+    method: 'POST', headers: { 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json', Authorization: `Bearer ${head}.${claims}.${sig}` },
+    body: JSON.stringify({ repositories: [repoName(_engGithubRepo()), repoName(cfg.staging)], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } }),
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => ({}));
+  return typeof j.token === 'string' ? j.token : null;
+}
+// Copies the runner's verified change from the staging repo onto a runner/* branch of the canonical
+// repo and opens a DRAFT pull request. Every step is a plain REST call; there is no merge call.
+async function _engPrOpenerRun({ cfg, token, branch, baseSha, title, summary, runner, taskId }) {
+  const main = _engGithubRepo();
+  const H = { 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const gh = async (method, path, body) => {
+    const r = await fetch(`https://api.github.com${path}`, { method, headers: H, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const j = await r.json().catch(() => ({}));
+    return { status: r.status, ok: r.ok, j };
+  };
+  // 1. The base commit must be on canonical main (main is ahead of it or identical).
+  const base = await gh('GET', `/repos/${main}/compare/${baseSha}...main`);
+  if (!base.ok || !['ahead', 'identical'].includes(base.j.status)) return { code: 409, error: 'base_not_on_main' };
+  // 2. What the runner changed, read from the staging repo.
+  const cmp = await gh('GET', `/repos/${cfg.staging}/compare/${baseSha}...${encodeURIComponent(branch)}`);
+  if (!cmp.ok) return { code: 502, error: `staging_compare_failed_${cmp.status}` };
+  const files = cmp.j.files || [];
+  const commits = cmp.j.commits || [];
+  const stagingHead = commits.length ? commits[commits.length - 1].sha : null;
+  if (!files.length || !stagingHead) return { code: 409, error: 'no_changes' };
+  if (files.length >= 300 || files.length > ENG_PR_MAX_FILES) return { code: 409, error: 'too_many_files' };
+  // 3. Every touched path (including a rename's old path) must pass the business allowlist.
+  const paths = [...new Set(files.flatMap(f => [f.filename, f.previous_filename].filter(Boolean)))];
+  const check = _engRunnerPathCheck(paths, runner);
+  if (!check.ok) return { code: 409, error: 'paths_outside_business_allowlist', denied: check.denied, outside: check.outside };
+  // 4. Copy blobs (content-addressed: the new blob sha must equal the staging sha).
+  const tree = []; let bytes = 0;
+  for (const f of files) {
+    if (f.previous_filename && f.previous_filename !== f.filename) tree.push({ path: f.previous_filename, mode: '100644', type: 'blob', sha: null });
+    if (f.status === 'removed') { tree.push({ path: f.filename, mode: '100644', type: 'blob', sha: null }); continue; }
+    const b = await gh('GET', `/repos/${cfg.staging}/git/blobs/${f.sha}`);
+    if (!b.ok || b.j.encoding !== 'base64' || typeof b.j.content !== 'string') return { code: 502, error: 'staging_blob_read_failed' };
+    bytes += Number(b.j.size) || 0;
+    if (bytes > ENG_PR_MAX_BYTES) return { code: 409, error: 'change_too_large' };
+    const nb = await gh('POST', `/repos/${main}/git/blobs`, { content: b.j.content.replace(/\n/g, ''), encoding: 'base64' });
+    if (!nb.ok || nb.j.sha !== f.sha) return { code: 502, error: 'blob_copy_mismatch' };
+    tree.push({ path: f.filename, mode: '100644', type: 'blob', sha: nb.j.sha });
+  }
+  // 5. Tree on top of the base commit, one commit, the runner/* ref, a draft PR.
+  const bc = await gh('GET', `/repos/${main}/git/commits/${baseSha}`);
+  if (!bc.ok || !bc.j.tree || !bc.j.tree.sha) return { code: 502, error: 'base_commit_read_failed' };
+  const nt = await gh('POST', `/repos/${main}/git/trees`, { base_tree: bc.j.tree.sha, tree });
+  if (!nt.ok) return { code: 502, error: 'tree_create_failed' };
+  const message = `Runner: ${title}\n\nTask ${taskId}\nStaging ${cfg.staging}@${stagingHead}\nOpened by MMMOS from a checked runner branch. MMMOS never merges; the CEO decides.`;
+  const nc = await gh('POST', `/repos/${main}/git/commits`, { message, tree: nt.j.sha, parents: [baseSha] });
+  if (!nc.ok) return { code: 502, error: 'commit_create_failed' };
+  let ref = await gh('POST', `/repos/${main}/git/refs`, { ref: `refs/heads/${branch}`, sha: nc.j.sha });
+  if (ref.status === 422) ref = await gh('PATCH', `/repos/${main}/git/refs/heads/${branch}`, { sha: nc.j.sha, force: true });
+  if (!ref.ok) return { code: 502, error: 'branch_create_failed' };
+  const body = `${summary || ''}\n\n---\nTask \`${taskId}\` · staging \`${cfg.staging}@${String(stagingHead).slice(0, 12)}\` · ${paths.length} file(s), all inside the task's business folders.\nOpened by MMMOS. **MMMOS never merges; the CEO decides.**`;
+  const pr = await gh('POST', `/repos/${main}/pulls`, { title: `Runner: ${title}`, head: branch, base: 'main', body, draft: true, maintainer_can_modify: false });
+  if (!pr.ok || !pr.j.number) return { code: 502, error: 'pull_request_create_failed' };
+  return { code: 200, pr_number: pr.j.number, pr_url: pr.j.html_url, commit_sha: nc.j.sha, staging_head_sha: stagingHead, files: paths };
+}
+
 async function _engGithubBranchFacts(branch, prNumber) {
   const repo = _engGithubRepo(), token = process.env.GITHUB_TOKEN;
   const H = { 'User-Agent': 'mmm-static-ops', Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
@@ -1949,6 +2031,9 @@ const AGENT_GATEWAY_ALLOWED_OPS = new Set([
   'read_runner_scope',      // the business folders / shared files this task may change
   'renew_lease',            // extend this claim's lease (capped at 8 hours from the claim)
   'submit_pull_request',    // record the task's PR; server checks the branch's files against the allowlist
+  // 035 — MMMOS opens the PR itself from the runner's STAGING branch after checking every file.
+  // It can create runner/* branches and draft PRs; it never merges (no merge call exists in this code).
+  'open_runner_pull_request',
 ]);
 
 // v16.37.0 — Phase 4E: manifest is now DERIVED PER-TASK from that task's own
@@ -2316,6 +2401,55 @@ async function engineeringAgentGateway(req, res) {
       }
       await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { lease_expires_at: newExpiry });
       result = { lease_expires_at: newExpiry };
+    } else if (op === 'open_runner_pull_request') {
+      // 035 (H4) — only for a CEO runner-authorized task held by the runner, on its own task-bound branch.
+      if (!String(task.agent_claimed_by || '').startsWith('runner:') || !_engRunnerEligible(task)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'runner_task_required' });
+        return res.status(403).json({ ok: false, error: 'runner_task_required' });
+      }
+      const branch = typeof body.branch === 'string' ? body.branch.trim() : '';
+      const baseSha = typeof body.base_sha === 'string' ? body.base_sha.trim().toLowerCase() : '';
+      if (!_engRunnerBranchFor(task_id, branch)) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'branch_not_bound_to_task', branch });
+        return res.status(400).json({ ok: false, error: 'branch_not_bound_to_task', expected_prefix: `runner/${String(task_id).slice(0, 8)}-` });
+      }
+      if (!/^[0-9a-f]{40}$/.test(baseSha)) return res.status(400).json({ ok: false, error: 'base_sha must be the 40-character commit the branch started from' });
+      const pf = _engFields(body, { title: { max: 200, required: true }, summary: { max: 5000 } });
+      if (pf.error) return res.status(400).json({ ok: false, error: pf.error });
+      const prior = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(String(task_id))}&evidence_type=eq.pull_request&select=url,metadata&limit=20`);
+      const opened = (prior || []).find(e => e.metadata && e.metadata.opened_by === 'mmmos');
+      if (opened) {
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { idempotent: true, pr_number: opened.metadata.pr_number });
+        result = { accepted: true, already_open: true, pr_number: opened.metadata.pr_number, pr_url: opened.url };
+      } else {
+        const cfg = _engPrOpenerConfig();
+        if (!cfg) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'pr_opener_not_configured' });
+          return res.status(503).json({ ok: false, error: 'pr_opener_not_configured', message: 'The MMMOS PR opener is not installed. Nothing was sent to GitHub.' });
+        }
+        const token = await _engPrOpenerToken(cfg);
+        if (!token) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: 'pr_opener_token_failed' });
+          return res.status(502).json({ ok: false, error: 'pr_opener_token_failed' });
+        }
+        const out = await _engPrOpenerRun({ cfg, token, branch, baseSha, title: pf.values.title, summary: pf.values.summary, runner: task.agent_capability_scope.runner, taskId: task_id });
+        if (out.code !== 200) {
+          await _agentGatewayAudit(task_id, agent_run_id, op, 'denied', { reason: out.error, denied: out.denied, outside: out.outside });
+          return res.status(out.code).json({ ok: false, error: out.error, ...(out.denied ? { denied: out.denied, outside: out.outside } : {}) });
+        }
+        await sbInsert('brain_evidence', {
+          task_id: String(task_id), run_id: agent_run_id, evidence_type: 'pull_request',
+          title: `Pull request #${out.pr_number} (opened by MMMOS)`,
+          content: `Branch ${branch} · ${out.files.length} file(s) · commit ${out.commit_sha.slice(0, 12)} · staging ${out.staging_head_sha.slice(0, 12)}`,
+          url: out.pr_url,
+          metadata: { pr_number: out.pr_number, branch, head_sha: out.commit_sha, staging_head_sha: out.staging_head_sha, base_sha: baseSha, files: out.files.slice(0, 100),
+            within_allowlist: true, opened_by: 'mmmos', draft: true, submitted_at: new Date().toISOString(), non_authoritative: true },
+          engine: task.affected_engine,
+        });
+        await _agentGatewayAudit(task_id, agent_run_id, op, 'allowed', { pr_number: out.pr_number, files: out.files.length });
+        result = { accepted: true, pr_number: out.pr_number, pr_url: out.pr_url, commit_sha: out.commit_sha, files: out.files, draft: true,
+          note: 'Draft pull request opened by MMMOS. It is never merged or deployed by MMMOS; the CEO decides.' };
+      }
     } else if (op === 'submit_pull_request') {
       // R2 — the runner's deliverable is a pull request, never a merge. The
       // server reads the branch from GitHub itself (read-only token) and checks
