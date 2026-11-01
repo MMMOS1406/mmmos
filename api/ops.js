@@ -247,6 +247,10 @@ const PUBLISH_GATED_ACTIONS = new Set([
 // 046 — business actions that previously took no login now need the CEO or VA session (same gate,
 // same enforce/observe mode as publishing). Grouped by business; paid generation, deletion and approvals first.
 const SESSION_GATED_ACTIONS = new Set([
+  'generate_package', // NextWave V2 generation and memory
+  'nextwave_v2_generate_scene_package', // NextWave V2 generation and memory
+  'nextwave_v2_generate_visual_plan', // NextWave V2 generation and memory
+  'delete_memory_item', // NextWave V2 generation and memory
   'heygen_render_status', // production pipeline and assets
   'save_heygen_execution', // production pipeline and assets
   'save_suno_execution', // production pipeline and assets

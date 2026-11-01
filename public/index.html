@@ -18604,7 +18604,7 @@ async function _nextwaveV2GenerateCharacterPose(taskId,poseRole){
 async function nextwaveV2GenerateStoryboardPackage(pkg){
   if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
   try{
-    const r=await fetch('/api/ops?action=nextwave_v2_generate_scene_package',{
+    const r=await _publishFetch('/api/ops?action=nextwave_v2_generate_scene_package',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({script:pkg.script}),
     });
@@ -18707,7 +18707,7 @@ async function nextwaveV2StartBuild(pkg){
 async function nextwaveV2GenerateHybridVisualPlan(pkg){
   if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
   try{
-    const r=await fetch('/api/ops?action=nextwave_v2_generate_visual_plan',{
+    const r=await _publishFetch('/api/ops?action=nextwave_v2_generate_visual_plan',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({script:pkg.script}),
     });
@@ -28540,7 +28540,7 @@ async function cleanMemory(){
 
 async function deleteMemoryItem(id){
   try{
-    await fetch('/api/ops?action=delete_memory_item',{
+    await _publishFetch('/api/ops?action=delete_memory_item',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({id})
@@ -28720,7 +28720,7 @@ async function startGeneration(){
     // v13.69.462 — pass contentFormat from task so server knows to generate long-form script
     const _fTask=fTaskId&&Array.isArray(D.tasks)?D.tasks.find(function(t){return String(t.id)===String(fTaskId);}):null;
     const _fContentFormat=(_fTask&&_fTask.contentFormat)||'short';
-    const response=await fetch('/api/ops?action=generate_package',{
+    const response=await _publishFetch('/api/ops?action=generate_package',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engineId:fEngine.id,mode:fMode,existingMemory,contentFormat:_fContentFormat,...(fEngine.id==='srv_english'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: flag-gated
