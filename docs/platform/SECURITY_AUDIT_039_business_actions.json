@@ -1,0 +1,503 @@
+[
+ {
+  "action": "create_task",
+  "fn": "createTask",
+  "category": "state_change",
+  "tables": [
+   "operator_activity_logs",
+   "operator_tasks"
+  ],
+  "ui_calls": 1,
+  "lines": 30,
+  "gate_hint": false
+ },
+ {
+  "action": "update_task",
+  "fn": "updateTask",
+  "category": "state_change",
+  "tables": [
+   "operator_activity_logs",
+   "operator_tasks"
+  ],
+  "ui_calls": 1,
+  "lines": 29,
+  "gate_hint": false
+ },
+ {
+  "action": "business_brain_create",
+  "fn": "businessBrainCreate",
+  "category": "state_change",
+  "tables": [
+   "business_brain"
+  ],
+  "ui_calls": 1,
+  "lines": 73,
+  "gate_hint": false
+ },
+ {
+  "action": "business_operations_update_service_plan",
+  "fn": "businessOperationsUpdateServicePlan",
+  "category": "state_change",
+  "tables": [
+   "client_service_plans"
+  ],
+  "ui_calls": 1,
+  "lines": 16,
+  "gate_hint": false
+ },
+ {
+  "action": "business_operations_update_schedule_prefs",
+  "fn": "businessOperationsUpdateSchedulePrefs",
+  "category": "state_change",
+  "tables": [
+   "client_service_plans"
+  ],
+  "ui_calls": 1,
+  "lines": 24,
+  "gate_hint": false
+ },
+ {
+  "action": "business_operations_curate_asset",
+  "fn": "businessOperationsCurateAsset",
+  "category": "state_change",
+  "tables": [
+   "client_service_plans"
+  ],
+  "ui_calls": 1,
+  "lines": 73,
+  "gate_hint": false
+ },
+ {
+  "action": "va_task_queue_generate",
+  "fn": "vaTaskQueueGenerate",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 0,
+  "lines": 23,
+  "gate_hint": false
+ },
+ {
+  "action": "sm_va_task_generate_package",
+  "fn": "smVaTaskGeneratePackage",
+  "category": "state_change",
+  "tables": [
+   "sm_production_packages",
+   "sm_va_tasks"
+  ],
+  "ui_calls": 1,
+  "lines": 28,
+  "gate_hint": false
+ },
+ {
+  "action": "nextwave_v2_generate_scene_package",
+  "fn": "nextwaveV2GenerateScenePackageAction",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 53,
+  "gate_hint": true
+ },
+ {
+  "action": "nextwave_v2_generate_visual_plan",
+  "fn": "nextwaveV2GenerateVisualPlanPackageAction",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 2,
+  "lines": 41,
+  "gate_hint": false
+ },
+ {
+  "action": "sm_video_production_generate",
+  "fn": "smVideoProductionGenerate",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 2,
+  "lines": 25,
+  "gate_hint": false
+ },
+ {
+  "action": "create_pipeline_item",
+  "fn": "createPipelineItem",
+  "category": "state_change",
+  "tables": [
+   "production_pipeline"
+  ],
+  "ui_calls": 1,
+  "lines": 24,
+  "gate_hint": false
+ },
+ {
+  "action": "update_pipeline_stage",
+  "fn": "updatePipelineStage",
+  "category": "state_change",
+  "tables": [
+   "production_pipeline"
+  ],
+  "ui_calls": 2,
+  "lines": 29,
+  "gate_hint": false
+ },
+ {
+  "action": "approve",
+  "fn": "approveItem",
+  "category": "approval",
+  "tables": [
+   "approvals"
+  ],
+  "ui_calls": 2,
+  "lines": 17,
+  "gate_hint": false
+ },
+ {
+  "action": "reject",
+  "fn": "rejectItem",
+  "category": "approval",
+  "tables": [
+   "approvals"
+  ],
+  "ui_calls": 2,
+  "lines": 17,
+  "gate_hint": false
+ },
+ {
+  "action": "create_asset",
+  "fn": "createAsset",
+  "category": "state_change",
+  "tables": [
+   "production_assets_library"
+  ],
+  "ui_calls": 1,
+  "lines": 30,
+  "gate_hint": false
+ },
+ {
+  "action": "update_asset",
+  "fn": "updateAsset",
+  "category": "state_change",
+  "tables": [
+   "production_assets_library"
+  ],
+  "ui_calls": 1,
+  "lines": 19,
+  "gate_hint": false
+ },
+ {
+  "action": "delete_asset",
+  "fn": "deleteAsset",
+  "category": "deletion",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 20,
+  "gate_hint": false
+ },
+ {
+  "action": "update_task_execution",
+  "fn": "updateTaskExecution",
+  "category": "state_change",
+  "tables": [
+   "operator_activity_logs",
+   "operator_tasks"
+  ],
+  "ui_calls": 5,
+  "lines": 30,
+  "gate_hint": false
+ },
+ {
+  "action": "save_suno_execution",
+  "fn": "saveSunoExecution",
+  "category": "paid_generation",
+  "tables": [
+   "suno_executions"
+  ],
+  "ui_calls": 1,
+  "lines": 37,
+  "gate_hint": false
+ },
+ {
+  "action": "save_heygen_execution",
+  "fn": "saveHeygenExecution",
+  "category": "paid_generation",
+  "tables": [
+   "heygen_executions"
+  ],
+  "ui_calls": 1,
+  "lines": 37,
+  "gate_hint": false
+ },
+ {
+  "action": "save_task_asset",
+  "fn": "saveTaskAsset",
+  "category": "state_change",
+  "tables": [
+   "production_assets_library"
+  ],
+  "ui_calls": 1,
+  "lines": 34,
+  "gate_hint": false
+ },
+ {
+  "action": "add_to_upload_queue",
+  "fn": "addToUploadQueue",
+  "category": "state_change",
+  "tables": [
+   "upload_queue"
+  ],
+  "ui_calls": 1,
+  "lines": 28,
+  "gate_hint": false
+ },
+ {
+  "action": "update_upload_status",
+  "fn": "updateUploadStatus",
+  "category": "state_change",
+  "tables": [
+   "upload_queue"
+  ],
+  "ui_calls": 1,
+  "lines": 21,
+  "gate_hint": false
+ },
+ {
+  "action": "save_performance",
+  "fn": "savePerformance",
+  "category": "state_change",
+  "tables": [
+   "package_performance"
+  ],
+  "ui_calls": 0,
+  "lines": 16,
+  "gate_hint": false
+ },
+ {
+  "action": "save_memory_item",
+  "fn": "saveMemoryItemFn",
+  "category": "state_change",
+  "tables": [
+   "generation_memory"
+  ],
+  "ui_calls": 1,
+  "lines": 12,
+  "gate_hint": false
+ },
+ {
+  "action": "delete_memory_item",
+  "fn": "deleteMemoryItemFn",
+  "category": "deletion",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 16,
+  "gate_hint": false
+ },
+ {
+  "action": "seed_memory",
+  "fn": "seedMemory",
+  "category": "state_change",
+  "tables": [
+   "generation_memory"
+  ],
+  "ui_calls": 1,
+  "lines": 52,
+  "gate_hint": true
+ },
+ {
+  "action": "create_notification_table",
+  "fn": "createNotificationTable",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 11,
+  "gate_hint": false
+ },
+ {
+  "action": "mark_notification_read",
+  "fn": "markNotificationRead",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 3,
+  "lines": 14,
+  "gate_hint": false
+ },
+ {
+  "action": "mark_all_read",
+  "fn": "markAllRead",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 12,
+  "gate_hint": false
+ },
+ {
+  "action": "create_notification",
+  "fn": "createNotification",
+  "category": "state_change",
+  "tables": [
+   "notifications"
+  ],
+  "ui_calls": 4,
+  "lines": 68,
+  "gate_hint": false
+ },
+ {
+  "action": "sync_marketing_work_items",
+  "fn": "syncMarketingWorkItems",
+  "category": "state_change",
+  "tables": [
+   "department_work_items"
+  ],
+  "ui_calls": 2,
+  "lines": 196,
+  "gate_hint": false
+ },
+ {
+  "action": "generate_package",
+  "fn": "generatePackage",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 1314,
+  "gate_hint": true
+ },
+ {
+  "action": "farsi_regen_caption",
+  "fn": "farsiRegenCaption",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 2,
+  "lines": 90,
+  "gate_hint": false
+ },
+ {
+  "action": "srv_english_regen_caption",
+  "fn": "srvEnglishRegenCaption",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 31,
+  "gate_hint": false
+ },
+ {
+  "action": "youtube_sync_performance",
+  "fn": "youtubeSyncPerformance",
+  "category": "state_change",
+  "tables": [
+   "notifications",
+   "operator_tasks",
+   "package_performance"
+  ],
+  "ui_calls": 1,
+  "lines": 147,
+  "gate_hint": false
+ },
+ {
+  "action": "srv_build_package",
+  "fn": "srvBuildPackage",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 134,
+  "gate_hint": false
+ },
+ {
+  "action": "heygen_render_status",
+  "fn": "heygenRenderStatus",
+  "category": "paid_generation",
+  "tables": [],
+  "ui_calls": 5,
+  "lines": 474,
+  "gate_hint": true
+ },
+ {
+  "action": "optimization_toggle_auto",
+  "fn": "optimizationToggleAutoApply",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 13,
+  "gate_hint": false
+ },
+ {
+  "action": "analytics_auto_run",
+  "fn": "analyticsAutoRun",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 0,
+  "lines": 29,
+  "gate_hint": false
+ },
+ {
+  "action": "analytics_sync_status",
+  "fn": "analyticsSyncStatus",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 14,
+  "gate_hint": false
+ },
+ {
+  "action": "srv_english_build",
+  "fn": "srvEnglishBuild",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 0,
+  "lines": 64,
+  "gate_hint": false
+ },
+ {
+  "action": "srv_english_render_status",
+  "fn": "srvEnglishRenderStatus",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 1,
+  "lines": 27,
+  "gate_hint": false
+ },
+ {
+  "action": "roadmap_update_phase",
+  "fn": "roadmapUpdatePhase",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 0,
+  "lines": 27,
+  "gate_hint": false
+ },
+ {
+  "action": "cdp_create",
+  "fn": "cdpCreate",
+  "category": "state_change",
+  "tables": [
+   "ceo_decision_protocol"
+  ],
+  "ui_calls": 0,
+  "lines": 39,
+  "gate_hint": false
+ },
+ {
+  "action": "cdp_record_learning",
+  "fn": "cdpRecordLearning",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 0,
+  "lines": 20,
+  "gate_hint": false
+ },
+ {
+  "action": "cdp_generate_recommendations",
+  "fn": "cdpGenerateRecommendations",
+  "category": "state_change",
+  "tables": [
+   "ceo_decision_protocol"
+  ],
+  "ui_calls": 1,
+  "lines": 477,
+  "gate_hint": false
+ },
+ {
+  "action": "publishing_router_resolve",
+  "fn": "publishingRouterResolve",
+  "category": "state_change",
+  "tables": [],
+  "ui_calls": 0,
+  "lines": 20,
+  "gate_hint": false
+ }
+]

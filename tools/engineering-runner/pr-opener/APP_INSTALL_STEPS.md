@@ -29,10 +29,9 @@
 
 ## What Claude Code verifies after installation (no private key needed)
 
-- Through your GitHub session, `GET /user/installations` shows exactly one installation:
-  - repository selection "selected", exactly the two repositories;
-  - permissions exactly `contents:write, pull_requests:write, metadata:read`;
-  - no events.
+- **Correction (039):** a normal user token cannot list App installations (GitHub returns 403 for `GET /user/installations`), so scope is verified in two ways:
+  1. **Read-only, right after install:** the CEO's reply gives the App ID and installation ID. Claude Code checks with `gh api` that rulesets `26252619` and `26286416` are unchanged, with no bypass for any App.
+  2. **At activation (separate PM approval):** the server mints its own installation token, and GitHub's response states the exact `permissions` and `repositories`. The controlled test refuses to continue unless they are exactly `contents:write, pull_requests:write, metadata:read` on `mmmos` and `mmmos-runner-staging`.
 - Rulesets `26252619` and `26286416` are still active, with no App in any bypass list.
 - The opener stays **inactive**: no `ENG_PR_*` / `ENG_RUNNER_STAGING_REPO` setting in Vercel. `open_runner_pull_request` keeps answering 503 `pr_opener_not_configured`.
 
