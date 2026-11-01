@@ -1,0 +1,155 @@
+START CHECKPOINT 041
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-11-01
+EXECUTION ORDER: ORDER 041 (ChatGPT PM; CEO authorization safety and task reconciliation)
+
+EXECUTIVE SUMMARY:
+- The CEO created two "Checkpoint archive" tasks, 4 seconds apart (a double submission). Both are unauthorized, unclaimed and open.
+- Both task texts were reworded by the Task Generator to "build/create a storage system", and both carry its generic template (implement, deploy, version badge, screenshot). That wording exceeds H5.
+- Authorizing ONE of them is still safe. The Authorize button grants an empty capability scope: no read/write paths, no validation ops. The gateway has no deploy or migration operation. So a claim can only read the task, upload private artifacts and post evidence, which is exactly H5. The template steps cannot be carried out.
+- Selected for authorization: ec27ddf6-27ed-4f4d-888c-fd59aba1caf2. The duplicate 00f27077-9e89-43da-bc0f-cc433c9219f5 stays unauthorized. Nothing is deleted.
+- Production is healthy on main 5e8db56 (dpl_EuZWNcYsNg8FdH9jhLihbX3ZnQUt). That is PR #72, an SRV Studio release by another workstream; it touches no engineering code.
+- 17/17 anonymous engineering reads return 401. eng_runner and eng_adviser_connect are OFF. GitHub Actions is OFF.
+- H4, H6 and H7 are still waiting on the CEO. They are prepared, with nothing bypassed.
+
+CHECKPOINT ARCHIVE TASKS FOUND: 2. No other task created in the last 3 days, and no other task mentions "checkpoint archive".
+
+TASK IDS AND STATUS:
+- ec27ddf6-27ed-4f4d-888c-fd59aba1caf2
+  - created 2026-11-01 18:32:07 UTC; status open; not authorized, not claimed, no capability scope; release_kind new_development
+  - affected_engine "Engineering Tasks"; packet.business not set; created_via task_generator (ceo_decision_paste)
+  - text begins: "Build a checkpoint archive system to store engineering checkpoint reports and their SHA-256 manifests as private artifacts within MMMOS. This is a storage-only feature..."
+- 00f27077-9e89-43da-bc0f-cc433c9219f5
+  - created 2026-11-01 18:32:11 UTC; status open; not authorized, not claimed, no capability scope; release_kind new_development
+  - affected_engine "Engineering Tasks"; packet.business not set; created_via task_generator (ceo_decision_paste)
+  - text begins: "Create a storage system for engineering checkpoint reports and their SHA-256 manifests as private artifacts within MMMOS..."
+- Both carry the identical CEO decision text: create one task "Checkpoint archive" (business: mmmos); store checkpoint reports and SHA-256 manifests as private artifacts only; no repository changes; no runner; no deployment; manual authorization required.
+
+DUPLICATES IDENTIFIED:
+- 00f27077 duplicates ec27ddf6: same decision text, same boundary constraints, created 4 seconds later.
+- Recommendation: leave 00f27077 unauthorized. Closing it is optional and cosmetic; it holds no permission while unauthorized.
+
+SELECTED TASK FOR AUTHORIZATION:
+- ec27ddf6-27ed-4f4d-888c-fd59aba1caf2, manual (NOT runner).
+- Reasons:
+  - it was created first;
+  - its text says "storage-only feature for internal engineering records";
+  - 00f27077 adds "must require manual authorization for all access", which reads as building a new access-control feature.
+
+EXACT AUTHORIZED SCOPE (what Claude Code will do after authorization, nothing more):
+- Claim ec27ddf6 with the existing worker credential (manual path).
+- Upload checkpoint reports 027-041 and their .sha256 manifests as private artifacts with the existing gateway operations. The server computes and records the SHA-256 for files up to 25 MB and refuses a mismatch.
+- Read them back and compare the checksums. Confirm they appear in Engineering Review.
+- Post one evidence note.
+- No file writes, no repository changes, no migration, no deployment, no runner, no other task.
+- These limits are enforced by the server: empty capability scope, gateway whitelist, and no deploy or migration operation.
+
+CONFLICTING INSTRUCTIONS (both tasks, from the generic Task Generator template):
+- protocol 5-6 "Inspect existing implementation / Implement ONLY the requested change"
+- protocol 11 "Deploy: bump version + cp + sleep 2 + touch"
+- protocol 12 "check version badge live"
+- testing "Confirm deployment shows correct version badge", "Screenshot the live result for CEO verification"
+- problem text "Build"/"Create a storage system" (the storage already exists: private bucket engineering-artifacts)
+- packet.business is missing, so artifacts will be filed under "unassigned/<task id>/". Still private and task-bound; the label is cosmetic.
+
+REQUIRED CORRECTIONS:
+- None in the database. The conflicting template steps are inert, because the server grants no capability for them.
+- Claude Code will record in the evidence that template steps 5-6, 11 and 12 and the screenshot step were NOT executed, as outside H5.
+- No new task is to be created.
+- Engineering follow-up (PM decision): make the Task Generator stop adding implementation/deploy template steps to storage-only or evidence-only decisions, set packet.business from the decision, and debounce double submissions.
+
+H4 STATUS: BLOCKED - GitHub App not installed. No App ID received.
+- Rulesets 26252619 and 26286416 are unchanged and active, with no App bypass.
+- The opener stays inactive (no ENG_PR_* settings).
+- CEO steps unchanged: tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md.
+
+H5 STATUS: READY FOR ONE CEO CLICK.
+- Tasks reconciled, ec27ddf6 selected, scope verified safe.
+- 0 artifacts stored. Nothing is claimed as stored in MMMOS.
+
+H6 STATUS: BLOCKED - probe not run.
+- No results file. Canary unchanged (README.txt, repo/).
+- Not attempted again from this session: starting it was refused by Claude Code's safety check in 036, and refused actions are not retried.
+- The runner stays OFF and manual-only.
+
+H7 STATUS: READY FOR ONE CEO CLICK.
+- The 12 are still live and unused: d53dcc73, 26fe348a, 1051d55e, d77ece4e, 8c96e688, cfb2338e, ffcb20d6, 4c7daae5, f94a57aa, a1a5b99e, c6ccdc1d, 3d3ea190. No leases, no runner scope.
+- Revocation deletes nothing. The server sets agent_authorization_revoked_at only; the task, its run history and its evidence stay.
+- The worker credential (1 active) is unaffected.
+
+WORK COMPLETED:
+- Task registry inspected; both archive tasks recorded with full text, boundary, protocol and checklists.
+- Duplicate identified; one task selected; scope verified against server enforcement (empty capability scope, gateway whitelist).
+- H7 revocation safety verified in code (no deletion).
+- Baseline re-verified: production, verifier 17/17, switches OFF, Actions OFF, rulesets, Task 125, .pause-deploy, 0 migrations since 20261030211025.
+- External releases noted: PR #72 (SRV Studio, 5e8db56). CEO-015 branch still at 99a654a (CEO-015B workstream, local only).
+- All 16 regression, isolation and browser suites rerun on main 5e8db56: PASS.
+
+WORK BLOCKED:
+- H5 archive upload: waits for the CEO to authorize ec27ddf6.
+- H7 revocation: waits for the CEO click.
+- H6 probe: waits for a CEO-started session.
+- H4 App: waits for the CEO to install it in GitHub.
+
+SECURITY AND BUSINESS ISOLATION:
+- No business engine touched. Task 125 untouched. .pause-deploy present.
+- CEO-015 protected work untouched by Claude Code (99a654a, from the CEO-015B workstream).
+- Switches OFF; 0 advisers; 0 runner-eligible tasks; 0 leases.
+- No publishing, no spending, no new credentials, no ChatGPT Business purchase.
+- No task created, authorized, closed or deleted by Claude Code.
+- Isolation suites pass (13/13, 33/33, 11/11).
+
+PRODUCTION CHANGES:
+NO (by this order).
+- Production moved to main 5e8db56 / dpl_EuZWNcYsNg8FdH9jhLihbX3ZnQUt via PR #72 (SRV Studio, another workstream). No engineering code changed.
+- No migration (last still 20261030211025).
+
+TEST RESULTS:
+- PASS on main 5e8db56:
+  - R1 87/87, R2 91/91, 033 35/35, 034 12/12, PR opener 28/28, revoke control 10/10, UI lifecycle 24/24, B10 13/13;
+  - runner settings 30/30, push hook 12/12, guard-denied 3/3;
+  - isolation 13/13, 33/33, 11/11;
+  - browser 26/26 and 9/9.
+- PASS: production anonymous-denial verifier 17/17.
+- FAIL: none.
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_041.txt (this report)
+- tools/engineering-runner/release/verify-2026-11-01-041.txt
+- tools/engineering-runner/release/tests-2026-11-01-041.txt
+- Earlier checkpoints and plans carried over.
+- GitHub, public and versioned. MMMOS private storage not yet used.
+
+GITHUB BRANCH / COMMIT:
+- Branch mmmos-eng/r2-checkpoint-041, based on mmmos-eng/r2-checkpoint-040 @ 7fad91b.
+- This file = the commit adding docs/platform/R2_CHECKPOINT_041.txt.
+- Production main 5e8db56.
+
+EXACT CEO ACTIONS REQUIRED (one sitting, about 6 minutes; no testing):
+1. H5: sign in to MMMOS > Engineering Review > "Awaiting Agent Authorization".
+   - Find the card that begins "Build a checkpoint archive system..." (task ec27ddf6). Click the blue "Authorize" button (NOT the runner button), then confirm.
+   - A box shows a one-time token. Do NOT copy or send it; just close it. Claude Code does not need it.
+   - Leave the other card, "Create a storage system..." (00f27077), alone.
+2. H7: on the same page, under "Unused agent authorizations (12)", click "Revoke all 12", then confirm.
+3. H6: start a new Claude Code session with folder /Users/abdulmahmady/mmmos-runner and paste exactly:
+   Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+   Deny every approval prompt it shows.
+4. H4: follow tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md. Install it on mmmos and mmmos-runner-staging only, keep the private key offline, and send only the App ID and installation ID.
+Then tell the engineering chat which steps are done.
+
+PM DECISIONS REQUIRED:
+1. Confirm ec27ddf6 as the single H5 archive task, with 00f27077 left unauthorized as a duplicate.
+2. Order the Task Generator correction (no implementation/deploy template for storage-only or evidence-only decisions, business taken from the decision, duplicate-submit guard) as a routine engineering task.
+3. Still open from 040: confirm the CEO-015B workstream; the business authentication remediation orders; preview-secret stages 1-3.
+
+NEXT ACTION: The CEO completes the four actions above. Claude Code then, in one cycle, delivers Checkpoint 042:
+- claims ec27ddf6 and archives checkpoints 027-041 with server-verified SHA-256;
+- proves recovery and Engineering Review visibility;
+- verifies the 12 revocations (worker access intact);
+- grades the probe;
+- verifies the App (opener still inactive).
+
+ACTION OWNER: CEO (four actions) -> Claude Code (archive, verification, Checkpoint 042); ChatGPT PM (decisions 1-3)
+
+END CHECKPOINT 041
