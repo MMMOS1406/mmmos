@@ -11011,7 +11011,7 @@ async function loadApprovals(){
 
 async function doApprove(id){
   try{
-    const r=await fetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin'})});
+    const r=await _publishFetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin'})});
     if(!r.ok)throw new Error((await r.json()).error||'Failed');
     await loadApprovals();
   }catch(e){alert('Error: '+e.message);}
@@ -11021,7 +11021,7 @@ async function doReject(id){
   const reason=prompt('Rejection reason:','');
   if(reason===null)return;
   try{
-    const r=await fetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin',reason})});
+    const r=await _publishFetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin',reason})});
     if(!r.ok)throw new Error((await r.json()).error||'Failed');
     await loadApprovals();
   }catch(e){alert('Error: '+e.message);}
@@ -28256,9 +28256,9 @@ async function adminDecideApproval(approvalId,decision){
     if(decision==='revision'){
       await fetch('/api/ops?action=request_revision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,requested_by:'admin',revision_notes:notes||'Revision requested'})});
     } else if(decision==='approve'){
-      await fetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',notes})});
+      await _publishFetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',notes})});
     } else {
-      await fetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',reason:notes})});
+      await _publishFetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',reason:notes})});
     }
     await refreshApprovalStatus();
   }catch(e){alert('Failed to submit decision');}
