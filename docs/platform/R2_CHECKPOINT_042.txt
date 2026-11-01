@@ -1,0 +1,140 @@
+START CHECKPOINT 042
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-11-01
+EXECUTION ORDER: ORDER 042 (ChatGPT PM; execute the CEO-authorized H5 checkpoint archive)
+
+EXECUTIVE SUMMARY:
+- H5 archive EXECUTED and VERIFIED in private MMMOS storage.
+  - Task ec27ddf6 was authorized by the CEO and claimed through the existing worker gateway.
+  - 21 files were stored in the private engineering-artifacts bucket, each with a server-verified SHA-256.
+  - A fresh database check confirms 21/21 objects match on size, storage MD5 and SHA-256, and 20/20 manifest entries.
+- Two gaps remain:
+  - the CEO cannot yet open this archive in the MMMOS UI (no screen lists this task's artifacts with download links);
+  - a byte-level re-download from a fresh session is not possible with worker rights.
+  Recovery is proven by server read-back plus storage metadata instead.
+- H7, H6 and H4 still wait on the CEO.
+- Production is healthy and unchanged by this order: main 5e8db56, dpl_EuZWNcYsNg8FdH9jhLihbX3ZnQUt, verifier 17/17.
+- eng_runner and eng_adviser_connect are OFF.
+
+H5 AUTHORIZATION: VERIFIED.
+- ec27ddf6-27ed-4f4d-888c-fd59aba1caf2 was authorized by "ceo" at 2026-11-01 18:49:37 UTC. Manual path, not runner. Capability scope empty (no read/write paths, no validation ops).
+- Boundary read through the gateway: storage-only; no repository changes, no runner, no production deployment; no other task or system.
+- Duplicate 00f27077-9e89-43da-bc0f-cc433c9219f5 remains unauthorized (no grant, no scope).
+
+H5 EXECUTION: COMPLETE.
+- Claimed 2026-11-01 18:55:05 UTC by worker 2bc9385c ("Cowork - Primary Engineering Worker"), run 56b7b01f2fd1a9471ad858a7b5d44c84.
+- 21 uploads through the existing gateway (create_artifact_upload, signed PUT, submit_artifact). Path: unassigned/ec27ddf6-27ed-4f4d-888c-fd59aba1caf2/56b7b01f2fd1a9471ad858a7b5d44c84/
+  - "unassigned" because the task has no business set; still private and bound to the task.
+- One evidence note recorded. It also records that generic template steps 5-6 (implement), 11 (deploy), 12 (version badge) and the screenshot step were NOT executed, as outside H5.
+- No file writes, no repository code change, no deployment, no migration, no runner.
+
+ARCHIVED REPORTS (21 files, 168,180 bytes):
+- R2_POST_RELEASE_027_FINDINGS.txt (027-029)
+- RUNNER_ISOLATION.md (030), RUNNER_VALIDATION_031.md, SECURITY_RESOLUTION_032.md
+- R2_MASTER_033_CHECKPOINT.md
+- R2_CONSOLIDATED_034.md + R2_CONSOLIDATED_034.sha256.txt
+- R2_READINESS_035.md + R2_READINESS_035.sha256.txt
+- R2_CHECKPOINT_036.md, R2_CHECKPOINT_036.txt, R2_CHECKPOINT_036.sha256.txt
+- CHECKPOINT_REPORTING_STANDARD.md
+- R2_CHECKPOINT_038.txt, SECURITY_AUDIT_038.md
+- R2_CHECKPOINT_039.txt, BUSINESS_AUTH_REMEDIATION_039.md, PREVIEW_SECRETS_PLAN_039.md
+- R2_CHECKPOINT_040.txt, R2_CHECKPOINT_041.txt
+- ARCHIVE_042_MANIFEST.sha256.txt (sha256, file name and source commit/path for each file)
+Note: the connector does not accept the .sha256 extension, so those 4 files are stored as byte-identical "<name>.sha256.txt". Each copy was checked with cmp.
+
+SHA-256 VERIFICATION: PASS.
+- Every submit_artifact returned sha256_verified=true: the server read the stored object back and hashed it itself.
+- A fresh database query of storage.objects and brain_evidence: 21/21 objects match their local source on size, storage MD5 (eTag) and server SHA-256.
+- The manifest's 20 entries are 20/20 confirmed in MMMOS.
+- Examples:
+  - R2_CHECKPOINT_041.txt b4e138713d3e1383ad64296044a34c83e2fd94b53d6ec17569f005e2530f209a
+  - R2_CHECKPOINT_039.txt c4e0db943681aad8f9c209671664702e9d8f2c2b5085cfa657ea43a27ec8b1a4
+  - ARCHIVE_042_MANIFEST.sha256.txt b1a277c383d3c6ca75ba5bb8ad81a8232b0cfc02ac047c0f1625192550b026bc
+
+RECOVERY TEST: PARTIAL.
+- PASS: the stored bytes are readable by MMMOS. The server re-read each object at registration (sha256_verified=true).
+- PASS: an independent fresh query of the storage layer shows all 21 objects present, private, with matching size and MD5.
+- NOT POSSIBLE with current rights: a byte-level download from a fresh session. The worker gateway has no download operation, and the adviser (which returns signed download links) is OFF under H8.
+- The same files also exist in GitHub (public, versioned) as a second, independent copy.
+
+CEO UI ACCESS: NOT AVAILABLE YET (gap found).
+- Engineering Review builds packets only for tasks in "ready_for_ceo". No worker operation moves a task there, so this open task does not appear.
+- The review packet lists only the newest 20 evidence rows, with no download links.
+- Fix (needs a PM order and a release; not done because this order forbids code changes): a CEO-session "Artifacts" view in Engineering Review that lists any task's stored artifacts with short-lived download links, using the existing signed-download helper. Then the CEO opens task ec27ddf6 and downloads any file.
+
+H7 STATUS: PENDING CEO.
+- All 12 unused authorizations are still active: d53dcc73, 26fe348a, 1051d55e, d77ece4e, 8c96e688, cfb2338e, ffcb20d6, 4c7daae5, f94a57aa, a1a5b99e, c6ccdc1d, 3d3ea190.
+- The worker credential 2bc9385c is unaffected by revocation (it is a credential, not a task grant).
+- The new archive grant ec27ddf6 is NOT in the "unused" list (it is under 7 days old).
+
+H6 STATUS: PENDING CEO. No results file. Canary unchanged. Runner OFF, manual only, never run.
+
+H4 STATUS: PENDING CEO. The App is not installed. Rulesets 26252619 and 26286416 are active with no App bypass. The opener is inactive.
+
+H8 STATUS: ON HOLD. No purchase; eng_adviser_connect OFF; 0 advisers.
+
+NEXTWAVE PILOT READINESS: DESIGN READY, NOT REGISTERED.
+- docs/platform/NEXTWAVE_FINANCE_PILOT_DESIGN.md (on main) defines:
+  - a separate business key, nextwave_finance_pilot;
+  - separate folders, private artifact path and task history;
+  - separation from NextWave V1 and the V2 task 2e17bd23;
+  - review and a per-video publishing approval.
+- Needs its own order: a server change on a branch with tests, then a release.
+
+SECURITY AND ISOLATION:
+- Only gateway operations allowed by the empty-scope manual grant were used (claim, read boundary, artifact upload/register, evidence).
+- No RLS bypass. No CEO-gate bypass. No new credentials. No spending.
+- Task 125 untouched. .pause-deploy present. CEO-015 branch at 99a654a (CEO-015B workstream, not touched).
+- No business engine touched. No publishing.
+- The archived files contain no secrets (pattern scan clean).
+
+PRODUCTION CHANGES:
+NO deployment, migration, code, setting or secret change.
+- Data written in production: 21 private artifacts and their 21 evidence rows, plus 1 evidence note, all on task ec27ddf6. Task ec27ddf6 is now claimed (lease to 19:25 UTC).
+- This is the CEO-authorized H5 operation itself.
+
+TEST RESULTS:
+- PASS: production verifier 17/17 reads 401, public pages 200 (re-run in 042).
+- PASS: archive verification 21/21 (size, MD5, SHA-256) and 20/20 manifest entries.
+- Main unchanged since the 041 suite run (5e8db56: all 16 engineering, runner, isolation and browser suites PASS). No code changed in 042.
+- FAIL: none.
+
+DURABLE EVIDENCE:
+- MMMOS (private): the 21 artifacts plus the evidence note on task ec27ddf6. This checkpoint and the tracker are uploaded there too (see the chat message for confirmation).
+- GitHub (public, versioned): branch mmmos-eng/r2-checkpoint-042:
+  - docs/platform/R2_CHECKPOINT_042.txt
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - docs/platform/ARCHIVE_042_MANIFEST.sha256
+  - tools/engineering-runner/release/verify-2026-11-01-042.txt
+
+BLOCKERS:
+- CEO UI access to the archive: needs a small UI change (PM order and CEO release).
+- Fresh-session byte download: needs that same UI view (CEO session), or the adviser path (H8).
+- H7, H6 and H4: CEO actions.
+
+PM DECISIONS REQUIRED:
+1. Order the Engineering Review "Artifacts" view, CEO-session only, with short-lived download links. That completes H5 CEO access and fresh-session recovery.
+2. Decide whether archive grant ec27ddf6 stays authorized for future checkpoint archiving, or is revoked after 042.
+3. Still open: the Task Generator template correction; the business authentication remediation orders; preview-secret stages 1-3; confirming the CEO-015B workstream.
+
+CEO DECISIONS REQUIRED (about 5 minutes, no testing):
+1. H7: MMMOS > Engineering Review > "Unused agent authorizations (12)" > "Revoke all 12" > confirm.
+2. H6: start a new Claude Code session with folder /Users/abdulmahmady/mmmos-runner and paste exactly:
+   Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+   Deny every approval prompt it shows.
+3. H4: follow tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md. Install it on mmmos and mmmos-runner-staging only, keep the private key offline, and send only the App ID and installation ID.
+
+NEXT ACTION:
+- The PM orders the Artifacts view (decision 1).
+- The CEO does steps 1-3.
+- Claude Code then, in one cycle:
+  - builds and tests the Artifacts view on a branch for CEO release;
+  - verifies the 12 revocations;
+  - grades the probe;
+  - verifies the App;
+  - delivers Checkpoint 043.
+
+ACTION OWNER: ChatGPT PM (decisions 1-3) -> CEO (three steps) -> Claude Code (Artifacts view, verification, Checkpoint 043)
+
+END CHECKPOINT 042
