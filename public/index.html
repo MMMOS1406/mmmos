@@ -16579,7 +16579,7 @@ async function _srvEnglishV2RegenCaption(pkg){
   const lyrics=String(pkg[used.lyrics]||'');
   const src=_srvEnglishV2MetaSrc(task,pkg); // what this caption is generated from
   try{
-    const r=await fetch('/api/ops?action=srv_english_regen_caption',{
+    const r=await _publishFetch('/api/ops?action=srv_english_regen_caption',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({title:pkg.title||'',lyrics,isLong}),
     });
@@ -19897,7 +19897,7 @@ function _farsisaveEdit(pkgId,field,inputId,btnId){
     var _capEls=document.querySelectorAll('[id^="slfF_'+pkgId+'"]');
     var _capEl=null;
     _capEls.forEach(function(e){if((e.textContent||'').includes('#')||((e.value||'').includes('#')))_capEl=e;});
-    fetch('/api/ops?action=farsi_regen_caption',{
+    _publishFetch('/api/ops?action=farsi_regen_caption',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({title:pkg.title||'',lyrics:_lyrics,isLong:_isLong,needFinglish:field==='title'})
@@ -24646,7 +24646,7 @@ async function srvBuildPackage(pkgId){
     const _pkgLocal = D.packages.find(p=>p.id===pkgId) || {};
     // v13.69.8 — tasks use t.taskId not t.id; wrong field made _taskForPkg always undefined → pkg_engine empty → English Claude prompt
     const _taskForPkg = (D.tasks||[]).find(t=>String(t.taskId||'')===String(_pkgLocal.taskId||''));
-    const r = await fetch('/api/ops?action=srv_build_package', {
+    const r = await _publishFetch('/api/ops?action=srv_build_package', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
