@@ -247,6 +247,7 @@ const PUBLISH_GATED_ACTIONS = new Set([
 // 046 — business actions that previously took no login now need the CEO or VA session (same gate,
 // same enforce/observe mode as publishing). Grouped by business; paid generation, deletion and approvals first.
 const SESSION_GATED_ACTIONS = new Set([
+  'sm_video_production_generate', // SMM video generation
   'srv_build_package', // SRV Farsi / SRV English generation
   'srv_english_regen_caption', // SRV Farsi / SRV English generation
   'farsi_regen_caption', // SRV Farsi / SRV English generation

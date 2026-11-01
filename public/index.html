@@ -11665,7 +11665,7 @@ async function _smmExecGenerateVideo(){
   if(!_smmExecActiveTaskId||_smmExecState.busy)return;
   _smmExecState.busy=true;_smmExecRerenderIfMounted();
   try{
-    const r=await fetch('/api/ops?action=sm_video_production_generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
+    const r=await _publishFetch('/api/ops?action=sm_video_production_generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
     const j=await r.json().catch(function(){return{};});
     if(!r.ok||!j.ok)throw new Error(j.error||('request failed ('+r.status+')'));
     _smmExecState.video=j.production;
@@ -26788,7 +26788,7 @@ async function smmVideoGenerate(taskId){
   st.busy=true; st.error=null;
   smmVaRerenderIfMounted(smmVaBusinessId);
   try{
-    const res=await fetch('/api/ops?action=sm_video_production_generate',{
+    const res=await _publishFetch('/api/ops?action=sm_video_production_generate',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({vaTaskId:taskId})
     });
