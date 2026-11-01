@@ -16880,6 +16880,116 @@ async function _srvEnglishV2Build(pkgId,taskId){
   }
 }
 // 029: Build for a promotional Short — the audio is the Long's, so there is nothing to generate or upload first.
+// ── SRV-STUDIO-V2-037: Suno steps for the VA (SRV Studio only; the manual Suno workflow, made safer) ──────────
+// Copies exactly the APPROVED text of this format (never the other format's text as a fallback) and checks the MP3
+// before Build: type, size and real duration. The MP3 stays in this browser until Build, which stores it with the
+// package (029). Nothing here talks to Suno.
+// <srv2-mp3-check>
+const SRV2_MP3_LIMITS={minBytes:200*1024,maxBytes:40*1024*1024,
+  long:{minSec:120,maxSec:420,okMinSec:165,okMaxSec:270},short:{minSec:15,maxSec:90,okMinSec:25,okMaxSec:40}};
+function srv2Mp3Check(f,L){
+  L=L||SRV2_MP3_LIMITS;const errors=[],warnings=[];const name=String(f&&f.name||''),type=String(f&&f.type||'').toLowerCase();
+  if(!/\.mp3$/i.test(name)&&!/^audio\/(mpeg|mp3)$/.test(type))errors.push('This is not an MP3 file ('+(name||'no name')+').');
+  const size=Number(f&&f.size||0);
+  if(size<L.minBytes)errors.push('The file is only '+Math.round(size/1024)+' KB — too small to be a full song.');
+  if(size>L.maxBytes)errors.push('The file is '+(size/1048576).toFixed(1)+' MB — too large for a song MP3.');
+  const r=f&&f.isLong?L.long:L.short;const d=Number(f&&f.durationSec);
+  if(!(d>0))errors.push('The audio could not be read. Download the MP3 from Suno again.');
+  else if(d<r.minSec||d>r.maxSec)errors.push('The song is '+srv2Clock(d)+' long — a '+(f.isLong?'Long':'Short')+' song must be '+srv2Clock(r.minSec)+'–'+srv2Clock(r.maxSec)+'. Check that this is the right song.');
+  else if(d<r.okMinSec||d>r.okMaxSec)warnings.push('The song is '+srv2Clock(d)+' — longer or shorter than usual ('+srv2Clock(r.okMinSec)+'–'+srv2Clock(r.okMaxSec)+'). Listen before you build.');
+  return {ok:!errors.length,errors,warnings,durationSec:d>0?+d.toFixed(2):null};
+}
+function srv2Clock(sec){sec=Math.max(0,Math.round(Number(sec)||0));return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');}
+// </srv2-mp3-check>
+function _srvEnglishV2ApprovedText(task,pkg,which){
+  const used=_srvEnglishV2BuildKeys(task,pkg);const key=which==='lyrics'?used.lyrics:used.sunoPrompt;
+  // same rule as Build: a package with an approval record must still match it; one without (older packages) is allowed
+  return {key,text:String(pkg&&pkg[key]||''),approved:pkg&&pkg._srvV2Approved?_srvEnglishV2ApprovalMatches(task,pkg):true};
+}
+function _srvEnglishV2CopyApproved(taskId,pkgId,which,btn){
+  const task=_srvEnglishTaskById(taskId);const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  const st=document.getElementById('srv2-suno-copy-status-'+pkgId);
+  const say=function(m,c){if(st){st.textContent=m;st.style.color=c||'var(--dim)';}};
+  if(!task||!pkg){say('⚠ This task or its package could not be identified.','#ef4444');return false;}
+  const a=_srvEnglishV2ApprovedText(task,pkg,which);const label=which==='lyrics'?'lyrics':'style prompt';
+  if(!a.text){say('⚠ The '+label+' is empty — fill it in at Review.','#ef4444');return false;}
+  if(!a.approved){say('⚠ The text changed after approval — go back to Review and approve it again before using Suno.','#ef4444');return false;}
+  const done=function(){say('✓ Copied the approved '+label+' ('+a.text.length+' characters). Paste it into Suno\'s '+(which==='lyrics'?'Lyrics':'Style')+' box.','#22c55e');
+    if(btn){const o=btn.textContent;btn.textContent='✓ Copied';setTimeout(function(){btn.textContent=o;},1500);}};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(a.text).then(done).catch(function(){window.prompt('Copy this text (Ctrl+A, Ctrl+C):',a.text);done();});
+  else{window.prompt('Copy this text (Ctrl+A, Ctrl+C):',a.text);done();}
+  return true;
+}
+function _srvEnglishV2AudioDuration(file){
+  return new Promise(function(resolve){
+    let url=null;try{url=URL.createObjectURL(file);}catch(_){resolve(null);return;}
+    const a=new Audio();let done=false;const fin=function(v){if(done)return;done=true;try{URL.revokeObjectURL(url);}catch(_){}resolve(v);};
+    a.preload='metadata';a.onloadedmetadata=function(){fin(isFinite(a.duration)?a.duration:null);};a.onerror=function(){fin(null);};
+    setTimeout(function(){fin(null);},15000);a.src=url;
+  });
+}
+async function _srvEnglishV2AcceptMp3(taskId,pkgId,file){
+  const task=_srvEnglishTaskById(taskId);const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  const st=document.getElementById('srv2-mp3-status-'+pkgId);
+  const show=function(html,c){if(st){st.innerHTML=html;st.style.color=c||'var(--dim)';}};
+  if(!file)return false;
+  if(!task||!pkg){show('⚠ This task or its package could not be identified.','#ef4444');return false;}
+  show('Checking '+escHTML(file.name)+'…');
+  const isLong=_srvEnglishV2TaskIsLong(task);
+  const durationSec=await _srvEnglishV2AudioDuration(file);
+  const chk=srv2Mp3Check({name:file.name,type:file.type,size:file.size,durationSec,isLong});
+  if(!chk.ok){delete _srvAudioData[pkgId];show('⚠ Not loaded: '+chk.errors.map(escHTML).join(' '),'#ef4444');return false;}
+  _srvAudioData[pkgId]={file,name:file.name,sizeMB:(file.size/1048576).toFixed(1),durationSec:chk.durationSec,checkedAt:new Date().toISOString()};
+  show('✓ <b>'+escHTML(file.name)+'</b> · '+srv2Clock(chk.durationSec)+' · '+(file.size/1048576).toFixed(1)+' MB — ready to build.'
+    +(chk.warnings.length?'<br><span style="color:#c9a84c">⚠ '+chk.warnings.map(escHTML).join(' ')+'</span>':'')
+    +'<br><span style="color:var(--dim)">The MP3 is held in this browser and is saved with the package when you press Build. Keep this tab open until then.</span>','#22c55e');
+  const pv=document.getElementById('srv2-mp3-preview-'+pkgId);
+  if(pv){try{if(pv.dataset.url)URL.revokeObjectURL(pv.dataset.url);}catch(_){}const u=URL.createObjectURL(file);pv.dataset.url=u;pv.src=u;pv.style.display='block';}
+  return true;
+}
+function _srvEnglishV2Mp3Drop(ev,taskId,pkgId){
+  ev.preventDefault();const z=ev.currentTarget;if(z)z.style.borderColor='rgba(139,92,246,0.45)';
+  const f=ev.dataTransfer&&ev.dataTransfer.files&&ev.dataTransfer.files[0];
+  if(ev.dataTransfer&&ev.dataTransfer.files&&ev.dataTransfer.files.length>1){const st=document.getElementById('srv2-mp3-status-'+pkgId);if(st){st.textContent='⚠ Drop one MP3 at a time.';st.style.color='#ef4444';}return;}
+  _srvEnglishV2AcceptMp3(taskId,pkgId,f);
+}
+function _srvEnglishV2SunoStepsHtml(task,pkg,taskId){
+  const pkgId=String(pkg.id);const isLong=_srvEnglishV2TaskIsLong(task);
+  const sp=_srvEnglishV2ApprovedText(task,pkg,'sunoPrompt'),ly=_srvEnglishV2ApprovedText(task,pkg,'lyrics');
+  const a=_srvAudioData[pkgId];const kept=isLong&&pkg._srvAudioUrl;
+  const H='font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace';
+  const B='flex:1;padding:10px;background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.35);border-radius:8px;color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif';
+  const r=isLong?SRV2_MP3_LIMITS.long:SRV2_MP3_LIMITS.short;
+  return `<div id="srv2-suno-steps-${escHTML(pkgId)}" data-srv2-suno-steps="1">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">Make the song in Suno with the approved text, download the MP3, drop it below, then build.</div>
+      <div style="margin-bottom:14px">
+        <div style="${H}">STEP 1 — MAKE THE SONG IN SUNO</div>
+        ${sp.approved?'':'<div style="margin-bottom:8px;font-size:11px;color:#ef4444">⚠ The text changed after approval. Go back to Review and approve it again before using Suno.</div>'}
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button onclick="_srvEnglishV2CopyApproved('${taskId}','${escHTML(pkgId)}','sunoPrompt',this)" ${sp.text&&sp.approved?'':'disabled'} style="${B}">📋 Copy approved style prompt</button>
+          <button onclick="_srvEnglishV2CopyApproved('${taskId}','${escHTML(pkgId)}','lyrics',this)" ${ly.text&&ly.approved?'':'disabled'} style="${B}">📋 Copy approved lyrics</button>
+        </div>
+        <div id="srv2-suno-copy-status-${escHTML(pkgId)}" style="font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">${isLong?'Long song':'Short song'} · style ${sp.text.length} characters · lyrics ${ly.text.length} characters</div>
+        <a href="https://suno.com/create" target="_blank" rel="noopener" style="display:block;text-align:center;padding:9px 14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.10);border-radius:8px;color:var(--text);font-size:11px;font-weight:700;text-decoration:none;font-family:'Syne',sans-serif">🎵 Open Suno ↗</a>
+        <div style="margin-top:6px;font-size:10px;color:var(--dim)">In Suno use Custom mode: paste the style prompt into Style and the lyrics into Lyrics. Download only the version you choose — the shared Suno account has a monthly download limit.</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="${H}">STEP 2 — ADD THE MP3</div>
+        ${kept?'<div style="margin-bottom:8px;font-size:10px;color:#22c55e">✓ An original MP3 is already saved with this package from an earlier build. Add an MP3 only to build again.</div>':''}
+        <div role="button" tabindex="0" aria-label="Drop the MP3 here or choose a file" onclick="document.getElementById('srv2-mp3-input-${escHTML(pkgId)}').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"
+          ondragover="event.preventDefault();this.style.borderColor='#a78bfa'" ondragleave="this.style.borderColor='rgba(139,92,246,0.45)'" ondrop="_srvEnglishV2Mp3Drop(event,'${taskId}','${escHTML(pkgId)}')"
+          style="padding:18px 12px;border:2px dashed rgba(139,92,246,0.45);border-radius:10px;text-align:center;cursor:pointer;color:#a78bfa;font-size:12px;font-weight:700;font-family:'Syne',sans-serif">⬇ Drop the MP3 from Suno here, or click to choose<div style="font-size:10px;font-weight:400;color:var(--dim);margin-top:4px">MP3 only · ${isLong?'Long':'Short'} songs ${srv2Clock(r.minSec)}–${srv2Clock(r.maxSec)}</div></div>
+        <input id="srv2-mp3-input-${escHTML(pkgId)}" type="file" accept="audio/mpeg,audio/mp3,.mp3" style="display:none" onchange="_srvEnglishV2AcceptMp3('${taskId}','${escHTML(pkgId)}',this.files&&this.files[0]);this.value=''">
+        <div id="srv2-mp3-status-${escHTML(pkgId)}" style="margin-top:8px;font-size:11px;line-height:1.5;color:${a?'#22c55e':'var(--dim)'}">${a?'✓ <b>'+escHTML(a.name)+'</b>'+(a.durationSec?' · '+srv2Clock(a.durationSec):'')+' · '+escHTML(String(a.sizeMB))+' MB — ready to build.':'No MP3 added yet.'}</div>
+        <audio id="srv2-mp3-preview-${escHTML(pkgId)}" controls style="width:100%;margin-top:8px;display:none"></audio>
+      </div></div>`;
+}
+// Replaces the generic SRV English Step 1 + Step 2 (between the markers) with the V2 steps; everything else stays.
+function _srvEnglishV2SwapSunoSteps(html,task,pkg,taskId){
+  const i=html.indexOf('<!--srv-suno-steps-->'),j=html.indexOf('<!--/srv-suno-steps-->');
+  if(i<0||j<i)return html;
+  return html.slice(0,i)+_srvEnglishV2SunoStepsHtml(task,pkg,taskId)+html.slice(j+'<!--/srv-suno-steps-->'.length);
+}
 function _srvEnglishV2PromoBuildHtml(pkg,taskId){
   const P=escHTML(String(pkg.id)),T=escHTML(String(taskId));
   return `<div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">BUILD THE SHORT</div>
@@ -17862,6 +17972,7 @@ function renderSRVEnglishLifecycleCard(task){
     const spEsc=sunoPrompt?sunoPrompt.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     const lyEsc=sunoLyrics?sunoLyrics.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     stageContent=`
+      <!--srv-suno-steps-->
       <div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">Generate the song in Suno, download the MP3, then build the cinematic video.</div>
       <div style="margin-bottom:14px">
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 1 — GENERATE IN SUNO</div>
@@ -17880,6 +17991,7 @@ function renderSRVEnglishLifecycleCard(task){
           <span id="srv-lc-mp3-status-${pkgId}" style="font-size:10px;color:${mp3Ready?'#22c55e':'rgba(255,255,255,0.35)'};font-family:'JetBrains Mono',monospace;white-space:nowrap">${mp3Ready?'MP3 loaded ✓':'no MP3 yet'}</span>
         </div>
       </div>
+      <!--/srv-suno-steps-->
       ${bgUrl?`<div style="margin-bottom:10px;border-radius:8px;overflow:hidden;max-height:90px"><img src="${escHTML(bgUrl)}" style="width:100%;object-fit:cover;max-height:90px" alt="bg"><div style="font-size:9px;color:var(--dim);padding:2px 0">📷 Pexels background auto-selected</div></div>`:''}
       ${isRendering?`<div id="srv-lc-render-status-${pkgId}" style="padding:10px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:8px;font-size:11px;color:#a78bfa;margin-bottom:10px">⏳ Rendering in progress… <button onclick="_srvEnglishPollRender('${pkgId}','${taskId}')" style="margin-left:8px;padding:3px 8px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.35);border-radius:5px;color:#a78bfa;font-size:10px;cursor:pointer;font-family:'JetBrains Mono',monospace">↻ Check status</button></div>`:''}
       <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 3 — BUILD PACKAGE</div>
@@ -17934,6 +18046,7 @@ function renderSRVEnglishLifecycleCard(task){
   if(_v2On&&stage==='generate')stageContent=_srvEnglishV2GenerateHtml(task,taskId,mood); // 023: Long/Short selection
   if(_v2On&&(stage==='build'||stage==='approve'||stage==='done'))stageContent=_srvEnglishV2RenderHtml(task,pkg,taskId,stage)+(stage==='build'?stageContent.replace('⚡ Build Package — Fetch Background + Render Video',SRV2_BUILD_LABEL):stage==='approve'?_srvEnglishV2ApprovePoster(pkg,stageContent.replace("onclick=\"_srvEnglishApproveVideo('","onclick=\"_srvEnglishV2ApproveVideo('")):stageContent);
   if(_v2On&&stage==='build'&&pkg&&!_srvEnglishV2TaskIsLong(task)&&_srvEnglishV2IsPromoPkg(pkg))stageContent=_srvEnglishV2RenderHtml(task,pkg,taskId,stage)+_srvEnglishV2PromoBuildHtml(pkg,taskId); // 029: no Suno / MP3 steps
+  else if(_v2On&&stage==='build'&&pkg)stageContent=_srvEnglishV2SwapSunoSteps(stageContent,task,pkg,taskId); // 037: approved-text copy + MP3 drop zone with checks
   if(_v2On&&stage==='build')stageContent=_srvEnglishV2BuildSummaryHtml(task,pkg,taskId)+stageContent;
   if(_v2On&&(stage==='review'||stage==='build'||stage==='approve'))stageContent=_srvEnglishV2AvatarHtml(task,pkg,taskId,stage)+stageContent;
   return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
