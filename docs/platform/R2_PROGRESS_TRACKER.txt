@@ -1,21 +1,26 @@
 MMMOS ENGINEERING INTEGRATION - RELEASE 2 PROGRESS TRACKER
-Updated: 2026-11-01 (Checkpoint 042). Status words: COMPLETE / PENDING-CEO / BLOCKED / ON HOLD / NOT STARTED.
+Updated: 2026-11-01 (Checkpoint 043). Status words: COMPLETE / READY FOR RELEASE / PENDING-CEO / BLOCKED / ON HOLD / NOT STARTED.
 
-H1  Security release (31 anonymous actions closed)    COMPLETE      main 54f5e97 -> now 5e8db56; verifier 17/17 PASS
-H2  GitHub Actions disabled (repo only)               COMPLETE      enabled=false (main and staging)
-H3  Staging repo + staging-only deploy key            COMPLETE      MMMOS1406/mmmos-runner-staging, key 168324989
-H4  GitHub App "MMMOS Runner PR Opener"               PENDING-CEO   not installed; rulesets 26252619/26286416 active; opener inactive
-H5  Authorization (task ec27ddf6)                     COMPLETE      CEO authorized 2026-11-01 18:49:37 UTC (manual, empty scope)
-H5  Archive execution                                 COMPLETE      21 files stored, all server-verified SHA-256; 21/21 size+MD5+SHA match
-H5  CEO UI access to archive                          BLOCKED       no current Engineering Review view lists this task's artifacts with download links (needs a small UI PR)
-H5  Duplicate task 00f27077                           OPEN          left unauthorized (holds no permission)
-H6  Runner enforcement probe                          PENDING-CEO   needs a CEO-started session in ~/mmmos-runner
-H7  Revoke 12 unused authorizations                   PENDING-CEO   control live; all 12 still active
-H8  ChatGPT Business / adviser connection             ON HOLD       no purchase; switch OFF; compatibility tests pass
---  Business-engine auth remediation (50 actions)     NOT STARTED   plans ready (BUSINESS_AUTH_REMEDIATION_039.md); needs PM orders
---  Preview-secret isolation stages 1-3               NOT STARTED   plan ready (PREVIEW_SECRETS_PLAN_039.md); needs CEO approval
---  Task Generator template correction                NOT STARTED   recommended in 041; needs a PM order
---  NextWave Finance Pilot readiness                  DESIGN READY  NEXTWAVE_FINANCE_PILOT_DESIGN.md (on main); not registered; needs its own order after the H-items
+CHANGES SINCE 042
+- H7: the CEO revoked all 12 unused authorizations (2026-11-01 19:04:15-19:04:24 UTC). Verified; worker access intact.
+- H5: CEO Artifacts view built and tested on a branch (PR #73, draft). Not released.
+- Task Generator correction built and tested (PR #74, draft). Not released.
 
-Switches: eng_runner OFF, eng_adviser_connect OFF. Runner task: manual only, never run.
-Protected: Task 125 untouched; .pause-deploy present; CEO-015 branch at 99a654a (CEO-015B workstream, not by this project).
+H1  Security release (31 anonymous actions closed)    COMPLETE           production main 5e8db56; verifier 17/17 PASS
+H2  GitHub Actions disabled (repo only)               COMPLETE           enabled=false (main and staging)
+H3  Staging repo + staging-only deploy key            COMPLETE           MMMOS1406/mmmos-runner-staging, key 168324989
+H4  GitHub App "MMMOS Runner PR Opener"               PENDING-CEO        not installed; rulesets active; opener inactive
+H5  Archive (task ec27ddf6)                           COMPLETE           23 private artifacts, all server-verified SHA-256
+H5  CEO Artifacts view                                READY FOR RELEASE  PR #73 (draft): server 24/24, UI 11/11; NOT operational until released and verified
+H5  Duplicate task 00f27077                           OPEN               unauthorized; no permission
+H6  Runner enforcement probe                          PENDING-CEO        needs a CEO-started session in ~/mmmos-runner
+H7  Revoke 12 unused authorizations                   COMPLETE           12/12 revoked; history kept; worker 2bc9385c active
+H8  ChatGPT Business / adviser connection             ON HOLD            no purchase; switch OFF
+--  Task Generator correction                         READY FOR RELEASE  PR #74 (draft): 15/15
+--  Business-engine auth remediation (50 actions)     NOT STARTED        plans ready; needs PM orders
+--  Preview-secret isolation stages 1-3               NOT STARTED        plan ready; needs CEO approval
+--  NextWave Finance Pilot                            DESIGN READY       separate key/folders/history designed; not registered; next after the H-items
+
+NEXT MILESTONE: the CEO approves releasing PR #73 and PR #74. Claude Code then releases them and verifies the Artifacts view live with the CEO (one download, SHA-256 match). Owner: PM (order) -> CEO (approve) -> Claude Code.
+Switches: eng_runner OFF, eng_adviser_connect OFF. Runner manual only, never run.
+Protected: Task 125 untouched; .pause-deploy present; CEO-015B is a separate workstream (99a654a, local).

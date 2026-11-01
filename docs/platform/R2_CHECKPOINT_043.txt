@@ -1,0 +1,134 @@
+START CHECKPOINT 043
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-11-01
+EXECUTION ORDER: ORDER 043 (ChatGPT PM; H5 archive completion and H4/H6/H7 verification)
+
+EXECUTIVE SUMMARY:
+- H7 is COMPLETE. The CEO revoked all 12 unused agent authorizations, and that is verified: task history kept, worker access intact.
+- The H5 archive is intact (23 private artifacts, all server-verified SHA-256).
+- The CEO Artifacts view is BUILT AND TESTED on a branch (draft PR #73). It is NOT operational until released and verified live.
+- The Task Generator correction is BUILT AND TESTED (draft PR #74).
+- H6 and H4 still wait on the CEO. H8 is on hold.
+- Production is healthy and unchanged by this order: main 5e8db56, dpl_EuZWNcYsNg8FdH9jhLihbX3ZnQUt, verifier 17/17.
+- eng_runner and eng_adviser_connect are OFF.
+
+CHANGES SINCE 042:
+- The CEO revoked the 12 unused authorizations (2026-11-01 19:04:15 to 19:04:24 UTC).
+- New branch mmmos-eng/r2-artifacts-view-043 (f84751f), draft PR #73.
+- New branch mmmos-eng/task-generator-fix-043 (900ebbe), draft PR #74.
+- Tracker updated (docs/platform/R2_PROGRESS_TRACKER.txt).
+- No production, database, setting or secret change.
+
+H5 ARCHIVE STATUS: COMPLETE AND INTACT.
+- Task ec27ddf6-27ed-4f4d-888c-fd59aba1caf2 holds 23 stored objects in the private engineering-artifacts bucket: the 21 archive files plus checkpoint 042 and the tracker.
+- 23/23 have evidence rows with sha256_verified=true. The archive manifest was confirmed in 042: 21/21 size, MD5 and SHA-256; 20/20 entries.
+- Authorization is unchanged and was not expanded: authorized 2026-11-01 18:49:37 UTC, empty capability scope, not revoked. Its lease expired (19:25 UTC).
+- Duplicate 00f27077-9e89-43da-bc0f-cc433c9219f5 remains unauthorized.
+
+H5 CEO ARTIFACTS VIEW: BUILT, TESTED, NOT RELEASED (PR #73, draft).
+- Three new actions, all requiring the CEO session: engineering_artifacts_index, engineering_task_artifacts, engineering_artifact_download_link.
+- Engineering Review gets a "Stored artifacts" section: tasks with file counts, then each file with name, checkpoint, size, SHA-256, verified flag and upload date.
+- Security:
+  - anonymous callers, worker credentials and forged tokens are refused (401);
+  - no storage paths are ever returned in lists;
+  - every artifact is re-checked against its own task's folder, so cross-task, cross-business and forged rows get nothing (404);
+  - malformed ids are refused (400); unknown tasks get 404;
+  - one link per file, expiring after 120 seconds; a missing object returns an error, never a broken link.
+- Download check: files up to 25 MB are re-hashed in the browser; on a SHA-256 mismatch the file is not saved and the CEO is told. Larger files open directly.
+- No schema, RLS or storage change. Existing Engineering Review behaviour is unchanged (browser 26/26, 9/9).
+- Expired and invalid links are rejected by Supabase storage itself. This will be checked live after release.
+- Byte-level download and SHA-256 from a fresh CEO session: NOT YET VERIFIED (needs the release and one CEO download).
+
+TASK GENERATOR CORRECTION: BUILT, TESTED, NOT RELEASED (PR #74, draft).
+- Findings: the generator always appends a hard-coded template (implement, deploy, version badge, screenshot); it never stored the business named in the decision; and nothing stopped a double click (two tasks 4 seconds apart).
+- Fixes:
+  - duplicate guard: the same decision text within 10 minutes returns the task already created, keyed by SHA-256, before any AI call;
+  - "business: <name>" is stored when it is a known business;
+  - decisions that forbid both deployment and repository changes, and only store or archive records, get an evidence-only protocol and checklists;
+  - the AI prompt no longer turns "store records" into "build a system";
+  - the button ignores a second click while a submission is running.
+- Ordinary implementation decisions keep the standard protocol.
+
+H7 REVOCATIONS: COMPLETE AND VERIFIED.
+- Revoked (UTC 2026-11-01): d53dcc73 19:04:15; 26fe348a, 1051d55e 19:04:21; d77ece4e, 8c96e688, cfb2338e 19:04:22; ffcb20d6, 4c7daae5, f94a57aa 19:04:23; a1a5b99e, c6ccdc1d, 3d3ea190 19:04:24.
+- History kept: every task still has its problem text, run records (0-17 each) and evidence (0-4 each).
+- No other agent authorization is live except the archive task ec27ddf6.
+- Worker 2bc9385c is active, and eb_worker_list_authorized_tasks still works (it now lists only ec27ddf6).
+
+H6 RUNNER PROBE: PENDING CEO.
+- No results file in ~/mmmos-runner/reports. Canary unchanged.
+- Not attempted from this session: the safety check refused it in 036, and refused actions are not retried.
+- The runner stays OFF and manual-only.
+
+H4 GITHUB APP: PENDING CEO.
+- Not installed (no App ID received).
+- Rulesets 26252619 and 26286416 active, with no App bypass. Opener inactive (no ENG_PR_* settings).
+
+H8 CHATGPT CONNECTION: ON HOLD. No purchase; eng_adviser_connect OFF; 0 advisers.
+
+NEXTWAVE PILOT READINESS: DESIGN READY, NOT REGISTERED.
+- The design (docs/platform/NEXTWAVE_FINANCE_PILOT_DESIGN.md on main) separates it from NextWave V1 and the V2 task.
+- Registration is next after the H-items, under its own order.
+
+SECURITY RESULTS:
+- Production anonymous-denial verifier: RESULT PASS (17 reads 401, public pages 200).
+- GitHub Actions OFF. Rulesets unchanged.
+- No secrets in any new file. No credential created or shown.
+
+BUSINESS ISOLATION:
+- No business engine changed.
+- The new artifact code refuses cross-task and cross-business access (tested).
+- Isolation suites unchanged (release 13/13, state 33/33, client e2e 11/11).
+- Task 125 untouched. .pause-deploy present. CEO-015B separate (99a654a, local, untouched).
+
+TEST RESULTS:
+- PR #73 (artifacts view):
+  - new server 24/24, UI 11/11;
+  - 54 of 58 suites identical to main 5e8db56. The other 4 are the 2 new suites plus 2 diff-scope self-checks (YouTube, and SRV Studio 037 "only SRV Studio files changed"), which fail on any branch touching other files;
+  - browser 26/26 and 9/9;
+  - preservation identical to main except the 2 known CEO-008 file-scope checks.
+- PR #74 (task generator):
+  - new suite 15/15;
+  - 54 of 57 suites identical to main, the same 2 diff-scope self-checks differing;
+  - browser 26/26 and 9/9;
+  - preservation identical to main except the same 2 checks.
+- PR #73 and PR #74 merge with each other cleanly.
+- FAIL: none.
+
+PRODUCTION CHANGES:
+NO deployment, migration, code, setting or secret change. Production stays main 5e8db56 / dpl_EuZWNcYsNg8FdH9jhLihbX3ZnQUt.
+
+GITHUB BRANCH / PR / COMMIT:
+- PR #73 draft: mmmos-eng/r2-artifacts-view-043 @ f84751f (CEO Artifacts view).
+- PR #74 draft: mmmos-eng/task-generator-fix-043 @ 900ebbe (Task Generator correction).
+- Checkpoint branch mmmos-eng/r2-checkpoint-043, based on 042 @ e742509. This file = the commit adding docs/platform/R2_CHECKPOINT_043.txt.
+
+DURABLE REPORT PATH:
+- GitHub, public and versioned:
+  - docs/platform/R2_CHECKPOINT_043.txt
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - tools/engineering-runner/release/verify-2026-11-01-043.txt
+- MMMOS, private: this checkpoint and the tracker are uploaded to task ec27ddf6 (see the chat message for confirmation).
+
+PM DECISIONS REQUIRED:
+1. Approve PR #73 (CEO Artifacts view) and PR #74 (Task Generator correction) for CEO release sign-off. Both are engineering-only, with no schema or RLS change.
+2. Keep or revoke the archive grant ec27ddf6 (Claude Code suggests keeping it for future checkpoint archiving; its scope is empty, so it permits only artifacts and evidence).
+3. Still open: the business authentication remediation orders, preview-secret stages 1-3, and confirming the CEO-015B workstream.
+
+CEO DECISIONS REQUIRED (no testing):
+1. Release approval: "Approve releasing PR #73 and PR #74 to production." After the release, open Engineering Review > "Stored artifacts" > SHOW > OPEN the archive task > DOWNLOAD any one file. The page itself checks the SHA-256 (shows "SHA OK"). That one click is the live verification.
+2. H6: start a new Claude Code session with folder /Users/abdulmahmady/mmmos-runner and paste exactly:
+   Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+   Deny every approval prompt it shows.
+3. H4: follow tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md. Install it on mmmos and mmmos-runner-staging only, keep the private key offline, and send only the App ID and installation ID.
+
+NEXT ACTION:
+- The PM approves decision 1, and the CEO approves the release.
+- Claude Code then releases PR #73 and PR #74 through the protected PR process and verifies production (verifier, anonymous refusal of the 3 new actions, health).
+- After the CEO's one download, Claude Code records the SHA-256 match and delivers Checkpoint 044.
+- In parallel, the CEO does H6 and H4 when convenient.
+
+ACTION OWNER: ChatGPT PM (decisions) -> CEO (release approval, one download, H6, H4) -> Claude Code (release, verification, Checkpoint 044)
+
+END CHECKPOINT 043
