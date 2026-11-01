@@ -10210,7 +10210,7 @@ async function updateAssetStatus(id,status){
 async function deleteAsset(id){
   if(!confirm('Delete this asset?'))return;
   try{
-    const r=await fetch('/api/ops?action=delete_asset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset_id:id})});
+    const r=await _publishFetch('/api/ops?action=delete_asset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset_id:id})});
     if(!r.ok)throw new Error((await r.json()).error||'Failed');
     await loadAssets();
   }catch(e){alert('Error: '+e.message);}
@@ -13154,7 +13154,7 @@ async function _pollHeygenRenders(){
   if(!inFlight.length) return;
   for(const pkg of inFlight){
     try{
-      const r = await fetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(pkg.heygenJobId));
+      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(pkg.heygenJobId));
       const data = await r.json();
       if(!data.ok) continue;
       const status = data.status;
@@ -13542,7 +13542,7 @@ async function _resolveHeygenSource(input){
   if(!videoId && /^[a-f0-9]{32}$/i.test(raw)) videoId = raw;
   if(videoId){
     try{
-      const r = await fetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(videoId));
+      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(videoId));
       const d = await r.json();
       if(d.videoUrl) return { ok:true, url: d.videoUrl, source:'resolved', videoId, status: d.status };
       return { ok:false, error:'no_mp4_url_in_heygen_response', videoId, status: d.status||'?', raw: d };
@@ -14033,7 +14033,7 @@ async function heygenPaulFramingTest(){
   const POLL_INTERVAL = 30000;
   const pollOne = async (videoId) => {
     try{
-      const r = await fetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
+      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
       const d = await r.json();
       if(d.ok && d.data && (d.data.status === 'completed' || d.data.video_url)){
         const url = d.data.video_url || d.data.video_url_caption || '';
@@ -19097,7 +19097,7 @@ async function _nwv2PollHeygenJobToCompletion(videoId,maxAttempts,intervalMs){
   for(let i=0;i<maxAttempts;i++){
     await new Promise(function(res){setTimeout(res,intervalMs);});
     try{
-      const r=await fetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
+      const r=await _publishFetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
       const data=await r.json();
       if(!data.ok) continue;
       if(data.status==='completed'&&data.videoUrl) return{ok:true,videoUrl:data.videoUrl,durationSec:data.durationSec};
@@ -28039,7 +28039,7 @@ async function execSaveSuno(){
   else{payload.task_id=execState.taskId;}
   try{
     console.log('[SUNO SAVE] local_key:',execState.sunoLocalKey,'task_id:',execState.taskId,'payload:',JSON.stringify(payload));
-    const sr=await fetch('/api/ops?action=save_suno_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const sr=await _publishFetch('/api/ops?action=save_suno_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const sd=await sr.json();
     console.log('[SUNO SAVE] response:',sr.status,JSON.stringify(sd));
     if(btn){btn.textContent='Saved ✓';btn.style.color='#22c55e';setTimeout(()=>{btn.textContent='Save Suno Data';btn.style.color='var(--gold)';},2000);}
@@ -28099,7 +28099,7 @@ async function execSaveHeygen(){
   else if(execState.taskId){payload.task_id=execState.taskId;}
   try{
     console.log('[HEYGEN SAVE] local_key:',payload.local_key,'task_id:',payload.task_id,'full:',JSON.stringify(payload));
-    const r=await fetch('/api/ops?action=save_heygen_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await _publishFetch('/api/ops?action=save_heygen_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const rd=await r.json();
     console.log('[HEYGEN SAVE] response:',r.status,JSON.stringify(rd));
     if(btn){btn.textContent='Saved ✓';btn.style.color='#22c55e';setTimeout(()=>{btn.textContent='Save HeyGen Data';btn.style.color='#3b82f6';},2000);}
