@@ -29483,12 +29483,13 @@ async function _ebV2Load(action,params=''){
       // already safely overwrites the token hash without touching status,
       // decision, boundary, or claim state.
       const needsReauth=(orj.tasks||[]).filter(t=>t.status==='open' && t.agent_authorized_at && !t.agent_claimed_at);
+      const expiredAuth=_engExpiredAuthorizations([...(orj.tasks||[]),...(dj.tasks||[]),...(lj.tasks||[])]); // 036 (H7)
       const [awaitingPackets,donePackets]=await Promise.all([
         Promise.all(awaitingTasks.map(t=>_ceoAuthedFetch('/api/ops?action=engineering_task_review_packet',{id:t.id}).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
         Promise.all(doneTasks.map(t=>_ceoAuthedFetch('/api/ops?action=engineering_task_review_packet',{id:t.id}).then(r=>r.json()).catch(e=>({ok:false,error:e.message})))),
       ]);
       const pendingRelease=donePackets.filter(p=>p.ok && !(p.production_deployments||[]).some(d=>d.status==='deployed'));
-      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth,needsReauth,retroactiveReleases};
+      data={ok:true,packets:awaitingPackets.filter(p=>p.ok),releasePackets:pendingRelease,pendingAuth,needsReauth,retroactiveReleases,expiredAuth};
     } else if(action==='b2_workers'){
       // v16.50.0 — CEO Decision #16 Step 2D: read-only list of registered
       // Engineering Worker identities. Wired to the existing, unmodified
@@ -30752,6 +30753,7 @@ function renderEngineeringBrain(){
         </div>
         <button onclick="_ebV2Cache['b2_engreview']=null;_ebV2Load('b2_engreview')" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:10px;cursor:pointer">⟳ Refresh</button>
       </div>
+      ${_engExpiredAuthSection((_ebV2Cache[ck]?.expiredAuth)||[])}
       ${pendingAuth.length?`<div style="margin-bottom:18px">
         <div style="font-size:10px;font-weight:700;color:#38bdf8;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">🔑 Awaiting Agent Authorization (${pendingAuth.length})</div>
         ${pendingAuth.map(t=>`<div style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
@@ -31104,6 +31106,46 @@ function _engRunnerButton(t){
   if(!_ENG_RUNNER_BUSINESSES.includes(p.business)) return '';
   if(!(p.origin_decision&&p.origin_decision.authorization_boundary)) return '';
   return `<button data-eng-runner-btn data-id="${_engAttr(t.id)}" onclick="_engReviewAuthorizeAgent(this.dataset.id,'runner')" style="width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.12);color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer">🤖 Authorize for Runner — ${escHTML(p.business)} folders only, ends in a pull request</button>`;
+}
+// 036 (H7) — agent authorizations that are still live but no longer in use: authorized more than
+// 7 days ago, not revoked, and with no live lease. Revoking calls the EXISTING CEO-session-gated
+// engineering_task_ceo_revoke_agent_authorization; it removes only the agent grant (task, history and
+// evidence stay) and can be undone by authorizing again.
+function _engExpiredAuthorizations(tasks){
+  const now=Date.now(), seen=new Set();
+  return (tasks||[]).filter(t=>{
+    if(!t||!t.id||seen.has(t.id))return false; seen.add(t.id);
+    if(!t.agent_authorized_at||t.agent_authorization_revoked_at)return false;
+    if(t.lease_expires_at&&new Date(t.lease_expires_at).getTime()>now)return false;
+    return now-new Date(t.agent_authorized_at).getTime()>7*86400e3;
+  }).sort((a,b)=>String(a.agent_authorized_at).localeCompare(String(b.agent_authorized_at)));
+}
+function _engExpiredAuthSection(list){
+  if(!list.length)return '';
+  const rows=list.map(t=>`<div data-eng-expired-auth="${_engAttr(t.id)}" style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+      <div style="flex:1;min-width:0"><div style="font-size:11px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHTML(String(t.problem||'—').slice(0,110))}</div>
+      <div style="font-size:9px;color:var(--dim)">${escHTML(String(t.id).slice(0,8))} · ${escHTML(t.affected_engine||'—')} · ${escHTML(t.status||'')} · authorized ${escHTML(String(t.agent_authorized_at).slice(0,10))}${t.agent_claimed_by?' · last claimed by '+escHTML(t.agent_claimed_by):' · never claimed'}</div></div>
+      <button data-id="${_engAttr(t.id)}" onclick="_engRevokeAuthorizations([this.dataset.id])" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(239,68,68,0.4);background:transparent;color:#ef4444;font-size:9px;font-weight:700;cursor:pointer">REVOKE</button>
+    </div>`).join('');
+  return `<div data-eng-expired-section style="margin-bottom:18px;background:rgba(239,68,68,0.03);border:1px solid rgba(239,68,68,0.2);border-radius:12px;padding:12px 14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+      <div style="font-size:10px;font-weight:700;color:#ef4444;letter-spacing:0.8px;text-transform:uppercase">🔒 Unused agent authorizations (${list.length})</div>
+      <button data-ids="${_engAttr(list.map(t=>t.id).join(','))}" onclick="_engRevokeAuthorizations(this.dataset.ids.split(','))" style="padding:5px 12px;border-radius:7px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.1);color:#ef4444;font-size:10px;font-weight:800;cursor:pointer">REVOKE ALL ${list.length}</button>
+    </div>
+    <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Authorized over 7 days ago with no active work. Revoking removes only the agent's permission; the task, its history and evidence stay, and you can authorize it again.</div>
+    ${rows}</div>`;
+}
+async function _engRevokeAuthorizations(ids){
+  ids=(ids||[]).filter(x=>/^[0-9a-f-]{36}$/i.test(x));
+  if(!ids.length)return;
+  if(!confirm(`Revoke agent authorization on ${ids.length} task${ids.length>1?'s':''}?\n\n${ids.map(x=>x.slice(0,8)).join(', ')}\n\nTasks and their history are kept. You can authorize them again later.`))return;
+  const done=[],failed=[];
+  for(const id of ids){
+    try{const r=await _ceoAuthedFetch('/api/ops?action=engineering_task_ceo_revoke_agent_authorization',{id});const d=await r.json();(d.ok?done:failed).push(d.ok?id:`${id.slice(0,8)}: ${_engErrMsg(d)}`);}
+    catch(e){failed.push(`${id.slice(0,8)}: ${e.message}`);}
+  }
+  alert(`Revoked ${done.length} of ${ids.length}.`+(failed.length?`\n\nNot revoked:\n${failed.join('\n')}`:''));
+  _ebV2Cache['b2_engreview']=null; if(typeof _ebV2Load==='function')_ebV2Load('b2_engreview');
 }
 function _engAuthDetails(t){
   const p=(t&&t.packet)||{};
