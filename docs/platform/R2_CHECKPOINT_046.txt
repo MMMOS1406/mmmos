@@ -1,0 +1,112 @@
+START CHECKPOINT 046
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-11-01
+EXECUTION ORDER: ORDER 046 (ChatGPT PM; NextWave Finance Pilot registration, business authentication, preview secrets)
+
+EXECUTIVE SUMMARY:
+- Checkpoint 045 is recorded; H5 is COMPLETE and CEO ACCEPTED.
+- NextWave Finance Pilot isolated registration: built and tested (draft PR #75, 17/17). Not released.
+- Business authentication remediation P1: built and tested (draft PR #76, 11/11). It gates 11 paid-generation, deletion and approval actions with the existing CEO-or-VA gate. The 3 SRV actions are deferred to the SRV workstream.
+- Preview-secret stages 1-3: exact commands, verification and rollback prepared. The Plaid logic is proven against the real code (4/4). Nothing applied.
+- No release, deployment, migration, secret, setting or business change.
+- Production is healthy: main 71546c3, dpl_6jmdF5CErnssMvYTbVEVNMyZFuhj, verifier 17/17. eng_runner and eng_adviser_connect are OFF.
+
+1. COMPLETED AND VERIFIED WORK:
+- Baseline:
+  - production, verifier 17/17, Actions OFF, switches OFF, 0 advisers;
+  - only live grant: the archive task;
+  - archive 29 artifacts; tasks 79 (none created);
+  - last migration 20261030211025;
+  - Task 125 untouched, .pause-deploy present, CEO-015B at 99a654a untouched.
+- PR #75 and PR #76 built, with regressions found and fixed in this cycle:
+  - Finance Pilot labels broke 2 Engineering Review browser checks that expect the raw business key. Fixed by showing "Name (key)".
+  - The 043 UI test needed the new label helper.
+  - The SRV group broke SRV-owned lifecycle tests, so that group was deferred.
+- Combined trial (both PRs onto main 71546c3):
+  - 56 of 61 suites identical to main; new suites 17/17 and 11/11;
+  - browser 26/26 and 9/9;
+  - preservation identical to main except the 2 known CEO-008 file-scope checks.
+  - Classified differences (each fails on any branch touching files outside its own business):
+    - YouTube diff-scope self-check;
+    - SRV Studio 037 "only SRV Studio files changed";
+    - SRV Farsi short-publish "other businesses byte-identical", tripped by the one intended SMM function change in PR #76.
+- PR #75 and PR #76 merge with each other cleanly.
+
+2. NEXTWAVE REGISTRATION PR AND TEST RESULTS:
+- PR #75 (draft), branch mmmos-eng/nextwave-finance-pilot-registration @ 02abc3c.
+- Adds:
+  - business key nextwave_finance_pilot with its own folders: projects/, tests/projects/ and docs/projects/nextwave-finance-pilot/;
+  - "NextWave Finance Pilot" in the Task Generator component list;
+  - Engineering screens show "Name (key)";
+  - projects/nextwave-finance-pilot/pilot.config.json: identity, reserved state/analytics/asset namespaces (not wired), paid generation and publishing disabled.
+- Unchanged: the "nextwave" key (NextWave V2 code: lib/nextwaveV2*), V2 task 2e17bd23, and the live NextWave engine.
+- Test 17/17:
+  - pilot tasks may change only pilot folders;
+  - V2 code and tests, other businesses and api/ops.js are refused;
+  - pilot artifacts are stored under nextwave_finance_pilot/;
+  - V2 tasks cannot touch pilot folders, and V2 artifacts stay under nextwave/;
+  - a CEO decision naming the pilot keeps its key;
+  - the adviser schema lists the pilot.
+- Not done in this PR (needs its own orders): wiring live app state or analytics, any generation, any publishing.
+
+3. AUTHENTICATION REMEDIATION READINESS:
+- PR #76 (draft), branch mmmos-eng/auth-remediation-p1-046 @ 605a983, one commit per business group.
+- Gated now: approve, reject (operator approvals); heygen_render_status, save_heygen_execution, save_suno_execution, delete_asset (production pipeline); generate_package, nextwave_v2_generate_scene_package, nextwave_v2_generate_visual_plan, delete_memory_item (NextWave V2); sm_video_production_generate (SMM).
+- How:
+  - the same router gate as publishing (_publishGate: CEO or VA session; enforce mode while the VA PIN is set);
+  - the app's 14 call sites now use the existing _publishFetch;
+  - no new role policy: existing CEO and VA callers keep access.
+- Test 11/11: anonymous and forged callers refused (401) and nothing changed; a CEO session passes; no plain fetch remains.
+- Deferred: srv_build_package, srv_english_regen_caption, farsi_regen_caption, which need an SRV-owned test update (SRV workstream).
+- Noted: legacy public/index_staging.html (not linked anywhere) will be refused for these actions after release.
+- Remaining: 36 other state-change actions (priority 2), per BUSINESS_AUTH_REMEDIATION_039.md.
+
+4. PREVIEW-SECRET REMEDIATION READINESS:
+- Verified (names and targets only): 16 variables reach Preview; all sensitive ones are stored as "sensitive", so no value can be read back by anyone.
+- Prepared (tools/engineering-runner/preview-secrets/PREVIEW_SECRET_STAGES_046.md):
+  - Stage 1: remove the Preview target from the live PLAID_SECRET and PLAID_ENV, and add a Preview-only PLAID_ENV=sandbox. Proven 4/4 against the real selection code: production keeps live Plaid; previews get sandbox only.
+  - Stage 2: remove the Preview target from YOUTUBE_CLIENT_SECRET (used only for token refresh).
+  - Stage 3a: remove the Preview target from the 5 paid AI/media keys.
+  - Each stage has a production check and a one-line rollback. No cost. Stage 4 (service key, non-production database) has a cost and is a separate decision.
+- Exact CEO approval needed: "Approve preview-secret stages 1, 2 and 3a (Preview targets only; production values unchanged)."
+
+5. H1-H8 UPDATED PROGRESS:
+- H1 COMPLETE 2026-10-31
+- H2 COMPLETE 2026-10-31
+- H3 COMPLETE 2026-10-31
+- H4 AWAITING CEO (prerequisites re-verified 046: rulesets active with no App bypass, 0 canonical deploy keys, staging private with Actions off, opener inactive)
+- H5 COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 AWAITING CEO (prerequisites valid: runner sandbox strict, probe files present, canary clean, runner OFF; not retried)
+- H7 COMPLETE 2026-11-01
+- H8 ON HOLD
+
+6. REMAINING CEO DECISIONS (one checklist: docs/platform/CEO_CHECKLIST_046.txt):
+1. H6 (2 min): start a new Claude Code session with folder /Users/abdulmahmady/mmmos-runner and paste:
+   Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+   Deny every prompt, then say "probe done".
+2. H4 (3 min): create and install the GitHub App per tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md (two repositories only, key kept offline). Send only the App ID and installation ID.
+3. Release approvals, when the PM recommends:
+   - PR #75 (Finance Pilot registration);
+   - PR #76 (auth remediation P1, which changes access policy for 11 actions);
+   - preview-secret stages 1, 2 and 3a.
+
+7. DURABLE REPORT PATH AND COMMIT SHA:
+- Branch mmmos-eng/r2-checkpoint-046 (based on 045 @ 0b06a8f). This file = the commit adding docs/platform/R2_CHECKPOINT_046.txt.
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - docs/platform/CEO_CHECKLIST_046.txt
+  - tools/engineering-runner/preview-secrets/PREVIEW_SECRET_STAGES_046.md and check-plaid-selection.mjs
+  - tools/engineering-runner/release/verify-2026-11-01-046.txt and tests-2026-11-01-046-combined.txt
+- PRs: #75 @ 02abc3c, #76 @ 605a983 (both draft, not merged).
+- MMMOS: this checkpoint and the tracker are stored on task ec27ddf6 (confirmed in the chat message).
+
+8. NEXT ACTION:
+- The PM reviews PR #75, PR #76 and the preview-secret package, and recommends the release decisions.
+- The CEO does H6, H4 and the release approvals.
+- Claude Code then releases the approved items one at a time with production checks, grades the probe, verifies the App, and delivers Checkpoint 047.
+- In parallel, the PM orders the SRV-group remediation (SRV workstream) and priority 2.
+
+9. ACTION OWNER: ChatGPT PM (review, recommendations, orders) -> CEO (H6, H4, approvals) -> Claude Code (release, verification, Checkpoint 047)
+
+END CHECKPOINT 046

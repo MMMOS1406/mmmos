@@ -1,0 +1,61 @@
+test_auth_remediation_p1_046.mjs: exit 0 | 11 passed, 0 failed
+test_automatic_git_commit_capture_fix.cjs: exit 1 | 23 passed, 4 failed
+test_b10_engineering_tasks_private.mjs: exit 0 | 13 passed, 0 failed
+test_ceo_production_release_ui_fix.cjs: exit 0 | 29 passed, 0 failed
+test_client_isolation_e2e.mjs: exit 0 | 11 passed, 0 failed
+test_engineering_artifacts_ui_043.mjs: exit 0 | 11 passed, 0 failed
+test_engineering_artifacts_view_043.mjs: exit 0 | 24 passed, 0 failed
+test_engineering_auth_034.mjs: exit 0 | 12 passed, 0 failed
+test_engineering_integration_r1.mjs: exit 0 | 87 passed, 0 failed
+test_engineering_integration_r1_migration.mjs: exit 0 | 17 passed, 0 failed
+test_engineering_integration_r2.mjs: exit 0 | 91 passed, 0 failed
+test_engineering_pr_opener_035.mjs: exit 0 | 28 passed, 0 failed
+test_engineering_r2_master_033.mjs: exit 0 | 35 passed, 0 failed
+test_engineering_revoke_control_036.mjs: exit 0 | 10 passed, 0 failed
+test_engineering_ui_lifecycle_033.mjs: exit 0 | 24 passed, 0 failed
+test_governed_production_execution.js: exit 0 | 28 passed, 0 failed
+test_nextwave_discard_confirm.cjs: exit 0 |   PASS 6: Close Preview still reaches its own terminal state correctly
+test_nextwave_dup_confirm.cjs: exit 0 |   PASS 6: exactly 2 call sites total, both covered above (no un-awaited 3rd caller silently exists)
+test_nextwave_finance_pilot_registration_046.mjs: exit 0 | 17 passed, 0 failed
+test_nextwave_pkg_resolution.cjs: exit 0 |   PASS extra: task.taskId resolves correctly when task.id is absent
+test_nextwave_preview_close.cjs: exit 0 |   PASS I: the new/modified functions reference only NextWave task/package state, never SRV Farsi/English/AI Studio/SMM identifiers
+test_nextwave_v2_closeout_regressions.mjs: exit 0 | closeout regression tests: 28 passed, 0 failed
+test_nextwave_v2_evidence_integrity.mjs: exit 0 | EVIDENCE-INTEGRITY MATRIX: 100% PASS
+test_nextwave_v2_production_route.mjs: exit 1 | FAILED: ops.js diff vs the pre-reconciliation main baseline is purely additive except the dispatcher lines and the Release A2/decimal-repair allow-list | index.
+test_nextwave_v2_route_ops_e2e.mjs: exit 0 | 14 passed, 0 failed
+test_nextwave_v2_semantic_validators.mjs: exit 0 | validator helper tests: 27 passed, 0 failed
+test_nextwave_v2_storyboard_brain.mjs: exit 0 | STORYBOARD BRAIN: 67/67 checks passed
+test_nextwave_v2_storyboard_brain_holdout.mjs: exit 0 | HOLD-OUT SUMMARY: FULL 0/4   FAIL-SAFE 4/4
+test_nextwave_v2_storyboard_semantic_eval.mjs: exit 0 | model: claude-sonnet-4-5   live calls: 0  replayed: 208  tokens in/out: 0/0  cost this run: $0.0000
+test_p0_state_guard.cjs: exit 1 | Node.js v24.15.0
+test_packages_backup.mjs: exit 0 | 11 passed, 0 failed
+test_publish_auth.mjs: exit 0 | 92 passed, 0 failed
+test_release_isolation.mjs: exit 0 | 13 passed, 0 failed
+test_runner_guard_denied.mjs: exit 0 | 3 passed, 0 failed
+test_runner_push_hook.mjs: exit 0 | 12 passed, 0 failed
+test_runner_settings.mjs: exit 0 | 30 passed, 0 failed
+test_srv_farsi_analytics_view.mjs: exit 0 | 17 passed, 0 failed
+test_srv_farsi_p1_safety.cjs: exit 0 | 37 passed, 0 failed
+test_srv_farsi_playlist_oauth.mjs: exit 0 | 23 passed, 0 failed
+test_srv_farsi_short_publish.cjs: exit 1 | [v13.55.5] PACKAGE UPSERT FAILED status: 409 body: dup
+test_srv_farsi_va_artist_format.cjs: exit 0 | 32 passed, 0 failed
+test_srv_farsi_visuals.cjs: exit 0 | 124 passed, 0 failed
+test_srv_studio_v2_023.mjs: exit 0 | 53 passed, 0 failed
+test_srv_studio_v2_030.mjs: exit 0 | 36 passed, 0 failed
+test_srv_studio_v2_031.mjs: exit 0 | 16 passed, 0 failed
+test_srv_studio_v2_031_oauth.mjs: exit 0 | 21 passed, 0 failed
+test_srv_studio_v2_032_mix.mjs: exit 0 | 24 passed, 0 failed
+test_srv_studio_v2_033_audio.mjs: exit 0 | 21 passed, 0 failed
+test_srv_studio_v2_033_server.mjs: exit 0 | 40 passed, 0 failed
+test_srv_studio_v2_037_suno_steps.mjs: exit 1 | 21 passed, 3 failed
+test_srv_studio_v2_avatars.mjs: exit 1 | 55 passed, 4 failed
+test_srv_studio_v2_e4_security.mjs: exit 0 | 8 passed, 0 failed
+test_srv_studio_v2_isolation.mjs: exit 1 | 30 passed, 2 failed
+test_srv_studio_v2_lifecycle.cjs: exit 1 | 202 passed, 4 failed
+test_srv_studio_v2_motion.mjs: exit 1 | 25 passed, 1 failed
+test_srv_studio_v2_music.mjs: exit 1 | 70 passed, 1 failed
+test_srv_studio_v2_pilot.mjs: exit 1 | 37 passed, 1 failed
+test_srv_studio_v2_render.mjs: exit 1 | 87 passed, 2 failed
+test_state_isolation.mjs: exit 0 | 33 passed, 0 failed
+test_task_generator_fix_043.mjs: exit 0 | 15 passed, 0 failed
+test_youtube_oauth_reliability.mjs: exit 1 | FAILED: diff scope: this patch touches only api/youtube/callback.js and api/ops.js (the two files named in the change proposal) — no business production lifecyc

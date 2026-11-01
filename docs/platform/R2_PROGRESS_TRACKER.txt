@@ -1,27 +1,29 @@
 MMMOS ENGINEERING INTEGRATION - RELEASE 2 PROGRESS TRACKER
-Updated: 2026-11-01 (Checkpoint 045). Status words: COMPLETE / IN PROGRESS / AWAITING CEO / BLOCKED / ON HOLD / NOT STARTED.
+Updated: 2026-11-01 (Checkpoint 046). Status words: COMPLETE / READY FOR RELEASE / AWAITING CEO / BLOCKED / ON HOLD / NOT STARTED.
 
-CHANGES SINCE 044
-- H5 CEO ACCEPTED: the CEO downloaded R2_POST_RELEASE_027_FINDINGS.txt from live Engineering Review > Stored artifacts,
-  and the page showed "SHA OK" (screenshot relayed by the PM, Order 045). Independently confirmed in the Supabase logs:
-  link minted 22:53:50.686 UTC, download GET 200 at 22:53:51.190 UTC.
-- NextWave Finance Pilot: preview-only registration and validation plan written (not registered).
-- H4/H6: consolidated CEO instructions written (H4_H6_CEO_INSTRUCTIONS_045.txt).
+CHANGES SINCE 045
+- Checkpoint 045 accepted; H5 recorded COMPLETE and CEO ACCEPTED.
+- NextWave Finance Pilot registration built and tested: draft PR #75 (17/17). Not released.
+- Auth remediation P1 built and tested: draft PR #76, 11 actions gated (11/11). SRV group deferred. Not released.
+- Preview-secret stages 1-3 prepared with exact commands; Plaid stage-1 logic proven 4/4. Not applied.
 
-ITEM                                          STATUS                  DATE        EVIDENCE / DEPENDENCY                                  NEXT ACTION (OWNER)
-H1  Security release (31 actions)             COMPLETE                2026-10-31  PR #68/#69; verifier 17/17 (045)                       none
-H2  GitHub Actions off (repo only)            COMPLETE                2026-10-31  enabled=false main+staging                             none
-H3  Staging repo + staging-only key           COMPLETE                2026-10-31  mmmos-runner-staging, key 168324989                    none
-H4  GitHub App "MMMOS Runner PR Opener"       AWAITING CEO            -           prerequisites verified 045; opener inactive            install App (CEO)
-H5  Checkpoint archive + CEO Artifacts view   COMPLETE, CEO ACCEPTED  2026-11-01  PR #73 live; "SHA OK" + storage logs                   none
-H6  Runner enforcement probe                  AWAITING CEO            -           prerequisites verified 045; runner OFF                 start session (CEO), grade (Claude Code)
-H7  Revoke 12 unused authorizations           COMPLETE                2026-11-01  12/12 revoked; history kept                            none
-H8  ChatGPT Business / adviser connection     ON HOLD                 -           no purchase; switch OFF                                CEO business decision
---  Task Generator correction (PR #74)        COMPLETE                2026-11-01  released; 15/15                                       confirm on next real decision (Claude Code)
---  Business-engine auth remediation (50)     NOT STARTED             -           BUSINESS_AUTH_REMEDIATION_039.md                      PM orders
---  Preview-secret isolation stages 1-3       NOT STARTED             -           PREVIEW_SECRETS_PLAN_039.md                           CEO approval
---  NextWave Finance Pilot                    NOT STARTED (plan ready) -          NEXTWAVE_FINANCE_PILOT_PREVIEW_PLAN_045.md            PM order (registration PR)
+ITEM                                          STATUS                  DATE        EVIDENCE / DEPENDENCY                                     NEXT ACTION (OWNER)
+H1  Security release (31 actions)             COMPLETE                2026-10-31  verifier 17/17 (046)                                      none
+H2  GitHub Actions off (repo only)            COMPLETE                2026-10-31  enabled=false main+staging                                none
+H3  Staging repo + staging-only key           COMPLETE                2026-10-31  mmmos-runner-staging, key 168324989                       none
+H4  GitHub App "MMMOS Runner PR Opener"       AWAITING CEO            -           prerequisites valid; opener inactive                      install App (CEO)
+H5  Checkpoint archive + CEO Artifacts view   COMPLETE, CEO ACCEPTED  2026-11-01  "SHA OK" + storage logs (045)                            none
+H6  Runner enforcement probe                  AWAITING CEO            -           prerequisites valid; runner OFF                           start session (CEO)
+H7  Revoke 12 unused authorizations           COMPLETE                2026-11-01  12/12 revoked                                             none
+H8  ChatGPT Business / adviser connection     ON HOLD                 -           no purchase; switch OFF                                   CEO business decision
+--  Task Generator correction (PR #74)        COMPLETE                2026-11-01  released                                                  none
+--  NextWave Finance Pilot registration       READY FOR RELEASE       -           PR #75 draft, 17/17                                       CEO release approval
+--  Auth remediation P1 (11 actions)          READY FOR RELEASE       -           PR #76 draft, 11/11                                       CEO release approval
+--  Auth remediation SRV group (3 actions)    NOT STARTED             -           deferred: SRV-owned tests need updating                   PM order to SRV workstream
+--  Auth remediation P2 (36 state actions)    NOT STARTED             -           BUSINESS_AUTH_REMEDIATION_039.md                          PM order
+--  Preview-secret stages 1-3                 READY TO APPLY          -           PREVIEW_SECRET_STAGES_046.md; Plaid check 4/4             CEO approval
+--  NextWave Finance Pilot operation          NOT STARTED             -           after PR #75 release; paid generation and publishing off  separate CEO orders
 
-NEXT MILESTONE: the CEO does H6 and H4 (H4_H6_CEO_INSTRUCTIONS_045.txt); the PM orders the Finance Pilot registration PR. Owner: CEO / PM -> Claude Code.
+NEXT MILESTONE: CEO decisions on PR #75, PR #76 and preview-secret stages 1-3; CEO H6 and H4. Owner: CEO -> Claude Code.
 Switches: eng_runner OFF, eng_adviser_connect OFF. Runner manual only, never run.
 Protected: Task 125 untouched; .pause-deploy present; CEO-015B is a separate workstream (99a654a, local).

@@ -1,0 +1,16 @@
+CEO CHECKLIST (Checkpoint 046) - only what genuinely needs you. No testing, no secrets in chat.
+
+[ ] H6 runner probe (2 min)
+    New Claude Code session, folder /Users/abdulmahmady/mmmos-runner (NOT "Run now" on the runner task).
+    Paste: Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+    Deny every prompt. Then tell the engineering chat "probe done".
+
+[ ] H4 GitHub App (3 min) - tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md
+    New GitHub App "MMMOS Runner PR Opener"; webhook off; Contents + Pull requests Read and write only;
+    this account only; private key kept OFFLINE; install on mmmos + mmmos-runner-staging only.
+    Send only the App ID and installation ID. Rollback: uninstall, then delete the App.
+
+[ ] Release decisions (one line each, when the PM recommends):
+    - "Approve releasing PR <NextWave Finance Pilot registration>"     (engineering registration only)
+    - "Approve releasing PR <auth remediation P1>"                      (14 actions need a CEO or VA sign-in)
+    - "Approve preview-secret stages 1, 2 and 3a"                       (Preview targets only; production unchanged)
