@@ -1,0 +1,119 @@
+START — CEO CHECKPOINT REPORT
+
+PROJECT: SRV Studio V2 — Suno Inquiry Tracking & VA Release Preparation
+CHECKPOINT ID: SRV-STUDIO-V2-041
+DATE: 2026-11-01
+EXECUTION OWNER: Claude Code
+REQUESTING DEPARTMENT: Product, Creative Quality, Business Operations
+PM: ChatGPT / CEO Adviser
+AUTHORIZATION REFERENCE: SRV-STUDIO-V2-041 (CEO: Suno inquiry approved and sent)
+
+EXECUTIVE SUMMARY:
+- The Suno inquiry is recorded as SENT in the SRV Studio V2 project tracker, with all seven
+  questions. Every unconfirmed Suno capability stays marked NOT VERIFIED.
+- A step-by-step checklist is ready for grading Suno's written reply as soon as it arrives.
+- The VA workflow improvement (exact approved-text copy plus MP3 drop zone with checks) is
+  ready for release. It is up to date with production main and re-tested. It has not been
+  pushed or deployed, pending the PM's V2-040 release order.
+
+STATUS: COMPLETE (tracking and preparation). Suno reply: NOT YET RECEIVED.
+
+WORK COMPLETED:
+Project tracker (docs/srv-studio-v2/PROJECT_TRACKER.txt)
+- Inquiry status: SENT to support@suno.com by the CEO; recorded 2026-11-01. Reply not received.
+- Seven questions recorded:
+  - Q1 private MMMOS server integration
+  - Q2 exact custom lyrics and style prompt, plus generation status
+  - Q3 original MP3 retrieval
+  - Q4 commercial download permissions and how they count toward Pro's 20 per month
+  - Q5 one Pro account across two channels
+  - Q6 additional costs, credits per generation, rate limits, narrower OAuth scopes
+  - Q7 connector availability to this Pro account
+- Capability status unchanged:
+  - VERIFIED: the official connector is live and documented; song generation; credit
+    balance readable.
+  - NOT VERIFIED: server-client use, exact lyrics, exact style, status tool, MP3 retrieval,
+    commercial status of connector downloads, download counting, shared-account
+    confirmation, connector costs and scopes, availability to this account.
+  - NOT SUPPORTED: copies via share or CDN links, recording or stream ripping.
+- The tracker also records the released items:
+  - 029-031
+  - 034 Mix Builder LIVE with the feature OFF (PR #71, main 14e0f74,
+    dpl_HGk9xx8ropQunpdCR48AU1mfKGSL)
+  - the open CEO decisions
+Response-review checklist (docs/srv-studio-v2/SUNO_RESPONSE_REVIEW_CHECKLIST.txt)
+- Authenticity check (Suno domain; a real answer vs an automated acknowledgement).
+- Per-question pass criteria. Q1, Q2 and Q4 are gates: a "no" on any of them ends automation
+  (outcome C).
+- Rule: only explicit written statements verify a capability. Partial answers stay NOT
+  VERIFIED.
+- Final grading into outcomes A/B/C/D, with the next step defined for each.
+VA release preparation (built under V2-037, to be released under V2-040)
+- Branch: srv-studio/v2-037-va-suno-steps, local, not pushed.
+- Commits: 8d2e9e4, 4733cf1, merge c829d80 (current main e69367b), 5c38836 (docs).
+- Diff against production main: 6 files, SRV Studio only.
+  - public/index.html: SRV Studio V2 Build stage only.
+  - SRV Studio tests.
+  - SRV Studio docs.
+- A draft PR is ready to open when the PM's release order is given.
+
+VERIFICATION:
+On the final branch state (main e69367b included):
+- 037 VA steps 24/24, 033 audio 21/21, 033 Mix server 40/40, e4 security 8/8, publish auth
+  92/92.
+- SRV Studio lifecycle 202 passed, 4 failed. These are the same 4 baseline failures as clean
+  main; the V2-OFF screen is byte-identical.
+- SRV Farsi-owned guard 120/1. The single flag is the expected SRV Studio card change; Farsi
+  is unchanged.
+Earlier full regression of this branch vs clean main:
+- Chrome harness 10/10, including a real build using the dropped MP3.
+- 028 8/8, 029 19/19, 030 20/20 browser harnesses, all with 0 production requests.
+- Every platform suite equal to main.
+- No new behavioural failures.
+
+PRODUCTION STATUS:
+Nothing deployed, connected, published or changed.
+- No Suno connection, OAuth consent, generation, credit use or download.
+- No push, PR, merge or deploy of the VA release.
+- No production database or configuration change.
+- No Engineering Brain write: SRV Studio has no tasks there, and the tracker is kept in the
+  SRV Studio project documents.
+
+COST IMPACT:
+None. The existing Suno Pro plan is unchanged: 12 of 20 downloads per month in use (SRV Farsi
+8, SRV Studio 4).
+
+RISKS AND BLOCKERS:
+- Suno reply pending; turnaround unknown. Automation stays NOT VERIFIED until Suno answers in
+  writing.
+- The V2-040 release order text has not been received in this session. Preparation stopped
+  before push, PR, merge and deploy.
+- Release mechanics: ruleset 26286416 allows creating a new branch, but refuses updates to an
+  existing non-runner branch. So the release should push this branch once, complete, and
+  open the PR from it.
+
+BUSINESS ISOLATION:
+- Affected: SRV Studio documents and the local SRV Studio release branch only.
+- Unchanged: SRV Farsi, NextWave, AI Creation Studio, SMM, shared MMMOS systems, and
+  SRV Studio production.
+
+PM DECISIONS:
+- Issue or confirm the V2-040 release order for the VA workflow improvement: push, PR,
+  merge, deploy, and verify that V2-OFF is unaffected.
+- Forward Suno's reply to Claude Code as soon as it arrives.
+
+CEO DECISIONS REQUIRED:
+NONE at this checkpoint. Pending later: the inspection-only connector sign-in, to be
+considered after Suno's reply.
+
+RECOMMENDED NEXT STEP:
+- PM confirms the V2-040 release authorization so Claude Code can push the branch, open the
+  PR, merge and deploy the VA improvement with read-only production verification.
+- In parallel, the CEO forwards Suno's written reply when received, for grading against the
+  checklist.
+
+NEXT ACTION: PM provides the V2-040 release order (or confirms it), and forwards Suno's
+reply on arrival.
+ACTION OWNER: ChatGPT / PM
+
+END — CEO CHECKPOINT REPORT

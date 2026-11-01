@@ -1,0 +1,78 @@
+SRV STUDIO V2 — SUNO RESPONSE REVIEW CHECKLIST
+Prepared under SRV-STUDIO-V2-041 (2026-11-01). Used when the CEO supplies Suno's written reply.
+
+HOW TO USE
+- Paste or forward Suno's full written reply, including the sender's address and date.
+- Claude Code grades each question below and returns a CEO checkpoint.
+- A capability becomes VERIFIED only on an explicit written statement from Suno, or on direct
+  official evidence (for example a consented tool listing).
+- Vague or marketing wording ("you can make songs with lyrics") does not verify an exact
+  requirement. Partial answers stay NOT VERIFIED for the missing part.
+
+0. AUTHENTICITY AND SCOPE
+[ ] The reply comes from a Suno domain (suno.com / help.suno.com) and refers to our inquiry.
+[ ] It is a written policy answer, not an automated acknowledgement. If it is only an
+    acknowledgement or ticket number, record it as RECEIVED, NO ANSWER and keep everything
+    open.
+[ ] Note any statement that the answer is beta-only, temporary, or account-specific.
+
+1. Q1 — PRIVATE SERVER INTEGRATION (gate for the whole adapter)
+[ ] Explicit yes/no: may our own server, acting as an MCP client, use the connector?
+[ ] Any conditions: approved client list, registration, partner program, developer API instead?
+[ ] Any prohibition on automated or backend use, or a requirement for human-in-the-loop?
+Outcome: YES -> continue | NO -> outcome C (not supported) | conditional -> list the conditions
+for PM/CEO.
+
+2. Q2 — EXACT LYRICS AND STYLE; STATUS
+[ ] Exact custom lyrics accepted unchanged (no assistant rewriting)?
+[ ] Exact style prompt accepted unchanged? Any length limits? (The SRV Studio style prompt is
+    about 600 characters; Long lyrics about 900 characters.)
+[ ] Title, model or version, and instrumental options?
+[ ] A tool to check generation status, or are results returned synchronously?
+Outcome: all yes -> adapter can preserve SRV Studio identity | any no -> automation cannot
+meet the creative requirement; keep the manual workflow.
+
+3. Q3 — ORIGINAL MP3 RETRIEVAL
+[ ] Can the original audio of a song we generated be downloaded through the connector?
+[ ] Format (MP3 / WAV), bitrate, and whether it is the same file as the suno.com download.
+[ ] Any link expiry or one-time download restrictions.
+
+4. Q4 — COMMERCIAL DOWNLOADS (licensing gate)
+[ ] Connector downloads count as permitted downloads granting commercial-use rights.
+[ ] They count toward Pro's 20 per month. Per song or per version? Do re-downloads count?
+[ ] Does streaming or previewing in MMMOS before selection count as a download? (It must not,
+    for the "download only the chosen version" design.)
+Outcome: not confirmed -> no automated downloads; manual suno.com download stays.
+
+5. Q5 — SHARED PRO ACCOUNT (SRV Studio + SRV Farsi)
+[ ] One Pro account may serve both channels owned by the same account holder.
+[ ] Any requirement for separate accounts, team or business plans, or attribution.
+Outcome: if not allowed -> escalate to CEO (account structure decision; may imply cost).
+
+6. Q6 — COSTS, LIMITS, SCOPES
+[ ] Connector-specific charges: expected none; any charge = CEO cost decision.
+[ ] Credits per generation through the connector, and per version.
+[ ] Rate limits and concurrency.
+[ ] Price of extra downloads beyond 20 per month.
+[ ] A narrower OAuth scope set (without library:write, or read-only inspection).
+Outcome: any new cost -> outcome B (requires CEO approval).
+
+7. Q7 — AVAILABILITY TO THIS PRO ACCOUNT
+[ ] Connector enabled for our account now, or early-access approval required (and how).
+[ ] Beta stability or change-notice commitments.
+
+FINAL GRADING (reported in a CEO checkpoint)
+- Outcome A: Q1-Q4 and Q7 all confirmed, Q5 allowed, Q6 no extra cost. Next: CEO consent for
+  the 15-minute inspection-only session to record exact tool schemas, then the build order
+  (flag OFF).
+- Outcome B: feasible but with cost or conditions (Q5/Q6/Q7). Next: CEO business decision.
+- Outcome C: Q1, Q2 or Q4 refused. Next: close automation; keep the V2-037/040 manual workflow.
+- Outcome D: answers incomplete. Next: a targeted follow-up to Suno for the unanswered
+  questions (drafted for PM).
+- Every question is listed as ANSWERED-YES / ANSWERED-NO / CONDITIONAL / UNANSWERED, with a
+  short quote of Suno's wording.
+
+RESTRICTIONS DURING REVIEW
+- No connector connection, OAuth consent, generation, download, credit use or subscription
+  change.
+- SRV Farsi unchanged.
