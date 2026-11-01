@@ -16956,7 +16956,7 @@ function _srvEnglishV2Mp3Drop(ev,taskId,pkgId){
 function _srvEnglishV2SunoStepsHtml(task,pkg,taskId){
   const pkgId=String(pkg.id);const isLong=_srvEnglishV2TaskIsLong(task);
   const sp=_srvEnglishV2ApprovedText(task,pkg,'sunoPrompt'),ly=_srvEnglishV2ApprovedText(task,pkg,'lyrics');
-  const a=_srvAudioData[pkgId];const kept=isLong&&pkg._srvAudioUrl;
+  const a=(typeof _srvAudioData!=='undefined'&&_srvAudioData)?_srvAudioData[pkgId]:null;const kept=isLong&&pkg._srvAudioUrl;
   const H='font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace';
   const B='flex:1;padding:10px;background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.35);border-radius:8px;color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif';
   const r=isLong?SRV2_MP3_LIMITS.long:SRV2_MP3_LIMITS.short;
@@ -17972,8 +17972,7 @@ function renderSRVEnglishLifecycleCard(task){
     const spEsc=sunoPrompt?sunoPrompt.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     const lyEsc=sunoLyrics?sunoLyrics.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'):'';
     stageContent=`
-      <!--srv-suno-steps-->
-      <div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">Generate the song in Suno, download the MP3, then build the cinematic video.</div>
+      ${_srvStudioV2On()?'<!--srv-suno-steps-->':''}<div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.6">Generate the song in Suno, download the MP3, then build the cinematic video.</div>
       <div style="margin-bottom:14px">
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 1 — GENERATE IN SUNO</div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -17990,8 +17989,7 @@ function renderSRVEnglishLifecycleCard(task){
           <input id="srv-lc-mp3-${pkgId}" type="file" accept="audio/mpeg,audio/mp3,.mp3" style="display:none" onchange="srvLoadMp3('${pkgId}',this);var s=document.getElementById('srv-lc-mp3-status-${pkgId}');if(s){s.textContent='MP3 loaded ✓';s.style.color='#22c55e'}">
           <span id="srv-lc-mp3-status-${pkgId}" style="font-size:10px;color:${mp3Ready?'#22c55e':'rgba(255,255,255,0.35)'};font-family:'JetBrains Mono',monospace;white-space:nowrap">${mp3Ready?'MP3 loaded ✓':'no MP3 yet'}</span>
         </div>
-      </div>
-      <!--/srv-suno-steps-->
+      </div>${_srvStudioV2On()?'<!--/srv-suno-steps-->':''}
       ${bgUrl?`<div style="margin-bottom:10px;border-radius:8px;overflow:hidden;max-height:90px"><img src="${escHTML(bgUrl)}" style="width:100%;object-fit:cover;max-height:90px" alt="bg"><div style="font-size:9px;color:var(--dim);padding:2px 0">📷 Pexels background auto-selected</div></div>`:''}
       ${isRendering?`<div id="srv-lc-render-status-${pkgId}" style="padding:10px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:8px;font-size:11px;color:#a78bfa;margin-bottom:10px">⏳ Rendering in progress… <button onclick="_srvEnglishPollRender('${pkgId}','${taskId}')" style="margin-left:8px;padding:3px 8px;background:rgba(139,92,246,0.15);border:1px solid rgba(139,92,246,0.35);border-radius:5px;color:#a78bfa;font-size:10px;cursor:pointer;font-family:'JetBrains Mono',monospace">↻ Check status</button></div>`:''}
       <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">STEP 3 — BUILD PACKAGE</div>

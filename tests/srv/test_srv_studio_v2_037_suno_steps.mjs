@@ -29,7 +29,7 @@ ok('clock formatting', ctx.clock(205) === '3:25' && ctx.clock(59.6) === '1:00');
 
 // ── wiring ──
 ok('V2 build stage swaps in the Suno steps only when V2 is on, and never for a promotional Short', /if\(_v2On&&stage==='build'&&pkg&&!_srvEnglishV2TaskIsLong\(task\)&&_srvEnglishV2IsPromoPkg\(pkg\)\)stageContent=[^\n]*\n  else if\(_v2On&&stage==='build'&&pkg\)stageContent=_srvEnglishV2SwapSunoSteps\(stageContent,task,pkg,taskId\);/.test(H));
-ok('exactly one pair of markers in the generic SRV English build markup', H.split('\n').filter((l) => l.trim() === '<!--srv-suno-steps-->').length === 1 && H.split('\n').filter((l) => l.trim() === '<!--/srv-suno-steps-->').length === 1);
+ok('exactly one pair of markers in the generic SRV English build markup, emitted only when V2 is on (V2-OFF HTML byte-identical)', H.split("${_srvStudioV2On()?'<!--srv-suno-steps-->':''}<div").length === 2 && H.split("</div>${_srvStudioV2On()?'<!--/srv-suno-steps-->':''}").length === 2);
 const fnBody = (src, name) => { let i = src.indexOf('\nfunction ' + name + '('); if (i < 0) i = src.indexOf('\nasync function ' + name + '('); if (i < 0) return null; const j = src.indexOf('\n}\n', i); return src.slice(i, j + 3); };
 const approvedText = fnBody(H, '_srvEnglishV2ApprovedText');
 ok('copy uses this format\'s exact field (via _srvEnglishV2BuildKeys) — no fallback to the other format', /_srvEnglishV2BuildKeys\(task,pkg\)/.test(approvedText) && !/\|\|pkg\.(short)?(lyrics|sunoPrompt|Lyrics|SunoPrompt)/.test(approvedText));
@@ -44,11 +44,11 @@ ok('the new code never calls Suno or any network (manual workflow only)', !/fetc
 if (MAIN) {
   const diffLines = (a, b) => { const A = a.split('\n'), B = new Set(b.split('\n')); return A.filter((l) => !B.has(l)); };
   const added = diffLines(H, MAIN), removed = diffLines(MAIN, H);
-  ok('nothing removed from index.html', removed.length === 0, removed.slice(0, 3));
+  ok('nothing removed from index.html (the 2 marker lines are edits of existing lines)', removed.length >= 1 && removed.length <= 2 && removed.every((l) => /Generate the song in Suno|^      <\/div>$/.test(l)), removed.slice(0, 3));
   const outside = added.filter((l) => !v2fns.includes(l));
-  ok('outside the new SRV Studio block, only the 2 markers and the 1 V2 swap line were added', outside.length === 3 && outside.some((l) => l.trim() === '<!--srv-suno-steps-->') && outside.some((l) => l.trim() === '<!--/srv-suno-steps-->') && outside.some((l) => /_srvEnglishV2SwapSunoSteps\(stageContent/.test(l)), outside);
+  ok('outside the new SRV Studio block, only 2 existing lines gained a V2-only marker and 1 V2 swap line was added; nothing else', outside.length === 3 && outside.some((l) => l.includes("${_srvStudioV2On()?'<!--srv-suno-steps-->':''}<div")) && outside.some((l) => l.includes("</div>${_srvStudioV2On()?'<!--/srv-suno-steps-->':''}")) && outside.some((l) => /_srvEnglishV2SwapSunoSteps\(stageContent/.test(l)), outside);
   for (const name of ['_srvCopyBuildField', 'srvLoadMp3', 'renderSRVFarsiLifecycleCard', '_srvEnglishV2Build', '_srvUploadToStorage']) ok('unchanged from main: ' + name, fnBody(H, name) !== null && fnBody(H, name) === fnBody(MAIN, name));
   const changedFiles = execFileSync('git', ['-C', repo, 'diff', '--name-only', 'origin/main'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-  ok('only SRV Studio files changed (index.html + SRV Studio tests/docs)', changedFiles.every((f) => f === 'public/index.html' || /^tests\/srv\/(test_srv_studio_v2_037|studio-v2-preview\/headless-037)/.test(f) || /^docs\/srv-studio-v2\//.test(f)), changedFiles);
+  ok('only SRV Studio files changed (index.html + SRV Studio tests/docs)', changedFiles.every((f) => f === 'public/index.html' || /^tests\/srv\/(test_srv_studio_v2_0(33|37)|studio-v2-preview\/headless-037)/.test(f) || /^docs\/srv-studio-v2\//.test(f)), changedFiles);
 } else ok('origin/main available for the isolation checks', false);
 console.log(out.join('\n')); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

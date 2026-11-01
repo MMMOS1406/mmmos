@@ -91,7 +91,7 @@ ok('normalisation gain: toward −14 LUFS; boost capped at +9 dB to keep dynamic
     const cur = fnOf(H), base = mainSrc && fnOf(mainSrc);
     const added = cur && base ? cur.split('\n').filter((l) => !base.split('\n').includes(l)) : null;
     const removed = cur && base ? base.split('\n').filter((l) => !cur.split('\n').includes(l)) : null;
-    ok('SRV Studio badges: the only change from main is the Monthly Mix button, added only when _srvStudioV2MixOn()', added && removed && removed.length === 0 && added.length === 1 && /^\s*if\(_srvStudioV2MixOn\(\)\)b\.push\('<button onclick="_srvEnglishV2MixOpen\(\)"/.test(added[0]), { added, removed });
+    ok('SRV Studio badges: the Monthly Mix button (flag-gated) is the only change from main, or is already on main', added && removed && removed.length === 0 && (added.length === 0 ? /if\(_srvStudioV2MixOn\(\)\)b\.push\('<button onclick="_srvEnglishV2MixOpen\(\)"/.test(cur) : added.length === 1 && /^\s*if\(_srvStudioV2MixOn\(\)\)b\.push\('<button onclick="_srvEnglishV2MixOpen\(\)"/.test(added[0])), { added, removed });
   }
   const MX = fs.readFileSync(path.join(repo, 'public/srv-studio-v2/srv2-mix.mjs'), 'utf8');
   ok('builder module: no publishAt, never sets visibility, uses the server action for every upload step', !/publishAt|privacyStatus\s*:\s*'public'/.test(MX) && /op: 'upload_init'/.test(MX) && /op: 'upload_chunk'/.test(MX));
