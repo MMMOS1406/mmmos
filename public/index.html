@@ -31320,7 +31320,7 @@ async function _engRevokeAuthorizations(ids){
   _ebV2Cache['b2_engreview']=null; if(typeof _ebV2Load==='function')_ebV2Load('b2_engreview');
 }
 // 046 — readable business names in Engineering screens; the pilot is never shown as plain "NextWave".
-function _engBusinessLabel(k){return ({nextwave_finance_pilot:'NextWave Finance Pilot',nextwave:'NextWave V2 (nextwave)',mmmos:'MMMOS',srv_farsi:'SRV Farsi',srv_english:'SRV English',srv_studio:'SRV Studio',ai_creation_studio:'AI Creation Studio',smm:'SMM',finance:'Finance',unassigned:'unassigned'})[k]||String(k||'—');}
+function _engBusinessLabel(k){const n=({nextwave_finance_pilot:'NextWave Finance Pilot',nextwave:'NextWave V2',mmmos:'MMMOS',srv_farsi:'SRV Farsi',srv_english:'SRV English',srv_studio:'SRV Studio',ai_creation_studio:'AI Creation Studio',smm:'SMM',finance:'Finance'})[k];return n?`${n} (${k})`:String(k||'—');}
 function _engAuthDetails(t){
   const p=(t&&t.packet)||{};
   const boundary=p.origin_decision&&p.origin_decision.authorization_boundary;

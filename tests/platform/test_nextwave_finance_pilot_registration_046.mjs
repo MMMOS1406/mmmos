@@ -73,6 +73,6 @@ r = await call('engineering_adviser_openapi', {}, A);
 ok('the adviser schema lists the pilot as a business', JSON.stringify(r.body).includes('nextwave_finance_pilot'));
 // UI label
 const html = readFileSync(join(root, 'public', 'index.html'), 'utf8');
-ok('Engineering screens label the pilot "NextWave Finance Pilot"', html.includes("nextwave_finance_pilot:'NextWave Finance Pilot'") && html.includes('_engBusinessLabel(p.business'));
+ok('Engineering screens label the pilot "NextWave Finance Pilot (nextwave_finance_pilot)", never plain NextWave', html.includes("nextwave_finance_pilot:'NextWave Finance Pilot'") && html.includes("nextwave:'NextWave V2'") && html.includes('_engBusinessLabel(p.business'));
 console.log(`\n${T.pass} passed, ${T.fail} failed`);
 process.exit(T.fail ? 1 : 0);
