@@ -22703,6 +22703,22 @@ async function engineeringTaskCreateFromDecision(req, res) {
     const release_kind = body.release_kind === 'retroactive_release' ? 'retroactive_release' : 'new_development';
     const git_commit_sha = body.git_commit_sha;
 
+    // 043 — Task Generator correction.
+    // (1) Duplicate guard: the same decision text within 10 minutes returns the task already created
+    //     (no second task, no second AI call). Keyed by a SHA-256 of the decision text.
+    const decisionSha = createHash('sha256').update(decisionText).digest('hex');
+    const dupSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const dup = await sbGetSafe(`engineering_tasks?packet->>origin_decision_sha256=eq.${decisionSha}&created_at=gt.${encodeURIComponent(dupSince)}&select=*&order=created_at.asc&limit=1`);
+    if (dup && dup.length) return res.status(200).json({ ok: true, task: _engPublicTaskRow(dup[0]), deduped: true });
+    // (2) Business named explicitly in the decision ("business: mmmos") is kept, when it is a known business.
+    const bizMatch = /\bbusiness\s*[:=]\s*([A-Za-z][A-Za-z0-9 _-]{1,40})/i.exec(decisionText);
+    const decisionBusiness = bizMatch ? _engBusinessSlug(bizMatch[1].split(/[)\n,.;]/)[0].trim()) : null;
+    // (3) Storage/evidence-only decisions (no deployment AND no repository changes AND storage/artifacts/
+    //     archive/evidence only) get an evidence-only protocol instead of the generic implement/deploy one.
+    const evidenceOnly = /\bno\s+(?:production\s+)?deploy(?:ment)?s?\b/i.test(decisionText)
+      && /\bno\s+(?:repository|repo|code)\s+changes?\b/i.test(decisionText)
+      && /\b(?:artifacts?\s+only|storage[- ]only|evidence[- ]only|archive|store\b)/i.test(decisionText);
+
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     const KNOWN_COMPONENTS = [
       'SRV Farsi', 'SRV English', 'AI Creation Studio', 'NextWave Systems', 'Finance', 'Investment Engine', 'Uber Engine',
@@ -22720,6 +22736,7 @@ async function engineeringTaskCreateFromDecision(req, res) {
 - affected_engine: the single MOST relevant component name. STRONGLY prefer an exact match from this known list if one clearly fits: ${KNOWN_COMPONENTS.join(', ')}. If genuinely none fit, output a short (2-4 word) descriptive label instead — never leave it blank.
 - priority: one of critical | high | medium | low. "critical" = production is broken or blocking revenue right now. "high" = CEO explicitly marked this urgent/important. "medium" = normal approved work (default). "low" = nice-to-have. Infer from tone/urgency; default to medium if unclear.
 - acceptance_criteria: concise, testable criteria for when this is DONE. If the decision text contains an explicit "ACCEPTANCE TEST" / "ACCEPTANCE CRITERIA" section, base this closely on that section.
+- If the decision only stores or archives existing records (no code, no deployment), describe the work as storing those records with the existing storage — never as building a new system.
 - scope_boundaries: any explicit "do not modify / out of scope / do not do X" constraints stated in the decision (1-3 sentences). Empty string if none stated.
 
 Return STRICT JSON only, wrapped in <task> tags, matching exactly this schema:
@@ -22801,6 +22818,21 @@ ${decisionText}
       git_commit_sha,
       packetExtra: {
         derived_from: 'ceo_decision_paste',
+        origin_decision_sha256: decisionSha,
+        ...(decisionBusiness ? { business: decisionBusiness } : {}),
+        ...(evidenceOnly ? {
+          work_type: 'evidence_only',
+          task_protocol: [
+            '1. Claim the task and read its authorization boundary',
+            '2. Use only the existing evidence/artifact operations named in the boundary',
+            '3. No code change, no repository change, no schema change, no deployment, no runner',
+            '4. Record a server-verified SHA-256 for every stored file',
+            '5. Recovery check: read back and compare checksums',
+            '6. Report: files stored, checksums, anything not done',
+          ],
+          testing_checklist: ['Every stored file has a server-verified SHA-256', 'Recovery check: one stored file read back and its SHA-256 compared'],
+          regression_checklist: ['No code, schema, deployment, runner or business change'],
+        } : {}),
         origin_decision_text: decisionText.slice(0, 8000),
         scope_boundaries: derived.scope_boundaries || null,
         origin_decision: {

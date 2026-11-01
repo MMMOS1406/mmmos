@@ -31721,8 +31721,10 @@ function _ebRenderTaskResult(task, resultEl, derived){
 // decision text); backend (engineering_task_create_from_decision) derives the
 // rest and returns the same task shape engineeringTaskCreate always returned.
 async function _ebCreateTaskFromDecision(){
+  if(window._ebDecisionBusy)return; // 043: one submission at a time (double clicks created duplicate tasks)
   const decisionText=document.getElementById('eb-decision-text')?.value?.trim();
   if(!decisionText){alert('Paste the CEO decision text first.');return;}
+  window._ebDecisionBusy=true; setTimeout(()=>{window._ebDecisionBusy=false;},15000);
   const resultEl=document.getElementById('eb-packet-result');
   if(resultEl)resultEl.innerHTML='<div style="color:var(--dim);font-size:12px;text-align:center;padding:20px">Deriving engineering task from decision…</div>';
   try{
@@ -31735,8 +31737,8 @@ async function _ebCreateTaskFromDecision(){
       if(resultEl)resultEl.innerHTML=`<div style="color:#ef4444;font-size:12px;padding:10px">Error: ${escHTML(_engErrMsg(d))}</div>`;
     }
   }catch(e){
-    if(resultEl)resultEl.innerHTML=`<div style="color:#ef4444;font-size:12px;padding:10px">Error: ${e.message}</div>`;
-  }
+    if(resultEl)resultEl.innerHTML=`<div style="color:#ef4444;font-size:12px;padding:10px">Error: ${escHTML(e.message)}</div>`;
+  }finally{ window._ebDecisionBusy=false; }
 }
 
 // Manual-fields flow (advanced, unchanged validation/required fields) — now
