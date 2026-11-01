@@ -1,0 +1,142 @@
+START — CEO CHECKPOINT REPORT
+
+PROJECT: SRV Studio V2 — Official Suno Automation Feasibility
+CHECKPOINT ID: SRV-STUDIO-V2-038 (reissued under MMMOS-CEO-REPORTING-V1 / SRV-STUDIO-V2-039)
+DATE: 2026-11-01
+EXECUTION OWNER: Claude Code
+REQUESTING DEPARTMENT: Product, Creative Quality, Business Operations
+PM: ChatGPT / CEO Adviser
+AUTHORIZATION REFERENCE: SRV-STUDIO-V2-038 (verification only); V2-039 (reporting format)
+
+EXECUTIVE SUMMARY:
+Generating SRV Studio songs directly inside MMMOS looks possible on the existing Suno Pro
+plan with no extra charges, but it is NOT YET VERIFIED.
+- Suno's official connector exists and is live.
+- The connector shows its tools only after the CEO approves a Suno sign-in.
+- Suno has not yet confirmed that our own server may use it for commercial downloads.
+- Capacity is fine: 12 of 20 monthly downloads.
+- Outcome: D — NOT YET VERIFIED (expected A once verified).
+
+STATUS: BLOCKED (verification needs CEO consent and Suno's written answer)
+
+WORK COMPLETED:
+Suno account
+- Plan: Suno PRO. Confirmed by the CEO; official plan limits verified on suno.com/pricing.
+- Pro limits: $8/month, 2,500 credits/month, 20 downloads/month.
+- Extra downloads can be bought (price not published). No rollover claims are verified.
+- The account is shared by SRV Studio and SRV Farsi.
+Download demand (confirmed by the CEO)
+- SRV Farsi: 8 per month.
+- SRV Studio: 4 per month.
+- Total: 12 of 20 per month, leaving 8 spare for re-downloads or errors.
+- Shorts reuse Long audio, so there are no Short downloads.
+- Credits: about 360 of 2,500 per month. This uses Suno's widely cited estimate of about 10
+  credits per 2-version generation, up to 3 generations per song. The estimate is NOT VERIFIED.
+Official connector
+- https://api.suno.com/mcp is live and documented by Suno (suno.com/mcp; help.suno.com
+  articles 14551361, 14551425, 14486145).
+- It is in beta (announced 28 Oct 2026) and Suno says it works on all plans. VERIFIED.
+- Sign-in: Suno's own OAuth (studio-api-prod.suno.com) with PKCE and refresh tokens.
+  No password or cookie is shared.
+- Without sign-in every request is refused ("sign in to Suno to use this server",
+  re-checked 2026-11-01).
+Exact permissions the connector requests (published by Suno)
+- profile:read: read the account profile (read-only).
+- library:read: read the WHOLE library, including SRV Farsi songs (read-only).
+- library:search: search the library (read-only).
+- library:write: change the library (WRITE).
+- credits:spend: generate music using plan credits (SPENDS).
+- download: download songs (uses the 20/month allowance).
+- api:v0: general API access (breadth not documented).
+- offline_access: stays connected until revoked.
+Account-wide: yes. Read-only: no.
+Capability findings
+- Server integration from MMMOS: NOT VERIFIED. The sign-in is technically standard; Suno has
+  not confirmed that non-assistant clients are permitted.
+- Exact custom lyrics input: NOT VERIFIED (no published input schema).
+- Exact style prompt input: NOT VERIFIED.
+- Song generation: VERIFIED (official: creates songs using plan credits).
+- Job-status check: NOT VERIFIED.
+- Automatic original-MP3 retrieval: NOT VERIFIED. A "download" permission exists, but no
+  download tool is documented.
+- Credit balance readable: VERIFIED (official).
+- Copies via share or CDN links, recording or stream ripping: NOT SUPPORTED (prohibited by
+  Suno's terms).
+- Commercial use: VERIFIED that it requires a permitted download within the monthly
+  allowance (terms effective 3 Sep 2026). Whether connector downloads qualify is NOT VERIFIED.
+Design prepared (not built)
+- An SRV Studio-only server action, OFF by default, with these steps:
+  - generate (exact approved lyrics and style)
+  - status
+  - listen and select
+  - download the chosen version only
+  - store with the package
+  - existing Build
+- Manual fallback kept.
+- About 4-6 engineering days after verification.
+Official Suno inquiry: drafted, NOT sent. It asks Suno to confirm:
+- server-client use
+- exact lyrics and style input
+- MP3 retrieval
+- whether connector downloads count as permitted commercial downloads, and how they count
+  toward the 20/month
+- two channels on one Pro account
+- connector charges, limits and narrower scopes
+- early-access availability for this account
+
+VERIFICATION:
+- Read Suno's public OAuth metadata and called the connector unauthenticated: 401, with the
+  permission list above.
+- Read Suno's official product, help, pricing, terms and downloads-policy pages.
+- No sign-in, no tool call, no generation, no download.
+- Not verifiable without consent: tool names and schemas, exact lyrics and style input, job
+  status, MP3 download.
+
+PRODUCTION STATUS:
+Nothing deployed, connected, published or changed.
+- No Suno connection, OAuth consent, generation, credit use or download.
+- No MMMOS code, database or configuration change for this checkpoint.
+
+COST IMPACT:
+- Existing Suno Pro only. No new subscription, vendor or upgrade is needed.
+- Possible extra cost only if a month exceeds 20 downloads (buy downloads; price
+  unpublished). Avoid it by downloading only the chosen version.
+- Connector: no separate price announced; it uses plan credits.
+
+RISKS AND BLOCKERS:
+- BLOCKER: tool schema is visible only after CEO OAuth consent.
+- BLOCKER: Suno's confirmation of server-client use and of commercial-download status.
+- The consent scopes are account-wide and not read-only: they include spending credits,
+  downloads and library changes, and visibility of SRV Farsi's songs.
+- The connector is beta and may change or require early-access approval.
+- Exact credits per generation and download counting (per song or per version) are unverified.
+- Storing the sign-in token securely may need a protected shared-database change (CEO).
+
+BUSINESS ISOLATION:
+- Affected: none. This was research only.
+- Unchanged: SRV Studio production, SRV Farsi, NextWave, AI Creation Studio, SMM, shared
+  MMMOS systems.
+- Future design: SRV Studio-only code that touches only songs it generated, keeps its own
+  usage ledger and never connects to SRV Farsi.
+
+PM DECISIONS:
+- Review the Suno inquiry wording.
+- Release the improved manual workflow already built and tested locally under V2-037 (exact
+  approved-text copy plus MP3 drop zone with checks) as a routine engineering order.
+
+CEO DECISIONS REQUIRED:
+1. Authorize sending the Suno inquiry from the account holder (after PM review).
+2. Approve or decline a one-time, inspection-only connector sign-in with the permissions
+   above. About 15 minutes; no tool invoked; removed and revoked afterwards.
+3. Later, only if verification passes: authorize building the adapter (feature OFF) and one
+   supervised test generation and download.
+
+RECOMMENDED NEXT STEP:
+PM approves the inquiry text this week. The CEO sends it from the Suno account holder's
+email. Meanwhile PM issues the routine release order for the V2-037 manual-workflow
+improvements.
+
+NEXT ACTION: PM review of the Suno inquiry and request for CEO authorization to send it.
+ACTION OWNER: ChatGPT / PM
+
+END — CEO CHECKPOINT REPORT
