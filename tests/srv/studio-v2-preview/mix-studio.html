@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SRV Studio Mix Builder — preview</title>
+<style>
+:root{--bg:#0b0b0e;--panel:#141418;--line:#26262d;--text:#ececef;--dim:#9a9aa4;--gold:#c9a84c;--violet:#a78bfa;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.bar{position:sticky;top:0;z-index:5;background:#5b21b6;color:#fff;font:600 12px/1 system-ui;padding:8px 16px;text-align:center}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 16px 60px;display:grid;gap:16px}
+h1{font:700 22px/1.2 Georgia,serif;margin:4px 0}h2{font:700 13px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:var(--gold);margin:0 0 10px;text-transform:uppercase}
+.steps{display:flex;flex-wrap:wrap;gap:6px}.steps span{font:700 10px ui-monospace,monospace;letter-spacing:.08em;padding:5px 8px;border-radius:6px;background:#1d1d23;color:var(--dim)}.steps span.on{background:var(--gold);color:#111}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+table{width:100%;border-collapse:collapse;font:12px/1.4 ui-monospace,Menlo,monospace}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--dim);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.dim{color:var(--dim)}
+.tag.ok{background:rgba(34,197,94,.12)}.tag.bad{background:rgba(239,68,68,.12)}.tag.test{background:rgba(167,139,250,.15);color:var(--violet)}
+button{font:700 12px system-ui;padding:7px 11px;border-radius:8px;border:1px solid rgba(201,168,76,.45);background:rgba(201,168,76,.12);color:var(--gold);cursor:pointer}button.sm{padding:3px 7px;font-size:11px}button:disabled{opacity:.4;cursor:default}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tl{position:relative;height:46px;background:#0f0f13;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:10px 0}
+.tl .seg{position:absolute;top:6px;height:34px;border-radius:5px;background:rgba(201,168,76,.22);border:1px solid rgba(201,168,76,.5);font:600 10px ui-monospace,monospace;color:var(--text);padding:3px 5px;overflow:hidden;white-space:nowrap}
+.tl .seg.alt{top:10px;background:rgba(167,139,250,.2);border-color:rgba(167,139,250,.55)}.tl .tgt{position:absolute;top:0;bottom:0;width:2px;background:var(--ok)}
+.grid{display:flex;flex-wrap:wrap;gap:8px}.grid button{padding:0;width:120px;height:68px;overflow:hidden;border:2px solid transparent;background:#000;position:relative}.grid button.on{border-color:var(--gold)}
+.grid img{width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.08)}.grid b{position:absolute;left:4px;bottom:2px;font-size:10px;color:#fff;text-shadow:0 1px 2px #000}
+pre{white-space:pre-wrap;background:#0f0f13;border:1px solid var(--line);border-radius:8px;padding:10px;font:12px/1.5 ui-monospace,Menlo,monospace;max-height:340px;overflow:auto}
+video{width:100%;max-width:960px;border-radius:8px;background:#000}.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}@media(max-width:800px){.two{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font:12px ui-monospace,monospace}.kv span:nth-child(odd){color:var(--dim)}
+</style></head>
+<body>
+<div class="bar">SRV STUDIO V2 · MONTHLY MIX BUILDER — PREVIEW ONLY (order SRV-STUDIO-V2-032) · local data · no production access · nothing is uploaded</div>
+<div class="wrap">
+  <div><h1>Monthly Mix Builder</h1><div class="dim" id="note"></div></div>
+  <div class="steps" id="steps"></div>
+
+  <section id="s-select"><h2>1 · Generate mix → select songs</h2>
+    <div class="row"><span>Month</span><input id="month" type="month" value="2026-11"><button id="suggest">Suggest ~30 min</button><button id="clear" class="sm">Clear</button><span class="dim" id="selinfo"></span></div>
+    <table id="cat"><thead><tr><th></th><th>Song</th><th>Length</th><th>YouTube</th><th>Audio source</th><th>Package</th><th>Eligible</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section id="s-arrange"><h2>2 · Arrange &amp; preview</h2>
+    <div class="row"><b id="total"></b><span id="target" class="dim"></span></div>
+    <div class="tl" id="tl"></div>
+    <div id="problems"></div>
+    <table id="order"><thead><tr><th>#</th><th>Chapter</th><th>Song</th><th>Length</th><th>Loudness gain</th><th>Order</th><th>Transition</th></tr></thead><tbody></tbody></table>
+    <div class="dim" id="joinst" style="margin-top:8px"></div>
+  </section>
+
+  <section id="s-visual"><h2>3 · Cinematic visual (approved library)</h2><div class="grid" id="lib"></div><div class="dim" id="libinfo" style="margin-top:6px"></div></section>
+
+  <section id="s-meta"><h2>4 · Review metadata</h2>
+    <div class="kv" id="metakv"></div>
+    <div class="two" style="margin-top:10px"><div><div class="dim">YouTube description</div><pre id="desc"></pre></div><div><div class="dim">Source lineage (never modified)</div><table id="lineage"><thead><tr><th>#</th><th>Song</th><th>Package</th><th>Task</th><th>YouTube</th><th>Source</th></tr></thead><tbody></tbody></table></div></div>
+  </section>
+
+  <section id="s-build"><h2>5 · Build (representative excerpt) → 6 · Approve</h2>
+    <div class="row"><button id="build">Render representative excerpt (3 songs · 1920×1080 · full-mix bitrate)</button><span id="buildst" class="dim"></span></div>
+    <canvas id="cv" style="display:none"></canvas>
+    <div class="two" style="margin-top:10px"><div><video id="vid" controls playsinline></video></div><div><img id="thumb" alt="mix thumbnail" style="width:100%;border-radius:8px;display:none"><div class="kv" id="buildkv" style="margin-top:8px"></div></div></div>
+  </section>
+
+  <section id="s-upload"><h2>7 · Private upload (mock) → 8 · Done</h2>
+    <table id="checks"><thead><tr><th>Check</th><th>Result</th></tr></thead><tbody></tbody></table>
+    <div class="row" style="margin-top:10px"><button id="upload">Simulate private upload</button><span id="upst" class="dim"></span></div>
+    <pre id="ledger" style="margin-top:10px"></pre>
+  </section>
+</div>
+<script type="module">
+import * as M from '/__v2/lib/srvStudioV2Mix.mjs';
+import { SRV_STUDIO_V2_AVATARS } from '/__v2/lib/srvStudioV2Avatars.mjs';
+import * as X from '/__v2/mix-preview.mjs';
+const $ = (id) => document.getElementById(id); const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const cat = await (await fetch('/__v2/mix-catalog.json')).json();
+const S = window.__mix = { cat, eligible: M.srv2MixEligible(cat.packages, cat.publicVideoIds), order: [], avatarId: null, gains: {}, ledger: { rev: 0, entries: [] }, build: null, joins: {}, step: 0, sourcesBefore: JSON.stringify(cat.packages) };
+$('note').textContent = cat.note;
+const LIB = SRV_STUDIO_V2_AVATARS.filter((a) => a.rotationEligible && !a.archived && a.collection === 'final' && a.quality && a.quality.hdReady);
+S.avatarId = LIB.find((a) => a.id === 'srv2-fm-06') ? 'srv2-fm-06' : LIB[0].id;
+const STEPS = ['Generate mix', 'Select songs', 'Arrange & preview', 'Review metadata', 'Build', 'Approve', 'Private upload', 'Done'];
+const byId = (id) => S.eligible.find((e) => e.pkgId === id);
+const pkgOf = (id) => cat.packages.find((p) => p.id === id);
+function tracks() { return S.order.map((id) => byId(id)); }
+function timeline() { try { return M.srv2MixTimeline(tracks()); } catch (e) { return null; } }
+function render() {
+  const tl = S.order.length ? timeline() : null;
+  S.step = !S.order.length ? 1 : S.build ? (S.ledger.entries.some((e) => e.mixKey === S.mixKey) ? 7 : 5) : 3;
+  $('steps').innerHTML = STEPS.map((s, i) => `<span class="${i <= S.step ? 'on' : ''}">${i + 1} · ${s}</span>`).join('');
+  // catalog
+  $('cat').tBodies[0].innerHTML = S.eligible.map((e) => { const p = pkgOf(e.pkgId); const on = S.order.includes(e.pkgId);
+    return `<tr><td>${e.eligible ? `<input type="checkbox" data-pick="${esc(e.pkgId)}" ${on ? 'checked' : ''}>` : ''}</td><td>${esc(e.title || p.title)} ${p._test ? '<span class="tag test">TEST stand-in</span>' : ''}</td><td>${e.durationSec ? M.srv2Clock(e.durationSec) : '—'}</td><td>${esc(e.youtubeVideoId || '—')}</td><td>${e.source === 'original-mp3' ? 'original MP3' : p._test ? 'synthetic test audio' : 'Long video soundtrack (AAC)'}</td><td>${esc(e.pkgId)}</td><td>${e.eligible ? '<span class="tag ok">eligible</span>' : `<span class="tag bad">${esc(e.reason)}</span>`}</td></tr>`; }).join('')
+    + cat.packages.filter((p) => !S.eligible.some((e) => e.pkgId === p.id)).map((p) => `<tr class="dim"><td></td><td>${esc(p.title)}</td><td colspan="4">${esc(p.engine)} · ${p.srvShortOf ? 'promotional Short' : 'other business'}</td><td><span class="tag bad">${p.srvShortOf ? 'short' : 'not SRV Studio'}</span></td></tr>`).join('');
+  $('selinfo').textContent = `${S.order.length} selected (5–8)`;
+  // arrange
+  if (!tl) { $('total').textContent = 'No songs selected'; $('tl').innerHTML = ''; $('order').tBodies[0].innerHTML = ''; $('problems').innerHTML = ''; }
+  else {
+    const v = M.srv2MixValidate(tl); S.tl = tl; S.validation = v;
+    $('total').innerHTML = `Total ${tl.totalLabel}`; $('target').textContent = ` · target ${M.srv2Clock(tl.targetSec)} (±4 min) · ${tl.deltaSec >= 0 ? '+' : ''}${Math.round(tl.deltaSec)} s · ${tl.items.length} songs · ${tl.crossfadeSec} s crossfades`;
+    const scale = 100 / Math.max(tl.totalSec, tl.targetSec);
+    $('tl').innerHTML = tl.items.map((x, i) => `<div class="seg ${i % 2 ? 'alt' : ''}" style="left:${x.startSec * scale}%;width:${x.durationSec * scale}%" title="${esc(x.title)}">${x.timestamp} ${esc(x.title)}</div>`).join('') + `<div class="tgt" style="left:${tl.targetSec * scale}%" title="30:00 target"></div>`;
+    $('problems').innerHTML = v.ok ? '<div class="ok">✓ Mix rules met (5–8 songs, about 30 min, chapters valid)</div>' : v.problems.map((p) => `<div class="warn">⚠ ${esc(p)}</div>`).join('');
+    const opts = S.eligible.filter((e) => e.eligible && !S.order.includes(e.pkgId));
+    $('order').tBodies[0].innerHTML = tl.items.map((x, i) => `<tr><td>${i + 1}</td><td>${x.timestamp}</td><td>${esc(x.title)}</td><td>${M.srv2Clock(x.durationSec)}</td><td>${S.gains[x.pkgId] ? (S.gains[x.pkgId].gainDb >= 0 ? '+' : '') + S.gains[x.pkgId].gainDb + ' dB' : '<span class="dim">at build</span>'}</td>
+      <td class="row"><button class="sm" data-up="${i}" ${i ? '' : 'disabled'}>↑</button><button class="sm" data-down="${i}" ${i < tl.items.length - 1 ? '' : 'disabled'}>↓</button><button class="sm" data-rm="${i}">✕</button>
+      <select data-rep="${i}" class="sm"><option value="">replace…</option>${opts.map((o) => `<option value="${esc(o.pkgId)}">${esc(o.title)}</option>`).join('')}</select></td>
+      <td>${i ? `<button class="sm" data-join="${i}">▶ ${esc(tl.items[i - 1].title.slice(0, 14))} → ${esc(x.title.slice(0, 14))}</button>` : ''}</td></tr>`).join('');
+  }
+  // library
+  $('lib').innerHTML = LIB.map((a) => `<button data-av="${a.id}" class="${a.id === S.avatarId ? 'on' : ''}" title="${esc(a.title)}"><img src="${esc(a.src)}" alt="SRV Studio image ${a.number}" loading="lazy"><b>${String(a.number).padStart(2, '0')}</b></button>`).join('');
+  $('libinfo').textContent = `${LIB.length} approved images (archived and held images excluded) · selected #${LIB.find((a) => a.id === S.avatarId).number}`;
+  // metadata
+  if (tl) {
+    const mk = $('month').value; S.monthKey = mk; S.mixKey = M.srv2MixKey(mk, tl); S.title = M.srv2MixTitle(mk, tl); S.description = M.srv2MixDescription(mk, tl); S.tags = M.srv2MixTags(tl);
+    S.slot = M.srv2MixMonthlySlot(mk); S.plan = M.srv2MixBitratePlan(tl.totalSec); S.lineage = M.srv2MixLineage(tl, S.eligible);
+    const lab = new Date(S.slot.utcIso).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    $('metakv').innerHTML = [['Title (' + S.title.length + '/100)', esc(S.title)], ['Mix key (duplicate protection)', S.mixKey], ['Playlist', `suggest new “${M.SRV2_MIX_PLAYLIST.suggested.title}” (created once in Studio) · fallback “${M.SRV2_MIX_PLAYLIST.fallback.title}” ${M.SRV2_MIX_PLAYLIST.fallback.id}`], ['Planned public release', `${lab} (proposed monthly slot: last Saturday 2:00 PM ET) · manual, upload stays PRIVATE`], ['Tags', esc(S.tags.join(', '))], ['File plan', `video ${(S.plan.videoBitsPerSecond / 1e6).toFixed(2)} Mbps + audio 192 kbps → ≈ ${(S.plan.estimatedBytes / 1048576).toFixed(0)} MB (limit 500 MB) · at the Long's 8 Mbps it would be ${(S.plan.bytesAtLongBitrate / 1048576).toFixed(0)} MB`], ['Render time', `real time: ≈ ${Math.ceil(tl.totalSec / 60)} min with the tab in front`]].map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('');
+    $('desc').textContent = S.description;
+    $('lineage').tBodies[0].innerHTML = S.lineage.map((l) => `<tr><td>${l.order}</td><td>${esc(l.title)}</td><td>${esc(l.pkgId)}</td><td>${esc(l.taskUid || '')}</td><td>${esc(l.youtubeVideoId)}</td><td>${esc(l.source)}</td></tr>`).join('');
+  }
+  renderChecks();
+}
+function renderChecks() {
+  const tl = S.tl; if (!tl) { $('checks').tBodies[0].innerHTML = ''; return; }
+  const dec = M.srv2MixUploadDecide(S.ledger, { mixKey: S.mixKey, mixPkgId: 'pkg_mix_' + S.mixKey, monthKey: S.monthKey });
+  const rows = [
+    ['Signed-in VA or CEO session (server-checked)', 'mock: signed in', 'ok'],
+    ['Privacy', 'PRIVATE (forced by the server) · publishAt never set', 'ok'],
+    ['Channel', 'SRV Studio UC0nzWQX6AaUqlF5FozNpWPg (verified before upload)', 'ok'],
+    ['AI disclosure in description', S.description.includes(M.SRV2_MIX_AI_DISCLOSURE) ? 'present' : 'missing', S.description.includes(M.SRV2_MIX_AI_DISCLOSURE) ? 'ok' : 'bad'],
+    ['Mix rules (5–8 songs, ≈30 min, chapters)', S.validation.ok ? 'met' : S.validation.problems.join('; '), S.validation.ok ? 'ok' : 'warn'],
+    ['Projected file size ≤ 500 MB storage limit', `${(S.plan.estimatedBytes / 1048576).toFixed(0)} MB`, S.plan.fitsLimit ? 'ok' : 'bad'],
+    ['Built and approved', S.build ? 'excerpt rendered and reviewed' : 'not built yet', S.build ? 'ok' : 'warn'],
+    ['Duplicate protection (mix key / package / month)', dec.ok ? 'not uploaded before' : dec.reason, dec.ok ? 'ok' : 'bad'],
+    ['Source songs and packages unchanged', JSON.stringify(cat.packages) === S.sourcesBefore ? 'unchanged' : 'CHANGED', JSON.stringify(cat.packages) === S.sourcesBefore ? 'ok' : 'bad'],
+  ];
+  S.checks = rows; $('checks').tBodies[0].innerHTML = rows.map(([k, v, c]) => `<tr><td>${k}</td><td class="${c}">${esc(v)}</td></tr>`).join('');
+  $('ledger').textContent = 'Mock mix ledger (server-side in production):\n' + JSON.stringify(S.ledger, null, 1);
+}
+// ── audio for previews: local real copy when available, else stand-in synthetic audio ──
+const cache = {};
+async function audioFor(pkgId, secondsNeeded) {
+  if (cache[pkgId]) return cache[pkgId];
+  const p = pkgOf(pkgId);
+  if (p._localAudio) { try { const b = await X.decodeUrl('/__v2/mix-real/' + p._localAudio + '.mp4'); return (cache[pkgId] = { buf: b, kind: 'real song audio (local copy of the Long soundtrack)' }); } catch (_) { /* fall back */ } }
+  const seed = [...pkgId].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return (cache[pkgId] = { buf: await X.synthTrack(secondsNeeded, seed), kind: 'synthetic stand-in audio' });
+}
+async function gainFor(pkgId, buf) { if (!S.gains[pkgId]) S.gains[pkgId] = M.srv2LoudnessGain(X.measure(buf)); return S.gains[pkgId]; }
+async function previewJoin(i) {
+  const tl = S.tl; const a = tl.items[i - 1], b = tl.items[i];
+  $('joinst').textContent = 'Preparing the transition…';
+  const A = await audioFor(a.pkgId, 26), B = await audioFor(b.pkgId, 26);
+  const gA = await gainFor(a.pkgId, A.buf), gB = await gainFor(b.pkgId, B.buf);
+  const j = X.joinPreview(A.buf, B.buf, [gA.gain, gB.gain]);
+  S.joins[i] = { continuity: j.continuity, sources: [A.kind, B.kind], gains: [gA, gB], lengthSec: +j.buffer.duration.toFixed(2) };
+  X.play(j.buffer);
+  $('joinst').innerHTML = `▶ ${esc(a.title)} → ${esc(b.title)} · ${j.buffer.duration.toFixed(1)} s preview · crossfade at ${j.joinAtSec.toFixed(1)} s · level through the join ${j.continuity.minDb} … ${j.continuity.maxDb} dBFS (no gap) · ${esc(A.kind)} / ${esc(B.kind)} <button class="sm" id="stopj">■ stop</button>`;
+  $('stopj').onclick = () => X.stop(); render();
+}
+// ── build a representative excerpt: first 3 songs × 40 s around each join, rendered like the full mix would be ──
+async function build() {
+  const tl = S.tl; if (!tl || tl.items.length < 3) { $('buildst').textContent = 'Select at least 3 songs'; return; }
+  $('build').disabled = true; $('buildst').textContent = 'Preparing audio…';
+  const ex = []; for (let i = 0; i < 3; i++) { const it = tl.items[i]; const a = await audioFor(it.pkgId, 40); const g = await gainFor(it.pkgId, a.buf);
+    const take = Math.min(40, a.buf.duration); const from = i === 0 ? 0 : Math.max(0, Math.min(a.buf.duration - take, 30));
+    ex.push({ pkgId: it.pkgId, title: it.title, youtubeVideoId: it.youtubeVideoId, durationSec: take, chs: Array.from({ length: 2 }, (_, c) => a.buf.getChannelData(Math.min(c, a.buf.numberOfChannels - 1)).slice(Math.floor(from * X.SR), Math.floor((from + take) * X.SR))), gain: g.gain, kind: a.kind }); }
+  const etl = M.srv2MixTimeline(ex.map((e) => ({ pkgId: e.pkgId, title: e.title, youtubeVideoId: e.youtubeVideoId, durationSec: e.chs[0].length / X.SR })));
+  const mix = M.srv2MixPcm(ex.map((e) => e.chs), etl, ex.map((e) => e.gain), X.SR);
+  const mixBuf = X.toAudioBuffer(mix); const loud = M.srv2Loudness(mix, X.SR); const cont = M.srv2JoinContinuity(mix, X.SR, etl, 6);
+  const avatar = LIB.find((a) => a.id === S.avatarId); const monthLabel = new Date(S.monthKey + '-15T12:00:00Z').toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const out = await X.renderExcerpt({ mixBuffer: mixBuf, tl: etl, avatar, monthLabel, videoBitsPerSecond: S.plan.videoBitsPerSecond, canvas: $('cv'), onProgress: (m) => { $('buildst').textContent = m; } });
+  S.build = { stats: out.stats, excerpt: etl, loudness: loud, continuity: cont, sources: ex.map((e) => e.kind), gains: ex.map((e) => ({ title: e.title, ...S.gains[e.pkgId] })), avatarId: avatar.id, thumbBytes: out.thumbBlob.size };
+  S.blob = out.blob; S.thumb = out.thumbBlob;
+  $('vid').src = URL.createObjectURL(out.blob); $('thumb').src = URL.createObjectURL(out.thumbBlob); $('thumb').style.display = 'block';
+  const st = out.stats; $('buildkv').innerHTML = [['Excerpt', `${etl.items.length} songs · ${etl.totalLabel} · chapters ${etl.items.map((x) => x.timestamp).join(', ')}`], ['Video', `${st.width}×${st.height} · ${st.fps} fps · ${st.codec}`], ['Bitrate', `${st.targetVideoKbps} kbps target (full-mix plan) · ${st.measuredKbps} kbps measured`], ['Frames', `${st.frames.drawn}/${st.frames.expected} · ${st.frames.droppedPct}% dropped`], ['Mix loudness', `${loud.lufs} LUFS (target −14) · peak ${loud.samplePeakDb} dBFS`], ['Joins', cont.map((c) => `${c.minDb}…${c.maxDb} dBFS`).join(' · ')], ['Audio', ex.map((e) => e.kind).join(' · ')], ['Render time', `${st.renderSec} s for ${st.durationSec} s (real time)`]].map(([k, v]) => `<span>${k}</span><span>${esc(v)}</span>`).join('');
+  $('buildst').textContent = '✓ Built — review the video, then approve below'; $('build').disabled = false; render();
+}
+async function upload() {
+  const req = { mixKey: S.mixKey, mixPkgId: 'pkg_mix_' + S.mixKey, monthKey: S.monthKey };
+  const d = M.srv2MixUploadDecide(S.ledger, req);
+  if (!S.build) { $('upst').innerHTML = '<span class="warn">Build and approve first.</span>'; return; }
+  if (!d.ok) { $('upst').innerHTML = `<span class="bad">Refused — ${esc(d.reason)} (nothing uploaded)</span>`; S.lastRefusal = d.reason; return; }
+  S.ledger = { rev: S.ledger.rev + 1, entries: S.ledger.entries.concat({ id: 'mix_' + (S.ledger.rev + 1), ...req, kind: 'mix', status: 'uploaded', youtubeVideoId: 'MOCK' + String(S.ledger.rev + 1).padStart(7, '0'), privacyStatus: 'private', publishAt: null, title: S.title, lineage: S.lineage.map((l) => l.pkgId), plannedRelease: S.slot, dryRun: true }) };
+  $('upst').innerHTML = '<span class="ok">✓ Mock private upload recorded (no network call) — Done. Make it public in YouTube Studio at the planned time.</span>'; render();
+}
+// ── events ──
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.dataset.pick) { const id = t.dataset.pick; if (t.checked) { if (!S.order.includes(id)) S.order.push(id); } else S.order = S.order.filter((x) => x !== id); S.build = null; render(); }
+  if (t.dataset.rep && t.value) { S.order[+t.dataset.rep] = t.value; S.build = null; render(); }
+  if (t.id === 'month') render();
+});
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.up) { const i = +t.dataset.up; [S.order[i - 1], S.order[i]] = [S.order[i], S.order[i - 1]]; S.build = null; render(); }
+  if (t.dataset.down) { const i = +t.dataset.down; [S.order[i + 1], S.order[i]] = [S.order[i], S.order[i + 1]]; S.build = null; render(); }
+  if (t.dataset.rm) { S.order.splice(+t.dataset.rm, 1); S.build = null; render(); }
+  if (t.dataset.join) previewJoin(+t.dataset.join).catch((err) => { $('joinst').textContent = 'Transition preview failed: ' + err.message; });
+  if (t.dataset.av) { S.avatarId = t.dataset.av; S.build = null; render(); }
+});
+$('suggest').onclick = () => { const el = S.eligible.filter((e) => e.eligible); S.order = []; let tot = 0; for (const e of el) { if (S.order.length >= 8) break; S.order.push(e.pkgId); tot += e.durationSec - 6; if (tot >= 1800 - 120) break; } S.build = null; render(); };
+$('clear').onclick = () => { S.order = []; S.build = null; render(); };
+$('build').onclick = () => build().catch((err) => { $('buildst').textContent = 'Build failed: ' + err.message; $('build').disabled = false; });
+$('upload').onclick = () => upload();
+S.api = { render, previewJoin, build, upload };
+render();
+window.__mixReady = true;
+</script>
+</body></html>

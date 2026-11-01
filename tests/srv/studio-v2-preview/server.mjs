@@ -20,6 +20,7 @@ import path from 'node:path';
 import { classifyAction } from '../../preservation/stub-server.mjs';
 import { srv2RunPilotUpload, srv2RunProductionUpload } from '../../../lib/srvStudioV2Pilot.mjs';
 import { srv2EnsurePlaylist, srv2RunPlaylistSync } from '../../../lib/srvStudioV2Playlists.mjs';
+import { srv2RunMixOp } from '../../../lib/srvStudioV2MixServer.mjs';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { makeStudioFixture, sampleGeneratedPackage, sampleCaption, v2SamplePackage } from './fixture.mjs';
@@ -85,6 +86,28 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       if (!fs.existsSync(f)) return send(res, 404, { error: 'not found' });
       record(req, u, { kind: 'storage-read' });
       return sendFile(req, res, f, typeOf(f));
+    }
+    // 033: Supabase TUS resumable upload emulation (create → PATCH chunks → HEAD offset), with failure injection
+    const tc = u.pathname === '/__sb/storage/v1/upload/resumable', tm = u.pathname.match(/^\/__sb\/storage\/v1\/upload\/resumable\/([a-z0-9]+)$/);
+    if (tc && req.method === 'POST') {
+      const meta = Object.fromEntries(String(req.headers['upload-metadata'] || '').split(',').filter(Boolean).map((kv) => { const [k, v] = kv.split(' '); return [k, Buffer.from(v || '', 'base64').toString()]; }));
+      if (meta.bucketName !== 'srv-assets') return send(res, 400, { error: 'bucket' });
+      const id = 'tus' + (++tusSeq); const tmpf = path.join(STORE_DIR, '.tus-' + id); fs.mkdirSync(STORE_DIR, { recursive: true }); fs.writeFileSync(tmpf, '');
+      tus[id] = { objectName: meta.objectName, length: Number(req.headers['upload-length']), offset: 0, tmpf };
+      record(req, u, { kind: 'tus-create', bytes: tus[id].length, objectName: meta.objectName });
+      res.writeHead(201, { Location: '/__sb/storage/v1/upload/resumable/' + id, 'Tus-Resumable': '1.0.0', 'Access-Control-Expose-Headers': 'Location, Upload-Offset' }); res.end(); return;
+    }
+    if (tm && tus[tm[1]]) {
+      const t = tus[tm[1]];
+      if (req.method === 'HEAD') { res.writeHead(200, { 'Upload-Offset': String(t.offset), 'Upload-Length': String(t.length), 'Tus-Resumable': '1.0.0' }); res.end(); return; }
+      if (req.method === 'PATCH') {
+        if (Number(req.headers['upload-offset']) !== t.offset) { res.writeHead(409, { 'Upload-Offset': String(t.offset) }); res.end(); return; }
+        const c = []; for await (const x of req) c.push(x); let buf = Buffer.concat(c);
+        if (mixFail.tusOnce && t.offset > 0) { mixFail.tusOnce = false; buf = buf.subarray(0, buf.length >> 1); fs.appendFileSync(t.tmpf, buf); t.offset += buf.length; mixFail.tusHits = (mixFail.tusHits || 0) + 1; res.writeHead(500); res.end('injected failure'); return; }
+        fs.appendFileSync(t.tmpf, buf); t.offset += buf.length;
+        if (t.offset >= t.length) { const f = storagePath(t.objectName); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.renameSync(t.tmpf, f); record(req, u, { kind: 'storage-write', bytes: t.length, objectName: t.objectName }); }
+        res.writeHead(204, { 'Upload-Offset': String(t.offset), 'Tus-Resumable': '1.0.0' }); res.end(); return;
+      }
     }
     return send(res, 404, { error: 'preview storage: unsupported request' });
   }
@@ -195,6 +218,21 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
         }, json || {}, { supabaseUrl: host + '/__sb' });
         return send(res, out.status, out.json);
       }
+      if (action === 'srv_studio_v2_mix') { // 033: the REAL mix policy against this server's state, fake YouTube and local storage
+        if (!json || (json.ceo_session_token !== 'preview.session' && !json.operator_session_token)) return send(res, 401, { ok: false, mix: true, error: 'publisher_session_required' });
+        const out = await srv2RunMixOp({
+          now: () => Date.now(), by: json.ceo_session_token ? 'ceo' : 'operator', flagOn: async () => store.settings.srv_studio_v2_enabled === 'true',
+          getSetting: async (k) => (k in store.settings ? { text: store.settings[k] } : null),
+          casSetting: async (k, oldText, newText) => { const cur = k in store.settings ? store.settings[k] : null; if (cur !== oldText) return false; store.settings[k] = newText; persist(); return true; },
+          listSrvPackages: async () => Object.values(store.packages).map((r) => { try { return JSON.parse(r.full_package); } catch { return null; } }).filter((p) => p && p.engine === 'SRV English'),
+          lookupChannel: async () => ({ channel_id: store.previewChannelId || 'UC0nzWQX6AaUqlF5FozNpWPg' }), ytFor: async () => mixYt,
+          headObject: async (p) => { try { const st = fs.statSync(storagePath(p)); return { bytes: st.size, type: typeOf(p) }; } catch { return null; } },
+          readRange: async (p, a, b) => { const fd = fs.openSync(storagePath(p), 'r'); const buf = Buffer.alloc(b - a); const n = fs.readSync(fd, buf, 0, b - a, a); fs.closeSync(fd); return buf.subarray(0, n); },
+          seal: (t) => 'sealed:' + Buffer.from(t).toString('base64'), unseal: (x) => Buffer.from(String(x).slice(7), 'base64').toString(),
+          newId: () => 'mx_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        }, json || {});
+        return send(res, out.status, out.json);
+      }
       if (action === 'srv_studio_v2_playlist_sync') { // 030: the real sync runner against the in-memory YouTube
         if (!json || (json.ceo_session_token !== 'preview.session' && !json.operator_session_token)) return send(res, 401, { ok: false, playlistSync: true, error: 'publisher_session_required' });
         const out = await srv2RunPlaylistSync({
@@ -238,18 +276,45 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
   // 030: in-memory SRV Studio YouTube (playlists, membership, video privacy). /__stub/yt?scope=0 simulates today's token
   // (no playlist scope); every dry-run upload becomes a private video here.
   const ytState = { scope: true, playlists: { PLXCBPiF9p6SA: { channelId: 'UC0nzWQX6AaUqlF5FozNpWPg', title: 'SRV Studio, the full Collection', privacy: 'public' }, 'PLATi-bbiaU30': { channelId: 'UC0nzWQX6AaUqlF5FozNpWPg', title: 'SRV Studio Full Short Collection', privacy: 'public' } }, items: { PLXCBPiF9p6SA: [], 'PLATi-bbiaU30': [] }, videos: {}, calls: [] };
+  // 033: mix — TUS uploads, failure switches, resumable YouTube sessions (fake)
+  const tus = {}; let tusSeq = 0; const mixFail = { tusOnce: false, resetOnce: false, err503Once: false, expireOnce: false };
+  const mixSessions = {}; let mixVid = 0;
+  const mixYt = {
+    ...null,
+    setThumbnail: async (vid, buf) => { const jpeg = buf[0] === 0xff && buf[1] === 0xd8; ytState.calls.push(['mixThumb', vid, buf.length, jpeg]); if (!jpeg) throw new Error('not a jpeg'); return true; },
+    getVideosStatus: async (ids) => { const o = {}; for (const id of ids) if (ytState.videos[id]) o[id] = { channelId: 'UC0nzWQX6AaUqlF5FozNpWPg', privacyStatus: ytState.videos[id] }; return o; },
+    initResumable: async (resource, bytes, mime) => { const id = 'https://upload.fake/mix/' + Object.keys(mixSessions).length; mixSessions[id] = { got: 0, total: bytes, resource, mime, video: null, puts: 0 }; ytState.calls.push(['mixInit', resource.status.privacyStatus, 'publishAt' in resource.status]); return id; },
+    status: async (sid) => { const x = mixSessions[sid]; if (!x || mixFail.expireOnce) { mixFail.expireOnce = false; return { expired: true }; } return x.video ? { complete: true, video: x.video } : { offset: x.got }; },
+    putChunk: async (sid, buf, start, total) => {
+      const x = mixSessions[sid]; x.puts++;
+      if (mixFail.err503Once) { mixFail.err503Once = false; mixFail.hits503 = (mixFail.hits503 || 0) + 1; throw new Error('HTTP 503 (injected)'); }
+      if (mixFail.resetOnce && start > 0) { mixFail.resetOnce = false; x.got = start + (buf.length >> 1); mixFail.resets = (mixFail.resets || 0) + 1; throw new Error('connection reset (injected)'); }
+      if (start !== x.got) throw new Error('offset mismatch ' + start + ' vs ' + x.got);
+      x.got += buf.length;
+      if (x.got >= x.total) { const vid = 'MIXvid' + String(++mixVid).padStart(5, '0'); x.video = { id: vid, channelId: 'UC0nzWQX6AaUqlF5FozNpWPg', privacyStatus: x.resource.status.privacyStatus }; ytState.videos[vid] = x.video.privacyStatus; return { complete: true, video: x.video }; }
+      return { complete: false, offset: x.got };
+    },
+  };
   const fakeYt = {
     getPlaylist: async (id) => { ytState.calls.push(['getPlaylist', id]); const p = ytState.playlists[id]; return p ? { id, snippet: { channelId: p.channelId, title: p.title }, status: { privacyStatus: p.privacy } } : null; },
     findItem: async (pl, v) => { ytState.calls.push(['findItem', pl, v]); return (ytState.items[pl] || []).includes(v) ? { id: 'item_' + v } : null; },
     insertItem: async (pl, v) => { ytState.calls.push(['insertItem', pl, v]); if (!ytState.scope) { const e = new Error('HTTP 403 insufficientPermissions'); e.code = 'insufficient_scope'; throw e; } ytState.items[pl].push(v); return { id: 'item_' + v }; },
     getVideo: async (id) => { ytState.calls.push(['getVideo', id]); const v = ytState.videos[id]; return v ? { id, snippet: { channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' }, status: { privacyStatus: v } } : null; },
   };
+  Object.assign(mixYt, { getPlaylist: fakeYt.getPlaylist, findItem: fakeYt.findItem, insertItem: fakeYt.insertItem });
   const server = http.createServer(async (req, res) => {
     try {
       const u = new URL(req.url, 'http://x');
       if (PROD_MARK.test(req.url) || PROD_MARK.test(String(req.headers.referer || ''))) productionHits++;
       if (u.pathname === '/__stub/log') return send(res, 200, { productionHits, count: log.length, log: log.slice(-400) });
       if (u.pathname === '/__stub/yt') { if (u.searchParams.has('scope')) ytState.scope = u.searchParams.get('scope') !== '0'; if (u.searchParams.get('video')) ytState.videos[u.searchParams.get('video')] = u.searchParams.get('privacy') || 'private'; return send(res, 200, ytState); }
+      if (u.pathname === '/__stub/mix') { for (const k of ['tusOnce', 'resetOnce', 'err503Once', 'expireOnce']) if (u.searchParams.has(k)) mixFail[k] = u.searchParams.get(k) === '1'; if (u.searchParams.get('video')) ytState.videos[u.searchParams.get('video')] = u.searchParams.get('privacy') || 'private'; return send(res, 200, { mixFail, sessions: Object.fromEntries(Object.entries(mixSessions).map(([k, v]) => [k.slice(-2), { got: v.got, total: v.total, puts: v.puts, video: v.video, privacy: v.resource.status.privacyStatus, publishAt: 'publishAt' in v.resource.status }])), tus: Object.values(tus).map((t) => ({ objectName: t.objectName, length: t.length, offset: t.offset })), thumbs: ytState.calls.filter((c) => c[0] === 'mixThumb') }); }
+      if (u.pathname === '/__stub/mix-seed' && req.method === 'POST') {
+        const c = []; for await (const x of req) c.push(x); const songs = JSON.parse(Buffer.concat(c).toString() || '[]');
+        for (const sg of songs) { store.packages[sg.id] = { package_id: sg.id, task_id: sg.taskId || 0, engine: 'SRV English', title: sg.title, full_package: JSON.stringify(sg), generated_at: sg.generatedAt }; if (sg.srvProduction && sg.srvProduction.youtubeVideoId) ytState.videos[sg.srvProduction.youtubeVideoId] = sg._privacy || 'public'; }
+        persist(); return send(res, 200, { ok: true, seeded: songs.length });
+      }
+      { const am = u.pathname.match(/^\/__v2\/mix-audio\/([a-z0-9_-]+\.(m4a|mp4|mp3))$/); if (am) { const dir = process.env.SRV2_MIX_AUDIO_DIR; const f = dir && path.join(dir, am[1]); if (!f || !fs.existsSync(f)) return send(res, 404, { error: 'no mix test audio' }); return sendFile(req, res, f, am[2] === 'mp3' ? 'audio/mpeg' : am[2] === 'm4a' ? 'audio/mp4' : 'video/mp4'); } }
       if (u.pathname === '/__stub/reset') { store = fresh(); persist(); log.length = 0; dryRuns.length = 0; return send(res, 200, { ok: true, reset: true }); }
       if (u.pathname === '/__stub/state') return send(res, 200, { settings: Object.keys(store.settings), packages: Object.values(store.packages).map((r) => ({ id: r.package_id, title: r.title, task: r.task_id })) });
       // Checkpoint C — avatar studio page, the two modules it imports, and the test-task avatar view.
@@ -270,6 +335,14 @@ export async function startPreview({ publicDir, port = 4188, dataFile = null, qu
       if (u.pathname === '/__stub/dryrun') return send(res, 200, { count: dryRuns.length, dryRuns });
       if (u.pathname === '/__stub/pilot') { let c = null, l = null; try { c = JSON.parse(store.settings.srv_studio_v2_pilot || 'null'); } catch {} try { l = JSON.parse(store.settings.srv_studio_v2_pilot_ledger || 'null'); } catch {} return send(res, 200, { config: c, ledger: l }); }
       if (u.pathname === '/studio/render') return send(res, 200, fs.readFileSync(path.join(HERE, 'render-studio.html')), { 'Content-Type': 'text/html; charset=utf-8' });
+      // SRV-STUDIO-V2-032 — Monthly Mix Builder preview (isolated): page, shared pure modules, browser module, catalog
+      // snapshot, and optional real song audio from a local folder (SRV2_MIX_REAL_DIR; nothing is fetched from production).
+      if (u.pathname === '/studio/mix') return send(res, 200, fs.readFileSync(path.join(HERE, 'mix-studio.html')), { 'Content-Type': 'text/html; charset=utf-8' });
+      { const lm = u.pathname.match(/^\/__v2\/lib\/(srvStudioV2Mix|srvStudioV2Schedule)\.mjs$/); if (lm) return send(res, 200, fs.readFileSync(path.join(HERE, '../../../lib/' + lm[1] + '.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' }); }
+      if (u.pathname === '/__v2/lib/srvStudioV2Avatars.mjs') return send(res, 200, fs.readFileSync(path.join(HERE, '../../../lib/srvStudioV2Avatars.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' });
+      if (u.pathname === '/__v2/mix-preview.mjs') return send(res, 200, fs.readFileSync(path.join(HERE, 'srv2-mix-preview.mjs')), { 'Content-Type': 'text/javascript; charset=utf-8' });
+      if (u.pathname === '/__v2/mix-catalog.json') return send(res, 200, JSON.parse(fs.readFileSync(path.join(HERE, 'mix-catalog.json'), 'utf8')));
+      { const rm = u.pathname.match(/^\/__v2\/mix-real\/([a-z0-9_-]+)\.mp4$/); if (rm) { const dir = process.env.SRV2_MIX_REAL_DIR; const f = dir && path.join(dir, rm[1] + '.mp4'); if (!f || !fs.existsSync(f)) return send(res, 404, { error: 'no local real-audio copy' }); return sendFile(req, res, f, 'video/mp4'); } }
       { const cm = u.pathname.match(/^\/__v2\/compare\/(long|short)-(A|B)\.mp4$/); if (cm) { const f = path.join(COMPARE_DIR, COMPARE[cm[1] + '-' + cm[2]]); if (!fs.existsSync(f)) return send(res, 404, { error: 'comparison video not rendered on this computer' }); return sendFile(req, res, f, 'video/mp4'); } }
       if (u.pathname === '/__v2/test-audio.mp3') { if (!TEST_AUDIO || !fs.existsSync(TEST_AUDIO)) return send(res, 404, { error: 'no sample MP3 on this computer' }); return sendFile(req, res, TEST_AUDIO, 'audio/mpeg'); }
       if (u.pathname === '/__stub/save-render' && req.method === 'POST') {

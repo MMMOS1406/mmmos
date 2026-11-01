@@ -1,0 +1,246 @@
+{
+ "snapshotAt": "2026-10-31",
+ "note": "Read-only metadata snapshot of SRV Studio packages (production, 2026-10-31) plus three clearly labelled TEST stand-in songs (synthetic audio) so the preview can show a 30-minute mix. Public status from the official SRV Studio uploads feed.",
+ "monthKey": "2026-11",
+ "publicVideoIds": [
+  "9-GE-FEAUNM",
+  "UvD7hUQH4aM",
+  "s5l2w78K170",
+  "07xOBkeQ3TE",
+  "s34SXDqU0jk",
+  "TESTsong001",
+  "TESTsong002",
+  "TESTsong003",
+  "7LGUuXX1YnI",
+  "FARSIexampl"
+ ],
+ "packages": [
+  {
+   "id": "pkg_1792160628322",
+   "engine": "SRV English",
+   "title": "You never saw me break",
+   "srvTaskUid": "srve_1791661404055_136",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 234.0,
+    "durationSec": 234.0
+   },
+   "srvProduction": {
+    "youtubeVideoId": "9-GE-FEAUNM"
+   },
+   "_srvLongVideoUrl": "https://tldcwvtwjypmwynsklsd.supabase.co/storage/v1/object/public/srv-assets/pkg_1792160628322/long_1792163254499_srv2_long.mp4",
+   "srvAvatar": {
+    "id": "srv2-fm-02"
+   },
+   "_real": true,
+   "_localAudio": null
+  },
+  {
+   "id": "pkg_1792181554702",
+   "engine": "SRV English",
+   "title": "Gone Before Goodbye",
+   "srvTaskUid": "srve_1791670106885_138",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 242.8,
+    "durationSec": 242.8
+   },
+   "srvProduction": {
+    "youtubeVideoId": "UvD7hUQH4aM"
+   },
+   "_srvLongVideoUrl": "https://tldcwvtwjypmwynsklsd.supabase.co/storage/v1/object/public/srv-assets/pkg_1792181554702/long_1792182489784_srv2_long.mp4",
+   "srvAvatar": {
+    "id": "srv2-fm-05"
+   },
+   "_real": true,
+   "_localAudio": null
+  },
+  {
+   "id": "pkg_1792183714328",
+   "engine": "SRV English",
+   "title": "The day I stopped waiting",
+   "srvTaskUid": "srve_1792181501214_145",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 231.6,
+    "durationSec": 231.6
+   },
+   "srvProduction": {
+    "youtubeVideoId": "s5l2w78K170"
+   },
+   "_srvLongVideoUrl": "https://tldcwvtwjypmwynsklsd.supabase.co/storage/v1/object/public/srv-assets/pkg_1792183714328/long_1792184075739_srv2_long.mp4",
+   "srvAvatar": {
+    "id": "srv2-fm-06"
+   },
+   "_real": true,
+   "_localAudio": null
+  },
+  {
+   "id": "pkg_1792357382017",
+   "engine": "SRV English",
+   "title": "I don’t know you anymore",
+   "srvTaskUid": "srve_1792181501215_147",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 222.08,
+    "durationSec": 222.08
+   },
+   "srvProduction": {
+    "youtubeVideoId": "gLvywPifw78"
+   },
+   "_srvLongVideoUrl": "https://tldcwvtwjypmwynsklsd.supabase.co/storage/v1/object/public/srv-assets/pkg_1792357382017/long_1792358293733_srv2_long.mp4",
+   "srvAvatar": {
+    "id": "srv2-fm-11"
+   },
+   "_real": true,
+   "_localAudio": null
+  },
+  {
+   "id": "pkg_1792360206717",
+   "engine": "SRV English",
+   "title": "But the photograph lied",
+   "srvTaskUid": "srve_1792199330081_148",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 208.4,
+    "durationSec": 208.4
+   },
+   "srvProduction": {
+    "youtubeVideoId": "07xOBkeQ3TE"
+   },
+   "_srvLongVideoUrl": "https://tldcwvtwjypmwynsklsd.supabase.co/storage/v1/object/public/srv-assets/pkg_1792360206717/long_1792360529805_srv2_long.mp4",
+   "srvAvatar": {
+    "id": "srv2-fm-14"
+   },
+   "_real": true,
+   "_localAudio": "photograph"
+  },
+  {
+   "id": "pkg_1792604593962",
+   "engine": "SRV English",
+   "title": "Passenger Seat Witness",
+   "srvTaskUid": "srve_1792199330081_150",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 247.88,
+    "durationSec": 247.88
+   },
+   "srvProduction": {
+    "youtubeVideoId": "s34SXDqU0jk"
+   },
+   "_srvLongVideoUrl": "https://tldcwvtwjypmwynsklsd.supabase.co/storage/v1/object/public/srv-assets/pkg_1792604593962/long_1792605612925_srv2_long.mp4",
+   "srvAvatar": {
+    "id": "srv2-fm-16"
+   },
+   "_real": true,
+   "_localAudio": "passenger"
+  },
+  {
+   "id": "pkg_test_mix_1",
+   "engine": "SRV English",
+   "title": "TEST stand-in song A",
+   "srvTaskUid": "srve_0_test1",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 246.0,
+    "durationSec": 246.0
+   },
+   "srvProduction": {
+    "youtubeVideoId": "TESTsong001"
+   },
+   "_srvLongVideoUrl": "test://synthetic",
+   "srvAvatar": {
+    "id": "srv2-fm-11"
+   },
+   "_test": true
+  },
+  {
+   "id": "pkg_test_mix_2",
+   "engine": "SRV English",
+   "title": "TEST stand-in song B",
+   "srvTaskUid": "srve_0_test2",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 229.5,
+    "durationSec": 229.5
+   },
+   "srvProduction": {
+    "youtubeVideoId": "TESTsong002"
+   },
+   "_srvLongVideoUrl": "test://synthetic",
+   "srvAvatar": {
+    "id": "srv2-fm-11"
+   },
+   "_test": true
+  },
+  {
+   "id": "pkg_test_mix_3",
+   "engine": "SRV English",
+   "title": "TEST stand-in song C",
+   "srvTaskUid": "srve_0_test3",
+   "contentFormat": "long",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 251.2,
+    "durationSec": 251.2
+   },
+   "srvProduction": {
+    "youtubeVideoId": "TESTsong003"
+   },
+   "_srvLongVideoUrl": "test://synthetic",
+   "srvAvatar": {
+    "id": "srv2-fm-11"
+   },
+   "_test": true
+  },
+  {
+   "id": "pkg_1792875882770",
+   "engine": "SRV English",
+   "title": "Passenger Seat Witness",
+   "srvShortOf": {
+    "longPkgId": "pkg_1792604593962"
+   },
+   "srvRender": {
+    "width": 1080,
+    "height": 1920,
+    "durationSec": 30
+   },
+   "srvProduction": {
+    "youtubeVideoId": "7LGUuXX1YnI"
+   },
+   "_srvShortVideoUrl": "x",
+   "_real": true
+  },
+  {
+   "id": "pkg_farsi_example",
+   "engine": "SRV Farsi",
+   "title": "(SRV Farsi song — other business)",
+   "srvRender": {
+    "width": 1920,
+    "height": 1080,
+    "audioDurationSec": 240
+   },
+   "srvProduction": {
+    "youtubeVideoId": "FARSIexampl"
+   },
+   "_srvLongVideoUrl": "x"
+  }
+ ]
+}
