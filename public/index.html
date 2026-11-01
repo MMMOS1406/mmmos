@@ -31244,7 +31244,7 @@ async function _engArtifactsLoad(){
     const ts=d.tasks||[];
     el.innerHTML=ts.length?ts.map(t=>`<div data-eng-artifact-task="${_engAttr(t.task_id)}" style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
         <div style="flex:1;min-width:0"><div style="font-size:11px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHTML(t.title||'—')}</div>
-        <div style="font-size:9px;color:var(--dim)">${escHTML(String(t.task_id).slice(0,8))} · ${escHTML(t.business||'—')} · ${escHTML(String(t.files))} file${t.files===1?'':'s'} · ${escHTML(_engFmtBytes(t.total_bytes))} · last ${escHTML(String(t.last_upload||'').slice(0,16).replace('T',' '))}</div></div>
+        <div style="font-size:9px;color:var(--dim)">${escHTML(String(t.task_id).slice(0,8))} · ${escHTML(_engBusinessLabel(t.business||'—'))} · ${escHTML(String(t.files))} file${t.files===1?'':'s'} · ${escHTML(_engFmtBytes(t.total_bytes))} · last ${escHTML(String(t.last_upload||'').slice(0,16).replace('T',' '))}</div></div>
         <button data-id="${_engAttr(t.task_id)}" onclick="_engArtifactsOpen(this.dataset.id)" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(201,168,76,0.4);background:transparent;color:#c9a84c;font-size:9px;font-weight:700;cursor:pointer">OPEN</button></div>`).join('')
       :'<div style="font-size:11px;color:var(--dim)">No stored artifacts yet.</div>';
   }catch(e){el.innerHTML=`<div style="font-size:11px;color:#ef4444">${escHTML(e.message)}</div>`;}
@@ -31319,6 +31319,8 @@ async function _engRevokeAuthorizations(ids){
   alert(`Revoked ${done.length} of ${ids.length}.`+(failed.length?`\n\nNot revoked:\n${failed.join('\n')}`:''));
   _ebV2Cache['b2_engreview']=null; if(typeof _ebV2Load==='function')_ebV2Load('b2_engreview');
 }
+// 046 — readable business names in Engineering screens; the pilot is never shown as plain "NextWave".
+function _engBusinessLabel(k){return ({nextwave_finance_pilot:'NextWave Finance Pilot',nextwave:'NextWave V2 (nextwave)',mmmos:'MMMOS',srv_farsi:'SRV Farsi',srv_english:'SRV English',srv_studio:'SRV Studio',ai_creation_studio:'AI Creation Studio',smm:'SMM',finance:'Finance',unassigned:'unassigned'})[k]||String(k||'—');}
 function _engAuthDetails(t){
   const p=(t&&t.packet)||{};
   const boundary=p.origin_decision&&p.origin_decision.authorization_boundary;
@@ -31326,7 +31328,7 @@ function _engAuthDetails(t){
   const adviser=p.derived_from==='ceo_adviser_submission';
   return `<div data-eng-auth-details style="background:rgba(0,0,0,0.2);border-radius:8px;padding:8px 10px;margin-bottom:8px;display:flex;flex-direction:column;gap:4px">
             ${adviser?`<div><span style="font-size:9px;padding:2px 8px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.4);border-radius:4px;color:#c9a84c;font-weight:700;font-family:'JetBrains Mono',monospace">SUBMITTED BY CEO ADVISER</span></div>`:''}
-            <div style="font-size:11px;color:#8b9cc4"><b style="${label}">BUSINESS  </b>${escHTML(p.business||'—')}</div>
+            <div style="font-size:11px;color:#8b9cc4"><b style="${label}">BUSINESS  </b>${escHTML(_engBusinessLabel(p.business||'—'))}</div>
             <div style="font-size:11px;color:#8b9cc4;white-space:pre-wrap;word-break:break-word"><b style="${label}">AUTHORIZATION BOUNDARY  </b>${boundary?escHTML(boundary):'— none recorded (MMMOS will refuse to authorize this task)'}</div>
           </div>`;
 }
