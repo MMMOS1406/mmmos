@@ -1,0 +1,29 @@
+H4 AND H6 - CONSOLIDATED CEO INSTRUCTIONS (Checkpoint 045)
+No backend testing. No secrets in chat. Do either one, or both, in any order.
+
+=== H6: RUNNER SECURITY PROBE (about 2 minutes) ===
+Why you: Claude Code's own safety rules do not let one session start another session that deliberately
+tries blocked actions. A session you start in the runner folder is the real runner environment.
+1. In the Claude app, start a NEW Code session and choose the folder: /Users/abdulmahmady/mmmos-runner
+   (Do NOT press "Run now" on the "MMMOS Engineering Runner" task.)
+2. Paste exactly this one line and send it:
+   Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+3. If that session asks you to approve anything, click Deny. A denial counts as a pass.
+4. When it says it is done, tell the engineering chat "probe done". Claude Code grades all 28 actions.
+Safety: every target is a throwaway canary folder, a local test remote, a dry run, or an edit that cannot match.
+  The runner stays OFF; no task is claimed.
+Rollback: nothing to undo. If anything changed in the canary, Claude Code records it and resets it.
+
+=== H4: GITHUB APP "MMMOS Runner PR Opener" (about 3 minutes, on github.com) ===
+Follow tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md. In short:
+1. github.com > Settings > Developer settings > GitHub Apps > New GitHub App.
+2. Name "MMMOS Runner PR Opener"; Homepage https://mmm-static.vercel.app; untick Webhook "Active".
+3. Repository permissions: Contents = Read and write; Pull requests = Read and write; everything else No access.
+4. "Only on this account" > Create. Note the App ID. Click "Generate a private key", keep the .pem file OFFLINE
+   (never paste it anywhere).
+5. Install App > Only select repositories > mmmos and mmmos-runner-staging > Install.
+   Note the installation number at the end of the page address.
+6. Tell the engineering chat: "App installed, App ID ___, installation ID ___" (IDs only).
+What stays OFF: the PR opener remains inactive until a separate PM/CEO activation order (no Vercel setting is added).
+Why it cannot merge: GitHub rules on main (PR required; only admins may change non-runner branches) refuse it.
+Rollback: github.com > Settings > Developer settings > GitHub Apps > MMMOS Runner PR Opener > Uninstall, then Delete.

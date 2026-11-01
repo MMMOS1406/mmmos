@@ -1,0 +1,5 @@
+Supabase logs, 2026-11-01 (UTC), engineering-artifacts bucket, task ec27ddf6 folder:
+22:53:50.686  edge_logs     POST 200  /storage/v1/object/sign/engineering-artifacts/unassigned/ec27ddf6-.../56b7b01f.../1793559335846-R2_POST_RELEASE_027_FINDINGS.txt  (link minted by engineering_artifact_download_link)
+22:53:51.190  edge_logs     GET  200  same object via the signed link (browser download)
+22:53:51.572  storage_logs  GET  200  same object
+CEO screenshot (relayed by the PM in Order 045): Engineering Review > Stored artifacts, file R2_POST_RELEASE_027_FINDINGS.txt, button shows "SHA OK".

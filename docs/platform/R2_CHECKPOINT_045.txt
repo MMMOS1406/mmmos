@@ -1,0 +1,108 @@
+START CHECKPOINT 045
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-11-01
+EXECUTION ORDER: ORDER 045 (ChatGPT PM; close H5, prepare the remaining items)
+
+EXECUTIVE SUMMARY:
+- H5 is COMPLETE and CEO ACCEPTED (2026-11-01).
+  - The CEO downloaded R2_POST_RELEASE_027_FINDINGS.txt from the live MMMOS Engineering Review > Stored artifacts, and the page showed "SHA OK".
+  - Independently confirmed in the Supabase logs: the server minted a signed link at 22:53:50.686 UTC, and the browser downloaded that exact object (GET 200) at 22:53:51.190 UTC.
+- H1, H2, H3 and H7 are complete. H4 and H6 have verified prerequisites and one consolidated CEO instruction sheet. H8 is on hold.
+- NextWave Finance Pilot: isolation verified (nothing registered), and a preview-only registration and validation plan is written.
+- No production, database, secret, RLS, migration, GitHub-permission or business change.
+- Production is healthy (main 71546c3, dpl_6jmdF5CErnssMvYTbVEVNMyZFuhj, verifier 17/17). eng_runner and eng_adviser_connect are OFF.
+
+H5 CEO ACCEPTANCE CONFIRMATION:
+- File: R2_POST_RELEASE_027_FINDINGS.txt (archive task ec27ddf6-27ed-4f4d-888c-fd59aba1caf2).
+- Interface: live MMMOS > Engineering > Engineering Review > Stored artifacts.
+- Result shown: "SHA OK", meaning the browser recomputed the SHA-256 and it matched the server's recorded value.
+- Recorded SHA-256 of that file: 94975d768de8e07666671c01675834fcef65094cb47b40b01f39b2163629a391 (5,984 bytes).
+- Screenshot reference: the CEO acceptance screenshot relayed by the ChatGPT PM with Order 045 (2026-11-01). The screenshot itself is kept by the PM and is not stored in the public repository.
+- Server-side corroboration (Supabase logs, UTC 2026-11-01):
+  - 22:53:50.686 POST 200 object/sign for that file's path (link minted by engineering_artifact_download_link);
+  - 22:53:51.190 GET 200 of the same object via the signed link;
+  - 22:53:51.572 storage GET 200.
+- This closes the fresh-session byte-download and SHA-256 recovery requirement left open in 042-044.
+
+H1-H8 PROGRESS:
+- H1 Security release (31 actions): COMPLETE 2026-10-31 (verifier 17/17, rechecked 045)
+- H2 GitHub Actions off: COMPLETE 2026-10-31 (main and staging enabled=false)
+- H3 Staging repo + staging-only key: COMPLETE 2026-10-31 (mmmos-runner-staging, key 168324989)
+- H4 GitHub App: AWAITING CEO (prerequisites verified 045; opener inactive)
+- H5 Archive + CEO Artifacts view: COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 Runner probe: AWAITING CEO (prerequisites verified 045; runner OFF)
+- H7 Revocation of 12 grants: COMPLETE 2026-11-01 (12/12 revoked, history kept)
+- H8 ChatGPT Business: ON HOLD (no purchase; adviser switch OFF)
+- Related: Task Generator correction (PR #74) COMPLETE 2026-11-01. Business authentication remediation NOT STARTED (plans ready). Preview-secret stages NOT STARTED (plan ready).
+
+NEXTWAVE FINANCE PILOT READINESS: PLAN READY, NOT REGISTERED.
+- Verified isolation:
+  - no nextwave_finance_pilot business key, no Finance Pilot folders, no Finance Pilot task;
+  - NextWave V1 tasks completed, with no live grant;
+  - NextWave V2 task 2e17bd23 open, with no live grant;
+  - the "nextwave" runner key covers only the V2 code.
+- Finding: any task labelled "NextWave" resolves to business "nextwave" (beside V2), so the Finance Pilot needs its own key before its first task.
+- Constraint: previews use the production database, so "preview-only" validation uses the stand-in tests plus read-only checks in the protected preview. No task is ever created in a preview.
+- Plan: docs/platform/NEXTWAVE_FINANCE_PILOT_PREVIEW_PLAN_045.md (key, folders, labels, isolation tests, release and rollback). Nothing registered, activated, deployed or published.
+
+H4 AND H6 EXACT CEO INSTRUCTIONS (also in docs/platform/H4_H6_CEO_INSTRUCTIONS_045.txt):
+H6 - runner security probe (about 2 minutes):
+  1. In the Claude app, start a NEW Code session with folder /Users/abdulmahmady/mmmos-runner. (Do NOT press "Run now" on the runner task.)
+  2. Paste exactly:
+     Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+  3. Click Deny on anything it asks to approve.
+  4. Tell the engineering chat "probe done". Claude Code grades all 28 actions.
+  Verified prerequisites:
+  - runner sandbox enabled and strict (from settings);
+  - runner clone has no credential helper and pushes only to staging;
+  - probe list present; no old results;
+  - canary clean; test remote holds only main;
+  - runner task manual-only, prompt unchanged.
+  Rollback: none needed. Any canary change is recorded and reset by Claude Code.
+H4 - GitHub App "MMMOS Runner PR Opener" (about 3 minutes, github.com):
+  1. Settings > Developer settings > GitHub Apps > New GitHub App.
+  2. Name "MMMOS Runner PR Opener"; Homepage https://mmm-static.vercel.app; untick Webhook Active.
+  3. Permissions: Contents Read and write; Pull requests Read and write; everything else No access.
+  4. Only on this account > Create. Note the App ID. Generate a private key and keep the .pem OFFLINE.
+  5. Install App > Only select repositories > mmmos and mmmos-runner-staging.
+  6. Send the engineering chat the App ID and the installation ID only.
+  Verified prerequisites:
+  - ruleset 26252619 (main: no delete, no force push, PR required; no bypass) and 26286416 (only admins may change non-runner branches) are active;
+  - the canonical repo has 0 deploy keys;
+  - the staging repo is private, with Actions off and 1 staging-only key;
+  - no PR-opener setting exists, so the opener stays inactive.
+  Rollback: GitHub Apps > MMMOS Runner PR Opener > Uninstall, then Delete.
+
+REMAINING SECURITY RISKS:
+- 50 business-engine write actions have no login check (10 paid generation, 2 deletion, 2 approvals). Plans ready; needs PM orders.
+- Previews receive 16 production secrets, including the service key, the live Plaid secret and the YouTube client secret. Staged zero-cost plan ready; needs CEO approval.
+- The runner probe has not run (H6). The PR-opener App is not installed (H4).
+- Connector tools eb_create_task / eb_update_task / eb_load_task have been refused since B10 (safe, but broken).
+- Public GitHub copies of the reports are versioned, not private (the private copy is in MMMOS).
+
+SECURITY AND ISOLATION THIS ORDER:
+- No production, secret, RLS, migration, GitHub-permission or business change.
+- Task 125 untouched. .pause-deploy present. CEO-015B separate (99a654a).
+- Switches OFF. GitHub Actions OFF. Verifier 17/17.
+
+GITHUB REPORT PATH AND COMMIT:
+- Branch mmmos-eng/r2-checkpoint-045 (based on 044 @ 883e6da). This file = the commit adding docs/platform/R2_CHECKPOINT_045.txt.
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - docs/platform/NEXTWAVE_FINANCE_PILOT_PREVIEW_PLAN_045.md
+  - docs/platform/H4_H6_CEO_INSTRUCTIONS_045.txt
+  - tools/engineering-runner/release/verify-2026-11-01-045.txt
+  - tools/engineering-runner/release/h5-ceo-download-evidence-2026-11-01.txt
+
+MMMOS ARCHIVE VERIFICATION:
+- This checkpoint and the tracker are stored on task ec27ddf6 through the existing worker artifact workflow, with server-verified SHA-256. The results are reported in the chat message, because a file cannot contain its own upload result.
+
+NEXT ACTION:
+- The CEO does H6 and H4 (instructions above) when convenient.
+- The PM orders the NextWave Finance Pilot registration PR, the business authentication remediation, and the preview-secret stages.
+- Claude Code then grades the probe, verifies the App (opener still inactive), and delivers Checkpoint 046.
+
+ACTION OWNER: CEO (H6, H4) -> Claude Code (grading, verification, Checkpoint 046); ChatGPT PM (orders)
+
+END CHECKPOINT 045
