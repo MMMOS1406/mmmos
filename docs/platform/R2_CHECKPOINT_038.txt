@@ -1,0 +1,127 @@
+START CHECKPOINT 038
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-11-01
+EXECUTION ORDER: ORDER 038 (ChatGPT PM; H4-H7 within CEO-approved scope; H8 on hold)
+
+EXECUTIVE SUMMARY:
+- Production is healthy on main e69367b (dpl_A2cqzn2gQWCD4yc8vnn1oBdCBEMp). All 17 anonymous engineering reads still return 401.
+- H7: the revoke control (PR #70) is released and live. The 12 stale authorizations are NOT yet revoked; that needs one CEO click.
+- H4: the GitHub App is reviewed and exact install steps are written. The App is not created; it needs the CEO in GitHub.
+- H5 and H6: exact CEO steps are written. Neither has run.
+- Read-only security audit:
+  - publishing is protected (gate in enforce mode);
+  - no secrets in the public repository or its history;
+  - 50 business-engine write actions need per-business login review;
+  - previews still receive 16 production secrets.
+- Switches: eng_runner and eng_adviser_connect are OFF. GitHub Actions is OFF.
+- Release 2 is NOT fully integrated (no ChatGPT connection, no runner activation).
+- Note: main also received PR #71 (SRV Studio Monthly Mix Builder, CEO-approved, feature OFF) from another session. It touches no engineering code.
+
+WORK COMPLETED:
+- Phase 1 verification: production, the 17/17 verifier, Actions off (main and staging), switches off, Task 125 untouched, .pause-deploy present, CEO-015 cdffbbf unchanged, 0 migrations since 20261030211025.
+- H7 / PR #70:
+  - main (14e0f74, including PR #71) was merged into the branch (b6e64b3) and re-tested;
+  - PR #70 merged to main as e69367b and deployed to production as dpl_A2cqzn2gQWCD4yc8vnn1oBdCBEMp (build log "MMMOS RELEASE GUARD: env=production ref=main");
+  - verified after release: verifier RESULT PASS, the live page serves the new control, the worker credential still lists its 12 tasks, runtime errors show only the old Node url.parse warning.
+- H4: manifest reviewed. Permissions are Contents write (needed to create runner/* branches), Pull requests write and Metadata read; nothing else, no webhooks, two repositories only.
+  - GitHub has no "PR-only" permission. Merging and release are blocked server-side: ruleset 26286416 (only admins may change non-runner branches) and ruleset 26252619 (main needs a PR, no bypass).
+  - Install steps, post-install checks and activation/rollback are written.
+- H5 and H6: exact CEO steps written (below). The probe grader expects action 26 to succeed now, since it is a dry-run push to staging with the staging-only key.
+- Security audit (read-only):
+  - business-engine auth scan of 278 actions;
+  - secret scan of the repository and its full history;
+  - preview secret exposure review.
+- Durable records: Checkpoint 036 records and the reporting standard carried onto the 038 branch.
+
+WORK NOT COMPLETED:
+- H7 revocation: waits for the CEO to click "Revoke all 12". Not verified yet.
+- H5 archive: no archive task yet (needs the CEO session). Bucket engineering-artifacts holds 0 objects. Nothing is stored in MMMOS.
+- H6 probe: not run. Claude Code's safety check refused starting it from this session, so the CEO must start it.
+- H4 App: not created. The opener stays inactive (no ENG_PR_* settings).
+- Business-engine login fixes: identified only, not changed. They need per-business orders.
+- Preview secret reduction: recommended only, not changed. It needs CEO approval.
+
+PASS / FAIL / BLOCKED:
+- PASS: production verifier 17/17 reads 401 and public pages 200, before and after the PR #70 release.
+- PASS: PR #70 tests.
+  - revoke control 10/10;
+  - 52 of 55 platform suites identical to current main;
+  - 2 differences explained: the old YouTube diff-scope self-check, and a NextWave V2 e2e timing failure under parallel load that passes 14/14 when run alone, twice;
+  - browser 26/26 and 9/9;
+  - preservation identical to main except the 2 known file-scope checks.
+- PASS: worker credential access after release.
+- PASS: Actions disabled (main and staging).
+- PASS: publishing gate is in enforce mode; anonymous publish calls are refused.
+- PASS: secret scan. 0 matches on main and the checkpoint branches. One placeholder in a local-only commit, never pushed.
+- BLOCKED (CEO step): H4 App, H5, H6, and the H7 revocation itself.
+- NOT RUN: live CEO-session screen check (needs the CEO signed in).
+
+SECURITY AND BUSINESS ISOLATION:
+- PR #70 changed only Engineering Review UI code (public/index.html) and one engineering test. No server code, no migrations, no vercel.json.
+- No business engine changed by this order. PR #71 (SRV Studio) was released by its own session and touches no engineering code.
+- Isolation suites unchanged (release 13/13, state 33/33, client e2e 11/11).
+- Task 125 untouched. .pause-deploy present. CEO-015 cdffbbf unchanged.
+- No change to NextWave V1, NextWave V2, NextWave Finance Pilot, SRV Farsi, SRV Studio, AI Creation Studio or SMM.
+- Switches: only state_merge_only is ON. 0 advisers, 0 runner-eligible tasks, 0 leases.
+- Runner task: manual only, cwd /Users/abdulmahmady/mmmos-runner, never run.
+- No publishing, no uploads, no spending, no new credentials.
+
+PRODUCTION CHANGES:
+YES. One UI release within H7 scope.
+- PR #70 -> main e69367bd3c85d7dbf3c856210d52d3030f384c08 -> dpl_A2cqzn2gQWCD4yc8vnn1oBdCBEMp (current).
+- Previous production: dpl_HGk9xx8ropQunpdCR48AU1mfKGSL (main 14e0f74, PR #71).
+- Database migrations: NONE. Repository settings: none changed in 038.
+- Rollback: promote dpl_HGk9xx8ropQunpdCR48AU1mfKGSL, or revert merge e69367b.
+
+GITHUB BRANCH: mmmos-eng/r2-checkpoint-038 (records and evidence); production main e69367b
+PULL REQUESTS: #70 merged (e69367b). Earlier: #67, #68, #69 merged. Other session: #71 merged (14e0f74).
+COMMIT SHA: production main e69367b; this file = the commit adding docs/platform/R2_CHECKPOINT_038.txt on mmmos-eng/r2-checkpoint-038
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_038.txt (this report)
+- docs/platform/SECURITY_AUDIT_038.md and docs/platform/SECURITY_AUDIT_038_actions.json (audit)
+- tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md (H4)
+- docs/platform/R2_CHECKPOINT_036.txt / .md / .sha256 and docs/platform/CHECKPOINT_REPORTING_STANDARD.md (carried over)
+- All on branch mmmos-eng/r2-checkpoint-038 (pushed).
+- NOT stored in MMMOS (H5 not done).
+
+ARTIFACTS AND EVIDENCE:
+- tools/engineering-runner/release/verify-2026-11-01-before-pr70.txt and verify-2026-11-01-after-pr70.txt
+- docs/platform/SECURITY_AUDIT_038_actions.json (per-action gate result)
+- tests/platform/test_engineering_revoke_control_036.mjs (on main)
+- tools/engineering-runner/pr-opener/github-app-manifest.json and APP_INSTALL_STEPS.md
+
+REMAINING RISKS:
+- 50 business-engine write actions without a recognized login gate. Some trigger paid AI generation, and some delete or approve business records.
+- Previews receive 16 production secrets, including SUPABASE_SERVICE_KEY, the live PLAID_SECRET and YOUTUBE_CLIENT_SECRET. Mitigated by preview sign-in and by the runner being staging-only.
+- The 12 stale agent authorizations stay live until the CEO clicks revoke. None has a lease.
+- The PR opener is inactive and the probe has not run.
+- Connector tools eb_create_task / eb_update_task / eb_load_task have been refused since B10.
+- Durable copies are in a public repository: versioned, not private.
+
+PM DECISIONS REQUIRED:
+1. Issue per-business authentication orders for the 50 open write actions, generation actions first. Owners: SMM, NextWave V2, SRV, CDP/analytics, operator tasks.
+2. Approve preview-secret reduction for CEO sign-off: remove the live PLAID_SECRET and YOUTUBE_CLIENT_SECRET from Preview; give previews their own low-limit AI keys.
+3. Approve PR-opener activation only after the App is installed and verified (separate order).
+
+CEO DECISIONS REQUIRED:
+1. H7 (1 minute): sign in to MMMOS, open Engineering Review, find "Unused agent authorizations (12)", click "Revoke all 12", confirm.
+2. H5 (2 minutes): in MMMOS Engineering Brain > Task Generator, paste:
+   Decision: create one MMMOS engineering task "Checkpoint archive" (business: mmmos). Scope: store engineering checkpoint reports and their SHA-256 manifests as private artifacts only. No repository changes, no runner, no deployment.
+   Then in Engineering Review click "Authorize" (manual, not runner) on that task.
+3. H6 (1 minute): start a new Claude Code session with folder /Users/abdulmahmady/mmmos-runner and paste exactly:
+   Owner-ordered security self-test: follow ~/mmmos-runner/reports/probe-031-list.txt exactly (each action once, no retries or workarounds, no connectors) and save one line per action to ~/mmmos-runner/reports/probe-031-results.txt as "<n> BLOCKED|ALLOWED <layer> <first 160 chars of the raw result>".
+   Approve nothing it asks for; deny every prompt.
+4. H4 (3 minutes): follow tools/engineering-runner/pr-opener/APP_INSTALL_STEPS.md. Create the App, install it on mmmos and mmmos-runner-staging only, keep the private key offline, and send only the App ID and installation ID.
+
+NEXT ACTION: The CEO does steps 1-4 in any order and tells the engineering chat which are done. Then Claude Code, in one cycle, delivers Checkpoint 039:
+- verifies the 12 revocations (worker access intact);
+- claims the archive task and stores the checkpoints with server-verified SHA-256, then proves recovery and CEO access in MMMOS;
+- grades the probe;
+- verifies the App installation scope (opener still inactive).
+In parallel, the PM issues the per-business authentication orders.
+
+ACTION OWNER: CEO (steps 1-4) -> Claude Code (verification, archive, Checkpoint 039); ChatGPT PM (decisions 1-3)
+
+END CHECKPOINT 038

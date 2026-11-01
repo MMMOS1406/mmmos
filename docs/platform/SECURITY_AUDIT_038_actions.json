@@ -1,0 +1,1966 @@
+[
+ {
+  "action": "list_tasks",
+  "fn": "listTasks",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "create_task",
+  "fn": "createTask",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "update_task",
+  "fn": "updateTask",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "log_activity",
+  "fn": "logActivity",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "business_brain_list",
+  "fn": "businessBrainList",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "business_brain_create",
+  "fn": "businessBrainCreate",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "business_brain_materialize",
+  "fn": "businessBrainMaterialize",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "business_operations_get",
+  "fn": "businessOperationsGet",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "business_operations_register",
+  "fn": "businessOperationsRegister",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "business_operations_update_status",
+  "fn": "businessOperationsUpdateStatus",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "business_operations_update_service_plan",
+  "fn": "businessOperationsUpdateServicePlan",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "business_operations_update_schedule_prefs",
+  "fn": "businessOperationsUpdateSchedulePrefs",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "business_operations_curate_asset",
+  "fn": "businessOperationsCurateAsset",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "content_planning_list",
+  "fn": "contentPlanningList",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "content_planning_generate_demo",
+  "fn": "contentPlanningGenerateDemo",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "content_planning_review",
+  "fn": "contentPlanningReview",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "va_task_queue_generate",
+  "fn": "vaTaskQueueGenerate",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "va_task_list",
+  "fn": "vaTaskList",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "va_task_get",
+  "fn": "vaTaskGet",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_va_task_generate_package",
+  "fn": "smVaTaskGeneratePackage",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "production_package_review",
+  "fn": "productionPackageReview",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "ceo_review_queue_list",
+  "fn": "ceoReviewQueueList",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_narration_synthesize",
+  "fn": "nextwaveNarrationSynthesize",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_prepare_master_narration",
+  "fn": "nextwaveV2PrepareMasterNarration",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_slice_narration",
+  "fn": "nextwaveV2SliceNarration",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_plan_visuals",
+  "fn": "nextwaveV2PlanVisuals",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_debug_storyboard",
+  "fn": "nextwaveV2DebugStoryboard",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_generate_scene_package",
+  "fn": "nextwaveV2GenerateScenePackageAction",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_generate_visual_plan",
+  "fn": "nextwaveV2GenerateVisualPlanPackageAction",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_list_elevenlabs_voices",
+  "fn": "nextwaveListElevenLabsVoices",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_get_voice",
+  "fn": "nextwaveV2GetVoice",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_set_voice",
+  "fn": "nextwaveV2SetVoice",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_ideogram_status",
+  "fn": "nextwaveV2IdeogramStatus",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_set_ideogram_key",
+  "fn": "nextwaveV2SetIdeogramKey",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_ideogram_generate_pose",
+  "fn": "nextwaveV2IdeogramGeneratePose",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_ideogram_generate_object",
+  "fn": "nextwaveV2IdeogramGenerateObject",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_ideogram_generate_character_reference",
+  "fn": "nextwaveV2IdeogramGenerateCharacterReferenceAction",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_ideogram_generate_character_pose",
+  "fn": "nextwaveV2IdeogramGenerateCharacterPoseAction",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_ideogram_clear_uncertain_reservation",
+  "fn": "nextwaveV2IdeogramClearUncertainReservation",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_build_render",
+  "fn": "nextwaveV2BuildRender",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_composite_canvas",
+  "fn": "nextwaveV2CompositeCanvasRender",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_composition_proof",
+  "fn": "nextwaveV2CompositionProofRender",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_composite_fullframe",
+  "fn": "nextwaveV2CompositeFullFrameRender",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_composite_white_motion",
+  "fn": "nextwaveV2CompositeWhiteMotionRender",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_generate_thumbnail",
+  "fn": "nextwaveV2GenerateThumbnail",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_classify_long_beats",
+  "fn": "nextwaveV2ClassifyLongBeats",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_storyboard_brain",
+  "fn": "nextwaveV2StoryboardBrainAction",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_storyboard_brain_semantic",
+  "fn": "nextwaveV2StoryboardBrainSemanticAction",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_config",
+  "fn": "nextwaveV2RouteConfig",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_runtime_probe",
+  "fn": "nextwaveV2RouteRuntimeProbe",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_set_enabled",
+  "fn": "nextwaveV2RouteSetEnabled",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_status",
+  "fn": "nextwaveV2RouteStatus",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_debug_state",
+  "fn": "nextwaveV2RouteDebugState",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_contain",
+  "fn": "nextwaveV2RouteContain",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_narration_probe",
+  "fn": "nextwaveV2NarrationProbe",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_list_builds",
+  "fn": "nextwaveV2RouteListBuilds",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_start",
+  "fn": "nextwaveV2RouteStart",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_chunk",
+  "fn": "nextwaveV2RouteChunk",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_finish",
+  "fn": "nextwaveV2RouteFinish",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_route_regenerate_hook_illustration",
+  "fn": "nextwaveV2RouteRegenerateHookIllustration",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_composite_long_segment",
+  "fn": "nextwaveV2CompositeLongSegmentRender",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_concat_long",
+  "fn": "nextwaveV2ConcatLongRender",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "nextwave_v2_generate_long_thumbnail",
+  "fn": "nextwaveV2GenerateLongThumbnail",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_video_production_generate",
+  "fn": "smVideoProductionGenerate",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_video_production_poll",
+  "fn": "smVideoProductionPoll",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_video_production_list",
+  "fn": "smVideoProductionList",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_video_production_reject",
+  "fn": "smVideoProductionReject",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_content_asset_create",
+  "fn": "smContentAssetCreate",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_content_asset_list",
+  "fn": "smContentAssetList",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_content_asset_review",
+  "fn": "smContentAssetReview",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_content_asset_upload_direct",
+  "fn": "smContentAssetUploadDirect",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_content_asset_upload_url",
+  "fn": "smContentAssetUploadUrlCreate",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_content_asset_register",
+  "fn": "smContentAssetRegisterUploaded",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_asset_gap_report",
+  "fn": "smAssetGapReport",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_music_library_ingest_external",
+  "fn": "smMusicLibraryIngestExternalHandler",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "sm_va_task_mark_published",
+  "fn": "smVaTaskMarkPublished",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "list_pipeline",
+  "fn": "listPipeline",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "create_pipeline_item",
+  "fn": "createPipelineItem",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "update_pipeline_stage",
+  "fn": "updatePipelineStage",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "list_approvals",
+  "fn": "listApprovals",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "request_approval",
+  "fn": "requestApproval",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "approve",
+  "fn": "approveItem",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "reject",
+  "fn": "rejectItem",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "request_revision",
+  "fn": "requestRevision",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "list_assets",
+  "fn": "listAssets",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": true
+ },
+ {
+  "action": "create_asset",
+  "fn": "createAsset",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "update_asset",
+  "fn": "updateAsset",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "delete_asset",
+  "fn": "deleteAsset",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "get_task_detail",
+  "fn": "getTaskDetail",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "update_task_execution",
+  "fn": "updateTaskExecution",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "operator_recommendations",
+  "fn": "operatorRecommendations",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "get_suno_execution",
+  "fn": "getSunoExecution",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "save_suno_execution",
+  "fn": "saveSunoExecution",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "get_heygen_execution",
+  "fn": "getHeygenExecution",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "save_heygen_execution",
+  "fn": "saveHeygenExecution",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "get_task_assets",
+  "fn": "getTaskAssets",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": true
+ },
+ {
+  "action": "save_task_asset",
+  "fn": "saveTaskAsset",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "get_reliability_metrics",
+  "fn": "getReliabilityMetrics",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "get_task_approvals",
+  "fn": "getTaskApprovals",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "get_upload_queue",
+  "fn": "getUploadQueue",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": true
+ },
+ {
+  "action": "add_to_upload_queue",
+  "fn": "addToUploadQueue",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "update_upload_status",
+  "fn": "updateUploadStatus",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "get_generation_memory",
+  "fn": "getGenerationMemory",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "save_performance",
+  "fn": "savePerformance",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "get_performance",
+  "fn": "getPerformance",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "get_engine_learning",
+  "fn": "getEngineLearning",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "save_memory_item",
+  "fn": "saveMemoryItemFn",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "delete_memory_item",
+  "fn": "deleteMemoryItemFn",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "seed_memory",
+  "fn": "seedMemory",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "clean_memory",
+  "fn": "cleanMemory",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "create_notification_table",
+  "fn": "createNotificationTable",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "get_notifications",
+  "fn": "getNotifications",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "mark_notification_read",
+  "fn": "markNotificationRead",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "mark_all_read",
+  "fn": "markAllRead",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "create_notification",
+  "fn": "createNotification",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "sync_marketing_work_items",
+  "fn": "syncMarketingWorkItems",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "department_metrics",
+  "fn": "departmentMetrics",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "generate_package",
+  "fn": "generatePackage",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "farsi_regen_caption",
+  "fn": "farsiRegenCaption",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "srv_english_regen_caption",
+  "fn": "srvEnglishRegenCaption",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "srv_studio_v2_pilot_upload",
+  "fn": "srvStudioV2PilotUpload",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "srv_farsi_playlists",
+  "fn": "srvFarsiPlaylists",
+  "gated": true,
+  "write_like": false,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "srv_studio_v2_mix",
+  "fn": "srvStudioV2Mix",
+  "gated": true,
+  "write_like": false,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "srv_studio_v2_playlist_sync",
+  "fn": "srvStudioV2PlaylistSync",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "srv_studio_v2_va_upload",
+  "fn": "srvStudioV2VaUpload",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "srv_studio_v2_production_upload",
+  "fn": "srvStudioV2ProductionUpload",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "srv_studio_v2_retitle_job",
+  "fn": "srvStudioV2RetitleJob",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "youtube_sync_performance",
+  "fn": "youtubeSyncPerformance",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "log_performance_manual",
+  "fn": "logPerformanceManual",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "get_performance_summary",
+  "fn": "getPerformanceSummary",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "plaid_link",
+  "fn": "plaidLink",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "plaid_exchange",
+  "fn": "plaidExchange",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "plaid_pull",
+  "fn": "plaidPull",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "plaid_remove_item",
+  "fn": "plaidRemoveItem",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "srv_build_package",
+  "fn": "srvBuildPackage",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "ambient_music",
+  "fn": "ambientMusicWAV",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "heygen_test",
+  "fn": "heygenTest",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_list_avatars",
+  "fn": "heygenListAvatars",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_list_voices",
+  "fn": "heygenListVoices",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_list_videos",
+  "fn": "heygenListVideos",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_start_render",
+  "fn": "heygenStartRender",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_render_status",
+  "fn": "heygenRenderStatus",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_group_looks",
+  "fn": "heygenGroupLooks",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_list_avatar_groups",
+  "fn": "heygenListAvatarGroups",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "heygen_video_proxy",
+  "fn": "heygenVideoProxy",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_test",
+  "fn": "submagicTest",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_create_project",
+  "fn": "submagicCreateProject",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_get_project",
+  "fn": "submagicGetProject",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_list_templates",
+  "fn": "submagicListTemplates",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_create_media",
+  "fn": "submagicCreateMedia",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_list_media",
+  "fn": "submagicListMedia",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_update_project",
+  "fn": "submagicUpdateProject",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_export_project",
+  "fn": "submagicExportProject",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_upload_media_from_url",
+  "fn": "submagicUploadMediaFromUrl",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_probe_video",
+  "fn": "submagicProbeVideo",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "submagic_video_redirect",
+  "fn": "submagicVideoRedirect",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "youtube_upload_video",
+  "fn": "youtubeUploadVideo",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "set_yt_thumbnail",
+  "fn": "setYtThumbnail",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "youtube_video_status",
+  "fn": "youtubeVideoStatus",
+  "gated": true,
+  "write_like": false,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "youtube_check_scope",
+  "fn": "youtubeCheckScope",
+  "gated": true,
+  "write_like": false,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "youtube_analytics_pull",
+  "fn": "youtubeAnalyticsPull",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "youtube_snapshot_now",
+  "fn": "youtubeSnapshotNow",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "analytics_foundation",
+  "fn": "analyticsFoundationReport",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "decision_engine",
+  "fn": "decisionEngine",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "revenue_dashboard",
+  "fn": "revenueDashboard",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "optimization_apply_recs",
+  "fn": "optimizationApplyRecommendations",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "optimization_toggle_auto",
+  "fn": "optimizationToggleAutoApply",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "optimization_state",
+  "fn": "optimizationGetState",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "strategy_recompute",
+  "fn": "strategyRecompute",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "strategy_state",
+  "fn": "strategyGetState",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "analytics_auto_run",
+  "fn": "analyticsAutoRun",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "analytics_sync_status",
+  "fn": "analyticsSyncStatus",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "srv_english_pexels_bg",
+  "fn": "srvEnglishPexelsBg",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "srv_english_build",
+  "fn": "srvEnglishBuild",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "srv_english_render_status",
+  "fn": "srvEnglishRenderStatus",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_brain_load",
+  "fn": "engineeringBrainLoad",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_brain_seed",
+  "fn": "engineeringBrainSeed",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_brain_save",
+  "fn": "engineeringBrainSave",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_create",
+  "fn": "engineeringTaskCreate",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_create_from_decision",
+  "fn": "engineeringTaskCreateFromDecision",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_list",
+  "fn": "engineeringTaskList",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_update",
+  "fn": "engineeringTaskUpdate",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_ceo_approve",
+  "fn": "engineeringTaskCeoApprove",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_ceo_reject",
+  "fn": "engineeringTaskCeoReject",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_home_list",
+  "fn": "engineeringTaskHomeList",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_review_packet",
+  "fn": "engineeringTaskReviewPacket",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "production_deployment_authorize",
+  "fn": "productionDeploymentAuthorize",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "production_deployment_reconcile",
+  "fn": "productionDeploymentReconcile",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "production_release_authorization_create",
+  "fn": "productionReleaseAuthorizationCreate",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_execute_production_release",
+  "fn": "engineeringWorkerExecuteProductionRelease",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_ceo_authorize_agent",
+  "fn": "engineeringTaskCeoAuthorizeAgent",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_ceo_revoke_agent_authorization",
+  "fn": "engineeringTaskCeoRevokeAgentAuthorization",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_task_agent_claim",
+  "fn": "engineeringTaskAgentClaim",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_provision",
+  "fn": "engineeringWorkerProvision",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_revoke",
+  "fn": "engineeringWorkerRevoke",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_list",
+  "fn": "engineeringWorkerList",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_list_authorized_tasks",
+  "fn": "engineeringWorkerListAuthorizedTasks",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_claim_task",
+  "fn": "engineeringWorkerClaimTask",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_submit_task",
+  "fn": "engineeringWorkerSubmitTask",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_pairing_request",
+  "fn": "engineeringWorkerPairingRequest",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_pairing_list_pending",
+  "fn": "engineeringWorkerPairingListPending",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_pairing_approve",
+  "fn": "engineeringWorkerPairingApprove",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_pairing_reject",
+  "fn": "engineeringWorkerPairingReject",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_pairing_complete",
+  "fn": "engineeringWorkerPairingComplete",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_agent_gateway",
+  "fn": "engineeringAgentGateway",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_adviser_provision",
+  "fn": "engineeringAdviserProvision",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_adviser_revoke",
+  "fn": "engineeringAdviserRevoke",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_adviser_list",
+  "fn": "engineeringAdviserList",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_adviser_submit_task",
+  "fn": "engineeringAdviserSubmitTask",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_adviser_get_results",
+  "fn": "engineeringAdviserGetResults",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_adviser_post_followup",
+  "fn": "engineeringAdviserPostFollowup",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_worker_read_tasks",
+  "fn": "engineeringWorkerReadTasks",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_agent_runs_list",
+  "fn": "engineeringAgentRunsList",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_oauth_protected_resource",
+  "fn": "engineeringOAuthProtectedResource",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_oauth_metadata",
+  "fn": "engineeringOAuthMetadata",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_oauth_register",
+  "fn": "engineeringOAuthRegister",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_oauth_authorize",
+  "fn": "engineeringOAuthAuthorize",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_oauth_token",
+  "fn": "engineeringOAuthToken",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_mcp",
+  "fn": "engineeringMcp",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "engineering_adviser_openapi",
+  "fn": "engineeringAdviserOpenApi",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "roadmap_load",
+  "fn": "roadmapLoad",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "roadmap_approve_phase",
+  "fn": "roadmapApprovePhase",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "roadmap_update_phase",
+  "fn": "roadmapUpdatePhase",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "health_check",
+  "fn": "healthCheck",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": true
+ },
+ {
+  "action": "brain_v2_get_knowledge",
+  "fn": "brainV2GetKnowledge",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_save_knowledge",
+  "fn": "brainV2SaveKnowledge",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_learning",
+  "fn": "brainV2GetLearning",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_save_learning",
+  "fn": "brainV2SaveLearning",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_health",
+  "fn": "brainV2GetHealth",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_save_health",
+  "fn": "brainV2SaveHealth",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_experiments",
+  "fn": "brainV2GetExperiments",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_save_experiment",
+  "fn": "brainV2SaveExperiment",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_decisions",
+  "fn": "brainV2GetDecisions",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_rank_task",
+  "fn": "brainV2RankTask",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_deployments",
+  "fn": "brainV2GetDeployments",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_save_deployment",
+  "fn": "brainV2SaveDeployment",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_agent_runs",
+  "fn": "brainV2GetAgentRuns",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_safety_gate",
+  "fn": "brainV2SafetyGate",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_metrics",
+  "fn": "brainV2GetMetrics",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_save_learning_from_task",
+  "fn": "brainV2SaveLearningFromTask",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_update_confidence",
+  "fn": "brainUpdateKnowledgeConfidence",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_record_deploy",
+  "fn": "brainV2RecordDeploy",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_overview",
+  "fn": "brainV2Overview",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_run_validation",
+  "fn": "brainV2RunValidation",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_validations",
+  "fn": "brainV2GetValidations",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_save_adr",
+  "fn": "brainV2SaveAdr",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_get_adrs",
+  "fn": "brainV2GetAdrs",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_autonomous_status",
+  "fn": "brainV2AutonomousStatus",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "brain_v2_recommend_next",
+  "fn": "brainV2RecommendNext",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "ceo_login",
+  "fn": "ceoLogin",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "ceo_check_session",
+  "fn": "ceoCheckSession",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "operator_login",
+  "fn": "operatorLogin",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "operator_check_session",
+  "fn": "operatorCheckSession",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "publish_auth_status",
+  "fn": "publishAuthStatus",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "publish_auth_set_operator_pin",
+  "fn": "publishAuthSetOperatorPin",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "publish_auth_set_mode",
+  "fn": "publishAuthSetMode",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_list",
+  "fn": "cdpList",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_create",
+  "fn": "cdpCreate",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_get",
+  "fn": "cdpGet",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_submit",
+  "fn": "cdpSubmit",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_approve",
+  "fn": "cdpApprove",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_reject",
+  "fn": "cdpReject",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_execute",
+  "fn": "cdpExecute",
+  "gated": true,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_record_learning",
+  "fn": "cdpRecordLearning",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_generate_recommendations",
+  "fn": "cdpGenerateRecommendations",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_rollback",
+  "fn": "cdpRollback",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "cdp_validate",
+  "fn": "cdpValidate",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "finance_snapshot_save",
+  "fn": "financeSnapshotSave",
+  "gated": true,
+  "write_like": true,
+  "readonly_name": false
+ },
+ {
+  "action": "finance_snapshot_list",
+  "fn": "financeSnapshotList",
+  "gated": false,
+  "write_like": false,
+  "readonly_name": false
+ },
+ {
+  "action": "platform_connections_list",
+  "fn": "platformConnectionsList",
+  "gated": true,
+  "write_like": true,
+  "gate": "in-handler",
+  "readonly_name": false
+ },
+ {
+  "action": "platform_connections_matrix",
+  "fn": "platformConnectionsMatrix",
+  "gated": true,
+  "write_like": true,
+  "gate": "in-handler",
+  "readonly_name": false
+ },
+ {
+  "action": "platform_connection_update_status",
+  "fn": "platformConnectionUpdateStatus",
+  "gated": true,
+  "write_like": true,
+  "gate": "in-handler",
+  "readonly_name": false
+ },
+ {
+  "action": "platform_connection_sync_health",
+  "fn": "platformConnectionSyncHealth",
+  "gated": true,
+  "write_like": true,
+  "gate": "in-handler",
+  "readonly_name": false
+ },
+ {
+  "action": "platform_connection_request_ceo_auth",
+  "fn": "platformConnectionRequestCeoAuth",
+  "gated": true,
+  "write_like": true,
+  "gate": "in-handler",
+  "readonly_name": false
+ },
+ {
+  "action": "platform_connection_verify",
+  "fn": "platformConnectionVerify",
+  "gated": true,
+  "write_like": true,
+  "gate": "in-handler",
+  "readonly_name": false
+ },
+ {
+  "action": "tiktok_publish_draft",
+  "fn": "tiktokPublishDraft",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "tiktok_check_publish_status",
+  "fn": "tiktokCheckPublishStatus",
+  "gated": true,
+  "write_like": true,
+  "gate": "publish_gate(enforce)",
+  "readonly_name": false
+ },
+ {
+  "action": "publishing_router_resolve",
+  "fn": "publishingRouterResolve",
+  "gated": false,
+  "write_like": true,
+  "readonly_name": false
+ }
+]
