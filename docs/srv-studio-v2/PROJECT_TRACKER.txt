@@ -1,6 +1,6 @@
 SRV STUDIO V2 — PROJECT TRACKER
 System of record: MMMOS (this file; evidence in ~/MMM/srv-studio-v2-discovery/)
-Last updated: 2026-11-01 (SRV-STUDIO-V2-041)
+Last updated: 2026-11-01 (post V2-042: Suno reply graded)
 
 RELEASED
 - 029 Long + promotional Short, avatar library. LIVE (main 000891a).
@@ -16,59 +16,64 @@ RELEASED
     - CEO activation authorization
     - a supervised private-upload acceptance test
 
-IN PREPARATION
-- 040 VA Suno workflow release (built under 037):
-  - exact approved-text copy, MP3 drop zone with checks
-  - branch srv-studio/v2-037-va-suno-steps, local, not pushed
-  - status: release preparation; awaiting the PM release order to push, open the PR,
-    merge and deploy
+- 042 VA Suno workflow (built under 037). LIVE / PM ACCEPTED.
+  - Exact approved-text copy, MP3 drop zone with type/size/duration checks, preview,
+    Build-stage status.
+  - PR #72, merge 5e8db56, deployment dpl_EuZWNcYsNg8FdH9jhLihbX3ZnQUt (READY 2026-11-01).
+  - Rollback: dpl_A2cqzn2gQWCD4yc8vnn1oBdCBEMp (main e69367b).
+  - The manual Suno workflow is the production method.
 
-SUNO AUTOMATION (035-041)
+SUNO AUTOMATION (035-041 + reply)
 - Account: Suno PRO, shared by SRV Studio and SRV Farsi.
 - Confirmed volume: SRV Farsi 8 + SRV Studio 4 = 12 of 20 downloads per month.
 - Shorts reuse Long audio.
-- Feasibility outcome (038): D, NOT YET VERIFIED (expected A: existing Pro, no extra charge).
+- Feasibility outcome (038): D, NOT YET VERIFIED. SUPERSEDED by Suno's reply:
+  MCP for the backend = C (not supported); Public API = B (separate access and terms, CEO-gated).
 - No connector connection, OAuth consent, generation or download has been made.
 
-OFFICIAL SUNO INQUIRY
-Status: SENT (to support@suno.com, by the CEO; recorded 2026-11-01 under V2-041)
-Reply: NOT YET RECEIVED
-Questions:
-- Q1 Private server integration: may MMMOS's own server (an MCP client using the connector's
-  OAuth sign-in) use the official connector, or is it limited to consumer AI assistants?
-- Q2 Exact lyrics and style; status: can exact custom lyrics and an exact style prompt be
-  submitted unchanged, and is there a generation-status tool?
-- Q3 MP3 retrieval: can the original MP3 of a generated song be retrieved through the connector?
-- Q4 Commercial downloads: do connector downloads count as permitted downloads for commercial
-  use, and how do they count toward Pro's 20 per month (per song or version; re-downloads)?
-- Q5 Shared account: may one Pro account serve two independent YouTube music channels owned
-  by the same account holder?
-- Q6 Costs and scopes: connector-specific charges, credits per generation, rate limits,
-  narrower OAuth scopes (e.g. without library write)?
-- Q7 Availability: is the connector available to this Pro account now, or is early-access
-  approval required?
+OFFICIAL SUNO INQUIRY (V2-041)
+Status: REPLIED. Suno Support answered all seven questions.
+Graded in SUNO_RESPONSE_GRADING.txt, from the PM's authoritative summary; the verbatim email
+is to be archived.
+Result:
+- MCP for the MMMOS backend: NOT SUPPORTED (assistant-only; no backend status or MP3
+  retrieval) -> outcome C.
+- Backend automation requires the Suno Public API: separately negotiated, not in Pro ->
+  outcome B (CEO-gated).
+- Pro commercial use VERIFIED.
+- One Pro account for both channels VERIFIED.
+- No MCP charge.
+- Pro limit of 20 downloads per month applies.
 
-CAPABILITY STATUS (unchanged until Suno replies or consented inspection)
-- Official connector live, documented, all plans ........ VERIFIED
-- Song generation via connector ........................... VERIFIED (official description)
-- Credit balance readable ................................. VERIFIED (official description)
-- MMMOS server as connector client ........................ NOT VERIFIED (Q1)
-- Exact custom lyrics input ............................... NOT VERIFIED (Q2)
-- Exact style prompt input ................................ NOT VERIFIED (Q2)
-- Generation status tool .................................. NOT VERIFIED (Q2)
-- Original MP3 retrieval .................................. NOT VERIFIED (Q3)
-- Connector downloads = permitted commercial downloads .... NOT VERIFIED (Q4)
-- Download counting (per song or version) ................. NOT VERIFIED (Q4)
-- Two channels on one Pro account ......................... NOT VERIFIED (Q5); terms do not prohibit it
-- Connector charges / credits per generation / scopes ..... NOT VERIFIED (Q6); no separate price published
-- Availability to this Pro account ........................ NOT VERIFIED (Q7)
-- Copies via share or CDN link / recording / ripping ...... NOT SUPPORTED (Suno terms)
+SUNO PUBLIC API APPLICATION
+Status: SUBMITTED, AWAITING SUNO RESPONSE.
+- Applicant: Abdul Ahmady.
+- Product: MMMOS, a private internal production system.
+- Use cases: SRV Farsi + SRV Studio.
+- Volume: about 10-30 finished songs per month.
+- Correction sent: MMMOS has no public website; any placeholder website value is to be
+  disregarded.
+- No pricing commitment approved. Any API pricing, recurring cost, contract or vendor
+  commitment is CEO-gated.
+
+CAPABILITY STATUS
+See SUNO_RESPONSE_GRADING.txt. Summary:
+- VERIFIED: connector live; Pro commercial use (no revenue share); Pro 20/month applies to
+  MCP songs; one account for both channels; no MCP charge; Public API exists (separate).
+- VERIFIED WITH LIMITATION: exact lyrics, exact style and generation through MCP (inside a
+  supported AI assistant only); MCP availability (beta; waitlist).
+- NOT SUPPORTED: MMMOS backend calling MCP; backend status polling and MP3 retrieval via MCP;
+  Public API included in Pro; copies via share or CDN link / recording / ripping.
+- STILL UNKNOWN: download counting (per song or version); credits per generation; rate
+  limits; extra-download price; narrower scopes; Public API capabilities, pricing, terms and
+  download rules; this account's MCP waitlist status.
 
 OPEN CEO DECISIONS
-- Inspection-only connector sign-in (account-wide permissions). Pending; recommended after
-  Suno's reply.
-- Later, only if verification passes: build the adapter (flag OFF) and one supervised test
-  generation and download.
+- None now.
+- When Suno answers the Public API application: pricing, contract and recurring cost
+  (CEO-gated), then any build authorization.
+- The MCP inspection-only sign-in is no longer recommended (MCP cannot serve the MMMOS
+  backend).
 
-REVIEW PROCEDURE FOR SUNO'S REPLY
-See SUNO_RESPONSE_REVIEW_CHECKLIST.txt.
+REVIEW PROCEDURE FOR SUNO REPLIES
+See SUNO_RESPONSE_REVIEW_CHECKLIST.txt (also used for the Public API reply).

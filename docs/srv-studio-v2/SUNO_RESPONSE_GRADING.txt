@@ -1,0 +1,99 @@
+SRV STUDIO V2 — SUNO RESPONSE GRADING (against SUNO_RESPONSE_REVIEW_CHECKLIST.txt)
+Date: 2026-11-01 (post V2-042)
+Source: the PM's authoritative summary of Suno Support's written reply to the seven-question
+inquiry (sent to support@suno.com).
+The verbatim Suno email was not reviewed by engineering. Checklist step 0 (authenticity:
+Suno domain, real answer rather than an automated acknowledgement) is therefore recorded as
+ATTESTED BY CEO/PM, not independently checked.
+Recommendation: archive the original email in ~/MMM/srv-studio-v2-discovery/.
+
+PER-QUESTION GRADING
+Q1 Private server integration ........... ANSWERED-NO (for MCP)
+   Suno: MCP is for supported AI assistants (Claude, ChatGPT, Claude Code, Gemini, Cursor).
+   It is not a server-to-server API. A private backend such as MMMOS cannot call it as its
+   backend interface. Backend orchestration requires Suno Public API access.
+Q2 Exact lyrics and style; status ....... CONDITIONAL
+   MCP supports complete custom lyrics and custom style prompts (like Custom mode), but only
+   inside a supported AI assistant. Backend status polling is not an MCP purpose; it points
+   to the Public API.
+Q3 MP3 retrieval ......................... ANSWERED-NO (for MCP)
+   Songs land in the Suno Library. Background MP3 retrieval is not an MCP purpose; it points
+   to the Public API.
+Q4 Commercial downloads .................. ANSWERED-YES (with the Pro limit)
+   Pro songs carry commercial-use rights and may be monetized on YouTube and elsewhere; Suno
+   takes no share. Pro download limits apply regardless of MCP (20 per month).
+   Per-song vs per-version counting and re-downloads: not answered.
+Q5 Shared Pro account .................... ANSWERED-YES
+   One Pro account may serve multiple owned channels and projects (SRV Studio and SRV Farsi).
+Q6 Costs and scopes ...................... PARTIAL
+   MCP has no separate charge and uses plan credits. The Public API is negotiated separately
+   and is not included in Pro.
+   Not answered: credits per generation, rate limits, extra-download price, narrower OAuth
+   scopes.
+Q7 Availability .......................... ANSWERED-YES (with limitation)
+   MCP is beta / early access; a waitlist is required. This account's waitlist status is
+   unknown.
+
+OUTCOME (checklist final grading)
+- MCP automation for MMMOS: OUTCOME C — NOT SUPPORTED. The Q1 and Q3 gates are refused for
+  backend use.
+- Public API route: OUTCOME B — POSSIBLE BUT REQUIRES SEPARATE ACCESS AND COMMERCIAL TERMS.
+  The application has been submitted; pricing, contract and recurring cost are CEO-gated.
+- Manual workflow (V2-042, LIVE): remains the production method.
+
+CAPABILITY STATUS (replaces the NOT VERIFIED list in PROJECT_TRACKER.txt)
+- Official MCP connector live and documented ................ VERIFIED
+- MMMOS backend calling MCP ................................... NOT SUPPORTED (Suno: assistants only)
+- Exact custom lyrics through MCP ............................. VERIFIED WITH LIMITATION (only inside a supported AI assistant)
+- Exact style prompt through MCP .............................. VERIFIED WITH LIMITATION (only inside a supported AI assistant)
+- Song generation through MCP ................................. VERIFIED WITH LIMITATION (assistant-driven; songs go to the Suno Library)
+- Backend generation-status polling via MCP ................... NOT SUPPORTED (Public API capability)
+- Background original-MP3 retrieval via MCP ................... NOT SUPPORTED (Public API capability)
+- Commercial use and monetization of Pro songs ................ VERIFIED (no Suno revenue share)
+- Pro download limit applies to MCP-generated songs ........... VERIFIED (20 per month)
+- Download counting (per song or version; re-downloads) ....... STILL UNKNOWN
+- One Pro account for SRV Studio + SRV Farsi .................. VERIFIED
+- Separate MCP charge ......................................... VERIFIED: NONE (uses plan credits)
+- Credits per generation ...................................... STILL UNKNOWN
+- Rate limits ................................................. STILL UNKNOWN
+- Extra-download price ........................................ STILL UNKNOWN
+- Narrower OAuth scopes ....................................... STILL UNKNOWN
+- MCP availability ............................................ VERIFIED WITH LIMITATION (beta; waitlist; this account's status unknown)
+- Public API exists for backend orchestration ................. VERIFIED (per Suno); access separately negotiated
+- Public API included in Pro .................................. NOT SUPPORTED (separate)
+- Public API capabilities (lyrics/style in, status, original-audio retrieval) ... STILL UNKNOWN (no documentation or terms received)
+- Public API pricing, terms, download rules ................... STILL UNKNOWN (CEO-gated when received)
+- Copies via share or CDN link / recording / stream ripping ... NOT SUPPORTED (Suno terms)
+
+WHAT MCP CAN AND CANNOT DO FOR MMMOS
+Can:
+- A human using a supported AI assistant (for example Claude) can have Suno generate a song
+  from exact lyrics and style. The song lands in the Suno Library.
+- That song has full Pro commercial rights. There is no extra charge.
+Cannot:
+- MMMOS cannot call MCP from its server.
+- MMMOS cannot poll generation status or fetch the MP3 automatically.
+- The VA would still download from Suno and drop the file into MMMOS.
+- So MCP saves at most the copy-paste step, and it adds an assistant-account dependency plus
+  a beta waitlist.
+Assessment: MCP is NOT recommended for SRV Studio production.
+
+WHAT THE PUBLIC API COULD REMOVE FROM VA WORK (if granted; capabilities unconfirmed)
+- Copy and paste of approved lyrics and style into Suno (MMMOS would send the exact approved
+  text).
+- Pressing Generate on suno.com and waiting or checking for completion.
+- Downloading the MP3 from Suno and dropping it into MMMOS (MMMOS would retrieve and attach
+  it to the task).
+- About 3-5 minutes per song, about 12 songs per month (Farsi 8 + Studio 4), so roughly
+  40-60 VA-minutes per month across both channels.
+Would remain human:
+- listening, choosing or rejecting a version
+- approval
+- the existing Build / Approve / Publish lifecycle
+Also unknown: whether API downloads count against the Pro 20 per month or have separate
+limits.
+
+ESCALATION
+No CEO escalation now. No pricing, recurring cost, contract or protected-system requirement
+has been received.
+Escalate on receipt of Public API pricing, terms or contract.
