@@ -1198,16 +1198,98 @@ async function _engArtifactStat(objectPath) {
     return null;
   }
 }
-async function _engArtifactSignedDownload(objectPath) {
+async function _engArtifactSignedDownload(objectPath, ttlSeconds) {
   try {
     const r = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${ENG_ARTIFACTS_BUCKET}/${_engStorageEncodePath(objectPath)}`, {
-      method: 'POST', headers: _engStorageHeaders(), body: JSON.stringify({ expiresIn: ENG_ARTIFACT_DOWNLOAD_TTL_S }),
+      method: 'POST', headers: _engStorageHeaders(), body: JSON.stringify({ expiresIn: ttlSeconds || ENG_ARTIFACT_DOWNLOAD_TTL_S }),
     });
     const data = await r.json().catch(() => null);
     const rel = data && (data.signedURL || data.signedUrl);
     return r.ok && rel ? `${SUPABASE_URL}/storage/v1${rel}` : null;
   } catch (e) {
     return null;
+  }
+}
+
+// ── 043 — CEO Artifacts view (Engineering Review). CEO session only. ─────────────────
+// Lists stored engineering artifacts by task without ever returning storage paths; a download
+// link is minted for ONE artifact at a time, re-checked against its own task folder, and expires
+// after ENG_ARTIFACT_CEO_LINK_TTL_S. No new storage, no schema change, no RLS change.
+const ENG_ARTIFACT_CEO_LINK_TTL_S = 120;
+const _ENG_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function _engCheckpointLabel(name) {
+  const m = /(?:^|[^0-9])(0[2-9][0-9])(?:[^0-9]|$)/.exec(String(name || ''));
+  return m ? m[1] : null;
+}
+function _engCeoArtifactRow(e) {
+  const md = e.metadata || {};
+  return { artifact_id: e.id, name: e.title || String(md.object_path || '').split('/').pop().replace(/^\d+-/, ''),
+    kind: md.artifact_kind || 'other', size_bytes: Number(md.size_bytes) || 0, mime_type: md.mime_type || null,
+    sha256: md.sha256 || null, sha256_verified: md.sha256_verified === true, uploaded_at: e.created_at,
+    checkpoint: _engCheckpointLabel(e.title || md.object_path) };
+}
+async function engineeringArtifactsIndex(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  try {
+    const ev = await sbGetSafe(`brain_evidence?evidence_type=eq.artifact&select=task_id,created_at,metadata&order=created_at.desc&limit=2000`);
+    const by = new Map();
+    for (const e of (ev || [])) {
+      if (!e || !_ENG_UUID.test(String(e.task_id)) || !e.metadata || e.metadata.bucket !== ENG_ARTIFACTS_BUCKET) continue;
+      const g = by.get(e.task_id) || { task_id: e.task_id, files: 0, total_bytes: 0, last_upload: null };
+      g.files++; g.total_bytes += Number(e.metadata.size_bytes) || 0;
+      if (!g.last_upload || e.created_at > g.last_upload) g.last_upload = e.created_at;
+      by.set(e.task_id, g);
+    }
+    const ids = [...by.keys()].slice(0, 200);
+    const tasks = ids.length ? await sbGetSafe(`engineering_tasks?id=in.(${ids.map(encodeURIComponent).join(',')})&select=id,problem,affected_engine,status,packet`) : [];
+    const meta = new Map((tasks || []).map(t => [t.id, t]));
+    const out = ids.filter(id => meta.has(id)).map(id => {
+      const t = meta.get(id);
+      return { ...by.get(id), title: String(t.problem || '').slice(0, 140), engine: t.affected_engine || null, business: _engTaskBusiness(t), status: t.status };
+    });
+    return res.status(200).json({ ok: true, tasks: out });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'artifacts_index_failed' });
+  }
+}
+async function _engCeoTaskArtifactRows(taskId) {
+  const t = (await sbGetSafe(`engineering_tasks?id=eq.${encodeURIComponent(taskId)}&select=id,problem,affected_engine,status,packet&limit=1`))[0];
+  if (!t) return { task: null, rows: [] };
+  const ev = await sbGetSafe(`brain_evidence?task_id=eq.${encodeURIComponent(taskId)}&evidence_type=eq.artifact&select=id,task_id,title,created_at,metadata&order=created_at.asc&limit=1000`);
+  // Only rows whose stored object really sits in THIS task's own folder (business/task/run/file).
+  const rows = (ev || []).filter(e => e && e.metadata && e.metadata.bucket === ENG_ARTIFACTS_BUCKET && _engArtifactPathBelongsToTask(e.metadata.object_path, t));
+  return { task: t, rows };
+}
+async function engineeringTaskArtifacts(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  const body = (req.method === 'POST' ? req.body : req.query) || {};
+  const taskId = String(body.task_id || '');
+  if (!_ENG_UUID.test(taskId)) return res.status(400).json({ ok: false, error: 'task_id must be a task id' });
+  try {
+    const { task, rows } = await _engCeoTaskArtifactRows(taskId);
+    if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
+    return res.status(200).json({ ok: true, task: { id: task.id, title: String(task.problem || '').slice(0, 300), engine: task.affected_engine || null, business: _engTaskBusiness(task), status: task.status },
+      artifacts: rows.map(_engCeoArtifactRow), link_ttl_s: ENG_ARTIFACT_CEO_LINK_TTL_S });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'task_artifacts_failed' });
+  }
+}
+async function engineeringArtifactDownloadLink(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  const body = (req.method === 'POST' ? req.body : req.query) || {};
+  const taskId = String(body.task_id || ''), artifactId = String(body.artifact_id || '');
+  if (!_ENG_UUID.test(taskId) || !_ENG_UUID.test(artifactId)) return res.status(400).json({ ok: false, error: 'task_id and artifact_id required' });
+  try {
+    const { task, rows } = await _engCeoTaskArtifactRows(taskId);
+    if (!task) return res.status(404).json({ ok: false, error: 'task_not_found' });
+    const e = rows.find(r => r.id === artifactId);
+    if (!e) return res.status(404).json({ ok: false, error: 'artifact_not_found' }); // wrong task, wrong business, not an artifact, or forged path
+    const url = await _engArtifactSignedDownload(e.metadata.object_path, ENG_ARTIFACT_CEO_LINK_TTL_S);
+    if (!url) return res.status(502).json({ ok: false, error: 'download_link_failed' });
+    const row = _engCeoArtifactRow(e);
+    return res.status(200).json({ ok: true, url, expires_in_s: ENG_ARTIFACT_CEO_LINK_TTL_S, name: row.name, size_bytes: row.size_bytes, sha256: row.sha256, sha256_verified: row.sha256_verified });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'download_link_failed' });
   }
 }
 
@@ -21771,6 +21853,9 @@ export default async function handler(req, res) {
     if (action === 'engineering_task_ceo_reject')  return await engineeringTaskCeoReject(req, res);  // v15.0.0
     if (action === 'engineering_task_home_list')   return await engineeringTaskHomeList(req, res);   // v15.0.0
     if (action === 'engineering_task_review_packet') return await engineeringTaskReviewPacket(req, res); // v16.39.0
+    if (action === 'engineering_artifacts_index')        return await engineeringArtifactsIndex(req, res);       // 043 — CEO session
+    if (action === 'engineering_task_artifacts')         return await engineeringTaskArtifacts(req, res);        // 043 — CEO session
+    if (action === 'engineering_artifact_download_link') return await engineeringArtifactDownloadLink(req, res); // 043 — CEO session, 120 s link
     if (action === 'production_deployment_authorize') return await productionDeploymentAuthorize(req, res); // v16.40.0 — CEO-only, see function comment
     if (action === 'production_deployment_reconcile') return await productionDeploymentReconcile(req, res); // v16.43.0 — CEO Decision #10 (deployment reconciliation), see function comment
     // v16.53.0 — CEO Decision #17 Governed Production Execution Fix: split CEO

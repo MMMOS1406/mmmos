@@ -84,7 +84,7 @@ globalThis.fetch = async (url, opts = {}) => {
   // 033: object download (only objects given a body; others behave as missing, like a failed read).
   const OB = '/storage/v1/object/engineering-artifacts/';
   if (path.startsWith(OB)) { const p = decodeURIComponent(path.slice(OB.length)); const o = storage.objects.get(p); return o && o.body !== undefined ? new Response(o.body, { status: 200 }) : json(404, {}); }
-  if (path.startsWith(SG)) { const p = decodeURIComponent(path.slice(SG.length)); return storage.objects.has(p) ? json(200, { signedURL: `/object/sign/engineering-artifacts/${p}?token=dl` }) : json(404, {}); }
+  if (path.startsWith(SG)) { try { storage.lastSignBody = JSON.parse(opts.body || '{}'); } catch { storage.lastSignBody = null; } const p = decodeURIComponent(path.slice(SG.length)); return storage.objects.has(p) ? json(200, { signedURL: `/object/sign/engineering-artifacts/${p}?token=dl` }) : json(404, {}); }
   const m = /^\/rest\/v1\/(\w+)\??(.*)$/.exec(path);
   if (!m) return json(404, { error: 'no route ' + path });
   const [, table, qs] = m;

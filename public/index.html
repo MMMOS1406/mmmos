@@ -30865,6 +30865,7 @@ function renderEngineeringBrain(){
         <button onclick="_ebV2Cache['b2_engreview']=null;_ebV2Load('b2_engreview')" style="padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:10px;cursor:pointer">⟳ Refresh</button>
       </div>
       ${_engExpiredAuthSection((_ebV2Cache[ck]?.expiredAuth)||[])}
+      ${_engArtifactsSection()}
       ${pendingAuth.length?`<div style="margin-bottom:18px">
         <div style="font-size:10px;font-weight:700;color:#38bdf8;letter-spacing:0.8px;margin-bottom:8px;text-transform:uppercase">🔑 Awaiting Agent Authorization (${pendingAuth.length})</div>
         ${pendingAuth.map(t=>`<div style="background:rgba(56,189,248,0.04);border:1px solid rgba(56,189,248,0.25);border-radius:12px;padding:14px 16px;margin-bottom:10px">
@@ -31222,6 +31223,66 @@ function _engRunnerButton(t){
 // 7 days ago, not revoked, and with no live lease. Revoking calls the EXISTING CEO-session-gated
 // engineering_task_ceo_revoke_agent_authorization; it removes only the agent grant (task, history and
 // evidence stay) and can be undone by authorizing again.
+// 043 — CEO Artifacts view. Reads only through the CEO-session actions engineering_artifacts_index /
+// engineering_task_artifacts / engineering_artifact_download_link. Shows no storage paths; each download
+// link is minted for one file and expires in 120 s. Files up to 25 MB are re-hashed in the browser
+// (SHA-256) and compared with the server's recorded checksum before they are saved.
+function _engArtifactsSection(){
+  return `<div data-eng-artifacts style="margin-bottom:18px;background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.2);border-radius:12px;padding:12px 14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div style="font-size:10px;font-weight:700;color:#c9a84c;letter-spacing:0.8px;text-transform:uppercase">📦 Stored artifacts</div>
+      <button onclick="_engArtifactsLoad()" style="padding:5px 12px;border-radius:7px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.1);color:#c9a84c;font-size:10px;font-weight:800;cursor:pointer">SHOW</button>
+    </div><div id="eng-artifacts-body" style="margin-top:8px"></div></div>`;
+}
+function _engFmtBytes(n){n=Number(n)||0;return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(1)+' MB';}
+async function _engArtifactsLoad(){
+  const el=document.getElementById('eng-artifacts-body'); if(!el)return;
+  el.innerHTML='<div style="font-size:11px;color:var(--dim)">Loading…</div>';
+  try{
+    const d=await (await _ceoAuthedFetch('/api/ops?action=engineering_artifacts_index',{})).json();
+    if(!d.ok){el.innerHTML=`<div style="font-size:11px;color:#ef4444">${escHTML(_engErrMsg(d))}</div>`;return;}
+    const ts=d.tasks||[];
+    el.innerHTML=ts.length?ts.map(t=>`<div data-eng-artifact-task="${_engAttr(t.task_id)}" style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+        <div style="flex:1;min-width:0"><div style="font-size:11px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHTML(t.title||'—')}</div>
+        <div style="font-size:9px;color:var(--dim)">${escHTML(String(t.task_id).slice(0,8))} · ${escHTML(t.business||'—')} · ${escHTML(String(t.files))} file${t.files===1?'':'s'} · ${escHTML(_engFmtBytes(t.total_bytes))} · last ${escHTML(String(t.last_upload||'').slice(0,16).replace('T',' '))}</div></div>
+        <button data-id="${_engAttr(t.task_id)}" onclick="_engArtifactsOpen(this.dataset.id)" style="padding:4px 10px;border-radius:6px;border:1px solid rgba(201,168,76,0.4);background:transparent;color:#c9a84c;font-size:9px;font-weight:700;cursor:pointer">OPEN</button></div>`).join('')
+      :'<div style="font-size:11px;color:var(--dim)">No stored artifacts yet.</div>';
+  }catch(e){el.innerHTML=`<div style="font-size:11px;color:#ef4444">${escHTML(e.message)}</div>`;}
+}
+async function _engArtifactsOpen(taskId){
+  const el=document.getElementById('eng-artifacts-body'); if(!el)return;
+  try{
+    const d=await (await _ceoAuthedFetch('/api/ops?action=engineering_task_artifacts',{task_id:taskId})).json();
+    if(!d.ok){el.innerHTML=`<div style="font-size:11px;color:#ef4444">${escHTML(_engErrMsg(d))}</div>`;return;}
+    const rows=(d.artifacts||[]).map(a=>`<tr data-eng-artifact="${_engAttr(a.artifact_id)}">
+        <td style="padding:4px 6px;font-size:10px;color:#fff;word-break:break-all">${escHTML(a.name)}</td>
+        <td style="padding:4px 6px;font-size:10px;color:var(--dim)">${escHTML(a.checkpoint||'—')}</td>
+        <td style="padding:4px 6px;font-size:10px;color:var(--dim);white-space:nowrap">${escHTML(_engFmtBytes(a.size_bytes))}</td>
+        <td style="padding:4px 6px;font-size:9px;color:var(--dim);font-family:'JetBrains Mono',monospace;word-break:break-all">${escHTML(a.sha256||'—')}${a.sha256_verified?' ✓':''}</td>
+        <td style="padding:4px 6px;font-size:10px;color:var(--dim);white-space:nowrap">${escHTML(String(a.uploaded_at||'').slice(0,16).replace('T',' '))}</td>
+        <td style="padding:4px 6px"><button data-t="${_engAttr(taskId)}" data-a="${_engAttr(a.artifact_id)}" onclick="_engArtifactDownload(this.dataset.t,this.dataset.a,this)" style="padding:3px 8px;border-radius:5px;border:1px solid rgba(34,197,94,0.4);background:transparent;color:#22c55e;font-size:9px;font-weight:700;cursor:pointer">DOWNLOAD</button></td></tr>`).join('');
+    el.innerHTML=`<div style="font-size:11px;color:#fff;margin-bottom:6px">${escHTML((d.task&&d.task.title)||'')}</div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><tr>${['File','Checkpoint','Size','SHA-256','Uploaded',''].map(h=>`<th style="text-align:left;font-size:9px;color:var(--dim);padding:4px 6px">${h}</th>`).join('')}</tr>${rows}</table></div>
+      <div style="font-size:9px;color:var(--dim);margin-top:6px">Download links are private and expire after ${escHTML(String(d.link_ttl_s||120))} seconds. Files up to 25 MB are checked against their SHA-256 before saving.</div>
+      <button onclick="_engArtifactsLoad()" style="margin-top:6px;padding:3px 8px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:9px;cursor:pointer">← ALL TASKS</button>`;
+  }catch(e){el.innerHTML=`<div style="font-size:11px;color:#ef4444">${escHTML(e.message)}</div>`;}
+}
+async function _engSha256Hex(buf){const h=await crypto.subtle.digest('SHA-256',buf);return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('');}
+async function _engArtifactDownload(taskId,artifactId,btn){
+  const old=btn?btn.textContent:'';
+  try{
+    if(btn){btn.disabled=true;btn.textContent='…';}
+    const d=await (await _ceoAuthedFetch('/api/ops?action=engineering_artifact_download_link',{task_id:taskId,artifact_id:artifactId})).json();
+    if(!d.ok){alert('Download not available: '+_engErrMsg(d));return;}
+    if((Number(d.size_bytes)||0)>25*1024*1024){window.open(d.url,'_blank','noopener');return;}
+    const r=await fetch(d.url); if(!r.ok){alert('Download failed ('+r.status+').');return;}
+    const buf=await r.arrayBuffer(); const got=await _engSha256Hex(buf);
+    if(d.sha256&&got!==d.sha256){alert('Checksum mismatch: the downloaded file does not match its recorded SHA-256. It was not saved.');return;}
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([buf])); a.download=d.name||'artifact'; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);
+    if(btn)btn.textContent=d.sha256?'✓ SHA OK':'SAVED';
+  }catch(e){alert('Download failed: '+e.message);}
+  finally{ if(btn){btn.disabled=false; if(btn.textContent==='…')btn.textContent=old;} }
+}
 function _engExpiredAuthorizations(tasks){
   const now=Date.now(), seen=new Set();
   return (tasks||[]).filter(t=>{
