@@ -23,6 +23,7 @@ import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProducti
 import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
 import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer.mjs'; // SRV-STUDIO-V2-033 Monthly Mix (off unless app_settings.srv_studio_v2_mix is enabled)
 import * as NWFP from '../projects/nextwave-finance-pilot/lib/pilotState.mjs'; // 049 — NextWave Finance Pilot L1 state + L2 CEO status (pure logic in the pilot's own folder)
+import * as NWFP_PLAN from '../projects/nextwave-finance-pilot/lib/contentPlan.mjs'; // 051 — NextWave Finance Pilot L3 content planning (deterministic; no generation, no publishing)
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -1322,6 +1323,81 @@ async function nwfpStateUpdate(req, res) {
     return res.status(200).json({ ok: true, state: r.state });
   } catch (e) {
     return res.status(500).json({ ok: false, error: 'nwfp_state_write_failed' });
+  }
+}
+// 051 — NextWave Finance Pilot L3 content planning. CEO session only. Drafting and the Creative Quality
+// checklist store nothing and call no AI or media service. Saving and review changes write ONE row,
+// NWFP_PLAN.PLANS_KEY (inside the write-locked nextwave_finance_pilot_ prefix), and are refused unless the
+// mmm_platform_flags row NWFP_PLAN.PLAN_WRITES_FLAG is on (missing = OFF). Nothing here generates or publishes.
+async function _nwfpPlanRow() {
+  const rows = await sbGet(`app_settings?key=eq.${NWFP_PLAN.PLANS_KEY}&select=key,value&limit=1`);
+  return rows && rows[0] ? rows[0] : null;
+}
+async function _nwfpPlanWrite(row, value) {
+  const v = JSON.stringify(value);
+  if (row) await sbPatch('app_settings', `key=eq.${NWFP_PLAN.PLANS_KEY}`, { value: v });
+  else await sbInsert('app_settings', { key: NWFP_PLAN.PLANS_KEY, value: v });
+}
+async function nwfpPlanDraft(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  const b = (req.method === 'POST' ? req.body : req.query) || {};
+  const plan = NWFP_PLAN.draftPlan({ title: b.title, topic_category: b.topic_category, audience_level: b.audience_level });
+  return res.status(200).json({ ok: true, plan, quality: NWFP_PLAN.evaluateQuality(plan), stored: false });
+}
+async function nwfpPlanEvaluate(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  const plan = (req.body || {}).plan;
+  return res.status(200).json({ ok: true, validation: NWFP_PLAN.validatePlan(plan), quality: NWFP_PLAN.evaluateQuality(plan || {}), stored: false });
+}
+async function nwfpPlanList(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  try {
+    const row = await _nwfpPlanRow();
+    const st = NWFP_PLAN.parseStore(row ? row.value : null);
+    return res.status(200).json({ ok: true, plans: st.plans.map(p => ({ ...p, quality: NWFP_PLAN.evaluateQuality(p) })), revision: st.revision, valid: st.valid,
+      writes: (await _engPlatformFlag(NWFP_PLAN.PLAN_WRITES_FLAG)) ? 'ON' : 'OFF' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'nwfp_plan_list_failed' });
+  }
+}
+async function _nwfpPlanWriteGate(req, res) {
+  if (req.method !== 'POST') { res.status(405).json({ ok: false, error: 'POST only' }); return false; }
+  if (!(await requireCeoSession(req))) { res.status(401).json({ ok: false, error: 'ceo_session_required' }); return false; }
+  if (!(await _engPlatformFlag(NWFP_PLAN.PLAN_WRITES_FLAG))) {
+    res.status(409).json({ ok: false, error: 'pilot_plan_writes_off', message: 'Finance Pilot plan saving is off until the CEO switches it on.' }); return false;
+  }
+  return true;
+}
+async function nwfpPlanSave(req, res) {
+  if (!(await _nwfpPlanWriteGate(req, res))) return;
+  const b = req.body || {};
+  try {
+    const row = await _nwfpPlanRow();
+    const st = NWFP_PLAN.parseStore(row ? row.value : null);
+    const r = NWFP_PLAN.upsertPlan(st, b.plan, { expectedRevision: Number.isInteger(b.expected_revision) ? b.expected_revision : undefined });
+    if (!r.ok) return res.status(r.error === 'revision_conflict' ? 409 : 400).json({ ok: false, error: r.error, errors: r.errors, revision: r.revision });
+    await _nwfpPlanWrite(row, r.value);
+    return res.status(200).json({ ok: true, plan: r.plan, quality: NWFP_PLAN.evaluateQuality(r.plan), revision: r.value.revision });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'nwfp_plan_save_failed' });
+  }
+}
+async function nwfpPlanReview(req, res) {
+  if (!(await _nwfpPlanWriteGate(req, res))) return;
+  const b = req.body || {};
+  try {
+    const row = await _nwfpPlanRow();
+    const st = NWFP_PLAN.parseStore(row ? row.value : null);
+    if (Number.isInteger(b.expected_revision) && b.expected_revision !== st.revision) return res.status(409).json({ ok: false, error: 'revision_conflict', revision: st.revision });
+    const plan = st.plans.find(p => p.id === b.plan_id);
+    if (!plan) return res.status(404).json({ ok: false, error: 'plan_not_found' });
+    const r = NWFP_PLAN.applyReview(plan, b.review_status);
+    if (!r.ok) return res.status(409).json(r);
+    const saved = { ...r.plan, updated_at: new Date().toISOString() };
+    await _nwfpPlanWrite(row, NWFP_PLAN.storeValue(st.plans.map(p => (p.id === saved.id ? saved : p)), st.revision + 1));
+    return res.status(200).json({ ok: true, plan: saved, revision: st.revision + 1 });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'nwfp_plan_review_failed' });
   }
 }
 async function _engCeoTaskArtifactRows(taskId) {
@@ -21936,6 +22012,11 @@ export default async function handler(req, res) {
     if (action === 'nwfp_status')                        return await nwfpStatus(req, res);                      // 049 — NextWave Finance Pilot L2, CEO session, read-only
     if (action === 'nwfp_state_get')                     return await nwfpStateGet(req, res);                    // 049 — NextWave Finance Pilot L1, CEO session, read-only
     if (action === 'nwfp_state_update')                  return await nwfpStateUpdate(req, res);                 // 049 — NextWave Finance Pilot L1, CEO session, writes OFF by default
+    if (action === 'nwfp_plan_draft')                      return await nwfpPlanDraft(req, res);           // 051 — NextWave Finance Pilot L3, CEO session, stores nothing
+    if (action === 'nwfp_plan_evaluate')                   return await nwfpPlanEvaluate(req, res);        // 051 — NextWave Finance Pilot L3, CEO session, stores nothing
+    if (action === 'nwfp_plan_list')                       return await nwfpPlanList(req, res);            // 051 — NextWave Finance Pilot L3, CEO session, read-only
+    if (action === 'nwfp_plan_save')                       return await nwfpPlanSave(req, res);            // 051 — NextWave Finance Pilot L3, CEO session, writes OFF by default
+    if (action === 'nwfp_plan_review')                     return await nwfpPlanReview(req, res);          // 051 — NextWave Finance Pilot L3, CEO session, writes OFF by default
     if (action === 'engineering_task_artifacts')         return await engineeringTaskArtifacts(req, res);        // 043 — CEO session
     if (action === 'engineering_artifact_download_link') return await engineeringArtifactDownloadLink(req, res); // 043 — CEO session, 120 s link
     if (action === 'production_deployment_authorize') return await productionDeploymentAuthorize(req, res); // v16.40.0 — CEO-only, see function comment
