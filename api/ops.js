@@ -244,6 +244,23 @@ const PUBLISH_GATED_ACTIONS = new Set([
   'srv_studio_v2_mix', // SRV-STUDIO-V2-033 (it also requires a VA/CEO session itself)
   'srv_farsi_playlists', // SRV Farsi playlist check (uses the channel token, read-only)
 ]);
+// 046 — business actions that previously took no login now need the CEO or VA session (same gate,
+// same enforce/observe mode as publishing). Grouped by business; paid generation, deletion and approvals first.
+const SESSION_GATED_ACTIONS = new Set([
+  // SRV Farsi / SRV English generation (srv_build_package, srv_english_regen_caption, farsi_regen_caption) is
+  // left to the SRV workstream: its tests load selected app functions and need their own update.
+  'sm_video_production_generate', // SMM video generation
+  'generate_package', // NextWave V2 generation and memory
+  'nextwave_v2_generate_scene_package', // NextWave V2 generation and memory
+  'nextwave_v2_generate_visual_plan', // NextWave V2 generation and memory
+  'delete_memory_item', // NextWave V2 generation and memory
+  'heygen_render_status', // production pipeline and assets
+  'save_heygen_execution', // production pipeline and assets
+  'save_suno_execution', // production pipeline and assets
+  'delete_asset', // production pipeline and assets
+  'approve', // operator approvals
+  'reject', // operator approvals
+]);
 const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
 const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const PUBLISH_AUTH_CACHE_MS = 30 * 1000;
@@ -21630,6 +21647,11 @@ export default async function handler(req, res) {
   try {
     // SRV-STUDIO-V2-017 — publishing sign-in gate (see PUBLISH_GATED_ACTIONS). In-process callers such as
     // the SRV Studio V2 pilot call youtubeUploadVideo directly after their own CEO check and never pass here.
+    if (!_gatedAction && SESSION_GATED_ACTIONS.has(action)) {
+      const gate = await _publishGate(req, action);
+      if (!gate.ok) return res.status(401).json({ ok: false, error: 'session_required', message: 'Sign in to MMMOS again, then retry.' });
+      req._publisher = gate.who;
+    }
     if (_gatedAction) {
       const gate = await _publishGate(req, action);
       if (!gate.ok) return res.status(401).json({ ok: false, error: 'publisher_session_required', message: 'Sign in to MMMOS again, then retry.' });

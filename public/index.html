@@ -10210,7 +10210,7 @@ async function updateAssetStatus(id,status){
 async function deleteAsset(id){
   if(!confirm('Delete this asset?'))return;
   try{
-    const r=await fetch('/api/ops?action=delete_asset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset_id:id})});
+    const r=await _publishFetch('/api/ops?action=delete_asset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({asset_id:id})});
     if(!r.ok)throw new Error((await r.json()).error||'Failed');
     await loadAssets();
   }catch(e){alert('Error: '+e.message);}
@@ -11011,7 +11011,7 @@ async function loadApprovals(){
 
 async function doApprove(id){
   try{
-    const r=await fetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin'})});
+    const r=await _publishFetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin'})});
     if(!r.ok)throw new Error((await r.json()).error||'Failed');
     await loadApprovals();
   }catch(e){alert('Error: '+e.message);}
@@ -11021,7 +11021,7 @@ async function doReject(id){
   const reason=prompt('Rejection reason:','');
   if(reason===null)return;
   try{
-    const r=await fetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin',reason})});
+    const r=await _publishFetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,reviewed_by:currentUser?.id||'admin',reason})});
     if(!r.ok)throw new Error((await r.json()).error||'Failed');
     await loadApprovals();
   }catch(e){alert('Error: '+e.message);}
@@ -11665,7 +11665,7 @@ async function _smmExecGenerateVideo(){
   if(!_smmExecActiveTaskId||_smmExecState.busy)return;
   _smmExecState.busy=true;_smmExecRerenderIfMounted();
   try{
-    const r=await fetch('/api/ops?action=sm_video_production_generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
+    const r=await _publishFetch('/api/ops?action=sm_video_production_generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vaTaskId:_smmExecActiveTaskId})});
     const j=await r.json().catch(function(){return{};});
     if(!r.ok||!j.ok)throw new Error(j.error||('request failed ('+r.status+')'));
     _smmExecState.video=j.production;
@@ -13154,7 +13154,7 @@ async function _pollHeygenRenders(){
   if(!inFlight.length) return;
   for(const pkg of inFlight){
     try{
-      const r = await fetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(pkg.heygenJobId));
+      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(pkg.heygenJobId));
       const data = await r.json();
       if(!data.ok) continue;
       const status = data.status;
@@ -13542,7 +13542,7 @@ async function _resolveHeygenSource(input){
   if(!videoId && /^[a-f0-9]{32}$/i.test(raw)) videoId = raw;
   if(videoId){
     try{
-      const r = await fetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(videoId));
+      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(videoId));
       const d = await r.json();
       if(d.videoUrl) return { ok:true, url: d.videoUrl, source:'resolved', videoId, status: d.status };
       return { ok:false, error:'no_mp4_url_in_heygen_response', videoId, status: d.status||'?', raw: d };
@@ -14033,7 +14033,7 @@ async function heygenPaulFramingTest(){
   const POLL_INTERVAL = 30000;
   const pollOne = async (videoId) => {
     try{
-      const r = await fetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
+      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
       const d = await r.json();
       if(d.ok && d.data && (d.data.status === 'completed' || d.data.video_url)){
         const url = d.data.video_url || d.data.video_url_caption || '';
@@ -18604,7 +18604,7 @@ async function _nextwaveV2GenerateCharacterPose(taskId,poseRole){
 async function nextwaveV2GenerateStoryboardPackage(pkg){
   if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
   try{
-    const r=await fetch('/api/ops?action=nextwave_v2_generate_scene_package',{
+    const r=await _publishFetch('/api/ops?action=nextwave_v2_generate_scene_package',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({script:pkg.script}),
     });
@@ -18707,7 +18707,7 @@ async function nextwaveV2StartBuild(pkg){
 async function nextwaveV2GenerateHybridVisualPlan(pkg){
   if(!pkg||!pkg.script)return{ok:false,reason:'missing_pkg_or_script'};
   try{
-    const r=await fetch('/api/ops?action=nextwave_v2_generate_visual_plan',{
+    const r=await _publishFetch('/api/ops?action=nextwave_v2_generate_visual_plan',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({script:pkg.script}),
     });
@@ -19097,7 +19097,7 @@ async function _nwv2PollHeygenJobToCompletion(videoId,maxAttempts,intervalMs){
   for(let i=0;i<maxAttempts;i++){
     await new Promise(function(res){setTimeout(res,intervalMs);});
     try{
-      const r=await fetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
+      const r=await _publishFetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
       const data=await r.json();
       if(!data.ok) continue;
       if(data.status==='completed'&&data.videoUrl) return{ok:true,videoUrl:data.videoUrl,durationSec:data.durationSec};
@@ -26788,7 +26788,7 @@ async function smmVideoGenerate(taskId){
   st.busy=true; st.error=null;
   smmVaRerenderIfMounted(smmVaBusinessId);
   try{
-    const res=await fetch('/api/ops?action=sm_video_production_generate',{
+    const res=await _publishFetch('/api/ops?action=sm_video_production_generate',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({vaTaskId:taskId})
     });
@@ -28039,7 +28039,7 @@ async function execSaveSuno(){
   else{payload.task_id=execState.taskId;}
   try{
     console.log('[SUNO SAVE] local_key:',execState.sunoLocalKey,'task_id:',execState.taskId,'payload:',JSON.stringify(payload));
-    const sr=await fetch('/api/ops?action=save_suno_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const sr=await _publishFetch('/api/ops?action=save_suno_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const sd=await sr.json();
     console.log('[SUNO SAVE] response:',sr.status,JSON.stringify(sd));
     if(btn){btn.textContent='Saved ✓';btn.style.color='#22c55e';setTimeout(()=>{btn.textContent='Save Suno Data';btn.style.color='var(--gold)';},2000);}
@@ -28099,7 +28099,7 @@ async function execSaveHeygen(){
   else if(execState.taskId){payload.task_id=execState.taskId;}
   try{
     console.log('[HEYGEN SAVE] local_key:',payload.local_key,'task_id:',payload.task_id,'full:',JSON.stringify(payload));
-    const r=await fetch('/api/ops?action=save_heygen_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await _publishFetch('/api/ops?action=save_heygen_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const rd=await r.json();
     console.log('[HEYGEN SAVE] response:',r.status,JSON.stringify(rd));
     if(btn){btn.textContent='Saved ✓';btn.style.color='#22c55e';setTimeout(()=>{btn.textContent='Save HeyGen Data';btn.style.color='#3b82f6';},2000);}
@@ -28256,9 +28256,9 @@ async function adminDecideApproval(approvalId,decision){
     if(decision==='revision'){
       await fetch('/api/ops?action=request_revision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,requested_by:'admin',revision_notes:notes||'Revision requested'})});
     } else if(decision==='approve'){
-      await fetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',notes})});
+      await _publishFetch('/api/ops?action=approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',notes})});
     } else {
-      await fetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',reason:notes})});
+      await _publishFetch('/api/ops?action=reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:approvalId,reviewed_by:'admin',reason:notes})});
     }
     await refreshApprovalStatus();
   }catch(e){alert('Failed to submit decision');}
@@ -28540,7 +28540,7 @@ async function cleanMemory(){
 
 async function deleteMemoryItem(id){
   try{
-    await fetch('/api/ops?action=delete_memory_item',{
+    await _publishFetch('/api/ops?action=delete_memory_item',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({id})
@@ -28720,7 +28720,7 @@ async function startGeneration(){
     // v13.69.462 — pass contentFormat from task so server knows to generate long-form script
     const _fTask=fTaskId&&Array.isArray(D.tasks)?D.tasks.find(function(t){return String(t.id)===String(fTaskId);}):null;
     const _fContentFormat=(_fTask&&_fTask.contentFormat)||'short';
-    const response=await fetch('/api/ops?action=generate_package',{
+    const response=await _publishFetch('/api/ops?action=generate_package',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({engineId:fEngine.id,mode:fMode,existingMemory,contentFormat:_fContentFormat,...(fEngine.id==='srv_english'&&typeof _srvStudioV2On==='function'&&_srvStudioV2On()?{srvStudioV2:true}:{})}) // SRV Studio V2: flag-gated
