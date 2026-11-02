@@ -1,0 +1,8 @@
+PASS  the CEO Engineering Review still renders, with Stored artifacts and the new pilot card
+PASS  SHOW makes exactly one read, nwfp_status, through the CEO session helper
+PASS  the card makes no request until SHOW is clicked
+PASS  the card shows identity, REGISTERED, NOT OPERATIONAL, generation and publishing DISABLED
+PASS  all 8 lifecycle stages are listed; only registration is LIVE
+PASS  the card is read-only (one button, no inputs)
+PASS  no page errors and no outside requests while rendering
+7 passed, 0 failed

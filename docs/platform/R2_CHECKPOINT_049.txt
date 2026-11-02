@@ -1,0 +1,165 @@
+START CHECKPOINT 049
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2 / NextWave Finance Pilot
+DATE: 2026-11-01 (America/New_York; work ran 03:05-03:35 UTC on 2026-11-02)
+EXECUTION ORDER: ORDER 049 (Finance Pilot L1 + L2, preview-only; Checkpoint 048 follow-up)
+
+EXECUTIVE SUMMARY:
+- L1 (isolated pilot state) and L2 (read-only CEO card) are built, tested and in draft PR #77 (head 478dcc7). Not merged; no production change.
+- L1 reuses the SRV Studio V2 pattern:
+  - one server-written app_settings row, nextwave_finance_pilot_state;
+  - CEO session only;
+  - generation and publishing always stored disabled.
+- Writes stay OFF (switch row nwfp_state_writes absent) because app_settings is writable by the public key today. The matching write-lock migration is PREPARED, NOT APPLIED; that needs CEO authorization.
+- L2 shows, in the CEO Engineering Review: REGISTERED, NOT OPERATIONAL, stage readiness, tasks, artifacts, generation and publishing DISABLED, and the latest verified checkpoint. Nothing is LIVE except registration, and nothing is LIVE outside production.
+- Tests:
+  - new suite 34/34; browser 7/7;
+  - 59 of 62 suites identical to main; the only differences are the known file-scope self-checks;
+  - Engineering Review browser 26/26 and 9/9.
+- 048 follow-up: production healthy; no real user refused by the P1 gate; preview targets unchanged. The first autosync after stage 2 is NOT YET OBSERVED (due 00:00 UTC 2026-11-03).
+
+L1 STATE IMPLEMENTATION: PREVIEW READY (not released; writes OFF)
+- Logic: projects/nextwave-finance-pilot/lib/pilotState.mjs, pure and in the pilot's own folder.
+  - Schema v1: lifecycle_stage (registered | planning), notes (up to 20), planning_topics (up to 50), revision.
+  - A patch may not touch generation, publishing, business_key, schema, revision or any other business's field.
+  - Foreign or malformed stored data is never adopted.
+- Server (api/ops.js, additive only, 57 lines), all CEO session only:
+  - nwfp_state_get (read);
+  - nwfp_state_update (POST; refused 409 pilot_state_writes_off unless mmm_platform_flags.nwfp_state_writes is on; when on, writes exactly one row; refuses stale revisions);
+  - nwfp_status (L2 read).
+- Isolation:
+  - the pilot is not part of the shared company state (mmm_finance_v118 / saveAppState);
+  - no browser code writes pilot keys;
+  - ops.js references the pilot key only in the 049 block;
+  - after pilot writes, every other business's row and every other table are byte-identical.
+- Database: no migration applied. docs/projects/nextwave-finance-pilot/l1-app-settings-pilot-write-lock.sql is PREPARED, NOT APPLIED.
+  - It contains restrictive policies so the public key cannot write nextwave_finance_pilot_* rows, the same as the applied SRV Studio V2 lock.
+  - Verification and rollback are included.
+
+L2 CEO VIEW IMPLEMENTATION: PREVIEW READY (not released)
+- Read-only card "NextWave Finance Pilot" in the CEO Engineering Review, after Stored artifacts.
+  - One SHOW button, one CEO-session read (nwfp_status), no inputs, every value escaped.
+- Shows:
+  - business identity;
+  - REGISTERED and NOT OPERATIONAL;
+  - generation and publishing DISABLED;
+  - pilot state (stage, revision, stored, writes OFF);
+  - task count and status;
+  - artifacts (count, size, last);
+  - latest verified checkpoint 048;
+  - 8 lifecycle stages (Registration LIVE; L1, L2 PREVIEW READY; L3-L7 NOT STARTED).
+- Honesty rules:
+  - a stage is LIVE only via the evidence manifest;
+  - the server never shows LIVE outside production.
+- Privacy: counts only pilot tasks and artifacts in nextwave_finance_pilot/<task>/; no storage paths, ids, titles of other businesses, or tokens.
+
+NEXTWAVE V1/V2 ISOLATION:
+- PR #77 changes only api/ops.js (additions), public/index.html (additions) and the pilot's own folders. No existing line is removed or edited.
+- No NextWave V1/V2, SRV, SMM or AI Studio file is touched.
+- NextWave V2 settings and task 2e17bd23 are unchanged in production (no writes this cycle).
+
+TEST RESULTS:
+- test_nwfp_l1_l2_049: 34/34.
+- browser_nwfp_card_049 (real Engineering Review, headless Chrome): 7/7.
+- Full comparison, branch vs main 315e4ae: 59 of 62 identical; new 34/34.
+  - Known self-check differences: YouTube diff-scope, SRV Studio 037, and the 2 CEO-008 preservation scope checks.
+- Engineering Review browser checks 26/26 and 9/9 (same as main).
+- One issue found and fixed in this cycle: a local preservation run rewrote tests/preservation/last-report.json. The new scope test caught it, and it was restored (commit 478dcc7).
+
+SECURITY RESULTS:
+- Anonymous and forged callers refused by all 3 pilot actions.
+- Writes refused while the switch is absent; publishing and generation cannot be enabled through L1.
+- P1 gate live: the last hour of logs shows only the 048 probes refused; no real user refused.
+- eng_runner OFF, eng_adviser_connect OFF, nwfp_state_writes absent.
+- GitHub Actions OFF.
+- 0 migrations since 20261030211025; 0 pilot rows in production.
+- No secrets in the code or evidence.
+
+PRODUCTION HEALTH:
+- main 315e4ae, dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 READY.
+- Verifier 19/19.
+- Runtime errors: only the known url.parse deprecation warning.
+- Production unchanged by this order.
+
+YOUTUBE AUTOSYNC RESULT: NOT YET OBSERVED
+- The daily autosync runs at 00:00 UTC. The 2026-11-02 run (sync logs 00:49-00:50Z, all success) happened BEFORE stage 2. The first run after stage 2 is due 00:00 UTC 2026-11-03.
+- Connections (read-only check): 4 of 4 hold refresh tokens; tokens refreshed (expire 03:55Z); 0 sync errors since 00:00Z. No publishing, no token change by this order.
+
+DRAFT PR: https://github.com/MMMOS1406/mmmos/pull/77 (draft, CLEAN, checks SUCCESS; not merged)
+BRANCH: mmmos-eng/nwfp-l1-l2-049
+COMMIT SHA: 478dcc7aea8900a781438c7276a67b12f74f9ded (PR head)
+
+PREVIEW OR LOCAL EVIDENCE:
+- Local:
+  - browser check 7/7 and a screenshot of the card (docs/projects/nextwave-finance-pilot/evidence/nwfp-card-049-local.png on the PR branch);
+  - stand-in data only.
+- Preview: GitHub created dpl_9WFrpgjS38Xj1tvajKyF3ASvtbZX (READY) automatically on push.
+  - It is behind Vercel preview login (anonymous 302) and was built with the reduced preview variables.
+  - Not used for validation: it shares the production database, and validation needs no production writes. Writes are OFF anyway.
+
+H1-H8 PROGRESS:
+- H1 COMPLETE 2026-10-31
+- H2 COMPLETE 2026-10-31
+- H3 COMPLETE 2026-10-31
+- H4 AWAITING CEO - GitHub App
+- H5 COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 AWAITING CEO - runner security probe
+- H7 COMPLETE 2026-11-01
+- H8 ON HOLD - ChatGPT Business
+
+NEXTWAVE L1-L7 PROGRESS:
+- Registration LIVE (PR #75).
+- L1 PREVIEW READY (PR #77; writes OFF; write-lock migration prepared).
+- L2 PREVIEW READY (PR #77).
+- L3 content planning: NOT STARTED.
+- L4 paid generation: NOT STARTED (CEO cost decision).
+- L5 review/approval: NOT STARTED.
+- L6 publishing: NOT STARTED (per-video CEO authorization).
+- L7 analytics: NOT STARTED.
+- Overall: REGISTERED - NOT YET OPERATIONAL.
+
+PRODUCTION CHANGES: none.
+- No merge or deployment to production; no migration; no environment or secret change.
+- No flag or setting written; no production task or record created.
+- No preview deletion; no generation or publishing; no spending.
+- No runner, adviser or GitHub App change.
+- Task 125 not touched; .pause-deploy present; CEO-015B (99a654a) untouched.
+
+REMAINING RISKS:
+- Until the write-lock migration is applied, any app_settings key (including the future pilot row) is writable with the public key. L1 therefore keeps writes OFF and ignores foreign data.
+- Preview residual exposure (unchanged since 048):
+  - 89 READY preview deployments; those built before stage 3a hold the old preview values;
+  - SUPABASE_SERVICE_KEY still reaches previews (stage 4), so preview code can reach the production database. That includes the PR #77 preview, which is login-protected and writes OFF.
+- The first post-stage-2 autosync is not yet observed.
+- SRV package (6 actions) and P2 (32 actions) still ungated.
+
+PM DECISIONS REQUIRED:
+1. Accept the L1/L2 design (separate server-written row plus write-lock, instead of adding the pilot to the shared state).
+2. Recommend the PR #77 release and the migration to the CEO.
+3. Order L3 (content planning, no cost) after L1/L2 release.
+4. Order the SRV auth package and P2 groups.
+
+CEO DECISIONS REQUIRED:
+1. Release PR #77 (L1 + L2, writes OFF).
+2. Apply the L1 write-lock migration (database change), then turn on nwfp_state_writes (setting) - each a separate approval.
+3. H6 and H4 (unchanged).
+4. Optional, separate: stage 4; old preview deployments.
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_049.txt on branch mmmos-eng/r2-checkpoint-049 (based on 048 @ b7b0c0f).
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - tools/engineering-runner/release/: verify-2026-11-01-049.txt, test-nwfp-l1-l2-2026-11-01-049.txt, browser-nwfp-card-2026-11-01-049.txt, tests-2026-11-01-049-nwfp-branch-vs-main.txt
+  - tools/engineering-runner/preview-secrets/env-049.targets-only.json
+- The checkpoint branch commit SHA is reported in the chat message.
+
+MMMOS ARCHIVE VERIFICATION: checkpoint and tracker stored on task ec27ddf6 with server SHA-256 (reported in the chat message). Scope not expanded.
+
+NEXT ACTION:
+- The PM reviews PR #77 and the L1 design, and recommends the release and migration.
+- The CEO decides.
+- Claude Code observes the 00:00 UTC autosync and then releases or applies only what is approved.
+
+ACTION OWNER: ChatGPT PM (review, recommendation) -> CEO (PR #77, migration, H4, H6) -> Claude Code (autosync check, execution, Checkpoint 050)
+
+END CHECKPOINT 049

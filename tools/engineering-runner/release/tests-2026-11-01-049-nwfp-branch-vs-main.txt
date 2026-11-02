@@ -1,0 +1,17 @@
+suites main       61 branch       62
+main049 engineering-review-escaping    26 passed, 0 failed
+main049 engineering-r2-screens         9 passed, 0 failed
+main049 preservation: 141 checks, 10 failed
+nwfp-l1-l2 engineering-review-escaping    26 passed, 0 failed
+nwfp-l1-l2 engineering-r2-screens         9 passed, 0 failed
+nwfp-l1-l2 preservation: 141 checks, 12 failed
+preservation FAIL diff (main vs branch):
+10a11,12
+> FAIL  only the files this order authorizes were changed (public/shell.js and tests/preservation/ — no index.
+> FAIL  public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the only shell 
+  DIFF test_youtube_oauth_reliability.mjs           B 1 FAILED: diff scope: this patch touches only api/youtube/call | M 0 25 passed, 0 failed
+  NEW test_nwfp_l1_l2_049.mjs                      B 0 34 passed, 0 failed | M None 
+  DIFF test_srv_studio_v2_037_suno_steps.mjs        B 1 21 passed, 3 failed | M 1 22 passed, 2 failed
+identical to main: 59 of 62
+
+[exited with code 0]

@@ -1,0 +1,35 @@
+PASS pilot config and module agree on the business key; generation and publishing disabled in both
+PASS the state key is under the pilot prefix only
+PASS a patch may not touch generation, publishing, business_key or unknown fields
+PASS a valid patch is applied and generation/publishing are always stored disabled
+PASS stored data from another business, or malformed data, is never adopted
+PASS oversized or empty lists are refused
+PASS anonymous and forged callers are refused by all 3 pilot actions (3/3)
+PASS with the switch row missing, a CEO write is refused (409 pilot_state_writes_off) and nothing is stored
+PASS a CEO read returns the default state, not stored, writes OFF
+PASS a CEO write stores exactly one row, the pilot state key
+PASS a second write updates the same row (no duplicates) and bumps the revision
+PASS a write based on an old revision is refused (409 revision_conflict)
+PASS an attempt to enable publishing is refused and the stored state stays disabled
+PASS a pilot write cannot carry another business's fields
+PASS every other business's app_settings row (shared state, SRV Studio V2, NextWave V2) is byte-identical
+PASS no other table changed during pilot writes
+PASS writes are POST only
+PASS the shared company state payload (saveAppState) contains nothing of the pilot
+PASS api/ops.js writes the pilot key only inside the 049 pilot block
+PASS no browser code writes pilot keys (the app only reads through nwfp_status)
+PASS a foreign value written into the pilot row (e.g. through the public key before the write-lock) is ignored
+PASS status counts only pilot tasks (1) and only artifacts in the pilot's own folder (1 file, 100 B)
+PASS status returns no storage paths, other task ids, other titles or tokens
+PASS outside production nothing is LIVE (registration shows PREVIEW READY)
+PASS in production: REGISTERED, NOT OPERATIONAL; only registration is LIVE; L1/L2 PREVIEW READY; L3-L7 NOT STARTED
+PASS generation and publishing shown DISABLED; latest verified checkpoint 048
+PASS the stage manifest uses only the allowed statuses, and no L3-L7 stage claims LIVE
+PASS the card escapes every value (no injected tags)
+PASS the card shows identity, REGISTERED, NOT OPERATIONAL, DISABLED generation/publishing, all 8 stages and checkpoint 048
+PASS the card is read-only: one SHOW button, no inputs, and it calls only nwfp_status through the CEO session
+PASS the card is mounted once, in the CEO Engineering Review, right after Stored artifacts
+PASS only api/ops.js, public/index.html and the pilot's own folders are changed (no NextWave V1/V2, SRV, SMM or AI Studio file)
+PASS the shared files only gain lines (nothing existing is removed or edited)
+PASS the 3 pilot actions are dispatched and are not in the publishing or session gate lists (they check the CEO session themselves)
+34 passed, 0 failed
