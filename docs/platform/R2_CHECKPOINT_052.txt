@@ -1,0 +1,212 @@
+START CHECKPOINT 052
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2 / NextWave Finance Pilot L3 controlled release
+DATE: 2026-11-01 (America/New_York; work ran 04:37-05:05 UTC on 2026-11-02)
+EXECUTION ORDER: ORDER 052 (CEO-approved: release PR #78, then PR #79)
+
+EXECUTIVE SUMMARY:
+- Both approved releases are done and verified in order. No failure; no rollback needed.
+  - PR #78 (card evidence correction): merge fe13167, dpl_CfptpMvgqw53AjpvmQBjFv4cgRho.
+  - PR #79 (L3 content planning): merge a75e6d9, dpl_DbNxKnT4Xsd4mPB5bvjnVeFRVmeF (current).
+- Final main a75e6d9:
+  - all 62 existing suites identical to the pre-release main 9efd0df; new suites 13/13 and 37/37;
+  - browser 26/26, 9/9 and 8/8; preservation identical; verifier 19/19.
+- nwfp_state_writes and nwfp_plan_writes are both absent (OFF). 0 pilot state rows, 0 plan rows, 0 pilot tasks. No generation, publishing, cost or migration.
+- Finance Pilot statuses:
+  - L1 DEPLOYED - WRITES OFF, L2 DEPLOYED - READ ONLY (both shown correctly by the card);
+  - L3 DEPLOYED - SAVING OFF (verified live);
+  - L4-L7 NOT STARTED;
+  - overall REGISTERED - NOT YET OPERATIONAL.
+- One deviation from the order's expected card display, reported rather than worked around:
+  - PR #79, as reviewed, did not change the card's evidence manifest, so the card still shows L3 as NOT STARTED. It understates and never overstates.
+  - Changing it needs new code. A follow-up draft PR #80 is prepared (not authorized, not merged): L3 shows DEPLOYED - SAVING OFF, derived from the real plan-saving switch.
+- YouTube autosync after stage 2: NOT YET OBSERVED (due 00:00 UTC 2026-11-03).
+
+BASELINE VERIFICATION: PASS
+- main 9efd0df; dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx READY; verifier 19/19; GitHub Actions OFF.
+- Flags: only state_merge_only=true (nwfp_state_writes, nwfp_plan_writes, eng_runner, eng_adviser_connect absent).
+- Write-lock migration 20261102034457 present; 3 pilot policies; all-policies fingerprint 83708a1589cf94df419ed1db052939cc.
+- 0 pilot rows; 0 pilot tasks.
+- Fingerprints recorded: NextWave V2 task 2e17bd23 and settings; SRV Studio V2 settings; tasks 79 (status fingerprint 182ea498…); packages 550.
+- PR #78 at c85e517 (6 files) and PR #79 at c38cc47 (5 files): exactly the reviewed files, CLEAN, checks SUCCESS.
+- Task 125 not touched; .pause-deploy present; CEO-015B 99a654a untouched.
+- Rollback reference recorded: dpl_8jPjjXVEz (Checkpoint 050).
+
+PR #78 RELEASE RESULT: PASS
+- Merged through the protected PR process as fe13167 (parents 9efd0df, c85e517). The tree is identical to the reviewed head.
+- dpl_CfptpMvgqw53AjpvmQBjFv4cgRho READY; verifier 19/19; the live page is byte-identical to main.
+- Card, computed by the released code with production's real facts (no state row, switches absent, 0 tasks):
+  - Registration LIVE; L1 DEPLOYED - WRITES OFF; L2 DEPLOYED - READ ONLY; L3-L7 NOT STARTED; checkpoint 050.
+  - The same code outside production shows PREVIEW READY. L1 follows the actual switch (tested ON and OFF).
+- Tests: evidence 13/13; L1/L2 34/34; auth P1 16/16; Engineering Review browser 26/26 and 9/9; card browser 8/8.
+- Live: pilot actions refuse anonymous and forged callers; the 11 P1 actions are refused (11/11).
+- Runtime errors: only the known url.parse deprecation warning.
+- Rollback reference: dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx.
+
+PR #79 COMBINED PREVALIDATION: PASS
+- Trial merge of c38cc47 onto the new main fe13167 is clean (d1a15aa). It changes exactly the 5 reviewed files.
+- On the combined code: L3 37/37, evidence 13/13, L1/L2 34/34; browser 26/26, 9/9 and 8/8.
+- 61 of 64 suites identical to fe13167. The differences are only the known file-scope self-checks (YouTube diff-scope, SRV Studio 037, CEO-008 preservation scope), which fail on any unmerged branch and pass on main.
+- Scope-test interaction resolved without editing or weakening any test.
+  - L3's changed-files check compares against the current main. With PR #78 on main, it sees only PR #79's files, and passes with its protection intact.
+  - The final main shows the same: every suite passes.
+- Combined code retains the correct card evidence, L1 behaviour, write-lock, authentication, isolation, and disabled generation and publishing. Both switches absent.
+
+PR #79 RELEASE RESULT: PASS
+- Merged as a75e6d9 (parents fe13167, c38cc47). The tree is identical to the tested trial d1a15aa.
+- dpl_DbNxKnT4Xsd4mPB5bvjnVeFRVmeF READY; verifier 19/19; the live page is byte-identical to main; the app page makes no L3 call.
+- Live probes:
+  - all 5 L3 actions (draft, evaluate, list, save, review) refuse anonymous and forged callers (401 ceo_session_required);
+  - save and review over GET return 405;
+  - malformed JSON is rejected before any handler (500 "Invalid JSON", identical for every existing action; platform-wide, pre-existing; nothing runs).
+- 0 plan rows and 0 pilot rows after the probes.
+- L3 capabilities, proven in 37/37 on the released code (stand-in; a live CEO session was not used):
+  - finance-education topics; audience and objective; Long outline; Short companion; script structure; visual direction;
+  - responsible-framing rules; the 10-item Creative Quality checklist; review states;
+  - draft and evaluate store nothing; list is read-only; save and review answer 409 pilot_plan_writes_off while the switch is off;
+  - review changes trigger nothing.
+- No paid AI request, media, publishing, vendor or recurring cost (no outside call in tests; no new secret or setting).
+- Rollback reference: dpl_CfptpMvgqw53AjpvmQBjFv4cgRho (PR #78 only).
+
+L1 STATUS: DEPLOYED - WRITES OFF (card shows it; nwfp_state_writes absent; 0 state rows)
+L2 STATUS: DEPLOYED - READ ONLY (card shows it)
+
+L3 STATUS: DEPLOYED - SAVING OFF (verified live: actions present and CEO-gated; nwfp_plan_writes absent; 0 plan rows)
+- The card currently shows L3 NOT STARTED, an understatement. Follow-up draft PR #80 prepared:
+  - https://github.com/MMMOS1406/mmmos/pull/80, head 8571718, 8 files;
+  - tests: evidence 14/14, L1/L2 34/34, L3 37/37, browser 8/8.
+  - It also aligns L3's scope check with the L1/L2 rule (only pilot-owned functions may change in shared files), so the earlier cross-PR misfire cannot recur.
+
+COMBINED REGRESSION TESTS: PASS (final main a75e6d9)
+- 64 suites: all 62 pre-existing identical to the pre-release main 9efd0df; new 13/13 and 37/37.
+- Includes the auth P1 suite (16/16) and publishing-gate regressions.
+- Engineering Review browser 26/26 and 9/9; card browser 8/8; preservation identical (same 10 pre-existing failures).
+
+AUTHENTICATION VERIFICATION: PASS
+- Live:
+  - 3 L1/L2 and 5 L3 pilot actions refuse anonymous and forged callers (401);
+  - 11 P1 actions refused (11/11);
+  - publishing gate unchanged (publisher_session_required);
+  - verifier 19/19.
+- Tests on the released code: CEO-only access, writes refused while OFF, stale revisions refused.
+
+DATABASE WRITE-LOCK VERIFICATION: PASS
+- Migration 20261102034457 present; 3 policies; the all-policies fingerprint is unchanged through both releases (83708a1589cf94df419ed1db052939cc).
+- Plans use the locked prefix, so no new migration was needed. No migration or grant change in this order (last migration still 20261102034457).
+
+CROSS-BUSINESS ISOLATION: PASS
+- Across both releases: only pilot folders plus api/ops.js and public/index.html changed. The only edited existing line is the pilot badge colours inside _nwfpBadge; 0 non-pilot files.
+- Before and after, identical:
+  - NextWave V2 task and settings md5;
+  - SRV Studio V2 settings md5;
+  - tasks (79, same status fingerprint);
+  - packages (550).
+- All NextWave V1/V2, SRV, SMM and AI Studio suites identical to main.
+- L3 writes only its own plans row (proven); other businesses cannot write pilot rows (public-key write-lock; shared-state function key-restricted).
+- No shared lifecycle rebuild; no unauthorized database change.
+
+PRODUCTION HEALTH: PASS
+- main a75e6d9; dpl_DbNxKnT4Xsd4mPB5bvjnVeFRVmeF READY; verifier 19/19.
+- Environment targets unchanged (24 records).
+- YouTube: 4/4 connections with refresh tokens; 0 sync errors since 00:00Z.
+- Runtime errors: only the known warning.
+
+YOUTUBE AUTOSYNC RESULT: NOT YET OBSERVED
+- Last sync 00:50Z on 2026-11-02 (before stage 2). The first post-stage-2 run is due 00:00 UTC 2026-11-03. No manual sync, publish, reconnect or credential change.
+
+H1-H8 PROGRESS:
+- H1 COMPLETE 2026-10-31
+- H2 COMPLETE 2026-10-31
+- H3 COMPLETE 2026-10-31
+- H4 AWAITING CEO - GitHub App
+- H5 COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 AWAITING CEO - runner security probe
+- H7 COMPLETE 2026-11-01
+- H8 ON HOLD - ChatGPT Business
+
+NEXTWAVE L1-L7 PROGRESS:
+- Registration LIVE.
+- L1 DEPLOYED - WRITES OFF.
+- L2 DEPLOYED - READ ONLY.
+- L3 DEPLOYED - SAVING OFF (card update pending PR #80).
+- Write-lock APPLIED AND VERIFIED.
+- L4-L7 NOT STARTED.
+- Overall: REGISTERED - NOT YET OPERATIONAL.
+
+CHANGES MADE:
+- PR #78 and PR #79 marked ready and merged.
+- Two automatic production deployments.
+- Draft PR #80 opened (follow-up, not merged).
+- Checkpoint branch with evidence; MMMOS archive uploads.
+
+CHANGES NOT MADE:
+- Neither pilot switch enabled.
+- No pilot state, plan or task.
+- No generation, publishing, vendor or cost; no L4-L7.
+- No migration, grant, RLS, secret or environment change.
+- No preview deletion; no stage 4.
+- No runner, adviser or GitHub App change.
+- No other business change; .gitignore unchanged.
+- Task 125 not touched; .pause-deploy present; CEO-015B untouched.
+
+PASS / FAIL / BLOCKED:
+- PASS: Phase 0, 1, 2, 3, 4, 5, 6 (autosync NOT YET OBSERVED), 7, 8.
+- FAIL: none.
+- BLOCKED: none.
+- Deviation: the card shows L3 NOT STARTED instead of the expected DEPLOYED - SAVING OFF, because the reviewed PR #79 had no manifest change. Fix prepared as draft PR #80; not released (outside this order's scope).
+
+MERGE COMMITS:
+- fe131672bb4dbf00169f2365d217cf78d0050d24 (PR #78)
+- a75e6d99da056e65e500d687d5fc662920c4f230 (PR #79)
+
+DEPLOYMENT IDS:
+- dpl_CfptpMvgqw53AjpvmQBjFv4cgRho (PR #78)
+- dpl_DbNxKnT4Xsd4mPB5bvjnVeFRVmeF (PR #79, current)
+
+ROLLBACK REFERENCES:
+- If PR #79 must be undone: promote dpl_CfptpMvgqw53AjpvmQBjFv4cgRho (main fe13167), or revert a75e6d9.
+- To Checkpoint 050: promote dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx (main 9efd0df).
+- The write-lock migration stays in place in all cases.
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_052.txt on branch mmmos-eng/r2-checkpoint-052 (based on 051 @ beb4e54).
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - tools/engineering-runner/release/: verify-2026-11-02-052-{base,p1,p3}.txt, probe-2026-11-02-052-l3-live.txt, tests-2026-11-02-052-pr79-on-new-main.txt, tests-2026-11-02-052-final-main-a75e6d9.txt
+  - tools/engineering-runner/preview-secrets/env-052.targets-only.json
+- Documentation integrity: committed files checked with git on the remote (git cat-file), including every .md report from 039-051 (.gitignore excludes *.md; approved .md reports are force-added).
+
+COMMIT SHA: the checkpoint branch commit (reported in the chat message).
+
+MMMOS ARCHIVE VERIFICATION: checkpoint and tracker stored on task ec27ddf6 with server SHA-256 (reported in the chat message). Scope not expanded; no new task.
+
+REMAINING RISKS:
+- The card understates L3 until PR #80 is released.
+- Malformed JSON returns 500 instead of 400 (platform-wide; no write possible).
+- Pre-existing, unchanged:
+  - TRUNCATE/REFERENCES/TRIGGER grants (low, latent);
+  - public-key writes to app_settings keys outside the locked prefixes;
+  - 88 old previews hold pre-048 values; stage 4 (service key in previews).
+- The first post-stage-2 autosync is not yet observed.
+- SRV package (6 actions) and P2 (32 actions) still ungated.
+
+PM DECISIONS REQUIRED:
+1. Recommend the release of PR #80 (L3 card evidence).
+2. Order the next Finance Pilot step: an L3 plan editor UI, the decision to enable plan saving, or L5.
+3. Order the SRV auth package and P2 groups.
+4. Decide whether to propose the TRUNCATE revocation and the 400-for-malformed-JSON fix.
+
+CEO DECISIONS REQUIRED:
+1. Release PR #80.
+2. Later and separately: enable nwfp_plan_writes and/or nwfp_state_writes.
+3. H6 and H4.
+4. Optional: TRUNCATE revocation; stage 4; old previews.
+
+NEXT ACTION:
+- Claude Code checks the 00:00 UTC 2026-11-03 autosync.
+- The PM reviews PR #80 and the next orders.
+- The CEO decides on PR #80, H6 and H4.
+
+ACTION OWNER: ChatGPT PM (review, next orders) -> CEO (PR #80, H4, H6) -> Claude Code (autosync check, execution, Checkpoint 053)
+
+END CHECKPOINT 052

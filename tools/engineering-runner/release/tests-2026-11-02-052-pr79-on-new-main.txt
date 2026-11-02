@@ -1,0 +1,28 @@
+trial merge clean d1a15aa on main fe13167
+trial diff vs new main: api/ops.js docs/projects/nextwave-finance-pilot/CREATIVE_QUALITY_CRITERIA_051.md projects/nextwave-finance-pilot/lib/contentPlan.mjs tests/projects/nextwave-finance-pilot/fixtures/example_plan_emergency_fund.json tests/projects/nextwave-finance-pilot/test_nwfp_l3_planning_051.mjs 
+trial test_nwfp_l3_planning_051    37 passed, 0 failed
+trial test_nwfp_card_evidence_051  13 passed, 0 failed
+trial test_nwfp_l1_l2_049          34 passed, 0 failed
+main052a engineering-review-escaping    26 passed, 0 failed
+main052a engineering-r2-screens         9 passed, 0 failed
+main052a browser_nwfp_card              8 passed, 0 failed
+main052a preservation: 141 checks, 10 failed
+trial052 engineering-review-escaping    26 passed, 0 failed
+trial052 engineering-r2-screens         9 passed, 0 failed
+trial052 browser_nwfp_card              8 passed, 0 failed
+trial052 preservation: 141 checks, 11 failed
+preservation FAIL diff (main fe13167 vs trial):
+10a11
+> FAIL  only the files this order authorizes were changed (public/shell.js and tests/preservation/ —
+preservation FAIL diff (original main 9efd0df vs main fe13167):
+== main fe13167 vs main 9efd0df
+  NEW test_nwfp_card_evidence_051.mjs              X 0 13 passed, 0 failed | B None 
+  identical: 62 of 63
+== trial (fe13167+#79) vs main fe13167
+  DIFF test_youtube_oauth_reliability.mjs           X 1 FAILED: diff scope: this patch touches only api/youtube/call | B 0 25 passed, 0 failed
+  NEW test_nwfp_l3_planning_051.mjs                X 0 37 passed, 0 failed | B None 
+  DIFF test_srv_studio_v2_037_suno_steps.mjs        X 1 21 passed, 3 failed | B 1 22 passed, 2 failed
+  identical: 61 of 64
+ALLDONE
+
+[exited with code 0]

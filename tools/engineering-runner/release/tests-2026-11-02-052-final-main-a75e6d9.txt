@@ -1,0 +1,13 @@
+main a75e6d9
+suites 64
+final engineering-review-escaping    26 passed, 0 failed
+final engineering-r2-screens         9 passed, 0 failed
+final browser_nwfp_card              8 passed, 0 failed
+final preservation: 141 checks, 10 failed
+preservation FAIL diff (original main 9efd0df vs final a75e6d9):
+  NEW test_nwfp_card_evidence_051.mjs              F 0 13 passed, 0 failed | O None 
+  NEW test_nwfp_l3_planning_051.mjs                F 0 37 passed, 0 failed | O None 
+final main a75e6d9 vs original main 9efd0df: identical 62 of 64
+ALLDONE
+
+[exited with code 0]

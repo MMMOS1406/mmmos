@@ -1,0 +1,17 @@
+nwfp_plan_draft anon 401 ceo_session_required
+nwfp_plan_draft forged 401 ceo_session_required
+nwfp_plan_draft malformed 500 ops_failed
+nwfp_plan_evaluate anon 401 ceo_session_required
+nwfp_plan_evaluate forged 401 ceo_session_required
+nwfp_plan_evaluate malformed 500 ops_failed
+nwfp_plan_list anon 401 ceo_session_required
+nwfp_plan_list forged 401 ceo_session_required
+nwfp_plan_list malformed 500 ops_failed
+nwfp_plan_save anon 401 ceo_session_required
+nwfp_plan_save forged 401 ceo_session_required
+nwfp_plan_save malformed 500 ops_failed
+nwfp_plan_review anon 401 ceo_session_required
+nwfp_plan_review forged 401 ceo_session_required
+nwfp_plan_review malformed 500 ops_failed
+nwfp_plan_save GET-anon 405
+nwfp_plan_review GET-anon 405
