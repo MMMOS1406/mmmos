@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { db, call, calls, ceoToken, makeOk } from '../../platform/engineering-harness.mjs';
 import * as L3 from '../../../projects/nextwave-finance-pilot/lib/contentPlan.mjs';
 import * as P from '../../../projects/nextwave-finance-pilot/lib/pilotState.mjs';
+import { checkBranchScope } from './_scopeGuard.mjs';
 const T = makeOk(); const ok = T.ok;
 const here = dirname(fileURLToPath(import.meta.url)), root = join(here, '..', '..', '..');
 const src = readFileSync(join(root, 'api', 'ops.js'), 'utf8');
@@ -109,18 +110,10 @@ ok('no outside service was called (no AI, media, YouTube or publishing)', calls.
 const block = src.slice(src.indexOf('async function _nwfpPlanRow()'), src.indexOf('async function _engCeoTaskArtifactRows('));
 ok('the L3 server block writes only app_settings (the plans row) and calls no generation, upload or publishing helper',
   block.length > 2000 && block.length < 8000 && !/sbInsert\('(?!app_settings)|sbPatch\('(?!app_settings)|fetch\(|anthropic|heygen|elevenlabs|runway|submagic|youtube|upload|publish\w*\(/i.test(block.replace(/no generation, upload or publishing|nothing here generates or publishes|Nothing here generates or publishes/gi, '')) && /PLANS_KEY/.test(block));
-let changed = null;
-try { changed = execSync('git diff --name-only origin/main -- .', { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch { }
-if (changed) {
-  // Same rule as the L1/L2 suite: only the two shared files and the pilot's own folders may change, and in the
-  // shared files only lines inside pilot-owned functions (function _nwfp… / nwfp…) may be edited or removed.
-  const allowed = (f) => f === 'api/ops.js' || f === 'public/index.html' || f.startsWith('projects/nextwave-finance-pilot/') || f.startsWith('tests/projects/nextwave-finance-pilot/') || f.startsWith('docs/projects/nextwave-finance-pilot/');
-  ok('only api/ops.js, public/index.html and the pilot\'s own folders changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', changed.every(allowed), changed.filter(f => !allowed(f)).join(','));
-  const mainText = { 'api/ops.js': execSync('git show origin/main:api/ops.js', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }), 'public/index.html': execSync('git show origin/main:public/index.html', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }) };
-  const ownerOf = (txt, line) => { const i = txt.indexOf(line); if (i < 0) return null; const m = [...txt.slice(0, i).matchAll(/function\s+([A-Za-z0-9_$]+)\s*\(/g)].pop(); return m ? m[1] : null; };
-  const removed = execSync('git diff -U0 origin/main -- api/ops.js public/index.html', { cwd: root, encoding: 'utf8' }).split('\n').filter(l => /^-[^-]/.test(l)).map(l => l.slice(1));
-  const foreign = removed.filter(l => !['api/ops.js', 'public/index.html'].some(f => { const o = ownerOf(mainText[f], l); return o && /^_?nwfp/i.test(o); }));
-  ok('in the shared files, only lines inside pilot-owned functions are edited or removed', foreign.length === 0, foreign.slice(0, 2).join(' | '));
+const scope = checkBranchScope(root); // shared guard (Order 053): every changed line located by line number
+if (scope) {
+  ok('only the shared files and the pilot\'s own folders changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', scope.foreignFiles.length === 0, scope.foreignFiles.join(','));
+  ok('in the shared files, every added, edited or removed line is inside a pilot-owned function or a known pilot hook line', scope.violations.length === 0, scope.violations.slice(0, 2).join(' | '));
 }
 ok('the 5 L3 actions are dispatched and check the CEO session themselves (not in publishing/session gate lists)',
   acts.every(a => src.includes(`if (action === '${a}')`) && !new RegExp(`const (PUBLISH|SESSION)_GATED_ACTIONS = new Set\\(\\[[^\\]]*'${a}'`).test(src)));

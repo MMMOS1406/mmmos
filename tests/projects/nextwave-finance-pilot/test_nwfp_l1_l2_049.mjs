@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { db, call, ceoToken, makeOk, randomUUID } from '../../platform/engineering-harness.mjs';
 import * as P from '../../../projects/nextwave-finance-pilot/lib/pilotState.mjs';
+import { checkBranchScope } from './_scopeGuard.mjs';
 const T = makeOk(); const ok = T.ok;
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const src = readFileSync(join(root, 'api', 'ops.js'), 'utf8');
@@ -135,18 +136,11 @@ ok('the card is read-only: one SHOW button, no inputs, and it calls only nwfp_st
   (sectionAndCard.match(/\/api\/ops\?action=/g) || []).length === 1 && sectionAndCard.includes("_ceoAuthedFetch('/api/ops?action=nwfp_status'"));
 ok('the card is mounted once, in the CEO Engineering Review, right after Stored artifacts', (html.match(/\$\{_nwfpCardSection\(\)\}/g) || []).length === 1 && html.includes('${_engArtifactsSection()}\n      ${_nwfpCardSection()}'));
 
-// ── 8. Scope of the change ──
-let changed = [];
-try { changed = execSync('git diff --name-only origin/main -- .', { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch { changed = null; }
-if (changed) {
-  const allowed = (f) => f === 'api/ops.js' || f === 'public/index.html' || f.startsWith('projects/nextwave-finance-pilot/') || f.startsWith('tests/projects/nextwave-finance-pilot/') || f.startsWith('docs/projects/nextwave-finance-pilot/');
-  ok('only api/ops.js, public/index.html and the pilot\'s own folders are changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', changed.every(allowed), changed.filter(f => !allowed(f)).join(','));
-  const removed = execSync('git diff -U0 origin/main -- api/ops.js public/index.html', { cwd: root, encoding: 'utf8' }).split('\n').filter(l => /^-[^-]/.test(l));
-  // A changed line is allowed only inside a pilot-owned function (function _nwfp… / nwfp…) as it stands on main.
-  const mainText = { 'api/ops.js': execSync('git show origin/main:api/ops.js', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }), 'public/index.html': execSync('git show origin/main:public/index.html', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }) };
-  const ownerOf = (txt, line) => { const i = txt.indexOf(line); if (i < 0) return null; const m = [...txt.slice(0, i).matchAll(/function\s+([A-Za-z0-9_$]+)\s*\(/g)].pop(); return m ? m[1] : null; };
-  const foreign = removed.map(l => l.slice(1)).filter(l => !['api/ops.js', 'public/index.html'].some(f => { const o = ownerOf(mainText[f], l); return o && /^_?nwfp/i.test(o); }));
-  ok('in the shared files, only lines inside pilot-owned functions change (nothing of another feature is removed or edited)', foreign.length === 0, foreign.slice(0, 3).join(' | '));
+// ── 8. Scope of the change (shared guard, Order 053: every changed line located by line number) ──
+const scope = checkBranchScope(root);
+if (scope) {
+  ok('only the shared files and the pilot\'s own folders are changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', scope.foreignFiles.length === 0, scope.foreignFiles.join(','));
+  ok('in the shared files, every added, edited or removed line is inside a pilot-owned function or a known pilot hook line', scope.violations.length === 0, scope.violations.slice(0, 2).join(' | '));
 }
 ok('the 3 pilot actions are dispatched and are not in the publishing or session gate lists (they check the CEO session themselves)',
   ['nwfp_status', 'nwfp_state_get', 'nwfp_state_update'].every(a => src.includes(`if (action === '${a}')`) && !new RegExp(`const (PUBLISH|SESSION)_GATED_ACTIONS = new Set\\(\\[[^\\]]*'${a}'`).test(src)));
