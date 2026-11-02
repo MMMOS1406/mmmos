@@ -22,6 +22,7 @@ import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPromp
 import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProductionUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
 import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
 import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer.mjs'; // SRV-STUDIO-V2-033 Monthly Mix (off unless app_settings.srv_studio_v2_mix is enabled)
+import * as NWFP from '../projects/nextwave-finance-pilot/lib/pilotState.mjs'; // 049 — NextWave Finance Pilot L1 state + L2 CEO status (pure logic in the pilot's own folder)
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -1268,6 +1269,59 @@ async function engineeringArtifactsIndex(req, res) {
     return res.status(200).json({ ok: true, tasks: out });
   } catch (e) {
     return res.status(500).json({ ok: false, error: 'artifacts_index_failed' });
+  }
+}
+// 049 — NextWave Finance Pilot L1 (isolated state) and L2 (CEO read-only status). CEO session only.
+// The pilot's state is ONE app_settings row (NWFP.PILOT_STATE_KEY), written only here by the server and
+// never part of the shared company state. Writes stay refused until the mmm_platform_flags row
+// NWFP.PILOT_WRITES_FLAG is on (missing = OFF), which the CEO turns on only after the pilot write-lock
+// migration (docs/projects/nextwave-finance-pilot/l1-app-settings-pilot-write-lock.sql) is applied.
+async function _nwfpReadStateRow() {
+  const rows = await sbGet(`app_settings?key=eq.${NWFP.PILOT_STATE_KEY}&select=key,value&limit=1`);
+  return rows && rows[0] ? rows[0] : null;
+}
+async function nwfpStatus(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  try {
+    const [row, writes, tasks] = await Promise.all([
+      _nwfpReadStateRow(), _engPlatformFlag(NWFP.PILOT_WRITES_FLAG),
+      sbGet(`engineering_tasks?packet->>business=eq.${NWFP.PILOT_KEY}&select=id,status,packet&limit=500`),
+    ]);
+    const ids = (tasks || []).map(t => String(t.id)).filter(id => _ENG_UUID.test(id));
+    const ev = ids.length ? await sbGet(`brain_evidence?evidence_type=eq.artifact&task_id=in.(${ids.join(',')})&select=task_id,created_at,metadata&limit=2000`) : [];
+    const status = NWFP.buildStatus({ stateValue: row ? row.value : null, writesFlag: writes, tasks, evidence: ev, environment: process.env.VERCEL_ENV || 'local' });
+    return res.status(200).json({ ok: true, status });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'nwfp_status_failed' });
+  }
+}
+async function nwfpStateGet(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  try {
+    const row = await _nwfpReadStateRow();
+    const { state, valid } = NWFP.parseStoredState(row ? row.value : null);
+    return res.status(200).json({ ok: true, state, stored: !!row, valid, writes: (await _engPlatformFlag(NWFP.PILOT_WRITES_FLAG)) ? 'ON' : 'OFF' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'nwfp_state_read_failed' });
+  }
+}
+async function nwfpStateUpdate(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+  if (!(await _engPlatformFlag(NWFP.PILOT_WRITES_FLAG))) {
+    return res.status(409).json({ ok: false, error: 'pilot_state_writes_off', message: 'Finance Pilot state writes are off until the pilot write-lock migration is applied and the CEO switches them on.' });
+  }
+  const body = req.body || {};
+  try {
+    const row = await _nwfpReadStateRow();
+    const r = NWFP.applyPatch(row ? row.value : null, body.patch, { expectedRevision: Number.isInteger(body.expected_revision) ? body.expected_revision : undefined });
+    if (!r.ok) return res.status(r.error === 'revision_conflict' ? 409 : 400).json({ ok: false, error: r.error, errors: r.errors, revision: r.revision });
+    const value = JSON.stringify(r.state);
+    if (row) await sbPatch('app_settings', `key=eq.${NWFP.PILOT_STATE_KEY}`, { value });
+    else await sbInsert('app_settings', { key: NWFP.PILOT_STATE_KEY, value });
+    return res.status(200).json({ ok: true, state: r.state });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'nwfp_state_write_failed' });
   }
 }
 async function _engCeoTaskArtifactRows(taskId) {
@@ -21879,6 +21933,9 @@ export default async function handler(req, res) {
     if (action === 'engineering_task_home_list')   return await engineeringTaskHomeList(req, res);   // v15.0.0
     if (action === 'engineering_task_review_packet') return await engineeringTaskReviewPacket(req, res); // v16.39.0
     if (action === 'engineering_artifacts_index')        return await engineeringArtifactsIndex(req, res);       // 043 — CEO session
+    if (action === 'nwfp_status')                        return await nwfpStatus(req, res);                      // 049 — NextWave Finance Pilot L2, CEO session, read-only
+    if (action === 'nwfp_state_get')                     return await nwfpStateGet(req, res);                    // 049 — NextWave Finance Pilot L1, CEO session, read-only
+    if (action === 'nwfp_state_update')                  return await nwfpStateUpdate(req, res);                 // 049 — NextWave Finance Pilot L1, CEO session, writes OFF by default
     if (action === 'engineering_task_artifacts')         return await engineeringTaskArtifacts(req, res);        // 043 — CEO session
     if (action === 'engineering_artifact_download_link') return await engineeringArtifactDownloadLink(req, res); // 043 — CEO session, 120 s link
     if (action === 'production_deployment_authorize') return await productionDeploymentAuthorize(req, res); // v16.40.0 — CEO-only, see function comment
