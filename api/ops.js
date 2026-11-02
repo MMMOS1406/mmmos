@@ -1284,13 +1284,13 @@ async function _nwfpReadStateRow() {
 async function nwfpStatus(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
   try {
-    const [row, writes, tasks] = await Promise.all([
-      _nwfpReadStateRow(), _engPlatformFlag(NWFP.PILOT_WRITES_FLAG),
+    const [row, writes, planWrites, tasks] = await Promise.all([
+      _nwfpReadStateRow(), _engPlatformFlag(NWFP.PILOT_WRITES_FLAG), _engPlatformFlag(NWFP_PLAN.PLAN_WRITES_FLAG),
       sbGet(`engineering_tasks?packet->>business=eq.${NWFP.PILOT_KEY}&select=id,status,packet&limit=500`),
     ]);
     const ids = (tasks || []).map(t => String(t.id)).filter(id => _ENG_UUID.test(id));
     const ev = ids.length ? await sbGet(`brain_evidence?evidence_type=eq.artifact&task_id=in.(${ids.join(',')})&select=task_id,created_at,metadata&limit=2000`) : [];
-    const status = NWFP.buildStatus({ stateValue: row ? row.value : null, writesFlag: writes, tasks, evidence: ev, environment: process.env.VERCEL_ENV || 'local' });
+    const status = NWFP.buildStatus({ stateValue: row ? row.value : null, writesFlag: writes, planWritesFlag: planWrites, tasks, evidence: ev, environment: process.env.VERCEL_ENV || 'local' });
     return res.status(200).json({ ok: true, status });
   } catch (e) {
     return res.status(500).json({ ok: false, error: 'nwfp_status_failed' });

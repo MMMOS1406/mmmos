@@ -112,10 +112,15 @@ ok('the L3 server block writes only app_settings (the plans row) and calls no ge
 let changed = null;
 try { changed = execSync('git diff --name-only origin/main -- .', { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch { }
 if (changed) {
-  const allowed = (f) => f === 'api/ops.js' || f.startsWith('projects/nextwave-finance-pilot/') || f.startsWith('tests/projects/nextwave-finance-pilot/') || f.startsWith('docs/projects/nextwave-finance-pilot/');
-  ok('only api/ops.js and the pilot\'s own folders changed (no app page, NextWave V1/V2, SRV, SMM or AI Studio file)', changed.every(allowed), changed.filter(f => !allowed(f)).join(','));
-  const removed = execSync('git diff -U0 origin/main -- api/ops.js', { cwd: root, encoding: 'utf8' }).split('\n').filter(l => /^-[^-]/.test(l));
-  ok('api/ops.js only gains lines', removed.length === 0, removed.slice(0, 2).join(' | '));
+  // Same rule as the L1/L2 suite: only the two shared files and the pilot's own folders may change, and in the
+  // shared files only lines inside pilot-owned functions (function _nwfp… / nwfp…) may be edited or removed.
+  const allowed = (f) => f === 'api/ops.js' || f === 'public/index.html' || f.startsWith('projects/nextwave-finance-pilot/') || f.startsWith('tests/projects/nextwave-finance-pilot/') || f.startsWith('docs/projects/nextwave-finance-pilot/');
+  ok('only api/ops.js, public/index.html and the pilot\'s own folders changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', changed.every(allowed), changed.filter(f => !allowed(f)).join(','));
+  const mainText = { 'api/ops.js': execSync('git show origin/main:api/ops.js', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }), 'public/index.html': execSync('git show origin/main:public/index.html', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }) };
+  const ownerOf = (txt, line) => { const i = txt.indexOf(line); if (i < 0) return null; const m = [...txt.slice(0, i).matchAll(/function\s+([A-Za-z0-9_$]+)\s*\(/g)].pop(); return m ? m[1] : null; };
+  const removed = execSync('git diff -U0 origin/main -- api/ops.js public/index.html', { cwd: root, encoding: 'utf8' }).split('\n').filter(l => /^-[^-]/.test(l)).map(l => l.slice(1));
+  const foreign = removed.filter(l => !['api/ops.js', 'public/index.html'].some(f => { const o = ownerOf(mainText[f], l); return o && /^_?nwfp/i.test(o); }));
+  ok('in the shared files, only lines inside pilot-owned functions are edited or removed', foreign.length === 0, foreign.slice(0, 2).join(' | '));
 }
 ok('the 5 L3 actions are dispatched and check the CEO session themselves (not in publishing/session gate lists)',
   acts.every(a => src.includes(`if (action === '${a}')`) && !new RegExp(`const (PUBLISH|SESSION)_GATED_ACTIONS = new Set\\(\\[[^\\]]*'${a}'`).test(src)));

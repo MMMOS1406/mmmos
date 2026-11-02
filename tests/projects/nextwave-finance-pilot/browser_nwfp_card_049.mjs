@@ -52,7 +52,7 @@ try {
   ok('the card shows identity, REGISTERED, NOT OPERATIONAL, generation and publishing DISABLED',
     out.text.includes('NextWave Finance Pilot (nextwave_finance_pilot)') && out.badges.includes('REGISTERED') && out.badges.includes('NOT OPERATIONAL') && out.badges.filter(b => b === 'DISABLED').length === 2, out.badges.join(','));
   ok('all 8 lifecycle stages are listed; only registration is LIVE', out.stages.length === 8 && out.badges.filter(b => b === 'LIVE').length === 1);
-  ok('L1 shows DEPLOYED \u2014 WRITES OFF and L2 DEPLOYED \u2014 READ ONLY; checkpoint 050', out.badges.includes('DEPLOYED \u2014 WRITES OFF') && out.badges.includes('DEPLOYED \u2014 READ ONLY') && out.text.includes('050'), out.badges.join(','));
+  ok('L1 DEPLOYED \u2014 WRITES OFF, L2 DEPLOYED \u2014 READ ONLY, L3 DEPLOYED \u2014 SAVING OFF; checkpoint 052', out.badges.includes('DEPLOYED \u2014 WRITES OFF') && out.badges.includes('DEPLOYED \u2014 READ ONLY') && out.badges.includes('DEPLOYED \u2014 SAVING OFF') && out.text.includes('052'), out.badges.join(','));
   ok('the card is read-only (one button, no inputs)', out.buttons === 1 && out.inputs === 0);
   ok('no page errors and no outside requests while rendering', pageErrors.length === 0 && blocked.length === blockedBefore, pageErrors.concat(blocked.slice(blockedBefore)).join(' | ').slice(0, 300));
   if (shot) {
