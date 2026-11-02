@@ -31246,7 +31246,7 @@ function _nwfpCardSection(){
     </div><div id="nwfp-card-body" style="margin-top:8px"></div></div>`;
 }
 function _nwfpBadge(t){
-  const c=({'LIVE':'#22c55e','REGISTERED':'#22c55e','PREVIEW READY':'#38bdf8','NOT OPERATIONAL':'#f59e0b','NOT STARTED':'#8b9cc4','DISABLED':'#ef4444','OFF':'#ef4444','ON':'#22c55e'})[t]||'#8b9cc4';
+  const c=({'LIVE':'#22c55e','REGISTERED':'#22c55e','DEPLOYED \u2014 WRITES OFF':'#22c55e','DEPLOYED \u2014 READ ONLY':'#22c55e','DEPLOYED \u2014 WRITES ON':'#f59e0b','PREVIEW READY':'#38bdf8','NOT OPERATIONAL':'#f59e0b','NOT STARTED':'#8b9cc4','DISABLED':'#ef4444','OFF':'#ef4444','ON':'#22c55e'})[t]||'#8b9cc4';
   return `<span data-nwfp-badge="${escHTML(t)}" style="display:inline-block;padding:1px 7px;border-radius:5px;border:1px solid ${c};color:${c};font-size:9px;font-weight:800;letter-spacing:0.4px">${escHTML(t)}</span>`;
 }
 function _nwfpCardHtml(st){
