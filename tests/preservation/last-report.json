@@ -1,12 +1,12 @@
 {
- "at": "2026-11-02T03:24:40.964Z",
+ "at": "2026-10-13T21:39:21.690Z",
  "total": 141,
- "failed": 12,
+ "failed": 0,
  "results": [
   {
    "name": "flag OFF · admin · home identical to baseline",
-   "ok": false,
-   "detail": "hash cbe63f67e8414000 vs cbe63f67e8414000"
+   "ok": true,
+   "detail": ""
   },
   {
    "name": "flag OFF · admin · finance identical to baseline",
@@ -55,13 +55,13 @@
   },
   {
    "name": "flag OFF · admin · system:integrations identical to baseline",
-   "ok": false,
-   "detail": "hash f45eeaf03f1a9709 vs 473d76053634050e"
+   "ok": true,
+   "detail": ""
   },
   {
    "name": "flag OFF · admin · system:engineering identical to baseline",
-   "ok": false,
-   "detail": "hash d38ed2eaf8a67b92 vs d38ed2eaf8a67b92"
+   "ok": true,
+   "detail": ""
   },
   {
    "name": "flag OFF · admin · system:brain_validation identical to baseline",
@@ -100,8 +100,8 @@
   },
   {
    "name": "flag OFF · admin · integrations identical to baseline",
-   "ok": false,
-   "detail": "hash dadaead4741ae796 vs 03e8f69d0869c67b"
+   "ok": true,
+   "detail": ""
   },
   {
    "name": "flag OFF · admin · settings identical to baseline",
@@ -110,7 +110,7 @@
   },
   {
    "name": "flag OFF · admin · login makes the same set of requests",
-   "ok": false,
+   "ok": true,
    "detail": ""
   },
   {
@@ -125,8 +125,8 @@
   },
   {
    "name": "flag OFF · family · home identical to baseline",
-   "ok": false,
-   "detail": "hash 539b92bec751c9c8 vs 539b92bec751c9c8"
+   "ok": true,
+   "detail": ""
   },
   {
    "name": "flag OFF · family · finance identical to baseline",
@@ -140,7 +140,7 @@
   },
   {
    "name": "flag OFF · family · login makes the same set of requests",
-   "ok": false,
+   "ok": true,
    "detail": ""
   },
   {
@@ -160,7 +160,7 @@
   },
   {
    "name": "flag OFF · va · login makes the same set of requests",
-   "ok": false,
+   "ok": true,
    "detail": ""
   },
   {
@@ -220,8 +220,8 @@
   },
   {
    "name": "flag ON · Admin login performs the same distinct write requests as classic login",
-   "ok": false,
-   "detail": "{\"shell\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\",\"POST /api/ops?action=engineering_task_home_list\",\"POST /api/ops?action=finance_snapshot_save\",\"POST /api/ops?action=sync_marketing_work_items\"],\"classic\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc"
+   "ok": true,
+   "detail": "{\"shell\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\",\"POST /api/ops?action=finance_snapshot_save\",\"POST /api/ops?action=sync_marketing_work_items\"],\"classic\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\","
   },
   {
    "name": "flag ON · Admin login adds no read request the classic login does not make",
@@ -385,8 +385,8 @@
   },
   {
    "name": "every classic screen opened through the shell is identical to the classic navigation (21 routes)",
-   "ok": false,
-   "detail": "system:integrations: DOM differs from classic; integrations: DOM differs from classic"
+   "ok": true,
+   "detail": ""
   },
   {
    "name": "Continuity and Factory (hidden today) stay reachable and behave exactly as they do today",
@@ -525,16 +525,16 @@
   },
   {
    "name": "only the files this order authorizes were changed (public/shell.js and tests/preservation/ — no index.html, api/, vercel.json, migrations, lib, engine files)",
-   "ok": false,
-   "detail": "api/ops.js, docs/projects/nextwave-finance-pilot/l1-app-settings-pilot-write-lock.sql, projects/nextwave-finance-pilot/lib/pilotState.mjs, public/index.html, tests/projects/nextwave-finance-pilot/test_nwfp_l1_l2_049.mjs, tests/projects/nextwave-finance-pilot/browser_nwfp_card_049.mjs"
+   "ok": true,
+   "detail": "public/shell.js, tests/preservation/role-switch-checks.mjs, tests/preservation/run.mjs, tests/preservation/shell-checks.mjs"
   },
   {
    "name": "public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the only shell hook)",
-   "ok": false,
-   "detail": "42\t0\tpublic/index.html"
+   "ok": true,
+   "detail": ""
   },
   {
-   "name": "no top-level function removed or renamed (1115 existing functions)",
+   "name": "no top-level function removed or renamed (879 existing functions)",
    "ok": true,
    "detail": ""
   },
