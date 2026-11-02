@@ -15,20 +15,34 @@ export const PILOT_WRITES_FLAG = 'nwfp_state_writes'; // mmm_platform_flags row;
 export const PILOT_DISPLAY_NAME = 'NextWave Finance Pilot';
 export const SCHEMA_VERSION = 1;
 
-// Evidence-based stage manifest. A stage may say LIVE only when a checkpoint verified its production
-// activation; the release PR for a stage updates its line here together with the evidence reference.
-export const LATEST_VERIFIED_CHECKPOINT = '048';
+// Evidence-based stage manifest. The manifest records only what a checkpoint VERIFIED in production;
+// each line carries its evidence. What the card shows is then derived at runtime from that manifest plus
+// live facts (stageDisplayStatus): outside production nothing is shown as deployed or live, and L1's
+// label reflects the real value of the write switch.
+export const LATEST_VERIFIED_CHECKPOINT = '050';
 export const STAGES = Object.freeze([
   { id: 'registration', label: 'Registration (business key, folders, labels)', status: 'LIVE', evidence: 'Checkpoint 048: PR #75, merge 92281cf, production dpl_6iPTEc65' },
-  { id: 'L1', label: 'L1 Isolated state', status: 'PREVIEW READY', evidence: 'Checkpoint 049: built and tested, not released; writes OFF until the write-lock migration and CEO switch' },
-  { id: 'L2', label: 'L2 CEO read-only card', status: 'PREVIEW READY', evidence: 'Checkpoint 049: built and tested, not released' },
+  { id: 'L1', label: 'L1 Isolated state', status: 'DEPLOYED', evidence: 'Checkpoint 050: PR #77, merge 9efd0df, production dpl_8jPjjXVEz; write-lock migration 20261102034457 applied and verified' },
+  { id: 'L2', label: 'L2 CEO read-only card', status: 'DEPLOYED', evidence: 'Checkpoint 050: PR #77, merge 9efd0df, production dpl_8jPjjXVEz' },
   { id: 'L3', label: 'L3 Content planning (no generation)', status: 'NOT STARTED', evidence: null },
   { id: 'L4', label: 'L4 Paid generation (sandboxed)', status: 'NOT STARTED', evidence: null },
   { id: 'L5', label: 'L5 Review and approval', status: 'NOT STARTED', evidence: null },
   { id: 'L6', label: 'L6 Publishing (per video)', status: 'NOT STARTED', evidence: null },
   { id: 'L7', label: 'L7 Analytics', status: 'NOT STARTED', evidence: null },
 ]);
-export const STAGE_STATUSES = Object.freeze(['LIVE', 'PREVIEW READY', 'NOT STARTED']);
+export const STAGE_STATUSES = Object.freeze(['LIVE', 'DEPLOYED', 'PREVIEW READY', 'NOT STARTED']); // allowed in the manifest
+export const DISPLAY_STATUSES = Object.freeze(['LIVE', 'DEPLOYED \u2014 WRITES OFF', 'DEPLOYED \u2014 WRITES ON', 'DEPLOYED \u2014 READ ONLY', 'PREVIEW READY', 'NOT STARTED']);
+// What the card shows for one stage. Derived, never assumed:
+// - outside production, LIVE/DEPLOYED become PREVIEW READY;
+// - L1 shows the actual write switch; L2 is read-only by construction.
+export function stageDisplayStatus(stage, { isProduction, writesFlag }) {
+  if ((stage.status === 'LIVE' || stage.status === 'DEPLOYED') && !isProduction) return 'PREVIEW READY';
+  if (stage.status === 'DEPLOYED') {
+    if (stage.id === 'L1') return writesFlag ? 'DEPLOYED \u2014 WRITES ON' : 'DEPLOYED \u2014 WRITES OFF';
+    return 'DEPLOYED \u2014 READ ONLY';
+  }
+  return stage.status;
+}
 export const LIFECYCLE_STAGES = Object.freeze(['registered', 'planning']); // what L1 may record; later stages add more
 
 const MAX_NOTES = 20, MAX_NOTE_LEN = 500, MAX_TOPICS = 50, MAX_TOPIC_LEN = 200;
@@ -114,8 +128,7 @@ export function buildStatus({ stateValue, writesFlag, tasks, evidence, environme
   const isProduction = environment === 'production';
   const stages = STAGES.map(s => ({
     id: s.id, label: s.label, evidence: s.evidence,
-    // Outside production nothing is shown as LIVE, whatever the manifest says.
-    status: s.status === 'LIVE' && !isProduction ? 'PREVIEW READY' : s.status,
+    status: stageDisplayStatus(s, { isProduction, writesFlag: !!writesFlag }),
   }));
   const anyOperational = stages.some(s => /^L[3-7]$/.test(s.id) && s.status === 'LIVE');
   return {
