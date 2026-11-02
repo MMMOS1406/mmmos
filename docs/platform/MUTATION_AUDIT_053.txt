@@ -1,0 +1,36 @@
+FINANCE PILOT SCOPE-TEST MUTATION AUDIT (Order 053, Phase 1) - 2026-11-02
+
+PURPOSE: decide whether PR #80's change to the L3 changed-files scope check weakens protection
+(Order 053 stop condition). Method: apply one deliberate non-pilot change at a time to a disposable
+worktree and run the scope checks. Nothing was pushed or deployed; worktrees were discarded.
+
+MUTATIONS
+M1 edit an existing line inside deleteAsset (api/ops.js, AI Creation Studio asset library)
+M2 edit an existing line inside _engFmtBytes (public/index.html, Engineering; directly below the pilot card code)
+M3 add a new line inside _engArtifactsLoad (public/index.html, Engineering)
+M4 add a new line inside deleteAsset (api/ops.js)
+M6 add a comment inside nwfpStateGet (pilot-owned; must be allowed)
+
+RESULTS
+                         M1        M2        M3        M4        M6
+L3 rule on main (old)    caught    caught    caught    MISSED    allowed
+L3 rule in PR #80        caught    MISSED    MISSED    MISSED    allowed
+L1/L2 rule on main       caught    MISSED    MISSED    MISSED    allowed
+Strengthened guard #81   caught    caught    caught    caught    allowed
+
+CAUSE: the #78/#80 rule located a changed line by searching main for its text and credited it to the last
+function declared before it (M2 was credited to the pilot card function above it); additions were not checked.
+
+DECISION: PR #80 weakens the L3 scope check (M2, M3) -> Order 053 stop condition -> PR #80 NOT merged.
+Note: the same weak rule has been on main since PR #78 (L1/L2 suite). Test-only; no production code affected.
+Every pilot release (#77, #78, #79) was also reviewed file-by-file and line-by-line, and the strengthened guard
+confirms all three are clean, so no non-pilot change slipped through.
+
+FIX (draft PR #81, head 090cfd1; PR #80's 8 files unchanged + 4 test files):
+- tests/projects/nextwave-finance-pilot/_scopeGuard.mjs: every added/edited/removed line in api/ops.js and
+  public/index.html is located by LINE NUMBER and mapped to its enclosing top-level function (main for removals,
+  branch for additions). Allowed only: pilot-owned functions (nwfp..., _nwfp...) and three exact pilot hook lines
+  (pilot module import, an nwfp_ router line, the card mount); comments/blank lines only directly above those.
+- Both pilot suites use it. Self-test test_nwfp_scope_guard_053.mjs 14/14 (synthetic rules + real history:
+  #77/#78/#79 clean, non-pilot #76 flagged).
+- The guard never relaxes the file allowlist: files outside the pilot folders and the two shared files are still refused.

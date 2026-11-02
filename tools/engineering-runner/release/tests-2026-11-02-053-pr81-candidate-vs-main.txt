@@ -1,0 +1,20 @@
+main053 engineering-review-escaping    26 passed, 0 failed
+main053 engineering-r2-screens         9 passed, 0 failed
+main053 browser_nwfp_card              8 passed, 0 failed
+main053 preservation: 141 checks, 10 failed
+mutGuard engineering-review-escaping    26 passed, 0 failed
+mutGuard engineering-r2-screens         9 passed, 0 failed
+mutGuard browser_nwfp_card              8 passed, 0 failed
+mutGuard preservation: 141 checks, 12 failed
+preservation FAIL diff main vs candidate:
+10a11,12
+> FAIL  only the files this order authorizes were changed (public/shell.js and tests/preservation/ —
+> FAIL  public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the o
+  DIFF test_youtube_oauth_reliability.mjs           C 1 FAILED: diff scope: this patch touches only api/youtube/call | M 0 25 passed, 0 failed
+  DIFF test_nwfp_card_evidence_051.mjs              C 0 14 passed, 0 failed | M 0 13 passed, 0 failed
+  NEW test_nwfp_scope_guard_053.mjs                C 0 14 passed, 0 failed | M None 
+  DIFF test_srv_studio_v2_037_suno_steps.mjs        C 1 21 passed, 3 failed | M 1 22 passed, 2 failed
+candidate (PR #80 + guard) vs main a75e6d9: identical 61 of 65
+ALLDONE
+
+[exited with code 0]
