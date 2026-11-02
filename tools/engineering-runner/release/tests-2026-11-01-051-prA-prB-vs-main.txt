@@ -1,0 +1,48 @@
+A+B merge clean 6dd67d5
+suites main 62
+main051 engineering-review-escaping    26 passed, 0 failed
+main051 engineering-r2-screens         9 passed, 0 failed
+main051 browser_nwfp_card              7 passed, 0 failed
+main051 preservation: 141 checks, 10 failed
+nwfp-card-051 engineering-review-escaping    26 passed, 0 failed
+nwfp-card-051 engineering-r2-screens         9 passed, 0 failed
+nwfp-card-051 browser_nwfp_card              8 passed, 0 failed
+nwfp-card-051 preservation: 141 checks, 12 failed
+nwfp-l3 engineering-review-escaping    26 passed, 0 failed
+nwfp-l3 engineering-r2-screens         9 passed, 0 failed
+nwfp-l3 browser_nwfp_card              7 passed, 0 failed
+nwfp-l3 preservation: 141 checks, 11 failed
+comb051 engineering-review-escaping    26 passed, 0 failed
+comb051 engineering-r2-screens         9 passed, 0 failed
+comb051 browser_nwfp_card              8 passed, 0 failed
+comb051 preservation: 141 checks, 12 failed
+preservation FAIL diff main vs nwfp-card-051:
+10a11,12
+> FAIL  only the files this order authorizes were changed (public/shell.js and tests/preservation/ —
+> FAIL  public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the o
+preservation FAIL diff main vs nwfp-l3:
+10a11
+> FAIL  only the files this order authorizes were changed (public/shell.js and tests/preservation/ —
+preservation FAIL diff main vs comb051:
+10a11,12
+> FAIL  only the files this order authorizes were changed (public/shell.js and tests/preservation/ —
+> FAIL  public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the o
+== A card
+  DIFF test_youtube_oauth_reliability.mjs           X 1 FAILED: diff scope: this patch touches only api/youtube/call | M 0 25 passed, 0 failed
+  NEW test_nwfp_card_evidence_051.mjs              X 0 13 passed, 0 failed | M None 
+  DIFF test_srv_studio_v2_037_suno_steps.mjs        X 1 21 passed, 3 failed | M 1 22 passed, 2 failed
+  identical to main: 60 of 63
+== B L3
+  DIFF test_youtube_oauth_reliability.mjs           X 1 FAILED: diff scope: this patch touches only api/youtube/call | M 0 25 passed, 0 failed
+  NEW test_nwfp_l3_planning_051.mjs                X 0 37 passed, 0 failed | M None 
+  DIFF test_srv_studio_v2_037_suno_steps.mjs        X 1 21 passed, 3 failed | M 1 22 passed, 2 failed
+  identical to main: 60 of 63
+== A+B
+  DIFF test_youtube_oauth_reliability.mjs           X 1 FAILED: diff scope: this patch touches only api/youtube/call | M 0 25 passed, 0 failed
+  NEW test_nwfp_card_evidence_051.mjs              X 0 13 passed, 0 failed | M None 
+  NEW test_nwfp_l3_planning_051.mjs                X 1 36 passed, 1 failed | M None 
+  DIFF test_srv_studio_v2_037_suno_steps.mjs        X 1 21 passed, 3 failed | M 1 22 passed, 2 failed
+  identical to main: 60 of 64
+ALLDONE
+
+[exited with code 0]

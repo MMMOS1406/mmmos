@@ -1,0 +1,193 @@
+START CHECKPOINT 051
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2 / NextWave Finance Pilot
+DATE: 2026-11-01 (America/New_York; work ran 03:55-04:35 UTC on 2026-11-02)
+EXECUTION ORDER: ORDER 051 (card evidence correction; L3 content planning; preview-only)
+
+EXECUTIVE SUMMARY:
+- Two separate draft PRs, both CLEAN with checks SUCCESS. Not merged; production unchanged.
+  - PR #78 (A): the CEO card now shows the verified Checkpoint 050 evidence.
+    - Registration LIVE; L1 DEPLOYED - WRITES OFF; L2 DEPLOYED - READ ONLY; latest verified checkpoint 050.
+    - Statuses are derived at runtime from the evidence manifest plus live facts (production or not, the actual write switch).
+  - PR #79 (B): L3 content planning.
+    - Deterministic drafts, a 10-item Creative Quality checklist and plan review.
+    - No AI, media, generation or publishing.
+    - Saving is OFF (separate switch nwfp_plan_writes, absent); no migration needed (plans sit inside the applied write-lock).
+- Creative Quality: an original emergency-fund example passes 10/10. Acceptance criteria for production are documented.
+- Correction:
+  - 5 .md documents that Checkpoints 047 and 048 reported as committed were silently excluded by .gitignore (*.md);
+  - they are now committed unchanged on the 051 checkpoint branch;
+  - the Creative Quality document was force-added in PR #79.
+- Security: the TRUNCATE grants are low and latent; remediation prepared, not applied. Preview exposure unchanged. The YouTube autosync after stage 2 is NOT YET OBSERVED.
+
+CEO CARD CORRECTION: PREVIEW READY (draft PR #78, head c85e517)
+- Manifest: L1 and L2 marked DEPLOYED, with evidence (PR #77 merge 9efd0df, dpl_8jPjjXVEz, migration 20261102034457); latest verified checkpoint 050.
+- Display rules (stageDisplayStatus):
+  - outside production, nothing shows LIVE or DEPLOYED;
+  - L1 shows the real switch (DEPLOYED - WRITES OFF, or WRITES ON if ever enabled);
+  - L2 shows DEPLOYED - READ ONLY;
+  - L3-L7 NOT STARTED.
+- Changed:
+  - pilotState.mjs (pilot folder);
+  - one line inside the pilot-owned _nwfpBadge in public/index.html (badge colours);
+  - pilot tests.
+- No state, action, permission or data change.
+- Tests: new evidence suite 13/13; L1/L2 suite 34/34 (expectations updated); browser 8/8; local screenshot docs/projects/nextwave-finance-pilot/evidence/nwfp-card-051-local.png (on the PR branch).
+
+L3 PLANNING IMPLEMENTATION: PREVIEW READY, saving OFF (draft PR #79, head c38cc47)
+- projects/nextwave-finance-pilot/lib/contentPlan.mjs (pure):
+  - the plan holds topic category (11 finance-education categories), audience and level, learning objective, Long-form outline (6-20 min, 3-12 sections), Short companion (15-60 s, linked to the Long), script structure (hook through disclaimer), visual direction, compliance (disclaimer, sources, human claims check), originality and review status;
+  - deterministic draft skeleton; placeholders keep a draft "not ready" until a person fills them.
+- Review flow: draft -> ready_for_review (only when all 10 checks pass) -> accepted_for_planning, or back via changes_requested.
+  - Accepting changes only the status and triggers nothing.
+- api/ops.js (additive only), all CEO session only:
+  - nwfp_plan_draft and nwfp_plan_evaluate store nothing;
+  - nwfp_plan_list is read-only;
+  - nwfp_plan_save and nwfp_plan_review write ONE row, app_settings.nextwave_finance_pilot_content_plans, inside the applied write-lock prefix.
+  - Save and review answer 409 pilot_plan_writes_off unless nwfp_plan_writes is on. That switch is independent of the L1 state switch.
+- No migration, no shared-state change, no generation, no vendor, no publishing.
+
+CREATIVE QUALITY REVIEW:
+- Example (stand-in): "Emergency fund: how many months of expenses do you actually need?"
+  - 10-minute Long in 7 sections;
+  - 45-second Short ("the essential expenses test") linked to it;
+  - jar and pay-day calendar visuals; brand palette;
+  - CFPB and FDIC sources; disclaimer; human claims check.
+- Checklist 10/10 PASS: topic relevance, responsible framing, financial accuracy, audience usefulness, originality, Long/Short relationship, visual storytelling, brand consistency, distinct from AI/tech, structure.
+- The tests prove rejection of guarantees, risk-free, tickers, buy/sell instructions, hype, missing disclaimer, sources or claims check, unconfirmed originality, an unlinked Short and AI/tech framing.
+- Acceptance criteria for production (12 items; 5 enforced in code, the rest by human review) are in docs/projects/nextwave-finance-pilot/CREATIVE_QUALITY_CRITERIA_051.md (PR #79).
+- The brand profile is a proposal pending Creative Quality sign-off. No benchmark material was copied; no paid asset was generated.
+
+TEST RESULTS:
+- Main 9efd0df baseline: 62 suites.
+- PR #78:
+  - 60 of 63 identical to main; new 13/13;
+  - Engineering Review browser 26/26 and 9/9; card browser 8/8.
+- PR #79:
+  - 60 of 63 identical to main; new 37/37;
+  - Engineering Review browser 26/26 and 9/9; card browser 7/7.
+- Differences in both: only the known file-scope self-checks (YouTube diff-scope, SRV Studio 037, and the CEO-008 preservation scope checks).
+- PR #78 + #79 together:
+  - merge clean;
+  - all functional checks pass;
+  - the only extra difference is L3's own changed-files scope check reacting to PR #78's app-page line (expected when combined; each PR alone passes).
+- NextWave V1/V2 and SRV suites identical to main in every run.
+
+CROSS-BUSINESS ISOLATION:
+- L3 writes only its own plans row.
+- The stand-in proves:
+  - every other app_settings row is byte-identical (shared state, NextWave V2, SRV Studio V2, the L1 pilot state);
+  - no other table changes;
+  - no outside call is made (no AI, media, YouTube or publishing).
+- Plans cannot carry generation, publishing, business or foreign fields. Foreign stored data is ignored.
+- Changed files:
+  - PR #78: the pilot module, one pilot-owned line of the app page, pilot tests;
+  - PR #79: additions to api/ops.js plus pilot folders only.
+- No NextWave V1/V2, SRV, SMM or AI Studio file.
+
+SECURITY VERIFICATION:
+- Production: verifier 19/19; the pilot actions refuse anonymous callers.
+- eng_runner OFF, eng_adviser_connect OFF, nwfp_state_writes absent, nwfp_plan_writes absent.
+- GitHub Actions OFF.
+- Write-lock in place (3 policies); 0 pilot rows; 0 pilot tasks; 0 active advisers. No migration (last 20261102034457).
+- TRUNCATE review (docs/platform/SECURITY_FOLLOWUP_051.md):
+  - anon and authenticated hold TRUNCATE, REFERENCES and TRIGGER on 57 of 95 public tables (Supabase default privileges); RLS does not govern TRUNCATE;
+  - not reachable today: the roles cannot log in; PostgREST has no TRUNCATE; no function contains TRUNCATE or runs dynamic SQL for anon; no pg_graphql;
+  - risk LOW and latent; revocation SQL, verification and rollback prepared, not applied.
+- Related pre-existing exposure: the public key can write any app_settings row outside the locked prefixes.
+- Nothing changed: no grants, RLS, secrets, environments or deployments.
+
+PRODUCTION HEALTH:
+- main 9efd0df; dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx READY; verifier 19/19.
+- Environment targets unchanged since stage 3a (24 records; 9 reach Preview).
+- YouTube: 0 sync errors since 00:00Z.
+- Production unchanged by this order.
+
+YOUTUBE AUTOSYNC RESULT: NOT YET OBSERVED
+- The last sync was 00:50Z on 2026-11-02 (before stage 2). The first post-stage-2 run is due 00:00 UTC 2026-11-03.
+
+DRAFT PRS:
+- A: https://github.com/MMMOS1406/mmmos/pull/78 (draft, CLEAN, checks SUCCESS)
+- B: https://github.com/MMMOS1406/mmmos/pull/79 (draft, CLEAN, checks SUCCESS)
+
+BRANCHES:
+- mmmos-eng/nwfp-card-evidence-051 (A)
+- mmmos-eng/nwfp-l3-planning-051 (B)
+- mmmos-eng/r2-checkpoint-051 (reports)
+
+COMMIT SHAS:
+- A head c85e517e1e291e01e62670846e75fc867d9d8220
+- B head c38cc472ed633a0d645bf35fc9389dc925fc5c89
+- Checkpoint branch commit: reported in the chat message.
+
+PREVIEW OR LOCAL EVIDENCE:
+- Local:
+  - stand-in data only;
+  - card screenshot (PR #78);
+  - all test outputs in tools/engineering-runner/release/*051*.
+- Previews: GitHub built previews for both PRs automatically on push; both checks succeeded.
+  - They sit behind preview login and were not used for validation, because they share the production database.
+  - Both switches are absent, so no write path is open.
+
+H1-H8 PROGRESS:
+- H1 COMPLETE 2026-10-31
+- H2 COMPLETE 2026-10-31
+- H3 COMPLETE 2026-10-31
+- H4 AWAITING CEO - GitHub App
+- H5 COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 AWAITING CEO - runner security probe
+- H7 COMPLETE 2026-11-01
+- H8 ON HOLD - ChatGPT Business
+
+NEXTWAVE L1-L7 PROGRESS:
+- Registration LIVE.
+- L1 DEPLOYED - WRITES OFF.
+- L2 DEPLOYED - CEO READ-ONLY VIEW (card correction in PR #78).
+- Write-lock APPLIED AND VERIFIED.
+- L3 PREVIEW READY, saving OFF (PR #79).
+- L4-L7 NOT STARTED.
+- Overall: REGISTERED - NOT YET OPERATIONAL.
+
+REMAINING RISKS:
+- The production card understates L1/L2 until PR #78 is released.
+- Preview exposure:
+  - 93 READY previews; 88 built before stages 1-3a hold old values (behind preview login);
+  - SUPABASE_SERVICE_KEY still reaches previews (stage 4).
+- TRUNCATE grants (low, latent), and public-key writes to unlocked app_settings keys (pre-existing).
+- First post-stage-2 autosync not yet observed.
+- SRV package (6 actions) and P2 (32 actions) still ungated.
+- Process risk, now mitigated: .gitignore excludes *.md, so future .md reports must be force-added. Checkpoints now list committed files from git, not from the folder.
+
+PM DECISIONS REQUIRED:
+1. Recommend the releases of PR #78 and PR #79 (independent; either order).
+2. Approve the proposed brand profile, or send it to Creative Quality for edits.
+3. Decide whether the TRUNCATE revocation goes to the CEO.
+4. Order the SRV auth package and P2 groups.
+5. Order the next Finance Pilot step (an L3 plan editor UI, or L5) after L3 release.
+
+CEO DECISIONS REQUIRED:
+1. Release PR #78 (card correction).
+2. Release PR #79 (L3, saving OFF).
+3. Later and separately: turn on nwfp_plan_writes and/or nwfp_state_writes.
+4. H6 and H4.
+5. Optional: TRUNCATE revocation (database change); stage 4; old previews.
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_051.txt on branch mmmos-eng/r2-checkpoint-051 (based on 050 @ 18b9f5e).
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - docs/platform/SECURITY_FOLLOWUP_051.md
+  - recovered unchanged: docs/platform/RELEASE_READINESS_047.md, SRV_AUTH_REMEDIATION_PACKAGE_047.md, AUTH_REMEDIATION_P2_PLAN_047.md; tools/engineering-runner/preview-secrets/PREVIEW_SECRET_STAGES_047.md; docs/projects/nextwave-finance-pilot/LIFECYCLE_INTEGRATION_PLAN_048.md
+  - tools/engineering-runner/release/: verify-2026-11-01-051.txt, test-nwfp-card-evidence-2026-11-01-051.txt, test-nwfp-l3-planning-2026-11-01-051.txt, tests-2026-11-01-051-prA-prB-vs-main.txt
+  - tools/engineering-runner/preview-secrets/env-051.targets-only.json
+
+ARCHIVE VERIFICATION: checkpoint and tracker stored on MMMOS task ec27ddf6 with server SHA-256 (reported in the chat message). Scope not expanded.
+
+NEXT ACTION:
+- The PM reviews PR #78 and #79 and recommends the releases.
+- The CEO decides.
+- Claude Code checks the 00:00 UTC 2026-11-03 autosync and executes only what is approved.
+
+ACTION OWNER: ChatGPT PM (review, recommendations) -> CEO (PR #78, PR #79, H4, H6) -> Claude Code (autosync check, execution, Checkpoint 052)
+
+END CHECKPOINT 051

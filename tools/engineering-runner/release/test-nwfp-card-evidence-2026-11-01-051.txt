@@ -1,0 +1,14 @@
+PASS production, writes OFF: Registration LIVE, L1 DEPLOYED — WRITES OFF, L2 DEPLOYED — READ ONLY, L3-L7 NOT STARTED
+PASS latest verified checkpoint is 050
+PASS L1 follows the REAL write switch: ON shows DEPLOYED — WRITES ON (never assumed OFF)
+PASS outside production (preview) nothing shows LIVE or DEPLOYED
+PASS outside production (development) nothing shows LIVE or DEPLOYED
+PASS outside production (local) nothing shows LIVE or DEPLOYED
+PASS outside production (undefined) nothing shows LIVE or DEPLOYED
+PASS every DEPLOYED/LIVE manifest line names a checkpoint and a merge commit as evidence
+PASS L1 evidence names the applied write-lock migration
+PASS the manifest uses only allowed statuses and displayed statuses are from the allowed display set
+PASS no stage beyond L2 claims DEPLOYED or LIVE; overall stays NOT OPERATIONAL
+PASS generation and publishing stay DISABLED in every case
+PASS state defaults unchanged (registered, generation/publishing disabled)
+13 passed, 0 failed

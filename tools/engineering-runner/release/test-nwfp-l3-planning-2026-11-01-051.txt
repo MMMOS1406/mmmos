@@ -1,0 +1,38 @@
+PASS plans live under the write-locked pilot prefix (no new migration needed)
+PASS the representative example passes every Creative Quality item
+PASS a draft skeleton is structurally valid but NOT ready (placeholders must be replaced by a person)
+PASS responsible framing: guaranteed returns, risk-free, tickers, buy/sell instructions and hype are rejected
+PASS financial accuracy needs the disclaimer, a source and a human claims check
+PASS originality must be confirmed by the author
+PASS the Short must link to and share the Long's idea
+PASS generic AI/tech content is rejected for this business
+PASS a non-finance topic category is invalid
+PASS plans cannot carry generation, publishing, business or foreign fields
+PASS review flow: draft -> ready_for_review (only when ready) -> accepted_for_planning; no skipping, no going back from accepted
+PASS accepting a plan changes only its review status (no generation or publishing flag appears)
+PASS stored data from another business or malformed data is never adopted
+PASS anonymous and forged callers are refused by all 5 L3 actions (5/5)
+PASS CEO draft returns a skeleton and its checklist, stored:false
+PASS CEO evaluate returns validation + quality for the example (ready), stored:false
+PASS CEO list with nothing stored: 0 plans, writes OFF
+PASS draft, evaluate and list made no outside call and wrote nothing
+PASS with the switch missing, save and review are refused (409 pilot_plan_writes_off) and nothing is stored
+PASS turning on the L1 state switch does NOT enable plan saving (separate switch)
+PASS save writes exactly one row, the plans key, and the plan starts as draft
+PASS editing the same plan updates the same row (no duplicates)
+PASS a save based on an old revision is refused (409 revision_conflict)
+PASS a plan carrying publishing is refused
+PASS review cannot skip ready_for_review
+PASS review moves draft -> ready_for_review -> accepted_for_planning
+PASS an incomplete plan cannot be sent for review (quality checklist incomplete)
+PASS reviewing an unknown plan is 404
+PASS list returns the 2 stored plans with their checklists
+PASS saving is POST only
+PASS every non-plan app_settings row (shared state, NextWave V2, SRV Studio V2, the L1 pilot state) is byte-identical
+PASS no other table changed (no tasks, evidence, assets or packages created)
+PASS no outside service was called (no AI, media, YouTube or publishing)
+PASS the L3 server block writes only app_settings (the plans row) and calls no generation, upload or publishing helper
+PASS only api/ops.js and the pilot's own folders changed (no app page, NextWave V1/V2, SRV, SMM or AI Studio file)
+PASS api/ops.js only gains lines
+PASS the 5 L3 actions are dispatched and check the CEO session themselves (not in publishing/session gate lists)
+37 passed, 0 failed

@@ -1,45 +1,52 @@
 MMMOS ENGINEERING INTEGRATION - RELEASE 2 PROGRESS TRACKER
-Updated: 2026-11-01 (Checkpoint 050). Status words: COMPLETE / DEPLOYED / APPLIED AND VERIFIED / PREVIEW READY / AWAITING CEO / ON HOLD / NOT STARTED.
+Updated: 2026-11-01 (Checkpoint 051). Status words: COMPLETE / DEPLOYED / APPLIED AND VERIFIED / PREVIEW READY / AWAITING CEO / ON HOLD / NOT STARTED.
 
-CHANGES SINCE 049 (Order 050, CEO-approved)
-- PR #77 released: merge 9efd0df, production dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx. Verified.
-- Finance Pilot write-lock migration 20261102034457 applied and verified (pre-validated in a rolled-back transaction).
-- nwfp_state_writes remains absent (writes OFF). No pilot state row, task, generation or publishing.
+CHANGES SINCE 050
+- Checkpoint 050 complete: PR #77 live (9efd0df, dpl_8jPjjXVEz), write-lock 20261102034457 applied and verified.
+- Draft PR #78 (A): card shows verified Checkpoint 050 evidence; statuses derived at runtime. Not released.
+- Draft PR #79 (B): L3 content planning (deterministic; no generation, no publishing; saving OFF). Not released.
+- Creative Quality criteria and a representative example prepared (stand-in only).
+- Correction: 5 .md documents reported in Checkpoints 047/048 were never committed (.gitignore excludes *.md).
+  They are recovered unchanged on mmmos-eng/r2-checkpoint-051 (force-added).
+- Security review: TRUNCATE grants (low, latent; remediation prepared, not applied); preview exposure unchanged.
 
-ITEM                                          PREVIOUS               STATUS                            DATE        REFERENCE / EVIDENCE                                        REMAINING RISK                              NEXT ACTION (OWNER)
-PR #75 Finance Pilot registration             COMPLETE               COMPLETE (LIVE)                   2026-11-01  92281cf / dpl_6iPTEc65                                     none                                        none
-PR #76 Auth P1 (11 actions)                   COMPLETE               COMPLETE (LIVE)                   2026-11-01  315e4ae; 11/11 refused live (050)                          raw session_required text                   none
-PR #77 Finance Pilot L1 + L2                  PREVIEW READY          COMPLETE (LIVE)                   2026-11-01  9efd0df / dpl_8jPjjXVEz; suites 61/61 = prior main; 34/34  card manifest still says L1/L2 PREVIEW READY  manifest update PR (PM order)
-Preview stages 1, 2, 3a                       COMPLETE               COMPLETE                          2026-11-01  env targets unchanged (050)                                old previews keep values                    see residual risks
-Finance Pilot registration                    LIVE                   LIVE                              2026-11-01  PR #75                                                     none                                        none
-Finance Pilot L1 isolated state               PREVIEW READY          DEPLOYED - WRITES OFF             2026-11-01  PR #77; nwfp_state_writes absent; 0 pilot rows             none while writes OFF                      CEO decision to enable writes
-Finance Pilot L2 CEO card                     PREVIEW READY          DEPLOYED - CEO READ-ONLY VIEW     2026-11-01  PR #77; live page mounts card; browser 7/7 on main         not viewed signed-in by Claude Code         CEO opens Engineering Review
-Finance Pilot write-lock                      PREPARED               APPLIED AND VERIFIED              2026-11-01  migration 20261102034457; WRITE_LOCK_VERIFICATION_050.txt  none                                        none
-Finance Pilot overall                         REGISTERED-NOT OPER.   REGISTERED - NOT YET OPERATIONAL  2026-11-01  -                                                          -                                           L3 order (PM)
-Finance Pilot L3 content planning             NOT STARTED            NOT STARTED                       -           LIFECYCLE_INTEGRATION_PLAN_048.md                          -                                           PM order
-Finance Pilot L4 paid generation              NOT STARTED            NOT STARTED                       -           needs vendor + cap                                         -                                           CEO cost decision
-Finance Pilot L5 review and approval          NOT STARTED            NOT STARTED                       -           -                                                          -                                           PM order
-Finance Pilot L6 publishing                   NOT STARTED            NOT STARTED                       -           needs channel                                              -                                           per-video CEO authorization
-Finance Pilot L7 analytics                    NOT STARTED            NOT STARTED                       -           -                                                          -                                           PM order
-SRV auth package (6 actions)                  NOT STARTED            NOT STARTED (SPEC READY)          -           SRV_AUTH_REMEDIATION_PACKAGE_047.md                        6 actions ungated                           PM order to SRV workstream
-P2 auth remediation (32 actions)              NOT STARTED            NOT STARTED (PLAN READY)          -           AUTH_REMEDIATION_P2_PLAN_047.md                            32 actions ungated                          PM order per group
+ITEM                                          STATUS                            DATE        REFERENCE / EVIDENCE                                        NEXT ACTION (OWNER)
+PR #75 Finance Pilot registration             COMPLETE (LIVE)                   2026-11-01  92281cf / dpl_6iPTEc65                                     none
+PR #76 Auth P1 (11 actions)                   COMPLETE (LIVE)                   2026-11-01  315e4ae                                                    none
+PR #77 Finance Pilot L1 + L2                  COMPLETE (LIVE)                   2026-11-01  9efd0df / dpl_8jPjjXVEz                                    none
+PR #78 (A) card evidence correction           PREVIEW READY (draft)             2026-11-01  head c85e517; 13/13, 34/34, browser 8/8                    CEO release approval
+PR #79 (B) L3 content planning                PREVIEW READY (draft)             2026-11-01  head c38cc47; 37/37; example 10/10                         CEO release approval
+Preview stages 1, 2, 3a                       COMPLETE                          2026-11-01  targets unchanged (051)                                    none
+Finance Pilot registration                    LIVE                              2026-11-01  PR #75                                                     none
+Finance Pilot L1 isolated state               DEPLOYED - WRITES OFF             2026-11-01  PR #77; nwfp_state_writes absent; 0 rows                   CEO decision to enable writes
+Finance Pilot L2 CEO card                     DEPLOYED - CEO READ-ONLY VIEW     2026-11-01  PR #77 (card currently understates; fixed by PR #78)       release PR #78 (CEO)
+Finance Pilot write-lock                      APPLIED AND VERIFIED              2026-11-01  migration 20261102034457                                   none
+Finance Pilot L3 content planning             PREVIEW READY (saving OFF)        2026-11-01  PR #79; nwfp_plan_writes absent                            CEO release + later saving switch
+Finance Pilot L4 paid generation              NOT STARTED                       -           needs vendor + cap                                         CEO cost decision
+Finance Pilot L5 review and approval          NOT STARTED                       -           (L3 has plan-level review only)                            PM order
+Finance Pilot L6 publishing                   NOT STARTED                       -           needs channel                                              per-video CEO authorization
+Finance Pilot L7 analytics                    NOT STARTED                       -           -                                                          PM order
+Finance Pilot overall                         REGISTERED - NOT YET OPERATIONAL  2026-11-01  -                                                          -
+SRV auth package (6 actions)                  NOT STARTED (SPEC READY)          -           SRV_AUTH_REMEDIATION_PACKAGE_047.md (now committed)        PM order to SRV workstream
+P2 auth remediation (32 actions)              NOT STARTED (PLAN READY)          -           AUTH_REMEDIATION_P2_PLAN_047.md (now committed)            PM order per group
 
-H1  Security release (31 actions)             COMPLETE                        2026-10-31  verifier 19/19 (050)                                      none
-H2  GitHub Actions off (repo only)            COMPLETE                        2026-10-31  enabled=false (050)                                       none
-H3  Staging repo + staging-only key           COMPLETE                        2026-10-31  mmmos-runner-staging, key 168324989                       none
-H4  GitHub App "MMMOS Runner PR Opener"       AWAITING CEO                    -           prerequisites valid; opener inactive                      install App (CEO)
-H5  Checkpoint archive + CEO Artifacts view   COMPLETE, CEO ACCEPTED          2026-11-01  "SHA OK" + storage logs (045)                            none
-H6  Runner enforcement probe                  AWAITING CEO                    -           prerequisites valid; runner OFF                           start session (CEO)
-H7  Revoke 12 unused authorizations           COMPLETE                        2026-11-01  12/12 revoked                                             none
-H8  ChatGPT Business / adviser connection     ON HOLD                         -           no purchase; switch OFF                                   CEO business decision
+H1  Security release (31 actions)             COMPLETE                          2026-10-31  verifier 19/19 (051)                                       none
+H2  GitHub Actions off (repo only)            COMPLETE                          2026-10-31  enabled=false (051)                                        none
+H3  Staging repo + staging-only key           COMPLETE                          2026-10-31  mmmos-runner-staging, key 168324989                        none
+H4  GitHub App "MMMOS Runner PR Opener"       AWAITING CEO                      -           prerequisites valid; opener inactive                       install App (CEO)
+H5  Checkpoint archive + CEO Artifacts view   COMPLETE, CEO ACCEPTED            2026-11-01  "SHA OK" + storage logs (045)                             none
+H6  Runner enforcement probe                  AWAITING CEO                      -           prerequisites valid; runner OFF                            start session (CEO)
+H7  Revoke 12 unused authorizations           COMPLETE                          2026-11-01  12/12 revoked                                              none
+H8  ChatGPT Business / adviser connection     ON HOLD                           -           no purchase; switch OFF                                    CEO business decision
 
-RESIDUAL RISKS
-- Old preview deployments: 92 READY; those built before stage 3a hold the old preview values (behind preview login). Separate CEO decision.
-- Stage 4: SUPABASE_SERVICE_KEY still reaches previews (production database). Separate CEO decision (cost).
-- Pre-existing: anon/authenticated hold TRUNCATE grants on app_settings (not reachable via REST or any function). Separate decision.
-- First YouTube autosync after stage 2 (00:00 UTC 2026-11-03): NOT YET OBSERVED.
+REMAINING SECURITY RISKS (SECURITY_FOLLOWUP_051.md)
+- TRUNCATE/REFERENCES/TRIGGER granted to anon+authenticated on 57 of 95 public tables: LOW, latent (not reachable today). Revocation prepared, not applied.
+- Public key can still write any app_settings row outside the locked prefixes (pre-existing; shared-state guard covers catastrophic shrinks only).
+- 93 READY previews; 88 built before stages 1-3a keep old values (behind preview login).
+- Stage 4: SUPABASE_SERVICE_KEY still reaches previews (production database).
+- YouTube autosync after stage 2: NOT YET OBSERVED (due 00:00 UTC 2026-11-03).
 
-BLOCKERS: none technical. Waiting on CEO: H4, H6; PM: next orders.
-Production: main 9efd0df, dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx. Rollback: dpl_F6yC8Kry (app); drop the 3 pilot policies (database).
-Switches: eng_runner OFF, eng_adviser_connect OFF, nwfp_state_writes absent (OFF).
+BLOCKERS: none technical. Waiting on CEO: PR #78, PR #79, H4, H6; optional security decisions.
+Production: main 9efd0df, dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx (unchanged by 051).
+Switches: eng_runner OFF, eng_adviser_connect OFF, nwfp_state_writes absent, nwfp_plan_writes absent.
 Protected: Task 125 not touched; .pause-deploy present; CEO-015B (99a654a) untouched.
