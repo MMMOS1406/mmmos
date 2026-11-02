@@ -1,0 +1,44 @@
+NextWave Finance Pilot write-lock — verification record (Order 050)
+
+MIGRATION: 20261102034457 nextwave_finance_pilot_app_settings_write_lock (Supabase project tldcwvtwjypmwynsklsd)
+APPLIED SQL: write-lock-APPLIED-20261102034457.sql, SHA-256 f525286d1fb1c67622db27e01676fea781087dde845828695c9d39f27c88066c
+  (byte-identical to the body of the reviewed l1-app-settings-pilot-write-lock.sql between begin/commit)
+
+BEFORE-STATE (app_settings, 2026-11-02 03:35Z)
+- RLS enabled, not forced. 6 policies:
+  anon_full_access_app_settings      PERMISSIVE  ALL     anon                 using true / check true
+  block_anon_ceo_lockout             RESTRICTIVE ALL     anon                 key <> 'ceo_login_security_preview'
+  block_anon_ceo_lockout_production  RESTRICTIVE ALL     anon                 key <> 'ceo_login_security_production'
+  srv_studio_v2_keys_no_public_delete RESTRICTIVE DELETE anon, authenticated  left(key,14) <> 'srv_studio_v2_'
+  srv_studio_v2_keys_no_public_insert RESTRICTIVE INSERT anon, authenticated  left(key,14) <> 'srv_studio_v2_'
+  srv_studio_v2_keys_no_public_update RESTRICTIVE UPDATE anon, authenticated  left(key,14) <> 'srv_studio_v2_'
+- Fingerprint of ALL policies in the database (md5): 861953633a8f4ffecc495dd2c32e7a3f (57 in public).
+- Roles: anon, authenticated no BYPASSRLS; service_role and postgres BYPASSRLS.
+- Other write paths checked: mmm_state_save is SECURITY INVOKER and accepts only mmm_finance_v118 / mmm_isolation_test_*;
+  no function issues TRUNCATE; no view reads app_settings. Triggers: mmm_state_write_guard (update/delete) unchanged.
+- Pre-existing note (not changed): anon/authenticated hold table grants incl. TRUNCATE; RLS does not govern TRUNCATE,
+  but it is not reachable through the REST API or any function.
+
+PRE-VALIDATION (one transaction, forced rollback; nothing persisted)
+A.anon_insert_pilot=ALLOWED (today's gap) | B.policies_created=3 |
+C.anon_insert_pilot=REFUSED(42501) C.anon_upsert_pilot=REFUSED(42501) C.anon_update_pilot_rows=0 C.anon_delete_pilot_rows=0
+C.anon_rename_into_pilot=REFUSED(42501) C.anon_read_pilot_rows=1 C.anon_insert_other=ALLOWED C.anon_update_other_rows=1
+C.anon_delete_other_rows=1 C.anon_insert_srv_v2=REFUSED(42501) C.anon_insert_ceo_lockout=REFUSED(42501)
+C.anon_insert_near_miss_key('nextwave_finance_pilo')=ALLOWED | D.authenticated_insert_pilot=REFUSED(42501) |
+E.server_insert_pilot=ALLOWED E.server_update_pilot_rows=1 E.server_read_pilot_rows=1
+After: 0 pilot policies, 0 probe rows, all-policies fingerprint unchanged (861953633a8f4ffecc495dd2c32e7a3f).
+
+POST-APPLY VERIFICATION (real policies; one transaction, forced rollback; nothing persisted)
+anon_insert_pilot=REFUSED(42501) anon_upsert_pilot=REFUSED(42501) anon_update_pilot_rows=0 anon_delete_pilot_rows=0
+anon_rename_into_pilot=REFUSED(42501) anon_read_pilot_rows=1 anon_insert_other=ALLOWED anon_update_other_rows=1
+anon_delete_other_rows=1 anon_insert_srv_v2=REFUSED(42501) anon_insert_ceo_lockout=REFUSED(42501) anon_read_shared_state_rows=1
+authenticated_insert_pilot=REFUSED(42501) server_insert_pilot=ALLOWED server_update_pilot_rows=1 server_read_pilot_rows=1
+- 3 new policies exactly as reviewed (RESTRICTIVE, anon+authenticated, insert/update/delete).
+- Fingerprint of all OTHER policies unchanged: 861953633a8f4ffecc495dd2c32e7a3f; public policies 57 -> 60.
+- Grants unchanged. 0 pilot rows, 0 probe rows, nwfp_state_writes row absent.
+- Public REST read of app_settings still HTTP 200; production verifier 19/19.
+
+ROLLBACK (restores the exact previous state; touches nothing else):
+  drop policy if exists nextwave_finance_pilot_keys_no_public_insert on public.app_settings;
+  drop policy if exists nextwave_finance_pilot_keys_no_public_update on public.app_settings;
+  drop policy if exists nextwave_finance_pilot_keys_no_public_delete on public.app_settings;

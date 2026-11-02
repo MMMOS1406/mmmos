@@ -1,0 +1,202 @@
+START CHECKPOINT 050
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2 / NextWave Finance Pilot L1/L2 controlled release
+DATE: 2026-11-01 (America/New_York; work ran 03:35-03:55 UTC on 2026-11-02)
+EXECUTION ORDER: ORDER 050 (CEO-approved: release PR #77; apply the dedicated Finance Pilot write-lock)
+
+EXECUTIVE SUMMARY:
+- Both approved changes are done and verified. No failure; no rollback needed.
+- PR #77 is live: merge 9efd0df, production dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx.
+  - L1: DEPLOYED - WRITES OFF.
+  - L2: DEPLOYED - CEO READ-ONLY VIEW.
+- Write-lock migration 20261102034457 is applied and verified.
+  - Pre-validated with the exact SQL in a forced-rollback transaction, then re-verified after applying the same way.
+  - The public and signed-in roles can no longer create, update, rename into or delete nextwave_finance_pilot_* rows.
+  - Every other key and every other policy is unchanged.
+- nwfp_state_writes still absent; 0 pilot rows; no generation, publishing, task or cost.
+- Finance Pilot: REGISTERED - NOT YET OPERATIONAL.
+- YouTube autosync after stage 2: NOT YET OBSERVED (due 00:00 UTC 2026-11-03).
+
+BASELINE VERIFICATION: PASS
+- main 315e4ae; dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 READY; verifier 19/19; GitHub Actions OFF.
+- Flags: only state_merge_only=true (eng_runner, eng_adviser_connect, nwfp_state_writes absent = OFF).
+- 0 pilot app_settings rows; 0 pilot tasks.
+- NextWave V2 task 2e17bd23 and settings md5 recorded.
+- Task 125 not touched; .pause-deploy present; CEO-015B 99a654a untouched.
+- PR #77: head 478dcc7, CLEAN, checks SUCCESS, the reviewed 7 files, no existing line removed.
+- Rollback references set: dpl_F6yC8Kry (app); policy before-state and all-policies fingerprint 861953633a8f4ffecc495dd2c32e7a3f (database).
+
+WRITE-LOCK PREVALIDATION: PASS
+- Before-state: 6 app_settings policies.
+  - One permissive anon_full_access (all keys).
+  - Restrictive policies for the CEO lockout keys and srv_studio_v2_*.
+  - RLS on, not forced. anon and authenticated do not bypass RLS; service_role and postgres do.
+- Scope:
+  - the SQL creates 3 RESTRICTIVE policies on app_settings only, for anon and authenticated, matching only keys beginning 'nextwave_finance_pilot_' (23 characters);
+  - nothing else is created, altered or dropped.
+- Bypass check:
+  - restrictive policies AND with the permissive one, so no other policy can override them;
+  - the only function writing app_settings (mmm_state_save) runs with the caller's rights and accepts only mmm_finance_v118 or mmm_isolation_test_*;
+  - no function issues TRUNCATE; no view reads app_settings.
+- Simulation: one transaction, forced rollback, nothing persisted.
+  - Today: the public role CAN insert a pilot key (the gap).
+  - With the lock: public insert, upsert and rename-into-pilot are refused (42501); public update and delete affect 0 rows; the signed-in role is refused.
+  - Public reads still work; other keys work; SRV Studio V2 and CEO-lockout protections are unchanged.
+  - The server role can insert, update and read pilot rows.
+  - Afterwards: 0 policies and 0 probe rows remained; the fingerprint was unchanged.
+- Rollback: drop only the 3 named policies, which restores the exact before-state and weakens nothing else.
+
+PR #77 RELEASE RESULT: PASS
+- Merged through the protected PR process as 9efd0df (parents 315e4ae, 478dcc7). The tree is identical to the reviewed 478dcc7.
+- dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx READY; verifier 19/19.
+- Live:
+  - nwfp_status, nwfp_state_get and nwfp_state_update refuse anonymous and forged callers (401 ceo_session_required); the pilot module loads in production;
+  - the live page is byte-identical to main; the card is mounted once; the app has no pilot write call;
+  - the 11 P1 actions are still refused (11/11); the publishing gate is unchanged;
+  - runtime errors: only the known url.parse deprecation warning.
+- Tests on main 9efd0df:
+  - L1/L2 suite 34/34; card browser check 7/7;
+  - all 61 existing suites identical to the previous main;
+  - Engineering Review browser 26/26 and 9/9; preservation identical.
+- Writes refused while OFF, and stale revisions refused: proven in the 34/34 suite on the released code. Not exercised live, since that needs a CEO session.
+
+L1 STATE STATUS: DEPLOYED - WRITES OFF
+- Server actions are live and CEO-session only.
+- nwfp_state_writes is absent, so nwfp_state_update answers 409 pilot_state_writes_off to the CEO.
+- The pilot state row nextwave_finance_pilot_state does not exist (0 rows). Generation and publishing are stored and shown disabled.
+
+L2 CEO VIEW STATUS: DEPLOYED - CEO READ-ONLY VIEW
+- The card is in the CEO Engineering Review (one SHOW button, one CEO-session read).
+- With today's production data it shows:
+  - NextWave Finance Pilot (nextwave_finance_pilot), REGISTERED, NOT OPERATIONAL;
+  - generation DISABLED, publishing DISABLED, writes OFF;
+  - tasks 0, artifacts none yet;
+  - latest verified checkpoint 048;
+  - Registration LIVE; L1, L2 PREVIEW READY; L3-L7 NOT STARTED.
+- Known understatement: the card's evidence manifest still lists L1/L2 as PREVIEW READY and checkpoint 048. Updating it to "DEPLOYED" and 050 needs a small follow-up PR. Never overstated.
+- Not viewed signed-in by Claude Code (no CEO session); verified on the released code in a real browser (7/7).
+
+MIGRATION RESULT: APPLIED AND VERIFIED
+- 20261102034457 nextwave_finance_pilot_app_settings_write_lock.
+- Applied SQL SHA-256 f525286d1fb1c67622db27e01676fea781087dde845828695c9d39f27c88066c, byte-identical to the reviewed file body.
+- No other migration applied.
+
+RLS SECURITY VERIFICATION: PASS (real policies; forced-rollback transaction; nothing persisted)
+- Public role:
+  - insert, upsert and rename into pilot keys are refused (42501);
+  - update and delete of pilot rows affect 0 rows;
+  - reading pilot rows and the shared state still works.
+- Signed-in role: pilot insert refused.
+- Server role: pilot insert, update and read work.
+- Other keys: public insert, update and delete unchanged; SRV Studio V2 and CEO-lockout protections unchanged.
+- Policies:
+  - the 3 new ones are exactly as reviewed;
+  - the fingerprint of all other policies is unchanged (861953633a8f4ffecc495dd2c32e7a3f);
+  - public policies 57 -> 60; grants unchanged.
+- Public REST read of app_settings: HTTP 200. 0 pilot rows; switch row absent.
+
+NEXTWAVE V1/V2 ISOLATION: PASS
+- NextWave V2 task 2e17bd23 md5 and the nextwave_v2_* settings md5 are identical before and after.
+- No NextWave V1/V2 file changed (PR #77 touched only api/ops.js additions, public/index.html additions and the pilot folders).
+
+CROSS-BUSINESS ISOLATION: PASS
+- The pilot has its own key, its own state row (separate from mmm_finance_v118) and its own task and artifact namespaces.
+- The pilot can write only its own row (server, CEO, switch ON). Other businesses' workflows cannot write it: the shared-state function is key-restricted, and the public key is now locked out.
+- SRV Studio V2 settings md5 unchanged; tasks 79 and packages 550 unchanged.
+- No pilot task created; no paid generation; no publishing; no new cost; no other shared-system change.
+
+PRODUCTION HEALTH: PASS
+- main 9efd0df; dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx READY.
+- Verifier 19/19 at baseline, after the release and after the migration.
+- YouTube 4/4 connections with refresh tokens; 0 sync errors since 00:00Z.
+
+YOUTUBE AUTOSYNC RESULT: NOT YET OBSERVED
+- Last sync 00:50Z 2026-11-02 (before stage 2). The first post-stage-2 run is due 00:00 UTC 2026-11-03.
+- No publishing or credential change.
+
+H1-H8 PROGRESS:
+- H1 COMPLETE 2026-10-31
+- H2 COMPLETE 2026-10-31
+- H3 COMPLETE 2026-10-31
+- H4 AWAITING CEO - GitHub App
+- H5 COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 AWAITING CEO - runner security probe
+- H7 COMPLETE 2026-11-01
+- H8 ON HOLD - ChatGPT Business
+
+NEXTWAVE L1-L7 PROGRESS:
+- Registration LIVE.
+- L1 DEPLOYED - WRITES OFF.
+- L2 DEPLOYED - CEO READ-ONLY VIEW.
+- Write-lock APPLIED AND VERIFIED.
+- L3-L7 NOT STARTED.
+- Overall: REGISTERED - NOT YET OPERATIONAL.
+
+CHANGES MADE:
+- PR #77 marked ready and merged.
+- One automatic production deployment.
+- Migration 20261102034457 (3 restrictive policies on app_settings).
+- Checkpoint branch with evidence; MMMOS archive uploads.
+
+CHANGES NOT MADE:
+- nwfp_state_writes not enabled.
+- No pilot state, task, generation or publishing.
+- No L3-L7.
+- No other migration or policy change; the pre-existing TRUNCATE grants were left as they are.
+- No stage 4; no preview deletion; no secret change.
+- No GitHub App, runner or adviser change; no cost.
+- Task 125 not touched; .pause-deploy present; CEO-015B untouched.
+
+PASS / FAIL / BLOCKED:
+- PASS: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5 (autosync NOT YET OBSERVED), Phase 6/7.
+- FAIL: none.
+- BLOCKED: none.
+
+MERGE COMMIT: 9efd0df602df6cca32a136b92d33037550d7eab4 (PR #77)
+DEPLOYMENT ID: dpl_8jPjjXVEz8HSvN6Q3rweYKSDtrCx
+MIGRATION IDENTIFIER: 20261102034457 nextwave_finance_pilot_app_settings_write_lock
+
+ROLLBACK REFERENCES:
+- App: promote dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 (main 315e4ae), or revert 9efd0df.
+- Database: drop policy if exists nextwave_finance_pilot_keys_no_public_insert / _update / _delete on public.app_settings. This restores the exact before-state; evidence in WRITE_LOCK_VERIFICATION_050.txt.
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_050.txt on branch mmmos-eng/r2-checkpoint-050 (based on 049 @ 48cc496).
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - docs/projects/nextwave-finance-pilot/WRITE_LOCK_VERIFICATION_050.txt and write-lock-APPLIED-20261102034457.sql
+  - tools/engineering-runner/release/: verify-2026-11-01-050-{base,p2,p3}.txt, probe-2026-11-01-050-nwfp-live.txt, tests-2026-11-01-050-main-after-pr77.txt
+  - tools/engineering-runner/preview-secrets/env-050.targets-only.json
+
+COMMIT SHA: the checkpoint branch commit (reported in the chat message).
+
+MMMOS ARCHIVE VERIFICATION: checkpoint and tracker stored on task ec27ddf6 with server SHA-256 (reported in the chat message). Scope not expanded; no new task created.
+
+REMAINING RISKS:
+- Preview residual exposure:
+  - 92 READY preview deployments; those built before stage 3a hold the old preview values (behind preview login);
+  - SUPABASE_SERVICE_KEY still reaches previews (stage 4), so preview code can write the production database (including the pilot row, through server code).
+- Pre-existing: anon and authenticated hold TRUNCATE grants on app_settings. Not reachable through REST or any function; revoking them is a separate decision.
+- The card understates L1/L2 (shows PREVIEW READY and checkpoint 048) until a manifest-update PR.
+- First post-stage-2 autosync not yet observed.
+- SRV package (6 actions) and P2 (32 actions) still ungated.
+
+PM DECISIONS REQUIRED:
+1. Order the small manifest-update PR (L1 "DEPLOYED - WRITES OFF", L2 "DEPLOYED", latest checkpoint 050).
+2. Order L3 (content planning, no cost) when ready.
+3. Order the SRV auth package and P2 groups.
+4. Optionally propose revoking the unused TRUNCATE grants (defense in depth).
+
+CEO DECISIONS REQUIRED:
+1. Whether and when to turn on nwfp_state_writes (separate approval).
+2. H6 and H4.
+3. Optional, separate: stage 4; old preview deployments; TRUNCATE-grant revocation.
+
+NEXT ACTION:
+- Claude Code checks the 00:00 UTC 2026-11-03 autosync.
+- The PM issues the next orders.
+- The CEO does H6 and H4, and may view the card in Engineering Review.
+
+ACTION OWNER: ChatGPT PM (next orders) -> CEO (H6, H4, writes decision) -> Claude Code (autosync check, execution, Checkpoint 051)
+
+END CHECKPOINT 050

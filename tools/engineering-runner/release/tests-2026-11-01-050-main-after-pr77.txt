@@ -1,0 +1,10 @@
+main 9efd0df
+050 engineering-review-escaping    26 passed, 0 failed
+050 engineering-r2-screens         9 passed, 0 failed
+050 browser_nwfp_card_049          7 passed, 0 failed
+050 preservation: 141 checks, 10 failed
+preservation FAIL diff (main 315e4ae vs main 9efd0df):
+  NEW test_nwfp_l1_l2_049.mjs                      N 0 34 passed, 0 failed | O None 
+identical to previous main 315e4ae: 61 of 62
+
+[exited with code 0]

@@ -1,0 +1,6 @@
+nwfp_status anon 401 ceo_session_required
+nwfp_status forged 401 ceo_session_required
+nwfp_state_get anon 401 ceo_session_required
+nwfp_state_get forged 401 ceo_session_required
+nwfp_state_update anon 401 ceo_session_required
+nwfp_state_update forged 401 ceo_session_required
