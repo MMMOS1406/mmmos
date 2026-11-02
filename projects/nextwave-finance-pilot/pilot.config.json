@@ -1,0 +1,13 @@
+{
+  "_comment": "NextWave Finance Pilot - isolated business identity (046). Configuration only: nothing here is wired into live app state, analytics, generation or publishing. Each of those needs its own CEO-authorized order.",
+  "business_key": "nextwave_finance_pilot",
+  "display_name": "NextWave Finance Pilot",
+  "separate_from": ["nextwave (NextWave V2 code: lib/nextwaveV2*, task 2e17bd23)", "the live NextWave engine (V1)", "every other MMMOS business"],
+  "engineering": {
+    "runner_folders": ["projects/nextwave-finance-pilot/", "tests/projects/nextwave-finance-pilot/", "docs/projects/nextwave-finance-pilot/"],
+    "artifact_prefix": "engineering-artifacts/nextwave_finance_pilot/<task>/<run>/"
+  },
+  "reserved_namespaces": { "state_key": "nextwave_finance_pilot", "analytics_namespace": "nextwave_finance_pilot", "asset_prefix": "nextwave_finance_pilot/" },
+  "paid_generation": { "enabled": false, "requires": "separate CEO authorization" },
+  "publishing": { "enabled": false, "requires": "per-video CEO authorization through the existing approved path; never the runner" }
+}

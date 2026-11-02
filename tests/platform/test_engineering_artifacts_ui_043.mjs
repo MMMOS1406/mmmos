@@ -8,7 +8,7 @@ const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.
 let pass = 0, fail = 0;
 const ok = (n, c, x = '') => { c ? pass++ : fail++; console.log(`${c ? 'PASS' : 'FAIL'} ${n}${!c && x ? '  ' + x : ''}`); };
 const grab = (name) => { const i = html.indexOf(`function ${name}(`); if (i < 0) throw new Error('missing ' + name); const st = html.lastIndexOf('\n', i) + 1; let d = 0; for (let k = html.indexOf('{', i); k < html.length; k++) { if (html[k] === '{') d++; else if (html[k] === '}' && --d === 0) return html.slice(st, k + 1); } };
-const names = ['escHTML', '_engAttr', '_engErrMsg', '_engArtifactsSection', '_engFmtBytes', '_engArtifactsLoad', '_engArtifactsOpen', '_engSha256Hex', '_engArtifactDownload'];
+const names = ['escHTML', '_engAttr', '_engErrMsg', ...(html.includes('function _engBusinessLabel(') ? ['_engBusinessLabel'] : []), '_engArtifactsSection', '_engFmtBytes', '_engArtifactsLoad', '_engArtifactsOpen', '_engSha256Hex', '_engArtifactDownload'];
 const calls = []; const alerts = []; const saved = [];
 let responses = {}; let fetched = null;
 const el = { innerHTML: '' };

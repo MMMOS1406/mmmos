@@ -1136,7 +1136,8 @@ async function _engArtifactSha256(objectPath) {
     return createHash('sha256').update(buf).digest('hex');
   } catch (e) { return null; }
 }
-const ENG_BUSINESSES = ['mmmos', 'srv_farsi', 'srv_english', 'srv_studio', 'ai_creation_studio', 'nextwave', 'smm', 'finance'];
+const ENG_BUSINESSES = ['mmmos', 'srv_farsi', 'srv_english', 'srv_studio', 'ai_creation_studio', 'nextwave', 'smm', 'finance',
+  'nextwave_finance_pilot']; // 046 — separate from 'nextwave' (NextWave V2 code) and the live NextWave engine
 const ENG_ARTIFACT_DOWNLOAD_TTL_S = 60 * 60; // 1 hour
 
 function _engBusinessSlug(v) {
@@ -1360,6 +1361,8 @@ const ENG_BUSINESS_PATHS = {
   srv_studio: ['lib/srvStudioV2', 'docs/srv-studio-v2/', 'public/srv-studio-v2/', 'tests/srv/test_srv_studio_v2'],
   srv_farsi: ['lib/srvFarsi', 'tests/srv/test_srv_farsi', 'test_srv_farsi'],
   srv_english: [], ai_creation_studio: [], smm: [], finance: [],
+  // 046 — NextWave Finance Pilot: its own folders only (never lib/nextwaveV2*, never the live NextWave engine).
+  nextwave_finance_pilot: ['projects/nextwave-finance-pilot/', 'tests/projects/nextwave-finance-pilot/', 'docs/projects/nextwave-finance-pilot/'],
 };
 const ENG_SHARED_PATHS = ['api/ops.js', 'public/index.html', 'public/shell.js'];
 const ENG_DENIED_PATHS = ['.auto-deploy.sh', '.auto-deploy.plist', '.last-deploy-md5', '.pause-deploy', 'vercel.json',
@@ -22721,7 +22724,7 @@ async function engineeringTaskCreateFromDecision(req, res) {
 
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
     const KNOWN_COMPONENTS = [
-      'SRV Farsi', 'SRV English', 'AI Creation Studio', 'NextWave Systems', 'Finance', 'Investment Engine', 'Uber Engine',
+      'SRV Farsi', 'SRV English', 'AI Creation Studio', 'NextWave Systems', 'NextWave Finance Pilot', 'Finance', 'Investment Engine', 'Uber Engine',
       'Task Generator', 'Engineering Tasks', 'Roadmap', 'Brain v2 — Knowledge', 'Brain v2 — Learning', 'Brain v2 — Autonomous Agents',
       'CEO Command Center', 'Continuous Decision Protocol (CDP)', 'Production Pipeline', 'Scheduler', 'YouTube Upload', 'Submagic Captions',
       'Canvas Renderer — SRV', 'Canvas Renderer — AI Studio', 'Upload Engine', 'HeyGen Video Proxy', 'Frontend', 'Backend', 'Database',
