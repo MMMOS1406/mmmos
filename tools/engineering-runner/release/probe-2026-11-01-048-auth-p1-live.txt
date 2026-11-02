@@ -1,0 +1,16 @@
+heygen_render_status 401 session_required
+approve 401 session_required
+reject 401 session_required
+save_heygen_execution 401 session_required
+save_suno_execution 401 session_required
+delete_asset 401 session_required
+generate_package 401 session_required
+nextwave_v2_generate_scene_package 401 session_required
+nextwave_v2_generate_visual_plan 401 session_required
+delete_memory_item 401 session_required
+sm_video_production_generate 401 session_required
+forged approve 401
+forged delete_asset 401
+forged generate_package 401
+publish youtube_upload_video 401 publisher_session_required
+publish set_yt_thumbnail 401 publisher_session_required

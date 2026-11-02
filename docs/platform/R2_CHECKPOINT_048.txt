@@ -1,0 +1,214 @@
+START CHECKPOINT 048
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2
+DATE: 2026-11-01 (America/New_York; actions ran 02:30-03:10 UTC on 2026-11-02)
+EXECUTION ORDER: ORDER 048 (CEO-approved controlled release of Checkpoint 047 items)
+
+EXECUTIVE SUMMARY:
+- All three approved changes are released, verified and live. No stage failed; no rollback was needed.
+  - PR #75 (NextWave Finance Pilot registration): merge 92281cf, production dpl_6iPTEc65Ggixs4kuvDRRbeZdUcPy.
+  - PR #76 (auth remediation P1): merge 315e4ae, production dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 (current). All 11 actions refuse anonymous callers live.
+  - Preview-secret stages 1, 2 and 3a applied: 7 records changed to production-only and 1 preview-only PLAID_ENV=sandbox added. Production values and targets unchanged.
+- After every stage: production READY, verifier 19/19.
+- After each release: the full suite on the new main matched the original baseline (59 of 59 existing suites identical).
+- Finance Pilot: REGISTERED - NOT YET OPERATIONAL. Lifecycle plan prepared, not implemented.
+- Not done (excluded by the order):
+  - stage 4;
+  - deleting old previews;
+  - H4, H6, H8;
+  - the SRV and P2 code;
+  - any generation or publishing.
+
+PR #75 RELEASE RESULT: PASS
+- Pre-merge:
+  - head 02abc3c (2 reviewed commits), CLEAN, checks SUCCESS;
+  - the diff is the reviewed 8 files.
+- Merged through the protected PR process (gh pr merge --match-head-commit) as 92281cf (parents 71546c3, 02abc3c). The tree is identical to the reviewed 02abc3c.
+- Deployment dpl_6iPTEc65Ggixs4kuvDRRbeZdUcPy READY; build log "MMMOS RELEASE GUARD: env=production ref=main".
+- Checks:
+  - verifier 19/19;
+  - the live page is byte-identical to main (label helper and pilot key present);
+  - registration test 17/17 on main; Engineering artifacts UI 11/11;
+  - full suite: 59 of 59 existing suites identical to the old main;
+  - Engineering Review browser 26/26 and 9/9;
+  - preservation identical to the old main;
+  - runtime errors: only the known url.parse deprecation warning.
+- Isolation: the release changed only the 8 reviewed files. No change to lib/, NextWave V1/V2 code, tests/srv, api/generate.js or api/youtube.
+  - NextWave V2 task 2e17bd23 and its settings are byte-identical before and after (md5).
+- Pilot: business key present; pilot folders, docs, artifact prefix and reserved config isolated. Paid generation and publishing are enabled:false, and no pilot code path exists.
+- Rollback target: dpl_6jmdF5CErnssMvYTbVEVNMyZFuhj (main 71546c3).
+
+PR #76 RELEASE RESULT: PASS
+- Pre-merge:
+  - head dc4c1c6 (8 reviewed commits), CLEAN, checks SUCCESS;
+  - the diff is the reviewed 3 files;
+  - trial merge onto the new main (92281cf) clean; auth test 16/16 there, with the publishing gate compared against the new main.
+- Merged as 315e4ae (parents 92281cf, dc4c1c6). The tree is identical to the tested trial merge.
+- Deployment dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 READY.
+- Live probes (anonymous, empty requests; the handlers reject empty input even without the gate, so nothing could run):
+  - all 11 actions answer 401 session_required;
+  - forged CEO and VA tokens are refused (approve, delete_asset, generate_package);
+  - publishing still answers 401 publisher_session_required (youtube_upload_video, set_yt_thumbnail);
+  - ceo_check_session and operator_check_session work.
+- CEO and VA compatibility:
+  - the real code passes 16/16, including CEO and VA sessions for all 11 and a wrong-PIN refusal;
+  - the live page sends the session at all 17 call sites;
+  - production logs: every refusal came from the probes; no real user was refused.
+- Checks: verifier 19/19; full suite 59 of 59 existing suites identical to the original baseline; browser 26/26 and 9/9; preservation identical.
+- SRV group (3 actions) still deferred and unchanged.
+- Rollback target: dpl_6iPTEc65Ggixs4kuvDRRbeZdUcPy (main 92281cf).
+
+PREVIEW STAGE 1 RESULT: PASS
+- Changed:
+  - PLAID_SECRET (eAut91Ki0icwauMw) preview,production -> production;
+  - PLAID_ENV (Or5j2qnhipBiHoge) preview,production -> production.
+- Added: PLAID_ENV (jXO5gL40NoW8xVg1) = sandbox, target preview only.
+- No other record changed; production stays on every original record.
+- Checks:
+  - Plaid selection check 4/4 against the real code (production live; previews sandbox only);
+  - production READY (same deployment, not redeployed); verifier 19/19; no database change.
+- Rollback (not needed): PATCH both back to preview,production and delete jXO5gL40NoW8xVg1.
+
+PREVIEW STAGE 2 RESULT: PASS
+- Changed: YOUTUBE_CLIENT_SECRET (L8bi2rAw8xsaUHBa) preview,production -> production. No other record changed.
+- Production YouTube:
+  - all 4 connections still hold refresh tokens;
+  - the production status page refreshed all 4 tokens after the change ("recovered" x4);
+  - the last syncs succeeded;
+  - publishing gate unchanged.
+- New preview builds no longer receive the secret.
+  - Limitations: YouTube connect, token refresh, status recovery and manual sync do not work in previews.
+- Health: production READY; verifier 19/19.
+- Rollback (not needed): PATCH back to preview,production.
+
+PREVIEW STAGE 3a RESULT: PASS
+- Changed to production-only, and no other record:
+  - ANTHROPIC_API_KEY (BbdJCUP17hn4QcJj);
+  - ELEVENLABS_API_KEY (OpAJGrkQdgUVagki);
+  - HEYGEN_API_KEY (8NB7j1lByXC7akpd);
+  - RUNWAY_API_KEY (z3RueS97KRwzyABr);
+  - SUBMAGIC_API_KEY (lvBDMaZRQrDqM634).
+- Previews now receive only 9 variables: APP_URL, PEXELS_API_KEY, PLAID_CLIENT_ID, PLAID_ENV=sandbox, PLAID_SECRET_SANDBOX, SUPABASE_SERVICE_KEY, YOUTUBE_API_KEY, YOUTUBE_CLIENT_ID, YOUTUBE_REDIRECT_URI.
+- Paid features in previews fail safely ("not configured" in code). The Task Generator fallback test passes 15/15 with no AI key.
+- No paid generation was triggered. Health: production READY; verifier 19/19.
+- Rollback (not needed): PATCH the 5 back to preview,production.
+
+PRODUCTION VERIFICATION:
+- Production main 315e4ae, dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 READY.
+- Verifier 19/19 after each of the 5 steps; home page 200.
+- Environment: 23 -> 24 records. Every original production target is intact. The exact diff equals the approved list (8 entries). Evidence files hold names, IDs and targets only.
+- Database:
+  - no migration (last 20261030211025, 0 since);
+  - packages 550 before and after;
+  - CEO auth keys unchanged; publish mode row absent (enforce).
+
+SECURITY VERIFICATION:
+- 11 protected actions gated live.
+- Publishing gate unchanged: byte-identical code; live refusal is publisher_session_required.
+- eng_runner OFF, eng_adviser_connect OFF (no rows; only state_merge_only on).
+- GitHub Actions OFF (main and staging); rulesets 26252619 and 26286416 active.
+- Advisers 0; workers active 1 (the existing archive worker, unchanged).
+- No new credentials; no RLS bypass.
+- Old preview deployments: 88 READY, which is the 87 counted in 047 plus 1 new docs build. None deleted or modified.
+
+BUSINESS ISOLATION:
+- NextWave V1 and V2: code untouched; V2 task and settings md5-identical; V2 generation actions now need a CEO or VA session (intended).
+- SRV Farsi, SRV Studio and SRV English: code and tests untouched; all SRV suites identical to main; the SRV group of 3 is still ungated as deferred; SRV Studio V2 settings untouched.
+- AI Creation Studio and SMM: only the intended session gate on 5 pipeline actions and 1 SMM action; all suites identical.
+- Finance Pilot: confined to its own folders, tested in both directions.
+
+NEXTWAVE FINANCE PILOT STATUS: REGISTERED - NOT YET OPERATIONAL
+- Live: business key, folders, artifact prefix, labels, reserved config.
+- Not live: state, analytics, generation, publishing.
+- Next: docs/projects/nextwave-finance-pilot/LIFECYCLE_INTEGRATION_PLAN_048.md (stages L1-L7; recommended first L1 state + L2 read-only card, no cost). Not implemented.
+
+H1-H8 PROGRESS:
+- H1 COMPLETE 2026-10-31 (verifier 19/19 throughout 048)
+- H2 COMPLETE 2026-10-31
+- H3 COMPLETE 2026-10-31
+- H4 AWAITING CEO - GitHub App
+- H5 COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 AWAITING CEO - runner security probe
+- H7 COMPLETE 2026-11-01
+- H8 ON HOLD - ChatGPT Business
+
+CHANGES MADE:
+- PRs #75 and #76 marked ready and merged.
+- Two automatic production deployments.
+- 7 environment targets edited and 1 preview-only record added.
+- Checkpoint branch with evidence (below).
+- MMMOS archive uploads.
+
+CHANGES NOT MADE:
+- No stage 4.
+- No preview deployment deleted.
+- No database or migration.
+- No runner or adviser activation.
+- No GitHub App or permission change.
+- No new auth groups, no SRV code.
+- No generation, publishing or new cost.
+- No other business change.
+- Task 125 not touched by any action; .pause-deploy present; CEO-015B (99a654a) untouched.
+
+PASS / FAIL / BLOCKED:
+- PASS: Phase 0, PR #75, PR #76, stage 1, stage 2, stage 3a, final audit, archive.
+- FAIL: none.
+- BLOCKED: none.
+- Not verifiable by me without a CEO or VA sign-in: a live signed-in click-through. It is covered by the real-code tests, and the logs show no refused users.
+
+DEPLOYMENT IDS:
+- dpl_6iPTEc65Ggixs4kuvDRRbeZdUcPy (PR #75)
+- dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 (PR #76, current)
+
+MERGE COMMITS:
+- 92281cf84aaf594270944a1ba3aaae6161ec6e47 (#75)
+- 315e4ae4da8e9c2257ce9e33b5ae16719a272486 (#76)
+
+ROLLBACK REFERENCES:
+- PR #76: promote dpl_6iPTEc65Ggixs4kuvDRRbeZdUcPy, or revert 315e4ae.
+- PR #75 and #76 together: promote dpl_6jmdF5CErnssMvYTbVEVNMyZFuhj, or revert both merges.
+- Environment stages: tools/engineering-runner/preview-secrets/PREVIEW_SECRET_STAGES_047.md section 6. The record IDs are above; the before-state is in env-before-048.targets-only.json.
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_048.txt on branch mmmos-eng/r2-checkpoint-048 (based on 047 @ e724392).
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - docs/projects/nextwave-finance-pilot/LIFECYCLE_INTEGRATION_PLAN_048.md
+  - tools/engineering-runner/release/: verify-*-048-*.txt (5), probe-2026-11-01-048-auth-p1-live.txt, tests-2026-11-01-048-main-after-pr75.txt and -after-pr76.txt
+  - tools/engineering-runner/preview-secrets/: env-before-048, env-after-stage1, -stage2 and -stage3a .targets-only.json
+
+COMMIT SHA: the commit on mmmos-eng/r2-checkpoint-048 that adds this file (reported in the chat message).
+
+ARCHIVE VERIFICATION: this checkpoint and the tracker are stored on MMMOS task ec27ddf6 with server SHA-256 (reported in the chat message). Archive scope not expanded.
+
+REMAINING RISKS:
+- Residual preview exposure (separate from stages 1-3a):
+  - 88 READY preview deployments built before or during 048 still hold the earlier preview values, including the live Plaid, YouTube client and paid AI keys. They sit behind Vercel preview login.
+  - SUPABASE_SERVICE_KEY (stage 4) still reaches new previews, so previews still write to the production database.
+  - Preview secrets are therefore reduced, not eliminated.
+- An expired 12-hour session shows "session_required" until the user signs in again.
+- The legacy public/index_staging.html calls are refused.
+- 35 priority-2 actions and the SRV package (6 actions) are still ungated.
+- First daily YouTube autosync after stage 2 (00:00 UTC 2026-11-03) not yet observed. Production was not redeployed by the change, and the token refresh was proven after it.
+
+PM DECISIONS REQUIRED:
+1. Order Finance Pilot L1 + L2 (no cost).
+2. Order the SRV auth package (SRV workstream).
+3. Order the P2 groups (suggested P2-4 first).
+
+CEO DECISIONS REQUIRED:
+1. H6 runner probe and H4 GitHub App (CEO_CHECKLIST_047.txt).
+2. Optional, separate:
+   - stage 4 (non-production database, cost);
+   - delete or retain old preview deployments (irreversible);
+   - the cron secret for analytics_auto_run;
+   - H8.
+
+NEXT ACTION:
+- Claude Code observes the next YouTube autosync and production logs.
+- The PM issues the next orders.
+- The CEO does H6 and H4.
+
+ACTION OWNER: ChatGPT PM (next orders) -> CEO (H6, H4, optional decisions) -> Claude Code (execution, Checkpoint 049)
+
+END CHECKPOINT 048

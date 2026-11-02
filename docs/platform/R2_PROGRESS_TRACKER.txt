@@ -1,31 +1,36 @@
 MMMOS ENGINEERING INTEGRATION - RELEASE 2 PROGRESS TRACKER
-Updated: 2026-11-01 (Checkpoint 047). Status words: COMPLETE / READY FOR RELEASE / AWAITING CEO / BLOCKED / ON HOLD / NOT STARTED.
+Updated: 2026-11-01 (Checkpoint 048). Status words: COMPLETE / READY FOR RELEASE / AWAITING CEO / BLOCKED / ON HOLD / NOT STARTED.
 
-CHANGES SINCE 046
-- Final release-readiness review of PR #75, PR #76 and preview-secret stages 1, 2, 3a: all READY, recommended.
-- PR #76 test strengthened (dc4c1c6): VA session proven for all 11; publishing gate proven byte-identical to main. 16/16.
-- Corrections: PR #76 has 17 app call sites (not 14); priority 2 is 35 actions (not 36); YOUTUBE_CLIENT_SECRET is used in 4 files;
-  87 existing preview deployments keep old preview values until removed.
-- SRV auth package (6 actions) and priority-2 plan (5 groups, 32 actions) prepared as documents. No SRV code changed.
+CHANGES SINCE 047 (Order 048, CEO-approved controlled release)
+- PR #75 released: merge 92281cf, production dpl_6iPTEc65Ggixs4kuvDRRbeZdUcPy. Verified.
+- PR #76 released: merge 315e4ae, production dpl_F6yC8KryfefhSdDwmzG5iUKSKo41 (current). Verified, 11/11 refused live.
+- Preview-secret stages 1, 2, 3a applied and verified (8 records changed or added; production on every record).
+- Finance Pilot lifecycle integration plan prepared (docs/projects/nextwave-finance-pilot/LIFECYCLE_INTEGRATION_PLAN_048.md). Not implemented.
 
-ITEM                                          STATUS                  DATE        EVIDENCE / DEPENDENCY                                     NEXT ACTION (OWNER)
-H1  Security release (31 actions)             COMPLETE                2026-10-31  verifier 19/19 (047)                                      none
-H2  GitHub Actions off (repo only)            COMPLETE                2026-10-31  enabled=false main+staging                                none
-H3  Staging repo + staging-only key           COMPLETE                2026-10-31  mmmos-runner-staging, key 168324989                       none
-H4  GitHub App "MMMOS Runner PR Opener"       AWAITING CEO            -           prerequisites valid; opener inactive                      install App (CEO)
-H5  Checkpoint archive + CEO Artifacts view   COMPLETE, CEO ACCEPTED  2026-11-01  "SHA OK" + storage logs (045)                            none
-H6  Runner enforcement probe                  AWAITING CEO            -           prerequisites valid; runner OFF                           start session (CEO)
-H7  Revoke 12 unused authorizations           COMPLETE                2026-11-01  12/12 revoked                                             none
-H8  ChatGPT Business / adviser connection     ON HOLD                 -           no purchase; switch OFF                                   CEO business decision
---  Task Generator correction (PR #74)        COMPLETE                2026-11-01  released                                                  none
---  NextWave Finance Pilot registration       READY FOR RELEASE       -           PR #75 @ 02abc3c, 17/17, final review 047                 CEO release approval
---  Auth remediation P1 (11 actions)          READY FOR RELEASE       -           PR #76 @ dc4c1c6, 16/16, final review 047                 CEO release approval
---  Preview-secret stages 1, 2, 3a            READY TO APPLY          -           PREVIEW_SECRET_STAGES_047.md; Plaid check 4/4             CEO approval
---  Preview-secret stage 4 (service key)      NOT STARTED             -           needs non-production database (cost)                      separate CEO decision
---  Auth remediation SRV package (6 actions)  NOT STARTED (SPEC READY)-           SRV_AUTH_REMEDIATION_PACKAGE_047.md                       PM order to SRV workstream
---  Auth remediation P2 (32 actions, 5 PRs)   NOT STARTED (PLAN READY)-           AUTH_REMEDIATION_P2_PLAN_047.md                           PM order per group
---  NextWave Finance Pilot operation          NOT STARTED             -           after PR #75 release; paid generation and publishing off  separate CEO orders
+APPROVED ITEMS (048)
+ITEM                          PREVIOUS            NEW                 DATE        REFERENCE                          EVIDENCE                                        REMAINING RISK                                NEXT ACTION (OWNER)
+PR #75 Finance Pilot reg.     READY FOR RELEASE   COMPLETE            2026-11-01  92281cf / dpl_6iPTEc65             verifier 19/19; suites 59/59 = main; 17/17     none (registration only)                      L1+L2 order (PM)
+PR #76 Auth P1 (11 actions)   READY FOR RELEASE   COMPLETE            2026-11-01  315e4ae / dpl_F6yC8Kry             11/11 live 401; 16/16; suites 59/59 = main     expired session shows raw error; legacy page  SRV package + P2 orders (PM)
+Preview stage 1 (Plaid)       READY TO APPLY      COMPLETE            2026-11-01  env Or5j2q, eAut91, +jXO5gL       targets diff; Plaid check 4/4; health 19/19    old previews keep values                      none
+Preview stage 2 (YouTube)     READY TO APPLY      COMPLETE            2026-11-01  env L8bi2r                         targets diff; prod refresh 4/4 recovered       old previews keep values                      watch next autosync (Claude Code)
+Preview stage 3a (paid keys)  READY TO APPLY      COMPLETE            2026-11-01  env BbdJCU, OpAJGr, 8NB7j1, z3RueS, lvBDMa  targets diff; fallback 15/15; health 19/19  old previews keep values                      none
 
-NEXT MILESTONE: CEO release approvals for PR #75, PR #76 and preview-secret stages 1, 2, 3a; CEO H6 and H4. Owner: CEO -> Claude Code.
-Switches: eng_runner OFF, eng_adviser_connect OFF (no rows; default off). Runner manual only, never run.
-Protected: Task 125 untouched; .pause-deploy present; CEO-015B is a separate workstream (99a654a, local).
+ITEM                                          STATUS                          DATE        EVIDENCE / DEPENDENCY                                     NEXT ACTION (OWNER)
+H1  Security release (31 actions)             COMPLETE                        2026-10-31  verifier 19/19 (048, after every stage)                   none
+H2  GitHub Actions off (repo only)            COMPLETE                        2026-10-31  enabled=false main+staging (048)                          none
+H3  Staging repo + staging-only key           COMPLETE                        2026-10-31  mmmos-runner-staging, key 168324989                       none
+H4  GitHub App "MMMOS Runner PR Opener"       AWAITING CEO                    -           prerequisites valid; opener inactive                      install App (CEO)
+H5  Checkpoint archive + CEO Artifacts view   COMPLETE, CEO ACCEPTED          2026-11-01  "SHA OK" + storage logs (045)                            none
+H6  Runner enforcement probe                  AWAITING CEO                    -           prerequisites valid; runner OFF                           start session (CEO)
+H7  Revoke 12 unused authorizations           COMPLETE                        2026-11-01  12/12 revoked                                             none
+H8  ChatGPT Business / adviser connection     ON HOLD                         -           no purchase; switch OFF                                   CEO business decision
+--  NextWave Finance Pilot                    REGISTERED - NOT YET OPERATIONAL 2026-11-01  PR #75 live; generation + publishing disabled           L1+L2 order (PM), cost/publish decisions (CEO)
+--  Preview-secret stage 4 (service key)      NOT STARTED                     -           needs non-production database (cost)                      separate CEO decision
+--  Old preview deployments (88 READY)        NOT STARTED                     -           hold pre-048 preview values; behind preview login         separate CEO decision (delete/retention)
+--  Auth remediation SRV package (6 actions)  NOT STARTED (SPEC READY)        -           SRV_AUTH_REMEDIATION_PACKAGE_047.md                       PM order to SRV workstream
+--  Auth remediation P2 (32 actions, 5 PRs)   NOT STARTED (PLAN READY)        -           AUTH_REMEDIATION_P2_PLAN_047.md                           PM order per group
+
+NEXT MILESTONE: CEO H6 and H4; PM orders for Finance Pilot L1+L2, the SRV package and P2. Owner: PM -> CEO -> Claude Code.
+Production: main 315e4ae, dpl_F6yC8KryfefhSdDwmzG5iUKSKo41. Rollback: dpl_6iPTEc65 (before #76), dpl_6jmdF5CE (before #75).
+Switches: eng_runner OFF, eng_adviser_connect OFF. Runner manual only, never run.
+Protected: Task 125 not touched; .pause-deploy present; CEO-015B (99a654a) untouched.

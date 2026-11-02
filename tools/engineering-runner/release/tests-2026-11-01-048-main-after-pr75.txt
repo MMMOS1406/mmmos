@@ -1,0 +1,8 @@
+p1 engineering-review-escaping    26 passed, 0 failed
+p1 engineering-r2-screens         9 passed, 0 failed
+p1 preservation: 141 checks, 10 failed
+preservation FAIL diff (old main vs new main):
+  NEW test_nextwave_finance_pilot_registration_046 N 0 17 passed, 0 failed | O None 
+identical to old main: 59 of 60
+
+[exited with code 0]

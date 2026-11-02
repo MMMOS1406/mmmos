@@ -1,0 +1,10 @@
+main 315e4ae
+p2 engineering-review-escaping    26 passed, 0 failed
+p2 engineering-r2-screens         9 passed, 0 failed
+p2 preservation: 141 checks, 10 failed
+preservation FAIL diff (old main 71546c3 vs new main):
+  NEW test_auth_remediation_p1_046.mjs             N 0 16 passed, 0 failed | O None 
+  NEW test_nextwave_finance_pilot_registration_046 N 0 17 passed, 0 failed | O None 
+identical to old main: 59 of 61
+
+[exited with code 0]

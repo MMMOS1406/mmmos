@@ -1,0 +1,170 @@
+[
+ {
+  "key": "ANTHROPIC_API_KEY",
+  "id": "BbdJCUP17hn4QcJj",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "APP_URL",
+  "id": "StxOjZASgCp8nMMb",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "ELEVENLABS_API_KEY",
+  "id": "OpAJGrkQdgUVagki",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "GITHUB_REPO",
+  "id": "ljvY7Brymf8gFFbu",
+  "type": "encrypted",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "GITHUB_TOKEN",
+  "id": "ZI6vQ7MR63vqlW4e",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "HEYGEN_API_KEY",
+  "id": "8NB7j1lByXC7akpd",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "NEXTWAVE_V2_ROUTE_PRODUCTION",
+  "id": "iSgMTeFPAtXrlwNc",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "PEXELS_API_KEY",
+  "id": "tiFmHqzi6uhJKfME",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "PLAID_CLIENT_ID",
+  "id": "IKLlavNohIbBeUwc",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "PLAID_ENV",
+  "id": "jXO5gL40NoW8xVg1",
+  "type": "encrypted",
+  "target": "preview",
+  "gitBranch": ""
+ },
+ {
+  "key": "PLAID_ENV",
+  "id": "Or5j2qnhipBiHoge",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "PLAID_SECRET",
+  "id": "eAut91Ki0icwauMw",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "PLAID_SECRET_SANDBOX",
+  "id": "sgfSkK6IJB4KwCwC",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "PRODUCTION_DEPLOY_HOOK_URL",
+  "id": "1I7mOp9eeG6FFfVw",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "RUNWAY_API_KEY",
+  "id": "z3RueS97KRwzyABr",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "SUBMAGIC_API_KEY",
+  "id": "lvBDMaZRQrDqM634",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "SUPABASE_SERVICE_KEY",
+  "id": "VSgsITWEisvJRu5R",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "TIKTOK_CLIENT_KEY",
+  "id": "YSb7LJOflGogiyAn",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "TIKTOK_CLIENT_SECRET",
+  "id": "NsT19s6KojNrJPBd",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "TIKTOK_REDIRECT_URI",
+  "id": "D6tqEqoqmqeZ8hoG",
+  "type": "sensitive",
+  "target": "production",
+  "gitBranch": ""
+ },
+ {
+  "key": "YOUTUBE_API_KEY",
+  "id": "BvzJqsPsjI5NpyAu",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "YOUTUBE_CLIENT_ID",
+  "id": "PKImtVhnyGWVzth9",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "YOUTUBE_CLIENT_SECRET",
+  "id": "L8bi2rAw8xsaUHBa",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ },
+ {
+  "key": "YOUTUBE_REDIRECT_URI",
+  "id": "GNpF4lxezDT2tnXR",
+  "type": "sensitive",
+  "target": "preview,production",
+  "gitBranch": ""
+ }
+]
