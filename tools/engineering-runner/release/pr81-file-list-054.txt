@@ -1,0 +1,11 @@
+ api/ops.js                                         |   6 +-
+ .../evidence/nwfp-card-052-local.png               | Bin 0 -> 56503 bytes
+ projects/nextwave-finance-pilot/lib/pilotState.mjs |  15 ++--
+ public/index.html                                  |   2 +-
+ .../nextwave-finance-pilot/_scopeGuard.mjs         |  91 +++++++++++++++++++++
+ .../browser_nwfp_card_049.mjs                      |   2 +-
+ .../test_nwfp_card_evidence_051.mjs                |  13 +--
+ .../nextwave-finance-pilot/test_nwfp_l1_l2_049.mjs |  32 +++-----
+ .../test_nwfp_l3_planning_051.mjs                  |  12 ++-
+ .../test_nwfp_scope_guard_053.mjs                  |  73 +++++++++++++++++
+ 10 files changed, 202 insertions(+), 44 deletions(-)

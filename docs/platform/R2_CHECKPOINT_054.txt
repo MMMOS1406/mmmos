@@ -1,0 +1,203 @@
+START CHECKPOINT 054
+
+PROJECT: MMMOS Engineering Agent Integration - Release 2 / NextWave Finance Pilot L3 status correction and scope-guard remediation
+DATE: 2026-11-02 (work ran 15:48-16:15 UTC)
+EXECUTION ORDER: ORDER 054 (CEO-approved release of PR #81, replacing PR #80)
+
+EXECUTIVE SUMMARY:
+- PR #81 is released and verified. No failure; no rollback needed.
+  - Merge 036a754, production dpl_59CnfpwSr4tz7t5WMWjvMfWqjx8j (current), built from the merge commit.
+  - The CEO card now derives L3 DEPLOYED - SAVING OFF from the Checkpoint 052 evidence and the real nwfp_plan_writes switch.
+  - The strengthened line-number scope guard is live in both pilot suites.
+- Mandatory mutation audit PASS, on the exact candidate and again on the released code:
+  - every unauthorized change is rejected (replacements, additions, deletion, adjacent-function change, foreign file);
+  - authorized pilot edits are allowed;
+  - guard self-test 14/14 (#77, #78 and #79 accepted; #76 rejected).
+- Regression: released main matches the pre-release main on 63 of 65 suites. The 2 differences are expected: the evidence suite 13 -> 14, and the new guard suite 14/14.
+- Both pilot write switches remain absent (OFF). 0 state rows, 0 plan rows, 0 pilot tasks. No generation, publishing, migration or cost.
+- PR #80: GitHub automatically shows it as MERGED, because its head commit is part of PR #81. It was never merged on its own and could not be closed. A supersession note is recorded on #80.
+- YouTube autosync after stage 2: NOT YET OBSERVED (due 00:00 UTC 2026-11-03).
+
+BASELINE VERIFICATION: PASS
+- main a75e6d99da056e65e500d687d5fc662920c4f230; dpl_DbNxKnT4Xsd4mPB5bvjnVeFRVmeF READY; verifier 19/19.
+- GitHub Actions OFF; rulesets 26252619 and 26286416 active.
+- Flags: only state_merge_only=true (nwfp_state_writes, nwfp_plan_writes, eng_runner, eng_adviser_connect absent).
+- 0 state rows, 0 plan rows, 0 pilot tasks.
+- Write-lock 20261102034457 (3 policies; all-policies fingerprint 83708a1589cf94df419ed1db052939cc).
+- Fingerprints recorded: NextWave V2 task and settings; SRV Studio V2 settings; tasks 79 (182ea498…); packages 550 (4a423fac…).
+- Artifact evidence 45 (43 + the two 053 archive uploads).
+- Task 125 not touched; .pause-deploy present; CEO-015B 99a654a untouched. Environment targets unchanged.
+- Rollback reference: dpl_DbNxKnT4Xsd4mPB5bvjnVeFRVmeF.
+
+EXACT DIFF AUDIT: PASS
+- Remote head 090cfd15b7f1134b33a591700e8d5a5e97f7e61a = reviewed head; based on current main; CLEAN, MERGEABLE, checks SUCCESS.
+- Exact changed-file count vs main: 10 (recorded in pr81-file-list-054.txt; full diff in pr81-diff-054.txt).
+  - 6 of PR #80's files byte-identical: api/ops.js, pilotState.mjs, public/index.html, the card screenshot, browser_nwfp_card_049.mjs, test_nwfp_card_evidence_051.mjs.
+  - 2 of PR #80's test files changed only in their scope section, which now calls the shared guard: test_nwfp_l1_l2_049.mjs and test_nwfp_l3_planning_051.mjs.
+  - 2 new guard files: _scopeGuard.mjs and test_nwfp_scope_guard_053.mjs.
+- All production code is identical to the reviewed PR #80 correction.
+- No change to:
+  - other business code or shared lifecycle;
+  - authentication, database or permissions;
+  - publishing, generation, secrets or environment;
+  - unrelated UI.
+
+MUTATION TEST RESULTS: PASS (candidate 090cfd1 and released 036a754; both suites must exit non-zero for unauthorized changes)
+- M1 replacement inside deleteAsset (api/ops.js): REJECTED / REJECTED
+- M2 replacement inside _engFmtBytes, immediately below pilot code: REJECTED / REJECTED
+- M3 addition inside _engArtifactsLoad (public/index.html): REJECTED / REJECTED
+- M4 addition inside deleteAsset (api/ops.js): REJECTED / REJECTED
+- M5 deletion inside deleteAsset (api/ops.js): REJECTED / REJECTED
+- M7 adjacent-function change (first line of _engFmtBytes): REJECTED / REJECTED
+  - The first M7 run used `window`, which crashed the L1/L2 sandbox before its scope check. It was rerun with a sandbox-safe change, and both scope checks failed as required.
+- M9 new file in another business (lib/srvFarsi/): REJECTED / REJECTED
+- M6 pilot-owned edit (nwfpStateGet): ALLOWED / ALLOWED
+- M8 pilot-owned addition (nwfpStatus): ALLOWED / ALLOWED
+- Guard self-test 14/14: synthetic additions, deletions, replacements, adjacent edits, hook lines; released #77, #78 and #79 accepted; non-pilot #76 rejected.
+
+PRE-RELEASE REGRESSION: PASS (candidate vs main a75e6d9)
+- 61 of 65 identical.
+- Differences, all known or expected:
+  - evidence 13 -> 14;
+  - new guard 14/14;
+  - YouTube diff-scope and SRV 037 file-scope self-checks, and the 2 CEO-008 preservation scope checks. These fail on any unmerged branch touching these files and pass once merged; confirmed on the released main.
+- Evidence 14/14, L1/L2 34/34, L3 37/37, scope guard 14/14, auth P1 16/16.
+- Card browser 8/8; Engineering Review 26/26 and 9/9.
+
+PR #81 RELEASE RESULT: PASS
+- Marked ready; merged through the protected PR process (match-head-commit 090cfd1); no bypass.
+- Merge 036a754d38edf6273e881e89eb61a38214068d13 at 2026-11-02T16:03:31Z (parents a75e6d9, 090cfd1). The tree is identical to the reviewed head.
+- Production dpl_59CnfpwSr4tz7t5WMWjvMfWqjx8j READY at 16:03:35Z; deployed source commit 036a754 (matches the merge).
+
+PR #80 SUPERSESSION STATUS: SUPERSEDED BY #81
+- `gh pr close` was refused: GitHub marked #80 MERGED at 16:03:33Z, because its head 8571718 is an ancestor of #81 and therefore now on main.
+- It was never merged on its own.
+- A comment links #81, the 053 mutation audit and this checkpoint: https://github.com/MMMOS1406/mmmos/pull/80#issuecomment-6582026575
+- PR #80's history is preserved.
+
+MERGE COMMIT: 036a754d38edf6273e881e89eb61a38214068d13 (PR #81)
+PRODUCTION DEPLOYMENT: dpl_59CnfpwSr4tz7t5WMWjvMfWqjx8j (READY; source 036a754)
+ROLLBACK REFERENCE: dpl_DbNxKnT4Xsd4mPB5bvjnVeFRVmeF (main a75e6d9). The write-lock stays in all cases. Not needed.
+
+CEO CARD VERIFICATION: PASS
+- Released code with production's real facts (no state row, both switches absent, 0 tasks):
+  - REGISTERED / NOT OPERATIONAL;
+  - Registration LIVE; L1 DEPLOYED - WRITES OFF; L2 DEPLOYED - READ ONLY; L3 DEPLOYED - SAVING OFF; L4-L7 NOT STARTED;
+  - latest verified checkpoint 052; generation and publishing DISABLED.
+- The same code outside production shows PREVIEW READY for registration and L1-L3.
+- Browser check on the released code 8/8 (screenshot nwfp-card-054-released-code.png).
+- The live page is byte-identical to main. The card is read-only (one SHOW button, one CEO-session read).
+
+AUTHENTICATION VERIFICATION: PASS
+- All 8 pilot actions refuse anonymous and forged callers (16/16).
+- 11 P1 actions refused (11/11); publishing returns publisher_session_required.
+- Verifier 19/19.
+
+WRITE-SWITCH VERIFICATION: PASS - nwfp_state_writes and nwfp_plan_writes absent (OFF) after the release; 0 state rows; 0 plan rows.
+
+CROSS-BUSINESS ISOLATION: PASS
+- After the release, identical to baseline:
+  - NextWave V2 task and settings md5;
+  - SRV Studio V2 settings md5;
+  - tasks 79 and status fingerprint;
+  - packages 550 and id fingerprint;
+  - policy fingerprint;
+  - migrations (last 20261102034457); environment targets.
+- Artifact evidence 45 (the release created none).
+- The released diff touches only pilot-owned code and tests. The guard confirms no unauthorized shared-function edit.
+- All NextWave V1/V2, SRV, SMM and AI Studio suites identical.
+- No new external call; no cross-business write.
+
+POST-RELEASE REGRESSION: PASS (released 036a754 vs pre-release a75e6d9)
+- 63 of 65 identical. The differences are the expected evidence 14/14 (was 13) and the new guard 14/14.
+- Preservation identical (same 10 pre-existing failures); Engineering Review 26/26 and 9/9.
+- Mutation audit repeated on the released code: same results as the candidate.
+
+PRODUCTION HEALTH: PASS
+- dpl_59CnfpwSr4tz7t5WMWjvMfWqjx8j READY; verifier 19/19 before and after.
+- Runtime errors: the known url.parse deprecation warning, plus 9 "Invalid JSON" entries at 04:54Z on the previous deployment (my malformed-input probes from Order 052; no write).
+- YouTube 4/4 connections; 0 sync errors since 00:00Z.
+
+YOUTUBE AUTOSYNC RESULT: NOT YET OBSERVED
+- It is 16:1x UTC on 2026-11-02. Last sync 00:50Z (before stage 2). The first post-stage-2 run is due 00:00 UTC 2026-11-03.
+- No manual sync, reconnect, credential change or publishing.
+
+H1-H8 PROGRESS:
+- H1 COMPLETE 2026-10-31
+- H2 COMPLETE 2026-10-31
+- H3 COMPLETE 2026-10-31
+- H4 AWAITING CEO - GitHub App
+- H5 COMPLETE, CEO ACCEPTED 2026-11-01
+- H6 AWAITING CEO - runner security probe
+- H7 COMPLETE 2026-11-01
+- H8 ON HOLD - ChatGPT Business
+
+NEXTWAVE L1-L7 PROGRESS:
+- Registration LIVE.
+- L1 DEPLOYED - WRITES OFF.
+- L2 DEPLOYED - READ ONLY.
+- L3 DEPLOYED - SAVING OFF (now shown by the card).
+- Write-lock APPLIED AND VERIFIED.
+- L4-L7 NOT STARTED.
+- Overall: REGISTERED - NOT YET OPERATIONAL.
+
+CHANGES MADE:
+- PR #81 marked ready and merged; one automatic production deployment.
+- Supersession comment on PR #80.
+- Checkpoint branch with evidence; MMMOS archive uploads.
+
+CHANGES NOT MADE:
+- No switch enabled.
+- No state, plan, task, generation, publishing or cost.
+- No migration, grant, RLS, secret or environment change.
+- No preview deletion; no stage 4.
+- No runner, adviser or GitHub App change.
+- No other business change; .gitignore unchanged.
+- PR #80 not separately merged.
+- Task 125 not touched; .pause-deploy present; CEO-015B untouched.
+
+PASS / FAIL / BLOCKED:
+- PASS: baseline, diff audit, mutation audit (candidate and released), pre-release regression, isolation, release, CEO card, authentication, write switches, post-release regression, production health.
+- NOT YET OBSERVED: YouTube autosync.
+- FAIL: none.
+- BLOCKED: none.
+- Note: the PR #80 close step could not be performed as written (GitHub already marked it merged via #81); the supersession is recorded instead.
+
+DURABLE REPORT PATH:
+- docs/platform/R2_CHECKPOINT_054.txt on branch mmmos-eng/r2-checkpoint-054 (based on 053 @ 6a443f4).
+- Also on that branch:
+  - docs/platform/R2_PROGRESS_TRACKER.txt
+  - tools/engineering-runner/release/: verify-2026-11-02-054-{base,post}.txt, pr81-file-list-054.txt, pr81-diff-054.txt, mutation-audit-054-candidate.txt, tests-2026-11-02-054-pre-release-candidate.txt, tests-2026-11-02-054-post-release-036a754.txt, nwfp-card-054-released-code.png
+  - tools/engineering-runner/preview-secrets/env-054.targets-only.json
+- All reports are .txt, .json or .png (not affected by the *.md ignore rule). Each was confirmed with git cat-file on the remote.
+
+COMMIT SHA: the checkpoint branch commit (reported in the chat message).
+
+MMMOS ARCHIVE VERIFICATION: checkpoint and tracker stored on task ec27ddf6 with server SHA-256 (reported in the chat message). Scope not expanded.
+
+REMAINING RISKS:
+- Malformed JSON returns 500 instead of 400 (platform-wide; no write possible).
+- TRUNCATE/REFERENCES/TRIGGER grants (low, latent); public-key writes to unlocked app_settings keys (pre-existing).
+- 88 old previews with pre-048 values; stage 4 (service key in previews).
+- First post-stage-2 autosync not yet observed.
+- SRV package (6 actions) and P2 (32 actions) still ungated.
+- The scope guard covers the two shared files plus the file allowlist; pilot PRs still need human review.
+
+PM DECISIONS REQUIRED:
+1. Next Finance Pilot step: an L3 plan-editor UI (CEO-only, saving still OFF), the decision to enable plan saving, or L5.
+2. SRV auth package and P2 groups.
+3. Whether to propose the TRUNCATE revocation and the 400-for-malformed-JSON fix.
+
+CEO DECISIONS REQUIRED:
+1. H6 and H4.
+2. Later and separately: enable nwfp_plan_writes and/or nwfp_state_writes.
+3. Optional: TRUNCATE revocation; stage 4; old previews.
+
+NEXT ACTION:
+- Claude Code checks the 00:00 UTC 2026-11-03 autosync.
+- The PM issues the next orders.
+- The CEO does H6 and H4.
+
+ACTION OWNER: ChatGPT PM (next orders) -> CEO (H6, H4, optional decisions) -> Claude Code (autosync check, execution, Checkpoint 055)
+
+END CHECKPOINT 054

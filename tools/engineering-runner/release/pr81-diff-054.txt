@@ -1,0 +1,410 @@
+diff --git a/api/ops.js b/api/ops.js
+index 20781da..6baf27c 100644
+--- a/api/ops.js
++++ b/api/ops.js
+@@ -1284,13 +1284,13 @@ async function _nwfpReadStateRow() {
+ async function nwfpStatus(req, res) {
+   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_session_required' });
+   try {
+-    const [row, writes, tasks] = await Promise.all([
+-      _nwfpReadStateRow(), _engPlatformFlag(NWFP.PILOT_WRITES_FLAG),
++    const [row, writes, planWrites, tasks] = await Promise.all([
++      _nwfpReadStateRow(), _engPlatformFlag(NWFP.PILOT_WRITES_FLAG), _engPlatformFlag(NWFP_PLAN.PLAN_WRITES_FLAG),
+       sbGet(`engineering_tasks?packet->>business=eq.${NWFP.PILOT_KEY}&select=id,status,packet&limit=500`),
+     ]);
+     const ids = (tasks || []).map(t => String(t.id)).filter(id => _ENG_UUID.test(id));
+     const ev = ids.length ? await sbGet(`brain_evidence?evidence_type=eq.artifact&task_id=in.(${ids.join(',')})&select=task_id,created_at,metadata&limit=2000`) : [];
+-    const status = NWFP.buildStatus({ stateValue: row ? row.value : null, writesFlag: writes, tasks, evidence: ev, environment: process.env.VERCEL_ENV || 'local' });
++    const status = NWFP.buildStatus({ stateValue: row ? row.value : null, writesFlag: writes, planWritesFlag: planWrites, tasks, evidence: ev, environment: process.env.VERCEL_ENV || 'local' });
+     return res.status(200).json({ ok: true, status });
+   } catch (e) {
+     return res.status(500).json({ ok: false, error: 'nwfp_status_failed' });
+diff --git a/projects/nextwave-finance-pilot/lib/pilotState.mjs b/projects/nextwave-finance-pilot/lib/pilotState.mjs
+index 7f25045..8b4a278 100644
+--- a/projects/nextwave-finance-pilot/lib/pilotState.mjs
++++ b/projects/nextwave-finance-pilot/lib/pilotState.mjs
+@@ -19,26 +19,27 @@ export const SCHEMA_VERSION = 1;
+ // each line carries its evidence. What the card shows is then derived at runtime from that manifest plus
+ // live facts (stageDisplayStatus): outside production nothing is shown as deployed or live, and L1's
+ // label reflects the real value of the write switch.
+-export const LATEST_VERIFIED_CHECKPOINT = '050';
++export const LATEST_VERIFIED_CHECKPOINT = '052';
+ export const STAGES = Object.freeze([
+   { id: 'registration', label: 'Registration (business key, folders, labels)', status: 'LIVE', evidence: 'Checkpoint 048: PR #75, merge 92281cf, production dpl_6iPTEc65' },
+   { id: 'L1', label: 'L1 Isolated state', status: 'DEPLOYED', evidence: 'Checkpoint 050: PR #77, merge 9efd0df, production dpl_8jPjjXVEz; write-lock migration 20261102034457 applied and verified' },
+   { id: 'L2', label: 'L2 CEO read-only card', status: 'DEPLOYED', evidence: 'Checkpoint 050: PR #77, merge 9efd0df, production dpl_8jPjjXVEz' },
+-  { id: 'L3', label: 'L3 Content planning (no generation)', status: 'NOT STARTED', evidence: null },
++  { id: 'L3', label: 'L3 Content planning (no generation)', status: 'DEPLOYED', evidence: 'Checkpoint 052: PR #79, merge a75e6d9, production dpl_DbNxKnT4; plan saving OFF (nwfp_plan_writes absent)' },
+   { id: 'L4', label: 'L4 Paid generation (sandboxed)', status: 'NOT STARTED', evidence: null },
+   { id: 'L5', label: 'L5 Review and approval', status: 'NOT STARTED', evidence: null },
+   { id: 'L6', label: 'L6 Publishing (per video)', status: 'NOT STARTED', evidence: null },
+   { id: 'L7', label: 'L7 Analytics', status: 'NOT STARTED', evidence: null },
+ ]);
+ export const STAGE_STATUSES = Object.freeze(['LIVE', 'DEPLOYED', 'PREVIEW READY', 'NOT STARTED']); // allowed in the manifest
+-export const DISPLAY_STATUSES = Object.freeze(['LIVE', 'DEPLOYED \u2014 WRITES OFF', 'DEPLOYED \u2014 WRITES ON', 'DEPLOYED \u2014 READ ONLY', 'PREVIEW READY', 'NOT STARTED']);
++export const DISPLAY_STATUSES = Object.freeze(['LIVE', 'DEPLOYED \u2014 WRITES OFF', 'DEPLOYED \u2014 WRITES ON', 'DEPLOYED \u2014 READ ONLY', 'DEPLOYED \u2014 SAVING OFF', 'DEPLOYED \u2014 SAVING ON', 'PREVIEW READY', 'NOT STARTED']);
+ // What the card shows for one stage. Derived, never assumed:
+ // - outside production, LIVE/DEPLOYED become PREVIEW READY;
+-// - L1 shows the actual write switch; L2 is read-only by construction.
+-export function stageDisplayStatus(stage, { isProduction, writesFlag }) {
++// - L1 shows the actual state-write switch; L3 shows the actual plan-saving switch; L2 is read-only.
++export function stageDisplayStatus(stage, { isProduction, writesFlag, planWritesFlag }) {
+   if ((stage.status === 'LIVE' || stage.status === 'DEPLOYED') && !isProduction) return 'PREVIEW READY';
+   if (stage.status === 'DEPLOYED') {
+     if (stage.id === 'L1') return writesFlag ? 'DEPLOYED \u2014 WRITES ON' : 'DEPLOYED \u2014 WRITES OFF';
++    if (stage.id === 'L3') return planWritesFlag ? 'DEPLOYED \u2014 SAVING ON' : 'DEPLOYED \u2014 SAVING OFF';
+     return 'DEPLOYED \u2014 READ ONLY';
+   }
+   return stage.status;
+@@ -118,7 +119,7 @@ export function pilotArtifactBelongs(objectPath, taskId) {
+ }
+ 
+ // Builds the read-only CEO status. Inputs come from the server; output has no paths, tokens or foreign data.
+-export function buildStatus({ stateValue, writesFlag, tasks, evidence, environment }) {
++export function buildStatus({ stateValue, writesFlag, planWritesFlag, tasks, evidence, environment }) {
+   const parsed = parseStoredState(stateValue);
+   const own = pilotTasks(tasks);
+   const ids = new Set(own.map(t => t.id));
+@@ -128,7 +129,7 @@ export function buildStatus({ stateValue, writesFlag, tasks, evidence, environme
+   const isProduction = environment === 'production';
+   const stages = STAGES.map(s => ({
+     id: s.id, label: s.label, evidence: s.evidence,
+-    status: stageDisplayStatus(s, { isProduction, writesFlag: !!writesFlag }),
++    status: stageDisplayStatus(s, { isProduction, writesFlag: !!writesFlag, planWritesFlag: !!planWritesFlag }),
+   }));
+   const anyOperational = stages.some(s => /^L[3-7]$/.test(s.id) && s.status === 'LIVE');
+   return {
+diff --git a/public/index.html b/public/index.html
+index 58731f3..9285749 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -31246,7 +31246,7 @@ function _nwfpCardSection(){
+     </div><div id="nwfp-card-body" style="margin-top:8px"></div></div>`;
+ }
+ function _nwfpBadge(t){
+-  const c=({'LIVE':'#22c55e','REGISTERED':'#22c55e','DEPLOYED \u2014 WRITES OFF':'#22c55e','DEPLOYED \u2014 READ ONLY':'#22c55e','DEPLOYED \u2014 WRITES ON':'#f59e0b','PREVIEW READY':'#38bdf8','NOT OPERATIONAL':'#f59e0b','NOT STARTED':'#8b9cc4','DISABLED':'#ef4444','OFF':'#ef4444','ON':'#22c55e'})[t]||'#8b9cc4';
++  const c=({'LIVE':'#22c55e','REGISTERED':'#22c55e','DEPLOYED \u2014 WRITES OFF':'#22c55e','DEPLOYED \u2014 READ ONLY':'#22c55e','DEPLOYED \u2014 WRITES ON':'#f59e0b','DEPLOYED \u2014 SAVING OFF':'#22c55e','DEPLOYED \u2014 SAVING ON':'#f59e0b','PREVIEW READY':'#38bdf8','NOT OPERATIONAL':'#f59e0b','NOT STARTED':'#8b9cc4','DISABLED':'#ef4444','OFF':'#ef4444','ON':'#22c55e'})[t]||'#8b9cc4';
+   return `<span data-nwfp-badge="${escHTML(t)}" style="display:inline-block;padding:1px 7px;border-radius:5px;border:1px solid ${c};color:${c};font-size:9px;font-weight:800;letter-spacing:0.4px">${escHTML(t)}</span>`;
+ }
+ function _nwfpCardHtml(st){
+diff --git a/tests/projects/nextwave-finance-pilot/_scopeGuard.mjs b/tests/projects/nextwave-finance-pilot/_scopeGuard.mjs
+new file mode 100644
+index 0000000..2bfdd18
+--- /dev/null
++++ b/tests/projects/nextwave-finance-pilot/_scopeGuard.mjs
+@@ -0,0 +1,91 @@
++// Finance Pilot scope guard (Order 053). Used by every pilot suite to check a branch against origin/main.
++//
++// Rule: a pilot change may touch only the pilot's own folders and the two shared files. Inside the shared
++// files (api/ops.js, public/index.html) EVERY changed line, whether added, edited or removed, must sit inside a
++// pilot-owned top-level function (name starts with nwfp / _nwfp) in the file version it belongs to (removed
++// lines: main; added lines: the branch), or be one of the known pilot hook lines (the pilot module import, a
++// router line for an nwfp_ action, the card mount). Lines are located by their exact line number from the diff,
++// never by searching for their text.
++import { execSync } from 'node:child_process';
++import { readFileSync } from 'node:fs';
++import { join } from 'node:path';
++
++export const PILOT_DIRS = ['projects/nextwave-finance-pilot/', 'tests/projects/nextwave-finance-pilot/', 'docs/projects/nextwave-finance-pilot/'];
++export const SHARED_FILES = ['api/ops.js', 'public/index.html'];
++const PILOT_FN = /^_?nwfp/i;
++export const HOOK_LINES = [
++  /^import \* as NWFP(?:_[A-Z]+)? from '\.\.\/projects\/nextwave-finance-pilot\/lib\/[A-Za-z]+\.mjs'; \/\/ .*$/, // pilot module import (api/ops.js)
++  /^ {4}if \(action === 'nwfp_[a-z_]+'\)\s+return await nwfp[A-Za-z]+\(req, res\);\s+\/\/ .*$/,                  // router line for an nwfp_ action
++  /^ {6}\$\{_nwfpCardSection\(\)\}$/,                                                                          // card mount (Engineering Review)
++];
++
++// Top-level function spans: from a column-0 `function`/`async function` declaration to the line before the
++// next column-0 line that is not blank and not '}' (the closing brace belongs to the function).
++export function functionSpans(text) {
++  const lines = text.split('\n'), spans = [];
++  let cur = null;
++  for (let i = 0; i < lines.length; i++) {
++    const l = lines[i];
++    const m = /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/.exec(l);
++    if (m) { if (cur) { cur.end = i; spans.push(cur); } cur = { name: m[1], start: i + 1, end: null }; continue; }
++    if (cur && l.length && !/^\s/.test(l) && !/^\}/.test(l)) { cur.end = i; spans.push(cur); cur = null; }
++  }
++  if (cur) { let e = lines.length; while (e > cur.start && !lines[e - 1].trim()) e--; cur.end = e; spans.push(cur); }
++  return spans;
++}
++const ownerAt = (spans, n) => { const s = spans.find(x => n >= x.start && n <= x.end); return s ? s.name : null; };
++
++// Parses `git diff -U0` output for one file into removed (old line numbers) and added (new line numbers).
++export function parseHunks(diffText) {
++  const removed = [], added = [];
++  let o = 0, n = 0;
++  for (const line of diffText.split('\n')) {
++    const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
++    if (h) { o = Number(h[1]); n = Number(h[2]); continue; }
++    if (line.startsWith('---') || line.startsWith('+++')) continue;
++    if (line.startsWith('-')) { removed.push({ n: o, text: line.slice(1) }); o++; }
++    else if (line.startsWith('+')) { added.push({ n, text: line.slice(1) }); n++; }
++  }
++  return { removed, added };
++}
++
++// Returns the violations for one shared file.
++export function sharedFileViolations(oldText, newText, diffText) {
++  const { removed, added } = parseHunks(diffText);
++  const oldSpans = functionSpans(oldText), newSpans = functionSpans(newText);
++  const newLines = newText.split('\n');
++  const isHook = (t) => HOOK_LINES.some(re => re.test(t));
++  const out = [];
++  for (const r of removed) {
++    const owner = ownerAt(oldSpans, r.n);
++    if (!(owner && PILOT_FN.test(owner)) && !isHook(r.text)) out.push(`removed/edited line ${r.n} in ${owner || 'top level'}: ${r.text.trim().slice(0, 80)}`);
++  }
++  for (const a of added) {
++    const owner = ownerAt(newSpans, a.n);
++    if ((owner && PILOT_FN.test(owner)) || isHook(a.text)) continue;
++    // A blank or comment line is allowed only directly above a pilot function or hook line.
++    if (/^\s*(\/\/.*)?$/.test(a.text)) {
++      let k = a.n; // 1-based; newLines[k] is the next line
++      while (k < newLines.length && /^\s*(\/\/.*)?$/.test(newLines[k])) k++;
++      const next = k + 1, o2 = ownerAt(newSpans, next);
++      if ((o2 && PILOT_FN.test(o2) && newSpans.find(s => s.start === next)) || (k < newLines.length && isHook(newLines[k]))) continue;
++    }
++    out.push(`added line ${a.n} in ${owner || 'top level'}: ${a.text.trim().slice(0, 80)}`);
++  }
++  return out;
++}
++
++// Checks the current branch (repo root) against origin/main. Returns { changed, foreignFiles, violations } or null.
++export function checkBranchScope(root) {
++  let changed;
++  try { changed = execSync('git diff --name-only origin/main -- .', { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch { return null; }
++  const foreignFiles = changed.filter(f => !SHARED_FILES.includes(f) && !PILOT_DIRS.some(d => f.startsWith(d)));
++  const violations = [];
++  for (const f of SHARED_FILES.filter(x => changed.includes(x))) {
++    const oldText = execSync(`git show origin/main:${f}`, { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
++    const newText = readFileSync(join(root, f), 'utf8');
++    const diff = execSync(`git diff -U0 origin/main -- ${f}`, { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
++    for (const v of sharedFileViolations(oldText, newText, diff)) violations.push(`${f}: ${v}`);
++  }
++  return { changed, foreignFiles, violations };
++}
+diff --git a/tests/projects/nextwave-finance-pilot/browser_nwfp_card_049.mjs b/tests/projects/nextwave-finance-pilot/browser_nwfp_card_049.mjs
+index f3ee341..a3e0f9d 100644
+--- a/tests/projects/nextwave-finance-pilot/browser_nwfp_card_049.mjs
++++ b/tests/projects/nextwave-finance-pilot/browser_nwfp_card_049.mjs
+@@ -52,7 +52,7 @@ try {
+   ok('the card shows identity, REGISTERED, NOT OPERATIONAL, generation and publishing DISABLED',
+     out.text.includes('NextWave Finance Pilot (nextwave_finance_pilot)') && out.badges.includes('REGISTERED') && out.badges.includes('NOT OPERATIONAL') && out.badges.filter(b => b === 'DISABLED').length === 2, out.badges.join(','));
+   ok('all 8 lifecycle stages are listed; only registration is LIVE', out.stages.length === 8 && out.badges.filter(b => b === 'LIVE').length === 1);
+-  ok('L1 shows DEPLOYED \u2014 WRITES OFF and L2 DEPLOYED \u2014 READ ONLY; checkpoint 050', out.badges.includes('DEPLOYED \u2014 WRITES OFF') && out.badges.includes('DEPLOYED \u2014 READ ONLY') && out.text.includes('050'), out.badges.join(','));
++  ok('L1 DEPLOYED \u2014 WRITES OFF, L2 DEPLOYED \u2014 READ ONLY, L3 DEPLOYED \u2014 SAVING OFF; checkpoint 052', out.badges.includes('DEPLOYED \u2014 WRITES OFF') && out.badges.includes('DEPLOYED \u2014 READ ONLY') && out.badges.includes('DEPLOYED \u2014 SAVING OFF') && out.text.includes('052'), out.badges.join(','));
+   ok('the card is read-only (one button, no inputs)', out.buttons === 1 && out.inputs === 0);
+   ok('no page errors and no outside requests while rendering', pageErrors.length === 0 && blocked.length === blockedBefore, pageErrors.concat(blocked.slice(blockedBefore)).join(' | ').slice(0, 300));
+   if (shot) {
+diff --git a/tests/projects/nextwave-finance-pilot/test_nwfp_card_evidence_051.mjs b/tests/projects/nextwave-finance-pilot/test_nwfp_card_evidence_051.mjs
+index 431b2af..47e3fe8 100644
+--- a/tests/projects/nextwave-finance-pilot/test_nwfp_card_evidence_051.mjs
++++ b/tests/projects/nextwave-finance-pilot/test_nwfp_card_evidence_051.mjs
+@@ -5,20 +5,21 @@ let pass = 0, fail = 0; const ok = (n, c, x = '') => { c ? pass++ : fail++; cons
+ const st = (env, writes) => P.buildStatus({ stateValue: null, writesFlag: writes, tasks: [], evidence: [], environment: env });
+ const byId = (s) => Object.fromEntries(s.stages.map(x => [x.id, x.status]));
+ const prod = byId(st('production', false));
+-ok('production, writes OFF: Registration LIVE, L1 DEPLOYED — WRITES OFF, L2 DEPLOYED — READ ONLY, L3-L7 NOT STARTED',
+-  prod.registration === 'LIVE' && prod.L1 === 'DEPLOYED — WRITES OFF' && prod.L2 === 'DEPLOYED — READ ONLY' && ['L3', 'L4', 'L5', 'L6', 'L7'].every(k => prod[k] === 'NOT STARTED'), JSON.stringify(prod));
+-ok('latest verified checkpoint is 050', st('production', false).latest_verified_checkpoint === '050');
++ok('production, both switches OFF: Registration LIVE, L1 DEPLOYED — WRITES OFF, L2 DEPLOYED — READ ONLY, L3 DEPLOYED — SAVING OFF, L4-L7 NOT STARTED',
++  prod.registration === 'LIVE' && prod.L1 === 'DEPLOYED — WRITES OFF' && prod.L2 === 'DEPLOYED — READ ONLY' && prod.L3 === 'DEPLOYED — SAVING OFF' && ['L4', 'L5', 'L6', 'L7'].every(k => prod[k] === 'NOT STARTED'), JSON.stringify(prod));
++ok('latest verified checkpoint is 052', st('production', false).latest_verified_checkpoint === '052');
++ok('L3 follows the REAL plan-saving switch: ON shows DEPLOYED \u2014 SAVING ON; it is independent of the L1 switch', byId(P.buildStatus({ stateValue: null, writesFlag: false, planWritesFlag: true, tasks: [], evidence: [], environment: 'production' })).L3 === 'DEPLOYED \u2014 SAVING ON' && byId(st('production', true)).L3 === 'DEPLOYED \u2014 SAVING OFF');
+ ok('L1 follows the REAL write switch: ON shows DEPLOYED — WRITES ON (never assumed OFF)', byId(st('production', true)).L1 === 'DEPLOYED — WRITES ON');
+ for (const env of ['preview', 'development', 'local', undefined]) {
+   const s = byId(st(env, false));
+-  ok(`outside production (${env}) nothing shows LIVE or DEPLOYED`, Object.values(s).every(v => !/^(LIVE|DEPLOYED)/.test(v)) && s.registration === 'PREVIEW READY' && s.L1 === 'PREVIEW READY' && s.L2 === 'PREVIEW READY');
++  ok(`outside production (${env}) nothing shows LIVE or DEPLOYED`, Object.values(s).every(v => !/^(LIVE|DEPLOYED)/.test(v)) && s.registration === 'PREVIEW READY' && s.L1 === 'PREVIEW READY' && s.L2 === 'PREVIEW READY' && s.L3 === 'PREVIEW READY');
+ }
+ ok('every DEPLOYED/LIVE manifest line names a checkpoint and a merge commit as evidence',
+   P.STAGES.filter(s => s.status === 'LIVE' || s.status === 'DEPLOYED').every(s => /Checkpoint 0\d\d/.test(s.evidence || '') && /merge [0-9a-f]{7}/.test(s.evidence || '')));
+-ok('L1 evidence names the applied write-lock migration', /20261102034457/.test(P.STAGES.find(s => s.id === 'L1').evidence));
++ok('L1 evidence names the applied write-lock migration; L3 evidence names PR #79 and saving OFF', /20261102034457/.test(P.STAGES.find(s => s.id === 'L1').evidence) && /PR #79/.test(P.STAGES.find(s => s.id === 'L3').evidence) && /saving OFF/.test(P.STAGES.find(s => s.id === 'L3').evidence));
+ ok('the manifest uses only allowed statuses and displayed statuses are from the allowed display set',
+   P.STAGES.every(s => P.STAGE_STATUSES.includes(s.status)) && ['production', 'preview'].every(e => [true, false].every(w => st(e, w).stages.every(x => P.DISPLAY_STATUSES.includes(x.status)))));
+-ok('no stage beyond L2 claims DEPLOYED or LIVE; overall stays NOT OPERATIONAL', P.STAGES.filter(s => /^L[3-7]$/.test(s.id)).every(s => s.status === 'NOT STARTED') && st('production', true).operational === 'NOT OPERATIONAL');
++ok('no stage beyond L3 claims DEPLOYED or LIVE; overall stays NOT OPERATIONAL (L3 planning is not an operational stage)', P.STAGES.filter(s => /^L[4-7]$/.test(s.id)).every(s => s.status === 'NOT STARTED') && st('production', true).operational === 'NOT OPERATIONAL');
+ ok('generation and publishing stay DISABLED in every case', ['production', 'preview'].every(e => [true, false].every(w => { const s = st(e, w); return s.generation === 'DISABLED' && s.publishing === 'DISABLED'; })));
+ ok('state defaults unchanged (registered, generation/publishing disabled)', P.defaultState().lifecycle_stage === 'registered' && P.defaultState().generation.enabled === false && P.defaultState().publishing.enabled === false);
+ console.log(`\n${pass} passed, ${fail} failed`);
+diff --git a/tests/projects/nextwave-finance-pilot/test_nwfp_l1_l2_049.mjs b/tests/projects/nextwave-finance-pilot/test_nwfp_l1_l2_049.mjs
+index 01e37e4..0ef69c8 100644
+--- a/tests/projects/nextwave-finance-pilot/test_nwfp_l1_l2_049.mjs
++++ b/tests/projects/nextwave-finance-pilot/test_nwfp_l1_l2_049.mjs
+@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
+ import vm from 'node:vm';
+ import { db, call, ceoToken, makeOk, randomUUID } from '../../platform/engineering-harness.mjs';
+ import * as P from '../../../projects/nextwave-finance-pilot/lib/pilotState.mjs';
++import { checkBranchScope } from './_scopeGuard.mjs';
+ const T = makeOk(); const ok = T.ok;
+ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+ const src = readFileSync(join(root, 'api', 'ops.js'), 'utf8');
+@@ -105,17 +106,17 @@ r = await call('nwfp_status', C);
+ const st = r.body.status, out = JSON.stringify(r.body);
+ ok('status counts only pilot tasks (1) and only artifacts in the pilot\'s own folder (1 file, 100 B)', r.status === 200 && st.tasks.total === 1 && st.artifacts.files === 1 && st.artifacts.total_bytes === 100);
+ ok('status returns no storage paths, other task ids, other titles or tokens', !/object_path|nextwave\/|run1|V2 SECRET|ceo_session|service|token/i.test(out) && !out.includes(nid) && !out.includes(fid) && !out.includes(pid));
+-ok('outside production nothing is LIVE or DEPLOYED (registration, L1, L2 show PREVIEW READY)', st.stages.every(s => !/^(LIVE|DEPLOYED)/.test(s.status)) && st.registration === 'PREVIEW READY' && st.stages.filter(s => s.status === 'PREVIEW READY').map(s => s.id).join() === 'registration,L1,L2');
++ok('outside production nothing is LIVE or DEPLOYED (registration, L1, L2, L3 show PREVIEW READY)', st.stages.every(s => !/^(LIVE|DEPLOYED)/.test(s.status)) && st.registration === 'PREVIEW READY' && st.stages.filter(s => s.status === 'PREVIEW READY').map(s => s.id).join() === 'registration,L1,L2,L3');
+ process.env.VERCEL_ENV = 'production';
+ r = await call('nwfp_status', C);
+ const sp = r.body.status;
+-ok('in production (stand-in switch is ON here): REGISTERED, NOT OPERATIONAL; registration LIVE; L1 shows the real switch, DEPLOYED \u2014 WRITES ON; L2 DEPLOYED \u2014 READ ONLY; L3-L7 NOT STARTED',
++ok('in production (stand-in state switch is ON here): REGISTERED, NOT OPERATIONAL; registration LIVE; L1 shows the real switch, DEPLOYED \u2014 WRITES ON; L2 DEPLOYED \u2014 READ ONLY; L3 DEPLOYED \u2014 SAVING OFF; L4-L7 NOT STARTED',
+   sp.registration === 'REGISTERED' && sp.operational === 'NOT OPERATIONAL' && sp.stages.filter(s => s.status === 'LIVE').map(s => s.id).join() === 'registration' &&
+   sp.stages.find(s => s.id === 'L1').status === 'DEPLOYED \u2014 WRITES ON' && sp.stages.find(s => s.id === 'L2').status === 'DEPLOYED \u2014 READ ONLY' &&
+-  sp.stages.filter(s => s.status === 'NOT STARTED').length === 5);
+-ok('generation and publishing shown DISABLED; latest verified checkpoint 050', sp.generation === 'DISABLED' && sp.publishing === 'DISABLED' && sp.latest_verified_checkpoint === '050');
++  sp.stages.find(s => s.id === 'L3').status === 'DEPLOYED \u2014 SAVING OFF' && sp.stages.filter(s => s.status === 'NOT STARTED').length === 4);
++ok('generation and publishing shown DISABLED; latest verified checkpoint 052', sp.generation === 'DISABLED' && sp.publishing === 'DISABLED' && sp.latest_verified_checkpoint === '052');
+ delete process.env.VERCEL_ENV;
+-ok('the stage manifest uses only the allowed statuses, and no L3-L7 stage claims LIVE', P.STAGES.every(s => P.STAGE_STATUSES.includes(s.status)) && P.STAGES.filter(s => /^L[3-7]$/.test(s.id)).every(s => s.status === 'NOT STARTED'));
++ok('the stage manifest uses only the allowed statuses, and no L4-L7 stage claims LIVE or DEPLOYED', P.STAGES.every(s => P.STAGE_STATUSES.includes(s.status)) && P.STAGES.filter(s => /^L[4-7]$/.test(s.id)).every(s => s.status === 'NOT STARTED'));
+ 
+ // ── 7. L2 card (real app code in a sandbox) ──
+ const grab = (name) => { const i = html.indexOf(`function ${name}(`); const s0 = html.lastIndexOf('\n', i) + 1; let d = 0, j = html.indexOf('{', i); for (; j < html.length; j++) { if (html[j] === '{') d++; else if (html[j] === '}' && --d === 0) break; } return html.slice(s0, j + 1); };
+@@ -126,27 +127,20 @@ const evil = { ...sp, display_name: '<img src=x onerror=alert(1)>', stages: [{ i
+ const card = vm.runInContext('_nwfpCardHtml', ctx)(evil);
+ ok('the card escapes every value (no injected tags)', !/<img|<script|"><b>/.test(card) && card.includes('&lt;img'));
+ const real = vm.runInContext('_nwfpCardHtml', ctx)(sp);
+-ok('the card shows identity, REGISTERED, NOT OPERATIONAL, DISABLED generation/publishing, all 8 stages and checkpoint 050',
++ok('the card shows identity, REGISTERED, NOT OPERATIONAL, DISABLED generation/publishing, all 8 stages and checkpoint 052',
+   real.includes('NextWave Finance Pilot (nextwave_finance_pilot)') && real.includes('data-nwfp-badge="REGISTERED"') && real.includes('data-nwfp-badge="NOT OPERATIONAL"') &&
+-  (real.match(/data-nwfp-badge="DISABLED"/g) || []).length === 2 && (real.match(/data-nwfp-stage=/g) || []).length === 8 && real.includes('050'));
++  (real.match(/data-nwfp-badge="DISABLED"/g) || []).length === 2 && (real.match(/data-nwfp-stage=/g) || []).length === 8 && real.includes('052'));
+ const sectionAndCard = grab('_nwfpCardSection') + grab('_nwfpCardHtml') + grab('_nwfpCardLoad');
+ ok('the card is read-only: one SHOW button, no inputs, and it calls only nwfp_status through the CEO session',
+   (sectionAndCard.match(/<button/g) || []).length === 1 && !/<input|<textarea|<select|contenteditable/.test(sectionAndCard) &&
+   (sectionAndCard.match(/\/api\/ops\?action=/g) || []).length === 1 && sectionAndCard.includes("_ceoAuthedFetch('/api/ops?action=nwfp_status'"));
+ ok('the card is mounted once, in the CEO Engineering Review, right after Stored artifacts', (html.match(/\$\{_nwfpCardSection\(\)\}/g) || []).length === 1 && html.includes('${_engArtifactsSection()}\n      ${_nwfpCardSection()}'));
+ 
+-// ── 8. Scope of the change ──
+-let changed = [];
+-try { changed = execSync('git diff --name-only origin/main -- .', { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch { changed = null; }
+-if (changed) {
+-  const allowed = (f) => f === 'api/ops.js' || f === 'public/index.html' || f.startsWith('projects/nextwave-finance-pilot/') || f.startsWith('tests/projects/nextwave-finance-pilot/') || f.startsWith('docs/projects/nextwave-finance-pilot/');
+-  ok('only api/ops.js, public/index.html and the pilot\'s own folders are changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', changed.every(allowed), changed.filter(f => !allowed(f)).join(','));
+-  const removed = execSync('git diff -U0 origin/main -- api/ops.js public/index.html', { cwd: root, encoding: 'utf8' }).split('\n').filter(l => /^-[^-]/.test(l));
+-  // A changed line is allowed only inside a pilot-owned function (function _nwfp… / nwfp…) as it stands on main.
+-  const mainText = { 'api/ops.js': execSync('git show origin/main:api/ops.js', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }), 'public/index.html': execSync('git show origin/main:public/index.html', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }) };
+-  const ownerOf = (txt, line) => { const i = txt.indexOf(line); if (i < 0) return null; const m = [...txt.slice(0, i).matchAll(/function\s+([A-Za-z0-9_$]+)\s*\(/g)].pop(); return m ? m[1] : null; };
+-  const foreign = removed.map(l => l.slice(1)).filter(l => !['api/ops.js', 'public/index.html'].some(f => { const o = ownerOf(mainText[f], l); return o && /^_?nwfp/i.test(o); }));
+-  ok('in the shared files, only lines inside pilot-owned functions change (nothing of another feature is removed or edited)', foreign.length === 0, foreign.slice(0, 3).join(' | '));
++// ── 8. Scope of the change (shared guard, Order 053: every changed line located by line number) ──
++const scope = checkBranchScope(root);
++if (scope) {
++  ok('only the shared files and the pilot\'s own folders are changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', scope.foreignFiles.length === 0, scope.foreignFiles.join(','));
++  ok('in the shared files, every added, edited or removed line is inside a pilot-owned function or a known pilot hook line', scope.violations.length === 0, scope.violations.slice(0, 2).join(' | '));
+ }
+ ok('the 3 pilot actions are dispatched and are not in the publishing or session gate lists (they check the CEO session themselves)',
+   ['nwfp_status', 'nwfp_state_get', 'nwfp_state_update'].every(a => src.includes(`if (action === '${a}')`) && !new RegExp(`const (PUBLISH|SESSION)_GATED_ACTIONS = new Set\\(\\[[^\\]]*'${a}'`).test(src)));
+diff --git a/tests/projects/nextwave-finance-pilot/test_nwfp_l3_planning_051.mjs b/tests/projects/nextwave-finance-pilot/test_nwfp_l3_planning_051.mjs
+index b749c47..ba5a228 100644
+--- a/tests/projects/nextwave-finance-pilot/test_nwfp_l3_planning_051.mjs
++++ b/tests/projects/nextwave-finance-pilot/test_nwfp_l3_planning_051.mjs
+@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
+ import { db, call, calls, ceoToken, makeOk } from '../../platform/engineering-harness.mjs';
+ import * as L3 from '../../../projects/nextwave-finance-pilot/lib/contentPlan.mjs';
+ import * as P from '../../../projects/nextwave-finance-pilot/lib/pilotState.mjs';
++import { checkBranchScope } from './_scopeGuard.mjs';
+ const T = makeOk(); const ok = T.ok;
+ const here = dirname(fileURLToPath(import.meta.url)), root = join(here, '..', '..', '..');
+ const src = readFileSync(join(root, 'api', 'ops.js'), 'utf8');
+@@ -109,13 +110,10 @@ ok('no outside service was called (no AI, media, YouTube or publishing)', calls.
+ const block = src.slice(src.indexOf('async function _nwfpPlanRow()'), src.indexOf('async function _engCeoTaskArtifactRows('));
+ ok('the L3 server block writes only app_settings (the plans row) and calls no generation, upload or publishing helper',
+   block.length > 2000 && block.length < 8000 && !/sbInsert\('(?!app_settings)|sbPatch\('(?!app_settings)|fetch\(|anthropic|heygen|elevenlabs|runway|submagic|youtube|upload|publish\w*\(/i.test(block.replace(/no generation, upload or publishing|nothing here generates or publishes|Nothing here generates or publishes/gi, '')) && /PLANS_KEY/.test(block));
+-let changed = null;
+-try { changed = execSync('git diff --name-only origin/main -- .', { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(Boolean); } catch { }
+-if (changed) {
+-  const allowed = (f) => f === 'api/ops.js' || f.startsWith('projects/nextwave-finance-pilot/') || f.startsWith('tests/projects/nextwave-finance-pilot/') || f.startsWith('docs/projects/nextwave-finance-pilot/');
+-  ok('only api/ops.js and the pilot\'s own folders changed (no app page, NextWave V1/V2, SRV, SMM or AI Studio file)', changed.every(allowed), changed.filter(f => !allowed(f)).join(','));
+-  const removed = execSync('git diff -U0 origin/main -- api/ops.js', { cwd: root, encoding: 'utf8' }).split('\n').filter(l => /^-[^-]/.test(l));
+-  ok('api/ops.js only gains lines', removed.length === 0, removed.slice(0, 2).join(' | '));
++const scope = checkBranchScope(root); // shared guard (Order 053): every changed line located by line number
++if (scope) {
++  ok('only the shared files and the pilot\'s own folders changed (no NextWave V1/V2, SRV, SMM or AI Studio file)', scope.foreignFiles.length === 0, scope.foreignFiles.join(','));
++  ok('in the shared files, every added, edited or removed line is inside a pilot-owned function or a known pilot hook line', scope.violations.length === 0, scope.violations.slice(0, 2).join(' | '));
+ }
+ ok('the 5 L3 actions are dispatched and check the CEO session themselves (not in publishing/session gate lists)',
+   acts.every(a => src.includes(`if (action === '${a}')`) && !new RegExp(`const (PUBLISH|SESSION)_GATED_ACTIONS = new Set\\(\\[[^\\]]*'${a}'`).test(src)));
+diff --git a/tests/projects/nextwave-finance-pilot/test_nwfp_scope_guard_053.mjs b/tests/projects/nextwave-finance-pilot/test_nwfp_scope_guard_053.mjs
+new file mode 100644
+index 0000000..3ac255b
+--- /dev/null
++++ b/tests/projects/nextwave-finance-pilot/test_nwfp_scope_guard_053.mjs
+@@ -0,0 +1,73 @@
++// Order 053 — self-test of the Finance Pilot scope guard. Proves it catches changes outside pilot-owned code
++// (including the cases the previous text-search rule missed) and accepts legitimate pilot changes.
++// Run: node tests/projects/nextwave-finance-pilot/test_nwfp_scope_guard_053.mjs
++import { execSync } from 'node:child_process';
++import { join, dirname } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { sharedFileViolations, functionSpans, parseHunks } from './_scopeGuard.mjs';
++let pass = 0, fail = 0; const ok = (n, c, x = '') => { c ? pass++ : fail++; console.log(`${c ? 'PASS' : 'FAIL'} ${n}${!c && x ? '  ' + x : ''}`); };
++const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
++
++// Builds a -U0 diff between two texts with git (no repository needed).
++import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++const diffOf = (a, b) => {
++  const d = mkdtempSync(join(tmpdir(), 'nwfp-guard-'));
++  writeFileSync(join(d, 'a'), a); writeFileSync(join(d, 'b'), b);
++  let out = '';
++  try { execSync(`git diff --no-index -U0 a b`, { cwd: d, encoding: 'utf8' }); } catch (e) { out = e.stdout || ''; }
++  rmSync(d, { recursive: true, force: true });
++  return out;
++};
++const v = (a, b) => sharedFileViolations(a, b, diffOf(a, b));
++
++const BASE = [
++  "import x from './x.mjs';",
++  '',
++  'function _nwfpCardHtml(st){',
++  "  return '<div>' + st + '</div>';",
++  '}',
++  'function _engFmtBytes(n){n=Number(n)||0;return n+" B";}',
++  'async function _engArtifactsLoad(){',
++  '  const el = 1;',
++  '  return el;',
++  '}',
++  'async function handler(req, res) {',
++  "    if (action === 'list_tasks')                return await listTasks(req, res);",
++  '}',
++  '',
++].join('\n');
++const edit = (from, to) => { if (!BASE.includes(from)) throw new Error('fixture: ' + from); return BASE.replace(from, to); };
++
++ok('function spans are found by declaration and end at the next top-level line', JSON.stringify(functionSpans(BASE).map(s => [s.name, s.start, s.end])) === JSON.stringify([['_nwfpCardHtml', 3, 5], ['_engFmtBytes', 6, 6], ['_engArtifactsLoad', 7, 10], ['handler', 11, 13]]));
++ok('hunk parsing gives exact old/new line numbers', (() => { const h = parseHunks(diffOf(BASE, edit('  const el = 1;', '  const el = 2;'))); return h.removed[0].n === 8 && h.added[0].n === 8; })());
++ok('an edit inside a pilot-owned function is allowed', v(BASE, edit("  return '<div>' + st + '</div>';", "  return '<p>' + st + '</p>';")).length === 0);
++ok('an edit to a non-pilot function directly below pilot code is caught (missed by the earlier rule)', v(BASE, edit('n=Number(n)||0;', 'n=Number(n)||1;')).length >= 1);
++ok('an added line inside a non-pilot function is caught (missed by the earlier rule)', v(BASE, edit('  const el = 1;\n', '  const el = 1;\n  window.x = 1;\n')).length >= 1);
++ok('a removed line inside a non-pilot function is caught', v(BASE, edit('  return el;\n', '')).length >= 1);
++ok('a new top-level non-pilot function is caught', v(BASE, BASE + 'function srvThing(){ return 1; }\n').length >= 1);
++ok('a new pilot function with a comment above it is allowed', v(BASE, BASE + '// 053 — pilot helper\nfunction _nwfpNew(){\n  return 1;\n}\n').length === 0);
++ok('a known router hook line for an nwfp_ action is allowed inside the shared handler',
++  v(BASE, edit("    if (action === 'list_tasks')                return await listTasks(req, res);\n", "    if (action === 'list_tasks')                return await listTasks(req, res);\n    if (action === 'nwfp_new')                  return await nwfpNew(req, res); // 053 — pilot\n")).length === 0);
++ok('a router line for a NON-pilot action is caught', v(BASE, edit("    if (action === 'list_tasks')                return await listTasks(req, res);\n", "    if (action === 'list_tasks')                return await listTasks(req, res);\n    if (action === 'srv_new')                   return await srvNew(req, res); // x\n")).length >= 1);
++ok('the pilot module import hook is allowed; any other import is caught',
++  v(BASE, edit("import x from './x.mjs';", "import x from './x.mjs';\nimport * as NWFP_X from '../projects/nextwave-finance-pilot/lib/x.mjs'; // 053 — pilot")).length === 0 &&
++  v(BASE, edit("import x from './x.mjs';", "import x from './x.mjs';\nimport y from '../lib/srvFarsi/y.mjs';")).length >= 1);
++ok('a comment-only addition in non-pilot code is caught', v(BASE, edit('  const el = 1;\n', '  // note\n  const el = 1;\n')).length >= 1);
++
++// Real history: legitimate pilot releases pass; a non-pilot release is flagged.
++const sh = (c) => execSync(c, { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
++let history = null;
++try {
++  history = Object.fromEntries([['77', '315e4ae', '9efd0df'], ['78', '9efd0df', 'fe13167'], ['79', 'fe13167', 'a75e6d9'], ['76', '92281cf', '315e4ae']].map(([pr, a, b]) => {
++    let n = 0;
++    for (const f of ['api/ops.js', 'public/index.html']) { const d = sh(`git diff -U0 ${a} ${b} -- ${f}`); if (d.trim()) n += sharedFileViolations(sh(`git show ${a}:${f}`), sh(`git show ${b}:${f}`), d).length; }
++    return [pr, n];
++  }));
++} catch { console.log('NOTE history check skipped: commits not available'); }
++if (history) {
++  ok('released pilot PRs #77, #78, #79 pass the guard', history['77'] === 0 && history['78'] === 0 && history['79'] === 0, JSON.stringify(history));
++  ok('a non-pilot release (PR #76, auth) is flagged by the guard', history['76'] > 0, JSON.stringify(history));
++}
++console.log(`\n${pass} passed, ${fail} failed`);
++process.exit(fail ? 1 : 0);

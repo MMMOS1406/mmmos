@@ -1,0 +1,23 @@
+M1  replacement inside deleteAsset (api/ops.js)              L1/L2:REJECTED L3:REJECTED guard-violations:2
+M2  replacement inside _engFmtBytes, right below pilot code  L1/L2:REJECTED L3:REJECTED guard-violations:2
+M3  addition inside _engArtifactsLoad (index.html)           L1/L2:REJECTED L3:REJECTED guard-violations:1
+M4  addition inside deleteAsset (api/ops.js)                 L1/L2:REJECTED L3:REJECTED guard-violations:1
+M5  deletion inside deleteAsset (api/ops.js)                 L1/L2:REJECTED L3:REJECTED guard-violations:1
+M7  adjacent-function change (_engFmtBytes first line)       L1/L2:allowed  L3:REJECTED guard-violations:2
+M9  new file in another business (lib/srvFarsi/)             L1/L2:REJECTED L3:REJECTED guard-violations:1
+M6  POSITIVE: pilot-owned edit in nwfpStateGet               L1/L2:allowed  L3:allowed  guard-violations:0
+M8  POSITIVE: pilot-owned addition in nwfpStatus             L1/L2:allowed  L3:allowed  guard-violations:0
+PASS released pilot PRs #77, #78, #79 pass the guard
+PASS a non-pilot release (PR #76, auth) is flagged by the guard
+14 passed, 0 failed
+M7b test_nwfp_l1_l2_049 exit=1 scopeFAIL=1 other:  | 33 passed, 1 failed
+M7b test_nwfp_l3_planning_051 exit=1 scopeFAIL=1 other:  | 36 passed, 1 failed
+--- exit codes for every mutation (both suites must exit non-zero for M1-M5, M7, M9; zero for M6, M8):
+M1 L1/L2 exit=1 L3 exit=1
+M2 L1/L2 exit=1 L3 exit=1
+M3 L1/L2 exit=1 L3 exit=1
+M4 L1/L2 exit=1 L3 exit=1
+M5 L1/L2 exit=1 L3 exit=1
+M9 L1/L2 exit=1 L3 exit=1
+M6 L1/L2 exit=0 L3 exit=0
+M8 L1/L2 exit=0 L3 exit=0

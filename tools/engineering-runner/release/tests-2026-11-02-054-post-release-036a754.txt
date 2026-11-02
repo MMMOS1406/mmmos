@@ -1,0 +1,21 @@
+--- post-release mutation audit on released main 036a754
+M1 L1/L2 exit=1 L3 exit=1
+M2 L1/L2 exit=1 L3 exit=1
+M3 L1/L2 exit=1 L3 exit=1
+M4 L1/L2 exit=1 L3 exit=1
+M5 L1/L2 exit=1 L3 exit=1
+M9 L1/L2 exit=1 L3 exit=1
+M6 L1/L2 exit=0 L3 exit=0
+M8 L1/L2 exit=0 L3 exit=0
+M7 L1/L2 exit=1 L3 exit=1
+--- full regression on released main 036a754
+released engineering-review-escaping    26 passed, 0 failed
+released engineering-r2-screens         9 passed, 0 failed
+released preservation: 141 checks, 10 failed
+preservation FAIL diff (main a75e6d9 vs released 036a754):
+  DIFF test_nwfp_card_evidence_051.mjs              R 0 14 passed, 0 failed | M 0 13 passed, 0 failed
+  NEW test_nwfp_scope_guard_053.mjs                R 0 14 passed, 0 failed | M None 
+released 036a754 vs pre-release main a75e6d9: identical 63 of 65
+ALLDONE
+
+[exited with code 0]

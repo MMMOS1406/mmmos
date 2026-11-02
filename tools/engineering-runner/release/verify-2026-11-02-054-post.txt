@@ -1,0 +1,20 @@
+PASS engineering_task_home_list 401
+PASS brain_v2_get_agent_runs 401
+PASS brain_v2_overview 401
+PASS brain_v2_get_metrics 401
+PASS brain_v2_get_deployments 401
+PASS brain_v2_get_learning 401
+PASS brain_v2_get_health 401
+PASS brain_v2_get_validations 401
+PASS brain_v2_get_knowledge 401
+PASS brain_v2_get_decisions 401
+PASS brain_v2_get_experiments 401
+PASS brain_v2_get_adrs 401
+PASS brain_v2_autonomous_status 401
+PASS brain_v2_recommend_next 401
+PASS engineering_task_list 401
+PASS engineering_task_review_packet 401
+PASS engineering_agent_runs_list 401
+PASS / 200
+PASS /.well-known/oauth-authorization-server 200
+RESULT PASS
