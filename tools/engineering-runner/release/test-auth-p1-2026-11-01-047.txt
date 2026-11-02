@@ -1,0 +1,17 @@
+PASS exactly the 11 priority actions are in the session gate (SRV group deferred to the SRV workstream)
+PASS operator approvals: every action refuses an anonymous caller (2/2)
+PASS production pipeline and assets: every action refuses an anonymous caller (4/4)
+PASS NextWave V2 generation and memory: every action refuses an anonymous caller (4/4)
+PASS SMM video generation: every action refuses an anonymous caller (1/1)
+PASS anonymous calls changed nothing in any table
+PASS forged CEO and VA tokens are refused for all 11 (11/11)
+PASS a CEO session passes the gate for all 11 (11/11; handler errors after the gate are expected with test input)
+PASS the real VA sign-in issues an operator session
+PASS a VA session passes the gate for all 11 (11/11)
+PASS a wrong VA PIN is refused and issues no session
+PASS publishing action list (PUBLISH_GATED_ACTIONS) is byte-identical to main
+PASS publishing gate code (_publisherFromRequest, _publishGate, operatorLogin) is byte-identical to main
+PASS no plain fetch() remains for any of the 11 actions in the app
+PASS every action has at least one session-sending call site
+PASS the gate reuses the publishing gate (same enforce/observe mode, CEO or VA session)
+16 passed, 0 failed

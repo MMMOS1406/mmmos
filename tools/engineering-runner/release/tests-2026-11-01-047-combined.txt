@@ -1,0 +1,21 @@
+Auto-merging api/ops.js
+Auto-merging public/index.html
+main 71546c3 combined clean 7ab36ad (#75 02abc3c, #76 dc4c1c6)
+main047 engineering-review-escaping    26 passed, 0 failed
+main047 engineering-r2-screens         9 passed, 0 failed
+main047 preservation: 141 checks, 10 failed
+comb047 engineering-review-escaping    26 passed, 0 failed
+comb047 engineering-r2-screens         9 passed, 0 failed
+comb047 preservation: 141 checks, 12 failed
+preservation FAIL diff (main vs combined):
+10a11,12
+> FAIL  only the files this order authorizes were changed (public/shell.js and tests/preserv
+> FAIL  public/index.html: untouched by this change (the CEO-008 loader is unchanged and rem
+  DIFF test_youtube_oauth_reliability.mjs           C 1 FAILED: diff scope: this patch touches only a | M 0 25 passed, 0 failed
+  NEW test_auth_remediation_p1_046.mjs             C 0 16 passed, 0 failed | M None 
+  NEW test_nextwave_finance_pilot_registration_046 C 0 17 passed, 0 failed | M None 
+  DIFF test_srv_farsi_short_publish.cjs             C 1 [v13.55.5] PACKAGE UPSERT FAILED status: 409  | M 0 [v13.55.5] PACKAGE UPSERT FAIL
+  DIFF test_srv_studio_v2_037_suno_steps.mjs        C 1 21 passed, 3 failed | M 1 22 passed, 2 failed
+identical to main: 56 of 61
+
+[exited with code 0]
