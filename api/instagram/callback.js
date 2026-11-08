@@ -18,7 +18,7 @@ const IG_USER_URL        = 'https://graph.instagram.com/me';
 const IG_SCOPES          = 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights';
 const IG_USER_FIELDS     = 'id,username,account_type,media_count,followers_count,follows_count,profile_picture_url';
 
-const ENGINE_LABELS = { ai_studio: 'AI Studio', nextwave: 'NextWave', srv_farsi: 'SRV Farsi', srv_english: 'SRV English' };
+const ENGINE_LABELS = { nextwave: 'NextWave', srv_farsi: 'SRV Farsi', srv_english: 'SRV English' };
 
 // ── Supabase helper ──────────────────────────────────────────────────────────
 async function sbUpsert(table, data, onConflict) {

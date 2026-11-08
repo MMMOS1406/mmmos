@@ -3704,6 +3704,8 @@ async function generatePackage(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'POST only' });
   const { engineId, mode, existingMemory, contentFormat } = req.body || {};
   if (!engineId || !mode) return res.status(400).json({ success: false, error: 'engineId and mode required' });
+  // CEO-017: AI Creation Studio is retired — fail closed instead of falling through to the generic prompt.
+  if (engineId === 'ai_studio') return res.status(410).json({ success: false, error: 'engine_retired', engine: 'ai_studio' });
   // SRV Studio V2: honoured only when the client asks AND the flag row is on (fails closed).
   const _srvV2 = engineId === 'srv_english' && (req.body || {}).srvStudioV2 === true &&
     await srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY });
@@ -4753,134 +4755,6 @@ Colin's energy is the energy of someone who actually works in the field giving y
 {"topic":"${topic}","angle":"the specific angle this video uses (e.g. 'why low-fee index funds outperform vs the usual fee story' / 'the AI replacement story most coverage misses' / 'morning routine variable that actually correlates')","concept":"one sentence — the unique angle of this video","primaryTopicObject":"the ONE concrete physical object/subject this video is about (e.g. 'car', 'house', 'credit card statement', 'retirement account') — must appear as plain words in the script itself, not just here","hookPattern":"which of the 8 hook ladder patterns","title":"max 8 words, insight-framed, no all-caps, no hype words","mood":"${topic}","hook":"Colin's exact 0:00-0:03 opening line — confident, specific, NOT shouty, NOT hype-bro — names the primary topic object and the stakes together","script":"Full Colin script with timestamp markers: [0:00 HOOK] line | [0:03 SETUP] line | [0:10 PAYOFF] line(s) | [0:22 IMPLICATION] line | [0:28 SOFT CTA] line (NextWave-branded, names \"NextWave\")${topic === 'Finance' ? ' | END WITH: [DISCLAIMER: Not financial advice. Educational only.]' : ''}","visualInstructions":"HeyGen setup per the PRODUCTION rules above — Colin costume (${look}), background per topic, text overlay timing (HOOK 0:00-0:03, payoff term 0:10-0:15)","thumbnailText":"max 6 words, insight-framed, no theatrics, no all-caps","captionYT":"hook question + 1-line context + soft CTA + #NextWave + 2-3 topic hashtags","captionTikTok":"one line carrying the insight + 2 hashtags max","captionIG":"2-3 dot-spacer lines + soft CTA + 3-4 hashtags","hashtags":"#NextWave #${topicTag} + 2-3 specific topic tags","workflowNotes":"HeyGen production steps + which hook pattern was used so the next generation rotates to a different one"}
 </package>`;
     } // end short-form NextWave prompt
-  } else if (engineId === 'ai_studio') {
-    // ─────────────────────────────────────────────────────────────────────────
-    // AI STUDIO (KELLY) IDENTITY LAYER v1.0 — 2026-06-10 (v13.49.2)
-    // Mirrors SRV's depth pattern but tuned for short-form curiosity content.
-    // Locks Kelly persona (warm, conversational, anti-clickbait), 8 hook
-    // ladder patterns, A/B/C category rotation, strict 30s structure,
-    // HeyGen production rules, GOOD vs BAD examples. LOCKED at v1.0 —
-    // no iterative cycles per the SRV-v1.2-lessons memory. JSON shape
-    // preserves all existing fields (title, mood, hook, script, captionYT,
-    // captionTikTok, captionIG, hashtags, thumbnailText) so the downstream
-    // parser keeps working; new identity-layer fields are additive.
-    // ─────────────────────────────────────────────────────────────────────────
-    const category = mode.includes('Tools') ? 'A' : mode.includes('Psychology') ? 'B' : 'C';
-    if (isLong) {
-      // v13.69.25 — 900-1000 words (~6-7 min). Landscape 16:9 handled on client side.
-      prompt = `You are the AI Creation Studio content engine for the Kelly avatar (HeyGen).
-
-GOAL: Long-form YouTube video. Script MUST be 900-1000 words — count carefully. Kelly persona: warm · curious · conversational · genuine.
-Category ${category} — ${mode}
-A = AI Tools | B = Psychology | C = Surprising Facts
-Avoid (must be conceptually distinct): ${avoidList}
-
-STRUCTURE (900-1000 words total — hit these targets):
-[0:00 HOOK] 70-80 words — strong curiosity question or statement
-[0:35 SETUP] 200-220 words — common understanding + the gap this video fills
-[2:00 CORE INSIGHT 1] 220-250 words — concrete mechanism, study, or example with real specifics
-[4:00 CORE INSIGHT 2] 200-220 words — second angle that deepens the first, NOT a repeat
-[5:30 TAKEAWAY] 150-170 words — one thing viewer walks away knowing or can apply
-[7:00 CLOSE] 80-100 words — one-sentence summary + warm outro + soft subscribe CTA
-
-Rules: No clickbait, no padding, no "you won't believe" — earn every word.
-
-Output JSON in <package> tags:
-<package>
-{"topic":"${mode}","angle":"specific angle","concept":"one-sentence thesis","title":"max 8 words curiosity-framed","mood":"${mode}","hook":"Kelly's exact opening line","script":"Full Kelly script with markers [0:00 HOOK] [0:35 SETUP] [2:00 CORE INSIGHT 1] [4:00 CORE INSIGHT 2] [5:30 TAKEAWAY] [7:00 CLOSE] — 900-1000 words","thumbnailText":"max 6 words","captionYT":"2-3 sentences + CTA + #AIStudio + hashtags","captionTikTok":"one line + 2 hashtags","captionIG":"3-4 lines + hashtags","hashtags":"#AIStudio #Kelly","workflowNotes":"Long-form video ~6-7 min landscape 16:9"}
-</package>`;
-    } else {
-    prompt = `You are the AI Creation Studio content engine for the Kelly avatar (HeyGen).
-
-═══════════ GOAL ═══════════
-35-45 second curiosity-driven short-form videos. Target 90-105 words for the script body so the rendered MP4 lands inside 35-45 seconds at HeyGen Kelly's natural cadence. Anything > 50 seconds is over-budget and must be rewritten tighter — Shorts performance peaks under 45 sec.
-The aim is NOT "louder clickbait" — the aim is MORE genuine curiosity, MORE specific insight, MORE conversational warmth, MORE "huh, I never knew that" moments.
-
-═══════════ MODE ═══════════
-Category ${category} — ${mode}
-A = AI Tools (what AI can/can't do; practical reveal; demystification)
-B = Psychology (why humans do what they do; behavioral insight; gentle self-recognition)
-C = Surprising Facts (counter-intuitive truths; "wait what" moments; specific data, not vibes)
-
-═══════════ AVOID LIST — last ~50 packages + published YouTube content for this engine ═══════════
-${avoidList}
-The new package MUST be conceptually distinct from EVERY item above. Different title surface words is NOT enough — the underlying concept/thesis must be new. Match against title, hook, concept, AND script angle.
-
-═══════════ KELLY PERSONA — every script must sound like ═══════════
-Warm · curious · conversational · direct to camera · first-person · slightly amused by the topic · respects viewer intelligence · NEVER patronizing · NEVER shouty · NEVER "you won't believe this".
-Kelly talks like a smart friend who just learned something genuinely interesting and can't wait to share it — NOT like a YouTube hook factory.
-
-═══════════ CORE FEELING — every video MUST feel ═══════════
-genuinely curious · specific · concrete · conversational · "that's actually interesting" · scrollable but worth stopping · respectful of viewer's time · ONE clear claim per video · earned (not hyped).
-
-═══════════ HOOK LADDER — choose ONE pattern, rotate across packages ═══════════
-1. CONFESSION — "I used to think [common belief]. Turns out [specific reveal]."
-2. SPECIFIC REVEAL — "Most people don't know that [concrete fact with specifics]."
-3. COUNTER-INTUITIVE — "[X] is actually the opposite of [common assumption]."
-4. PERSONAL EXPERIMENT — "I tried [thing] for [exact duration] and noticed [unexpected pattern]."
-5. SHIFTED PERSPECTIVE — "What if [common thing] is actually [reframe]?"
-6. STATISTIC + ANGLE — "[Specific %] of people [behavior]. Here's the reason."
-7. QUESTION → PAYOFF — "Why do we [common behavior]? [Specific mechanism]."
-8. STORY OPENER — "A [profession] once told me [insight]. I think about it constantly."
-
-Rotate which pattern you use across consecutive packages — don't repeat the same pattern as the previous package.
-
-═══════════ FORBIDDEN STYLE — immediate disqualifiers ═══════════
-NO: "You won't believe..." · "This will change your life..." · "The secret to..." · "Nobody talks about..." · "What X doesn't want you to know..." · "5 ways to..." · "Game changer..." · "Hack..." · "Banger..." · "Mind = blown..."
-NO ALL-CAPS shouting in title, hook, script, or thumbnail.
-NO "?????" or "!!!!" punctuation theatrics anywhere.
-NO LISTS in 40 seconds — one specific claim, one concrete payoff. Lists fragment attention and force speed-talking.
-NO commands ("DO this NOW") — Kelly invites curiosity, doesn't order action.
-NO "hey guys", "what's up everyone", "today we're talking about" — start mid-thought.
-
-═══════════ 40-SECOND STRUCTURE — strict timestamps · 90-105 words total ═══════════
-0:00–0:03 HOOK — one of the 8 hook ladder patterns. NO setup, NO greeting. Start mid-thought.
-0:03–0:10 SETUP — one specific scenario, fact, or context. Concrete. Real, not "imagine if".
-0:10–0:28 PAYOFF — the surprising answer, mechanism, or insight. THE reason this video exists. Bulk of the value lives here.
-0:28–0:35 IMPLICATION — why it matters to viewer in one specific way. NOT generic "think about it".
-0:35–0:40 SOFT CTA — "Follow for more [category descriptor]" OR "next video: [specific tease]". NEVER "smash subscribe", NEVER "drop a comment if...".
-
-═══════════ VOICE GUIDELINES ═══════════
-- First-person where it lands ("I noticed..." / "It made me realize...")
-- Specific over generic — "at 3am" not "at night"; "for 14 days" not "for a while"; "97%" not "most"; "in 2019" not "recently"
-- ONE concrete example beats abstract framing
-- Curiosity over command — "here's what surprised me" not "do this right now"
-- Conversational rhythm — sentence lengths VARY; no two consecutive sentences identical shape
-- Show, don't shout — if it's surprising, the surprise carries itself
-
-═══════════ PRODUCTION — HeyGen Kelly setup ═══════════
-- Kelly: medium close-up, direct eye contact, slight head tilts/nods between beats, hands stay below frame
-- Background: deep cinematic navy (#0a1628) or charcoal (#1a1a24). NO bright office backgrounds, NO stock B-roll, NO scene cuts.
-- Text overlays: centered, 60% black backing, sans-serif, MAX 6 words on screen at once
-- Text overlay timing: HOOK text appears 0:00–0:03 (matching spoken hook); ONE payoff term/stat overlay 0:10–0:15 (anchoring the insight). That's it — no more overlays.
-- NO Kelly walking, NO transitions, NO whoosh sound effects, NO music drops, NO B-roll cutaways
-
-═══════════ THUMBNAIL RULES ═══════════
-- Max 6 words
-- Curiosity framing — question OR counter-intuitive statement
-- White text on the dark cinematic background, high contrast
-- NO all-caps full string · NO "????" / "!!!" · NO arrows or circles drawn on Kelly's face
-Acceptable: "What 97% Miss About Sleep" · "AI Can't Do This Yet" · "Why Boredom Means Growth"
-NOT acceptable: "INSANE TRUTH!!!" · "YOU WON'T BELIEVE..." · "STOP DOING THIS NOW"
-
-═══════════ EXAMPLES — GOOD vs BAD ═══════════
-GOOD hook (Cat A — AI Tools): "Most people use ChatGPT for the wrong thing. The actual use case is way more specific." → conversational, sets up reveal, no hype
-BAD hook (Cat A): "You're using ChatGPT WRONG! Here's the SECRET nobody tells you!" → shouty, generic "secret", forbidden punctuation, all-caps
-
-GOOD hook (Cat B — Psychology): "I noticed something weird about how people order coffee. It says more than you'd think." → specific, conversational, sets up payoff
-BAD hook (Cat B): "Your COFFEE ORDER reveals your DARKEST personality trait!" → all-caps, hyped, vague claim, theatrical
-
-GOOD hook (Cat C — Surprising Facts): "Octopuses have three hearts and one of them stops every time they swim. That's not even the weird part." → specific stat, sets up bigger payoff, conversational closer
-BAD hook (Cat C): "OCTOPUSES are INSANE — wait until you hear THIS!" → all-caps, no specifics, manipulative
-
-═══════════ ENERGY RULE ═══════════
-Kelly's energy is the energy of telling your smartest friend something cool — NOT the energy of trying to grab someone's attention on TikTok. The 40 seconds should feel SHORT (worth re-watching), not RUSHED — and never bloated. 90-105 words. Stop when the payoff lands.
-
-═══════════ OUTPUT — JSON ONLY, WRAPPED IN <package> ═══════════
-<package>
-{"category":"${category}","categoryName":"${mode}","angle":"the specific angle this video uses (e.g. 'practical underused ChatGPT pattern' / 'micro-behavior that signals X' / 'counter-intuitive biology fact')","concept":"one sentence — the unique curiosity angle of this video","hookPattern":"which of the 8 hook ladder patterns (e.g. CONFESSION, SPECIFIC REVEAL, COUNTER-INTUITIVE)","title":"max 8 words, curiosity-framed, no all-caps","mood":"${mode}","hook":"Kelly's exact 0:00-0:03 opening line — conversational, specific, NOT shouty","script":"Full Kelly script with timestamp markers: [0:00 HOOK] line | [0:03 SETUP] line | [0:10 PAYOFF] line(s) | [0:22 IMPLICATION] line | [0:28 SOFT CTA] line","visualInstructions":"HeyGen setup per the PRODUCTION rules above — Kelly framing, background hex (navy #0a1628 or charcoal #1a1a24), text overlay timing (HOOK 0:00-0:03, payoff term 0:10-0:15)","thumbnailText":"max 6 words, curiosity-framed, no theatrics","captionYT":"hook question + 1-line context + soft CTA + #AICreationStudio + 2-3 category hashtags","captionTikTok":"one line carrying the curiosity + 2 hashtags max","captionIG":"2-3 dot-spacer lines + soft CTA + 3-4 hashtags","hashtags":"#AICreationStudio + category tags (#AI / #Psychology / #SurprisingFacts) + 2-3 specific topic tags","workflowNotes":"HeyGen production steps + which hook pattern was used so the next generation rotates to a different one"}
-</package>`;
-    } // end short-form AI Studio prompt
   } else {
     prompt = `Generate a content package for engine ${engineId} mode ${mode}. Avoid: ${avoidList}. Wrap JSON in <package> tags: <package>{"title":"...","concept":"...","mood":"...","hook":"...","lyrics":"...","captionYT":"...","captionTikTok":"...","captionIG":"...","hashtags":"..."}</package>`;
   }
@@ -5327,7 +5201,7 @@ async function srvStudioV2RetitleJob(req, res) {
 
 const CDP_VALID_STATES = ['draft','pending_ceo','approved','rejected','executing','validating','completed','failed','rolled_back'];
 const CDP_VALID_TYPES  = ['content_mix','engine_strategy','publishing_schedule','monetization','pause_resume','system_alert','finance_alert'];
-const CDP_VALID_ENGINES = ['NextWave','SRV Farsi','SRV English','AI Studio','Finance','Investment','Uber','MMMOS'];
+const CDP_VALID_ENGINES = ['NextWave','SRV Farsi','SRV English','Finance','Investment','Uber','MMMOS'];
 
 // CDP-1: List decisions (filterable by state, engine) — returns full fields needed for CCC + CDP UI
 async function cdpList(req, res) {
@@ -6015,7 +5889,7 @@ async function cdpGenerateRecommendations(req, res) {
   // ── Domains 2-4: AI Studio / SRV Farsi / SRV English — content-mix concentration +
   // staleness insight, advisory only (system_alert). No engine here consumes a
   // content_mix override today, so no execution-backed action is offered.
-  for (const engine of ['AI Studio', 'SRV Farsi', 'SRV English']) {
+  for (const engine of ['SRV Farsi', 'SRV English']) {
     await runDomain(engine, `packages (engine=${engine}, 30d) + full_package.topic/mood`, async () => {
       const { entries, total } = topicEntriesFor(engine);
       const latest = pkgs.filter(p => { let fp = p.full_package; if (typeof fp === 'string') { try { fp = JSON.parse(fp); } catch { return false; } } return fp?.engine === engine; })
@@ -7060,9 +6934,6 @@ async function seedMemory(req, res) {
     { memory_type: 'title', value: 'Starting at 35 vs 25 Costs You $1M', engine_id: 'nextwave' },
     { memory_type: 'concept', value: 'active vs passive income angle', engine_id: 'nextwave' },
     { memory_type: 'topic', value: 'Finance', engine_id: 'nextwave' },
-    { memory_type: 'title', value: 'AI Explained Why People Stay in Bad Relationships', engine_id: 'ai_studio' },
-    { memory_type: 'concept', value: 'bad relationship psychology angle', engine_id: 'ai_studio' },
-    { memory_type: 'category', value: 'B - Psychology', engine_id: 'ai_studio' },
   ];
   const items = (req.body && Array.isArray(req.body.items) && req.body.items.length) ? req.body.items : SEED_ITEMS;
   let inserted = 0, skipped = 0;
@@ -7298,7 +7169,7 @@ async function getPerformanceSummary(req, res) {
     const pkgMap = {};
     (packages || []).forEach(p => { pkgMap[p.id] = p; });
 
-    const ENGINE_IDS = ['srv_farsi', 'srv_english', 'nextwave', 'ai_studio'];
+    const ENGINE_IDS = ['srv_farsi', 'srv_english', 'nextwave'];
     const byEngine = {};
     for (const eid of ENGINE_IDS) byEngine[eid] = [];
 
@@ -8285,54 +8156,6 @@ async function heygenListVoices(req, res) {
   });
 }
 
-// v13.75.5 — Generate a 15-second ambient WAV loop for AI Studio background music.
-// Four sine-tone AI drone: A1(55Hz) E2(82Hz) A2(110Hz) E3(165Hz) — loopable, ~260KB.
-// HeyGen fetches this URL via background_audio.audio_url and loops it for the full video.
-function ambientMusicWAV(req, res) {
-  const sampleRate = 22050;
-  const durationSec = 15; // short enough to generate fast; HeyGen loops it
-  const numSamples = sampleRate * durationSec;
-  const freqs = [55, 82.4, 110, 165];
-  const gainPerFreq = 0.12; // total max ~0.48 — headroom before clipping
-
-  // Generate PCM samples (mono 16-bit)
-  const dataSize = numSamples * 2;
-  const buf = Buffer.allocUnsafe(44 + dataSize);
-
-  // WAV RIFF header
-  buf.write('RIFF', 0, 'ascii');
-  buf.writeUInt32LE(36 + dataSize, 4);
-  buf.write('WAVE', 8, 'ascii');
-  buf.write('fmt ', 12, 'ascii');
-  buf.writeUInt32LE(16, 16);           // PCM sub-chunk size
-  buf.writeUInt16LE(1, 20);            // AudioFormat: PCM
-  buf.writeUInt16LE(1, 22);            // NumChannels: mono
-  buf.writeUInt32LE(sampleRate, 24);
-  buf.writeUInt32LE(sampleRate * 2, 28); // ByteRate
-  buf.writeUInt16LE(2, 32);            // BlockAlign
-  buf.writeUInt16LE(16, 34);           // BitsPerSample
-  buf.write('data', 36, 'ascii');
-  buf.writeUInt32LE(dataSize, 40);
-
-  // Fill samples with looping fade-in/fade-out to avoid click at loop point
-  const twoPi = 2 * Math.PI;
-  const fadeLen = Math.round(sampleRate * 0.05); // 50ms fade
-  for (let i = 0; i < numSamples; i++) {
-    let s = 0;
-    for (const f of freqs) s += gainPerFreq * Math.sin(twoPi * f * i / sampleRate);
-    // Apply fade at start + end to make loop seamless
-    if (i < fadeLen) s *= (i / fadeLen);
-    else if (i > numSamples - fadeLen) s *= ((numSamples - i) / fadeLen);
-    buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(s * 32767))), 44 + i * 2);
-  }
-
-  res.setHeader('Content-Type', 'audio/wav');
-  res.setHeader('Content-Length', buf.length);
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.status(200).end(buf);
-}
-
 async function heygenStartRender(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
@@ -8789,8 +8612,6 @@ async function submagicVideoRedirect(req, res) {
 // which couldn't match the stored titles. Titles come from the OAuth callback's
 // fetchAllChannels response: ch.snippet.title.
 const YT_ENGINE_TO_TITLE = {
-  'AI Studio':           'AI Creation Studio',
-  'AI Creation Studio':  'AI Creation Studio',
   'NextWave':            'NextWave Systems',
   'NextWave Systems':    'NextWave Systems',
   'SRV Farsi':           'Silk Road Voices',
@@ -21950,8 +21771,6 @@ export default async function handler(req, res) {
     if (action === 'plaid_pull')                 return await plaidPull(req, res);
     if (action === 'plaid_remove_item')          return await plaidRemoveItem(req, res); // v13.65.1 — Finance Phase 3 hotfix
     if (action === 'srv_build_package')          return await srvBuildPackage(req, res); // v13.69.0 — SRV Automation Phase 1
-    // v13.75.5 — ambient music WAV generator (used as HeyGen background_audio URL)
-    if (action === 'ambient_music')              return ambientMusicWAV(req, res);
     // v13.51.0 — P1 HeyGen integration
     if (action === 'heygen_test')                return await heygenTest(req, res);
     if (action === 'heygen_list_avatars')        return await heygenListAvatars(req, res);
@@ -22322,10 +22141,7 @@ const ENGINEERING_BRAIN_SEED = [
   }},
   { section:'architecture', key:'rendering', title:'Rendering', sort_order:8, data:{
     srv_rendering:'Canvas API — Pexels background images + user MP3 audio + avatar overlay + lyrics + watermark. MediaRecorder captures to WebM. uploadVideoToSupabase converts.',
-    ai_studio_rendering:'Short: heygen_video_proxy → canvas (_aiStudioPostProcess) → WebM → Submagic. Long: raw HeyGen URL → Submagic directly (canvas skipped — 7-10min exceeds 185s ceiling).',
     music_srv:'User-uploaded Suno MP3 (Web Audio MediaElementSource)',
-    music_ai_studio:'Chord-progression ambient pad: Am→Gm→Fm→Gm (triangle oscillators, 0.13 gain, per-chord envelopes)',
-    logo_ai_studio:'"AI CREATION STUDIO" green text watermark (top-left + bottom-left, Short only)',
     logo_srv:'"SRV" gold text watermark (bottom-left)',
     cors_fix:'heygen_video_proxy in ops.js pipes HeyGen CDN through same-origin with CORS headers + Range passthrough',
   }},
@@ -22395,27 +22211,6 @@ const ENGINEERING_BRAIN_SEED = [
     version:'v13.74.17',
     architecture_keys:['frontend','backend','storage','rendering','uploads'],
   }},
-  { section:'engine_registry', key:'ai_studio', title:'AI Creation Studio ⚡', sort_order:3, data:{
-    purpose:'AI-topic educational videos with Sophia avatar. Long (7-10 min, 16:9) + Short (60-90s, 9:16).',
-    owner:'Mansoor Ahmady',
-    identity:'Professional AI educator. Sophia avatar (6-look pool). "AI CREATION STUDIO" green watermark. Chord-progression ambient music. Hormozi 2 captions.',
-    youtube_channel:'InsideObjects AI (AI Creation Studio)',
-    calendar:'Fri=Long, Sat=Short, Sun=Short (weeklyCapacity=3)',
-    workflow:['Generate script + metadata (AI)','Review package','Build: HeyGen render (Sophia avatar)','Short videos: canvas CORS proxy → logo + music → WebM → Submagic','Long videos: raw HeyGen URL → Submagic directly','Approve','Publish to YouTube','Done'],
-    avatar:'Sophia (HeyGen group 50cc8524aa404a479242ffb73ab56cb6). Long pool: Long1-4. Short pool: Short1-4.',
-    voice:'a4a6df6d4fc248829f72edde5529defa',
-    music:'Chord-progression ambient pad (Web Audio: Am→Gm→Fm→Gm, triangle oscillators, 0.13 gain)',
-    logo:'"AI CREATION STUDIO" green text watermark (canvas, Short videos only via CORS proxy)',
-    cors_note:'HeyGen CDN has no CORS headers. Short: use heygen_video_proxy. Long: skip canvas (7-10min exceeds 185s MediaRecorder ceiling).',
-    protected_components:['canvas_renderer_ai_studio','heygen_proxy','upload_engine','lifecycle_framework','supabase_schema'],
-    dependencies:['HeyGen (avatar video)','Submagic (captions)','YouTube (publish)','Supabase','OpenAI/Claude (script generation)'],
-    testing_steps:['Generate AI Studio task','Verify HeyGen render starts without API error','Poll until render complete (check videoUrl set)','For Short: verify Build stage shows "Adding music + logo"','Verify Submagic captions applied','Confirm YouTube publish succeeds','Check video live on channel'],
-    regression_rule_keys:['canvas_changes','heygen_changes','submagic_changes','youtube_upload_changes','lifecycle_changes'],
-    status:'PRODUCTION',
-    freeze_status:'FROZEN (lifecycle v13.75.0, pipeline v13.77.0)',
-    version:'v13.77.0',
-    architecture_keys:['frontend','backend','heygen','submagic','youtube','rendering','uploads'],
-  }},
   { section:'engine_registry', key:'nextwave', title:'NextWave Systems 🤖', sort_order:4, data:{
     purpose:'AI/tech educational content for NextWave Systems YouTube channel',
     owner:'Mansoor Ahmady',
@@ -22466,25 +22261,18 @@ const ENGINEERING_BRAIN_SEED = [
     used_by:['srv_farsi','srv_english'],
     risk:'HIGH — breaking this stops all SRV production',
   }},
-  { section:'protected_registry', key:'canvas_renderer_ai_studio', title:'Canvas Renderer — AI Studio', sort_order:2, data:{
-    description:'AI Studio canvas renderer: _aiStudioPostProcess. Short videos only. Loads HeyGen video via heygen_video_proxy, draws "AI CREATION STUDIO" watermark, mixes chord ambient music, records to WebM.',
-    rules:['Short videos ONLY (Long skip canvas — 7-10min exceeds 185s MediaRecorder ceiling)','CORS proxy REQUIRED (heygen_video_proxy) — HeyGen CDN has no CORS headers','Safety ceiling: 95000ms for Short. Do not increase.','Long videos go directly to Submagic via raw HeyGen URL'],
-    files:['index.html (_aiStudioPostProcess, _aiStudioSendToSubmagic)'],
-    used_by:['ai_studio'],
-    risk:'MEDIUM — breaking this removes logo+music from Short videos (Long unaffected)',
-  }},
   { section:'protected_registry', key:'upload_engine', title:'Upload Engine', sort_order:3, data:{
     description:'uploadVideoToSupabase (Supabase storage) + _youtubeResumableUpload (YouTube). Large files (>50MB or unknown size) streamed with body:srcRes.body, duplex:"half". Small files buffered.',
     rules:['Never change streaming logic without testing with actual large video (>50MB)','duplex:"half" is required for Node 18+ streaming — do not remove','Small file path uses arrayBuffer() — verify total bytes > 1000 before upload'],
     files:['index.html (uploadVideoToSupabase)','api/ops.js (_youtubeResumableUpload, youtubeUploadVideo)'],
-    used_by:['srv_farsi','srv_english','ai_studio','nextwave'],
+    used_by:['srv_farsi','srv_english','nextwave'],
     risk:'CRITICAL — breaking this stops all publish pipelines',
   }},
   { section:'protected_registry', key:'lifecycle_framework', title:'Lifecycle Framework', sort_order:4, data:{
     description:'Shared lifecycle state machine: generate→review→build→approve→publish→done. Used by SRV Farsi, SRV English, AI Studio. Shared primitives: _srvLifecycleProgressBar, lifecycle stage constants.',
     rules:['Shared lifecycle does NOT mean identical UI — each engine has its own render function','Any change must be regression tested against ALL 3 engines','Lifecycle stage persists in task.status + D.aiStudioLifecycleStages (AI Studio)'],
     files:['index.html (_srvLifecycleProgressBar, srv lifecycle functions, AI Studio lifecycle functions)'],
-    used_by:['srv_farsi','srv_english','ai_studio'],
+    used_by:['srv_farsi','srv_english'],
     risk:'HIGH — breaking this stops all 3 engines',
   }},
   { section:'protected_registry', key:'plaid_integration', title:'Plaid Integration', sort_order:5, data:{
@@ -22512,8 +22300,8 @@ const ENGINEERING_BRAIN_SEED = [
     description:'heygenVideoProxy action in ops.js. CORS bridge: fetches HeyGen CDN video server-side, returns with Access-Control-Allow-Origin:* and Range header passthrough so browser canvas can capture without CORS taint.',
     rules:['Only allows known HeyGen CDN domains (security whitelist)','Must pass Range header through for video seeking','Uses Readable.fromWeb() for Node 18+ body piping','Do not expand allowed domains without security review'],
     files:['api/ops.js (heygenVideoProxy function)'],
-    used_by:['ai_studio'],
-    risk:'LOW — only affects AI Studio Short video logo/music',
+    used_by:[],
+    risk:'LOW — AI Creation Studio (its only user) is retired; shared CORS bridge kept',
   }},
   { section:'protected_registry', key:'vercel_function_limit', title:'Vercel 12-Function Limit', sort_order:9, data:{
     description:'Vercel Hobby plan: maximum 12 serverless function files. Adding a 13th causes a silent deploy ERROR with no useful error message.',
@@ -22534,7 +22322,7 @@ const ENGINEERING_BRAIN_SEED = [
     description:'generation_memory Supabase table prevents regenerating same topics/lyrics. avoidList built from recent packages before each AI generation call.',
     rules:['Do not disable or bypass — repetition is a quality failure','avoidList is engine-specific (filtered by engine type)','After generating, save new package topics to memory'],
     files:['api/ops.js (generation_memory queries)','api/generate.js (buildAvoidList)'],
-    used_by:['srv_farsi','srv_english','ai_studio','nextwave'],
+    used_by:['srv_farsi','srv_english','nextwave'],
     risk:'LOW — disabling only causes content repetition',
   }},
 
@@ -22544,12 +22332,12 @@ const ENGINEERING_BRAIN_SEED = [
     state_storage:'task.status field (all engines) + D.aiStudioLifecycleStages (AI Studio)',
     progress_bar:'_srvLifecycleProgressBar(currentStage) — shared across SRV + AI Studio',
     rules:['Each engine has its own lifecycle card render function','Shared stages but independent UI and logic','Stage changes must persist via saveAppState'],
-    engines:['srv_farsi','srv_english','ai_studio'],
+    engines:['srv_farsi','srv_english'],
   }},
   { section:'shared_systems', key:'production_pipeline', title:'Production Pipeline (HeyGen→Submagic→YouTube)', sort_order:2, data:{
     description:'Full pipeline: HeyGen avatar render → (canvas post-process for Short) → Submagic captions → YouTube upload',
     components:['heygenStartRender (ops.js)','_pollHeygenRenders (index.html)','heygen_video_proxy (ops.js, CORS bridge)','_aiStudioPostProcess (index.html, Short only)','autoStartSubmagic (index.html)','_aiStudioRunPublish (index.html)','_youtubeResumableUpload (ops.js)'],
-    engines:['ai_studio','nextwave'],
+    engines:['nextwave'],
   }},
   { section:'shared_systems', key:'scheduler', title:'Production Scheduler', sort_order:3, data:{
     description:'cadenceDays arrays in ENGINES_CONFIG drive automatic task creation for each engine',
@@ -22561,20 +22349,20 @@ const ENGINEERING_BRAIN_SEED = [
     description:'Resumable YouTube upload via ops.js _youtubeResumableUpload. Streams large files to avoid Vercel 60s timeout.',
     key_feature:'body: srcRes.body, duplex: "half" (Node 18+ streaming, concurrent download+upload)',
     threshold:'>50MB or unknown Content-Length → streaming. <50MB with known size → buffer.',
-    engines:['srv_farsi','srv_english','ai_studio','nextwave'],
+    engines:['srv_farsi','srv_english','nextwave'],
   }},
   { section:'shared_systems', key:'submagic_captions', title:'Submagic Caption System', sort_order:5, data:{
     description:'Submagic API applies Hormozi 2 caption template to all engine videos',
     template:'Hormozi 2 (all engines)',
     channel_config:'CHANNEL_TEMPLATE_CONFIG in index.html maps channel name to template settings',
     fallback:'Retries without template if first attempt fails',
-    engines:['srv_farsi','srv_english','ai_studio','nextwave'],
+    engines:['srv_farsi','srv_english','nextwave'],
   }},
   { section:'shared_systems', key:'storage', title:'Supabase Storage', sort_order:6, data:{
     description:'Supabase srv-assets bucket for audio/video blobs',
     function:'uploadVideoToSupabase (index.html)',
     cors:'Access-Control-Allow-Origin: * — safe for canvas capture',
-    engines:['srv_farsi','srv_english','ai_studio'],
+    engines:['srv_farsi','srv_english'],
   }},
   { section:'shared_systems', key:'notifications', title:'Notifications', sort_order:7, data:{
     description:'Notification system for alerting CEO of completed renders, failures, or required actions',
@@ -22887,7 +22675,7 @@ async function engineeringTaskCreateFromDecision(req, res) {
       'SRV Farsi', 'SRV English', 'AI Creation Studio', 'NextWave Systems', 'NextWave Finance Pilot', 'Finance', 'Investment Engine', 'Uber Engine',
       'Task Generator', 'Engineering Tasks', 'Roadmap', 'Brain v2 — Knowledge', 'Brain v2 — Learning', 'Brain v2 — Autonomous Agents',
       'CEO Command Center', 'Continuous Decision Protocol (CDP)', 'Production Pipeline', 'Scheduler', 'YouTube Upload', 'Submagic Captions',
-      'Canvas Renderer — SRV', 'Canvas Renderer — AI Studio', 'Upload Engine', 'HeyGen Video Proxy', 'Frontend', 'Backend', 'Database',
+      'Canvas Renderer — SRV', 'Upload Engine', 'HeyGen Video Proxy', 'Frontend', 'Backend', 'Database',
       'Auth System', 'Supabase Schema', 'All Systems',
     ];
 
@@ -23929,7 +23717,6 @@ function _generateEngineeringPacket(task, brainRows) {
   const engineKeyMap = {
     'srv farsi': 'srv_farsi', 'srx farsi': 'srv_farsi',
     'srv english': 'srv_english',
-    'ai studio': 'ai_studio', 'ai creation studio': 'ai_studio',
     'nextwave': 'nextwave', 'nextwave systems': 'nextwave',
     'finance': 'finance',
     'investment': 'investment', 'investment engine': 'investment',
@@ -24174,8 +23961,8 @@ async function roadmapUpdatePhase(req, res) {
 // Lets CEO see at a glance whether any engine pipeline has stalled.
 async function healthCheck(req, res) {
   try {
-    const engines = ['SRV Farsi', 'SRV English', 'AI Studio', 'NextWave'];
-    const engineKeys = { 'SRV Farsi': 'srv_farsi', 'SRV English': 'srv_english', 'AI Studio': 'ai_studio', 'NextWave': 'nextwave' };
+    const engines = ['SRV Farsi', 'SRV English', 'NextWave'];
+    const engineKeys = { 'SRV Farsi': 'srv_farsi', 'SRV English': 'srv_english', 'NextWave': 'nextwave' };
     const now = Date.now();
     const STALL_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
     const result = { ok: true, checked_at: new Date().toISOString(), engines: {}, stalled: [] };
@@ -24666,8 +24453,8 @@ async function brainV2SafetyGate(req, res) {
     if (!scopeOk) failures.push('Gate 1: Scope undefined.');
 
     // Gate 2 — Protected Systems check
-    const PROTECTED = ['srv_farsi','srv_english','ai_studio','finance','investment'];
-    const LOCKED_FILES = ['_srvRenderVideo','srvBuildPackage','_aiStudioPostProcess','plaidLink','plaidExchange','plaidPull'];
+    const PROTECTED = ['srv_farsi','srv_english','finance','investment'];
+    const LOCKED_FILES = ['_srvRenderVideo','srvBuildPackage','plaidLink','plaidExchange','plaidPull'];
     const hitsProtected = PROTECTED.some(p => String(affected_engine||'').toLowerCase().includes(p));
     const hitsLockedFn = LOCKED_FILES.some(fn => files_to_change.some(f => String(f).includes(fn)));
     const protectionOk = !(hitsProtected || hitsLockedFn);
@@ -25088,7 +24875,7 @@ async function platformConnectionsMatrix(req, res) {
     return res.status(200).json({
       ok: true,
       matrix,
-      priority_engines: ['AI Studio', 'NextWave'],
+      priority_engines: ['NextWave'],
       registry_only_engines: ['SRV Farsi'],
       deferred_engines: ['SRV English'],
     });
@@ -25268,7 +25055,7 @@ async function platformConnectionVerify(req, res) {
 const TT_INBOX_INIT_URL = 'https://open.tiktokapis.com/v2/post/publish/inbox/video/init/';
 const TT_STATUS_URL     = 'https://open.tiktokapis.com/v2/post/publish/status/fetch/';
 const TT_TOKEN_URL      = 'https://open.tiktokapis.com/v2/oauth/token/';
-const TIKTOK_SHORT_ELIGIBLE_ENGINES = ['AI Studio', 'SRV Farsi'];
+const TIKTOK_SHORT_ELIGIBLE_ENGINES = ['SRV Farsi'];
 
 // v15.20.8 — CEO escalation fix (SRV Farsi TikTok frame_rate_check_failed): SRV Farsi Shorts
 // are rendered client-side via canvas.captureStream()+MediaRecorder → WebM, which is prone to
@@ -25311,7 +25098,7 @@ async function _transcodeWebmToMp4ForTikTok(inputBuf) {
 }
 // mmm_engine label → /api/tiktok/auth?engine=<key> query key, so a failed-refresh
 // response can hand the operator a precise, single-engine reauthorization link.
-const TIKTOK_ENGINE_AUTH_KEYS = { 'AI Studio': 'ai_studio', 'SRV Farsi': 'srv_farsi', 'NextWave': 'nextwave', 'SRV English': 'srv_english' };
+const TIKTOK_ENGINE_AUTH_KEYS = { 'SRV Farsi': 'srv_farsi', 'NextWave': 'nextwave', 'SRV English': 'srv_english' };
 
 // v15.20.7 — TikTok token refresh (fix-forward, Engineering Task 1c0e3090 — TikTok auth
 // failure). Root cause: tiktokPublishDraft only ever checked token_expires_at and bailed

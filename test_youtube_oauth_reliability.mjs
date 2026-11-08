@@ -239,7 +239,7 @@ await t('SMM has no YouTube channel mapping before or after this patch — confi
   const mapBody = ops.slice(mapStart, mapEnd);
   assert.ok(!/SMM/.test(mapBody), 'SMM must not appear in the engine-to-channel-title map');
   const mappedTitles = new Set([...mapBody.matchAll(/:\s*'([^']+)'/g)].map((m) => m[1]));
-  assert.deepEqual([...mappedTitles].sort(), ['AI Creation Studio', 'NextWave Systems', 'SRV Studio', 'Silk Road Voices'].sort(), 'exactly the 4 known channels, nothing more');
+  assert.deepEqual([...mappedTitles].sort(), ['NextWave Systems', 'SRV Studio', 'Silk Road Voices'].sort(), 'exactly the 3 retained channels, nothing more (CEO-017: AI Creation Studio retired)');
 });
 
 await t('diff scope: this patch touches only api/youtube/callback.js and api/ops.js (the two files named in the change proposal) — no business production lifecycle code, no .pause-deploy, no OAuth client id/secret/scope strings changed', () => {

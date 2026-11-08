@@ -20,8 +20,6 @@ const ENGINE_CHANNEL = {
   'SRV Studio English':    'UC0nzWQX6AaUqlF5FozNpWPg',
   'NextWave':              'UC41nsMBfVJCqj4vJRLktZTQ',
   'NextWave Systems':      'UC41nsMBfVJCqj4vJRLktZTQ',
-  'AI Studio':             'UCs3bHOHKiHLPg_zdVcd8_gQ',
-  'AI Creation Studio':    'UCs3bHOHKiHLPg_zdVcd8_gQ',
 };
 
 async function sbGet(path) {
