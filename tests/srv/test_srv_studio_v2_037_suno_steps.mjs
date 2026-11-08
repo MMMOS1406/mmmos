@@ -10,7 +10,9 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const out = []; let pass = 0, fail = 0;
 const ok = (n, c, x) => { if (c) pass++; else fail++; out.push((c ? 'PASS ' : 'FAIL ') + n + (c || x === undefined ? '' : '  ' + JSON.stringify(x).slice(0, 300))); };
 const H = fs.readFileSync(path.join(repo, 'public/index.html'), 'utf8');
-let MAIN = null; try { MAIN = execFileSync('git', ['-C', repo, 'show', 'origin/main:public/index.html'], { encoding: 'utf8', maxBuffer: 1 << 28 }); } catch (_) {}
+// CEO-017B: the isolation checks judge the RELEASE that introduced this feature (its base..tip), not whatever main has become since; the behaviour checks above still run on the working tree.
+const REL_BASE = process.env.SRV037_BASE || '5e8db56^1', REL_TIP = process.env.SRV037_TIP || '5e8db56';
+let MAIN = null, HREL = null; try { MAIN = execFileSync('git', ['-C', repo, 'show', REL_BASE + ':public/index.html'], { encoding: 'utf8', maxBuffer: 1 << 28 }); HREL = execFileSync('git', ['-C', repo, 'show', REL_TIP + ':public/index.html'], { encoding: 'utf8', maxBuffer: 1 << 28 }); } catch (_) {}
 
 // ── MP3 check rules (the exact block from index.html) ──
 const blk = H.slice(H.indexOf('// <srv2-mp3-check>'), H.indexOf('// </srv2-mp3-check>'));
@@ -43,12 +45,13 @@ ok('the new code never calls Suno or any network (manual workflow only)', !/fetc
 // ── isolation vs main ──
 if (MAIN) {
   const diffLines = (a, b) => { const A = a.split('\n'), B = new Set(b.split('\n')); return A.filter((l) => !B.has(l)); };
-  const added = diffLines(H, MAIN), removed = diffLines(MAIN, H);
+  const added = diffLines(HREL, MAIN), removed = diffLines(MAIN, HREL);
   ok('nothing removed from index.html (the 2 marker lines are edits of existing lines)', removed.length >= 1 && removed.length <= 2 && removed.every((l) => /Generate the song in Suno|^      <\/div>$/.test(l)), removed.slice(0, 3));
-  const outside = added.filter((l) => !v2fns.includes(l));
+  const v2fnsRel = HREL.slice(HREL.indexOf('// ── SRV-STUDIO-V2-037: Suno steps'), HREL.indexOf('function _srvEnglishV2PromoBuildHtml('));
+  const outside = added.filter((l) => !v2fnsRel.includes(l));
   ok('outside the new SRV Studio block, only 2 existing lines gained a V2-only marker and 1 V2 swap line was added; nothing else', outside.length === 3 && outside.some((l) => l.includes("${_srvStudioV2On()?'<!--srv-suno-steps-->':''}<div")) && outside.some((l) => l.includes("</div>${_srvStudioV2On()?'<!--/srv-suno-steps-->':''}")) && outside.some((l) => /_srvEnglishV2SwapSunoSteps\(stageContent/.test(l)), outside);
-  for (const name of ['_srvCopyBuildField', 'srvLoadMp3', 'renderSRVFarsiLifecycleCard', '_srvEnglishV2Build', '_srvUploadToStorage']) ok('unchanged from main: ' + name, fnBody(H, name) !== null && fnBody(H, name) === fnBody(MAIN, name));
-  const changedFiles = execFileSync('git', ['-C', repo, 'diff', '--name-only', 'origin/main'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+  for (const name of ['_srvCopyBuildField', 'srvLoadMp3', 'renderSRVFarsiLifecycleCard', '_srvEnglishV2Build', '_srvUploadToStorage']) ok('unchanged from main: ' + name, fnBody(HREL, name) !== null && fnBody(HREL, name) === fnBody(MAIN, name));
+  const changedFiles = execFileSync('git', ['-C', repo, 'diff', '--name-only', REL_BASE, REL_TIP], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
   ok('only SRV Studio files changed (index.html + SRV Studio tests/docs)', changedFiles.every((f) => f === 'public/index.html' || /^tests\/srv\/(test_srv_studio_v2_0(33|37)|studio-v2-preview\/headless-037)/.test(f) || /^docs\/srv-studio-v2\//.test(f)), changedFiles);
 } else ok('origin/main available for the isolation checks', false);
 console.log(out.join('\n')); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

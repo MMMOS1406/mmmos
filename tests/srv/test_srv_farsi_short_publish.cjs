@@ -329,7 +329,9 @@ const mkD=()=>({tasks:[
   const fnOf=(src,name)=>{const m=src.match(new RegExp('\\n(async )?function '+name+'\\('));if(!m)return null;const s=m.index+1;return src.slice(s,src.indexOf('\n}\n',s)+2);};
   const names=[...main.matchAll(/\n(?:async )?function (_srvEnglish\w*|_nextWave\w*|_aiStudio\w*|_smm\w*|srvEnglish\w*|nextWave\w*|renderSRVEnglish\w*|renderNextWave\w*)\(/g)].map(m=>m[1]);
   const changed=names.filter(n=>fnOf(main,n)!==fnOf(h,n));
-  ok('other businesses: every SRV English / NextWave / AI Studio / SMM function byte-identical to main ('+names.length+' checked)',names.length>50&&changed.length===0,changed.slice(0,5));
+  // CEO-017B: AI Creation Studio's own functions may be REMOVED (never edited); everything else — and the shared _aiStudioSendToSubmagic helper the NextWave lifecycle uses — must stay byte-identical.
+  const retiredAi=changed.filter(n=>/^_aiStudio/.test(n)&&n!=='_aiStudioSendToSubmagic'&&fnOf(h,n)===null), others=changed.filter(n=>!retiredAi.includes(n));
+  ok('other businesses: every SRV English / NextWave / SMM function (and the shared Submagic helper) byte-identical to main; AI Studio functions only removed ('+names.length+' checked, '+retiredAi.length+' retired)',names.length>50&&others.length===0&&fnOf(h,'_aiStudioSendToSubmagic')!==null,others.slice(0,5));
   ok('shared publish helpers untouched (_assignPublishSlot, _nextPublishSlotCandidates, _publishFetch)',['_assignPublishSlot','_nextPublishSlotCandidates','_publishFetch'].every(n=>fnOf(main,n)===fnOf(h,n))); }
 console.log(out.join('\n'));console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);
 })().catch(e=>{console.error(e);process.exit(1);});
