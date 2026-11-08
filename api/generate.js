@@ -7,6 +7,8 @@
 import { generateFactPackets, factPacketToPromptBlock } from '../lib/nextwaveV2FactPacket.mjs';
 // SRV Studio V2 (Checkpoint B) — V2 music direction, used only when the srv_studio_v2_enabled flag is on.
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, parseSrvStudioV2Reply, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs';
+// SRV Farsi Creative V2 — the one canonical SRV Farsi creative brain; used only when the srv_farsi_creative_v2 flag allows it.
+import { srvfCv2Handle } from '../lib/srvFarsiCreativeV2.mjs';
 
 // SRV FARSI IDENTITY LAYER v1 — 2026-06-08
 // Mirrors the live api/ops.js inline prompt for the same engine. Kept in sync so any
@@ -926,6 +928,12 @@ export default async function handler(req, res) {
   const { engine, mood, platform, contentType, contentFormat, taskName, recentPackages } = req.body;
 
   if (!engine) return res.status(400).json({ error: 'Engine is required.' });
+  // SRV Farsi Creative V2: the client asks for V2 only from the SRV Farsi lifecycle; the server re-checks the flag row
+  // (fails closed) and answers code 'srv_farsi_creative_v2_off' so the client falls back to the unchanged path below.
+  if (engine === 'SRV Farsi' && req.body.srvFarsiCreativeV2 === true) {
+    const v2 = await srvfCv2Handle(req.body, { apiKey, supabaseUrl: process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co', supabaseKey: process.env.SUPABASE_SERVICE_KEY });
+    return res.status(v2.status).json(v2.json);
+  }
   // v13.75.4 — long-form routing: AI Studio Long + NextWave Long (v15.4.2)
   const templateKey = (engine === 'NextWave' && contentFormat === 'long') ? 'NextWave Long'
     : (engine === 'AI Studio' && contentFormat === 'long') ? 'AI Studio Long'

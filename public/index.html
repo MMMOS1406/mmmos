@@ -19989,6 +19989,7 @@ function renderSRVFarsiLifecycleCard(task){
       {label:'TITLE',val:pkg.title||pkg.name||''},
       ...(_isLongTask?[{label:'LYRICS (FARSI)',val:pkg.lyrics||''}]:[{label:'SHORT LYRICS',val:pkg.shortLyrics||pkg.short_lyrics||''}]),
       {label:'SUNO PROMPT',val:pkg.sunoPrompt||''},
+      {label:'EXCLUDE STYLES',val:pkg.excludeStyles||''},
       {label:'CAPTION — YOUTUBE',val:pkg.captionYT||pkg.captionYouTube||''},
       {label:'HASHTAGS',val:pkg.hashtags||''},
     ]:[];
@@ -20089,7 +20090,7 @@ function renderSRVFarsiLifecycleCard(task){
       </div>`;
     }
     stageContent=`
-      ${farsiQualityHtml}
+      ${_srvFarsiCreativeV2ReviewNote(pkg)}${farsiQualityHtml}
       ${fieldHtml||'<div style="color:var(--dim);font-size:12px;padding:10px">Package not yet generated — go back to Generate.</div>'}
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
         <button onclick="_srvFarsiApprovePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.40);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✓ Approve Package → Build</button>
@@ -20116,6 +20117,7 @@ function renderSRVFarsiLifecycleCard(task){
         <div style="display:flex;gap:8px;margin-bottom:8px">
           ${sunoPrompt?`<button onclick="_srvCopyBuildField('${pkgId}','sunoPrompt',${_isLongTask},this)" style="flex:1;padding:10px;background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.35);border-radius:8px;color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">📋 Copy Suno Prompt</button>`:`<div style="flex:1;padding:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;font-size:11px;color:var(--dim)">← Go back to Generate first</div>`}
           ${sunoLyrics?`<button onclick="_srvCopyBuildField('${pkgId}','lyrics',${_isLongTask},this)" style="flex:1;padding:10px;background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.35);border-radius:8px;color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">📋 Copy Lyrics</button>`:''}
+          ${pkg&&pkg.excludeStyles?`<button onclick="_srvFarsiCopyExcludeStyles('${pkgId}',this)" style="flex:1;padding:10px;background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.35);border-radius:8px;color:#c9a84c;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">📋 Copy Exclude Styles</button>`:''}
         </div>
         <a href="https://suno.com" target="_blank" style="display:block;text-align:center;padding:9px 14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.10);border-radius:8px;color:var(--text);font-size:11px;font-weight:700;text-decoration:none;font-family:'Syne',sans-serif">🎵 Open Suno ↗</a>
         ${sunoPrompt?`<div style="margin-top:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;font-size:10px;color:var(--dim);font-family:'JetBrains Mono',monospace;max-height:55px;overflow-y:auto;white-space:pre-wrap">${escHTML(sunoPrompt.slice(0,200))}${sunoPrompt.length>200?'…':''}</div>`:''}
@@ -20767,6 +20769,73 @@ async function _srvFarsiPublishTikTok(pkgId,taskId){
 
 // ── v13.69.82 — SRV Farsi generate core: memory-aware + language-guarded ───────
 // Shared by vaFarsiGeneratePackage (initial) and _srvFarsiRegeneratePackage (regen)
+// SRV Farsi Creative V2 (order: SRV FARSI V2 CREATIVE BRAIN REPLACEMENT) — one creative attempt through the canonical
+// V2 brain (lib/srvFarsiCreativeV2.mjs on the server). The task's Artist/Mood are sent as structured values and are
+// authoritative. Returns {mode:'legacy'} when the server flag says off (the guard then calls the unchanged shared
+// generatePackage), {mode:'v2',ok:true,pkg} once a package passed every hard gate and was saved the same way
+// generatePackage saves it, or {mode:'v2',ok:false,failed} when the gates rejected the attempt (nothing is saved).
+function _srvFarsiCreativeV2Selection(t){
+  if(!t||!t.isLong)return null;
+  const artist=_srvFarsiVaCurrentArtistFormat(t).artist;
+  const m=String(t.mode||t.mood||'');
+  const part=m.includes(' — ')?m.split(' — ').slice(1).join(' — ').trim():m;
+  const mood=/happy/i.test(part)?'Happy':/emotional/i.test(part)?'Emotional':/romantic/i.test(part)?'Romantic':'';
+  return (['Male','Female','Duet'].includes(artist)&&mood)?{artist:artist,mood:mood}:null;
+}
+async function _srvFarsiCreativeV2Attempt(taskId,attempt,feedback){
+  const t=_srvFarsiTaskById(taskId);
+  const sel=_srvFarsiCreativeV2Selection(t);
+  if(!sel)return {mode:'legacy'};
+  let res=null,data=null;
+  try{
+    res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      engine:'SRV Farsi',srvFarsiCreativeV2:true,srvFarsiTest:_srvFarsiIsTestTask(t),
+      artist:sel.artist,mood:sel.mood,format:'Long',attempt:attempt,feedback:feedback||[],taskName:t.name})});
+    data=await res.json();
+  }catch(e){
+    return {mode:'v2',ok:false,failed:[{gate:'API',reason:'request failed: '+(e&&e.message||e)}]};
+  }
+  if(data&&data.code==='srv_farsi_creative_v2_off')return {mode:'legacy'};
+  if(data&&data.code==='srv_farsi_creative_v2_gates_failed')return {mode:'v2',ok:false,failed:data.failed||[],gateResults:data.gateResults||null};
+  if(!res.ok||!data||!data.success||!data.package)return {mode:'v2',ok:false,failed:[{gate:'API',reason:String((data&&(data.error||data.code))||('HTTP '+res.status)).slice(0,200)}]};
+  // Same package shape, save order and local-state update as the shared generatePackage (which stays untouched).
+  const _isT=_getEngineState(t.engine||'')==='test';
+  const pkg={taskId,engine:t.engine,mood:t.mood,platform:t.platform,contentType:t.contentType,engineType:data.engineType,
+    checklist:{},_pendingSync:false,performance_status:'generated',youtube_video_id:null,published_at:null,linked_channel:null,
+    tools:[],avatar:null,isTest:_isT,_inTestMode:_isT,...data.package};
+  pkg.id='pkg_'+Date.now(); pkg.taskId=taskId; pkg.engine='SRV Farsi'; pkg.generatedAt=new Date().toISOString();
+  if(!Array.isArray(pkg.tools))pkg.tools=[];
+  if(!pkg.contentFormat)pkg.contentFormat=t.contentFormat||(t.contentType==='Long'?'long':'short');
+  // Task selection is authoritative — the reply can never change artist, mood or format.
+  pkg.artist=sel.artist; pkg.vocal=sel.artist.toLowerCase(); pkg.mood=sel.mood.toLowerCase(); pkg.mode=sel.artist+' — '+sel.mood;
+  const saved=await savePackageToSupabase(pkg);
+  if(!Array.isArray(D.packages))D.packages=[];
+  D.packages=D.packages.filter(p=>String(p.taskId)!==String(taskId));
+  D.packages.push(pkg);
+  t.status='generating';
+  storageSafe(STORAGE_KEY,JSON.stringify(buildStateObject())).catch(e=>console.warn('[SRV Farsi V2] localStorage catch:',e));
+  console.log('[SRV Farsi V2] package passed all creative gates | id:',pkg.id,'| attempt:',attempt,'| supabase:',saved);
+  return {mode:'v2',ok:true,pkg};
+}
+function _srvFarsiCopyExcludeStyles(pkgId,btnEl){
+  const pkg=(D.packages||[]).find(function(p){return String(p.id||'')===String(pkgId);});
+  const text=pkg&&pkg.excludeStyles||'';
+  if(!text){alert('Field is empty');return;}
+  navigator.clipboard.writeText(text).then(function(){
+    if(btnEl){var o=btnEl.textContent;btnEl.textContent='✓ Copied!';setTimeout(function(){btnEl.textContent=o;},1500);}
+  }).catch(function(){window.prompt('Copy this text (Ctrl+A, Ctrl+C):',text);});
+}
+function _srvFarsiCreativeV2ReviewNote(pkg){
+  const R=pkg&&pkg.creativeV2&&pkg.creativeGateResults;
+  if(!R||!R.gates)return '';
+  const keys=Object.keys(R.gates); const passed=keys.filter(k=>R.gates[k]&&R.gates[k].pass).length;
+  const J=R.judge||{}; const lab={naturalFarsi:'Farsi',story:'Story',hook:'Hook',contrast:'Contrast',moodFit:'Mood',artistFit:'Artist',humanNotAI:'Human'};
+  const js=Object.keys(lab).filter(k=>J[k]&&J[k].score!=null).map(k=>lab[k]+' '+J[k].score).join(' · ');
+  return `<div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.30);border-radius:8px;font-size:10px;line-height:1.6;color:var(--text);font-family:'JetBrains Mono',monospace">
+    <div style="font-weight:800;color:#22c55e;letter-spacing:1px">CREATIVE V2 — ${passed}/${keys.length} HARD GATES PASSED · ATTEMPT ${escHTML(String(R.attempt||pkg.creativeAttempt||1))}</div>
+    <div style="color:var(--dim)">${escHTML(pkg.mode||'')} · Suno style ${escHTML(String((pkg.sunoPrompt||'').length))} chars${js?' · '+escHTML(js):''}</div>
+  </div>`;
+}
 async function _srvFarsiGenerateWithGuard(taskId,statusCb){
   // FIX 2: language guard — title + lyrics must contain Persian/Dari script (U+0600–U+06FF)
   const _hasFarsi=function(text){return /[؀-ۿ]/.test(text||'');};
@@ -20793,14 +20862,23 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
   _srvFarsiGuardActive=true;
   // Auto-retry loop (max 3 attempts): regenerate if language guard fails
   try{
+  let _cv2Feedback=null,_cv2Rejected=false; // SRV Farsi Creative V2 — failed-gate reasons carried into the next attempt
   for(let _att=0;_att<3;_att++){
-    if(_att>0&&statusCb){statusCb('Language check failed — retrying ('+(_att+1)+'/3)…');}
+    if(_att>0&&statusCb){statusCb(_cv2Rejected?'Quality check failed — rewriting ('+(_att+1)+'/3)…':'Language check failed — retrying ('+(_att+1)+'/3)…');}
     // v13.69.90 — use timestamp lookup instead of _beforeCount+slice.
     // generatePackage does filter+push (replace-in-place, net count = 0)
     // so slice(_beforeCount) always returned empty. Timestamp finds the
     // package generated within this call window regardless of array position.
     const _callTime=Date.now();
-    await generatePackage(_tid);
+    const _cv2=await _srvFarsiCreativeV2Attempt(_tid,_att+1,_cv2Feedback);
+    if(_cv2.mode==='legacy'){await generatePackage(_tid);}
+    else if(!_cv2.ok){
+      // A rejected V2 attempt is never saved and never reaches Review; its reasons steer the next attempt.
+      _cv2Rejected=true; _cv2Feedback=_cv2.failed;
+      console.warn('[SRV Farsi V2] creative gates failed (att '+(_att+1)+'):',(_cv2.failed||[]).map(function(f){return f.gate+' '+f.reason;}).join(' | '));
+      if(_att>=2){throw new Error('Creative quality check failed after 3 attempts — nothing was sent to Review. Press Generate to try again. Last failed checks: '+(_cv2.failed||[]).map(function(f){return f.gate;}).join(', '));}
+      continue;
+    }
     _pkg=(D.packages||[]).find(function(p){
       return p&&p.engine==='SRV Farsi' // P1-A: only SRV Farsi packages
         && (String(p.taskId)===String(_tid)||String(p.taskId)===String(taskId))
