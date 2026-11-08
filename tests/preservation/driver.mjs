@@ -74,11 +74,14 @@ export async function fetchJson(url) { const r = await fetch(url); return r.json
 
 export async function login(page, stubOrigin, userId) {
   await page.waitForFunction(() => typeof USERS !== 'undefined' && typeof selectUser === 'function');
-  const pin = await page.evaluate((id) => { const u = USERS.find((x) => x.id === id); return u.ceoAuth ? '0000' : u.pin; }, userId);
-  await page.evaluate((id) => selectUser(id), userId);
-  await page.evaluate((p) => { document.getElementById('pinInput').value = p; }, pin);
-  await page.evaluate(() => tryLogin());
-  await page.waitForFunction(() => document.getElementById('appScreen').classList.contains('show') && typeof currentUser !== 'undefined' && currentUser);
+  // CEO-017B: builds differ in how Family/VA sign in (browser PIN on main, server PIN afterwards). Try the page's own PIN first (never printed), then the stub's synthetic server PIN.
+  const pins = await page.evaluate((id) => { const u = USERS.find((x) => x.id === id); return u.ceoAuth ? ['0000'] : ['stub-pin', u.pin].filter(Boolean); }, userId);
+  for (let i = 0; i < pins.length; i++) {
+    await page.evaluate((id) => selectUser(id), userId);
+    await page.evaluate((p) => { document.getElementById('pinInput').value = p; }, pins[i]);
+    await page.evaluate(() => tryLogin());
+    try { await page.waitForFunction(() => document.getElementById('appScreen').classList.contains('show') && typeof currentUser !== 'undefined' && currentUser, { timeout: i === pins.length - 1 ? 30000 : 4000 }); break; } catch (e) { if (i === pins.length - 1) throw e; }
+  }
   await settle(page, stubOrigin, 900);
 }
 

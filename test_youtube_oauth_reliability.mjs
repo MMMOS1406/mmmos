@@ -211,9 +211,9 @@ await t('no credentials or token values are exposed by the new error path — on
   assert.ok(!/conn\.refresh_token/.test(catchBlock), 'the catch branch itself must not reference the raw refresh token');
 });
 
-// CEO-017C: files the authentication Release 1 is allowed to change. The OAuth callback and .pause-deploy stay strictly untouched by it (checked below).
+// CEO-017C/D: files the authentication Release 1 and 2 are allowed to change. The OAuth callback and .pause-deploy stay strictly untouched by it (checked below).
 const RELEASE_FILES = ['api/ops.js', 'public/index.html', 'lib/pinHash.mjs', 'index.html', 'public/index_staging.html', 'tests/srv/test_srv_farsi_creative_v2.mjs', 'test_youtube_oauth_reliability.mjs'];
-const isReleaseFile = (f) => RELEASE_FILES.includes(f) || f.startsWith('tests/ceo017a/');
+const isReleaseFile = (f) => RELEASE_FILES.includes(f) || f.startsWith('tests/ceo017a/') || f.startsWith('tests/preservation/'); // CEO-017D: Release 2 also adjusts the test harness' sign-in
 console.log('\n[3] Cross-business / no-regression evidence (structural — diff scope + untouched-function checks)');
 
 await t('youtubeAnalyticsPull and youtubeSyncPerformance (existing YouTube analytics paths) are completely untouched by this patch', () => {

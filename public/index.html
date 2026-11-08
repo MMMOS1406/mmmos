@@ -440,7 +440,6 @@ canvas.mini-chart{width:100%!important;height:100px!important;display:block}
         <input type="password" class="pin-input" id="pinInput" maxlength="6" placeholder="• • • •" onkeydown="if(event.key==='Enter')tryLogin()">
         <div class="pin-err" id="pinErr" style="display:none">Wrong PIN. Try again.</div>
         <button class="pin-submit" onclick="tryLogin()">Enter System →</button>
-        <div class="pin-hint mono">Family:5678 · VA:0000</div> <!-- v16.30.0 — Admin PIN removed from hint: no longer a client-side credential, verified server-side only -->
       </div>
     </div>
   </div>
@@ -716,8 +715,8 @@ const USERS=[
   // Legacy sub-routes (content, packages, integrations, constitution, factory, continuity, settings) remain callable
   // via renderTab(id) for backward compat; they just don't appear in the top nav anymore.
   {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","tasks","engines","finance","system","marketing","human_resources","legal_compliance","social_media_manager"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against. v16.67.1 — restored "tasks": the v13.69.46 5-tabs consolidation's own comment says access lists cover the 5 primary tabs (home/tasks/engines/finance/system), yet admin's array omitted "tasks" — the one place the Developer Options/quick-generate Long-or-Short test control (renderDeveloperCard, called only from renderTasks) renders, so it silently became unreachable for admin/CEO while VA (whose access already includes "tasks") was unaffected.
-  {id:"family",name:"Family",role:"Family Access",emoji:"👨‍👩‍👧",pin:"5678",access:["home","finance","engines"]},
-  {id:"va",name:"VA",role:"Operator",emoji:"⚙️",pin:"0000",access:["tasks","system"]},
+  {id:"family",name:"Family",role:"Family Access",emoji:"👨‍👩‍👧",access:["home","finance","engines"]},
+  {id:"va",name:"VA",role:"Operator",emoji:"⚙️",access:["tasks","system"]},
 ];
 // v13.69.46 — MMMOS Simplification: 11 tabs → 5.
 // Home = CEO dashboard · Tasks = execution · Engines = business center (Content + Packages live inside)
@@ -1947,7 +1946,6 @@ let D={
   settings:{
     profileName:'Mansoor',
     profileEmail:'',
-    adminPin:'',
     uploadPlatforms:{youtube:true,tiktok:true,instagram:true},
     uploadDay:'Monday',
   },
@@ -4155,9 +4153,8 @@ async function tryLogin(){
     return;
   }
   // SRV-STUDIO-V2-017 — the VA signs in on the server once the CEO has set a VA PIN (System → Integrations →
-  // Publishing sign-in); the session it returns is what lets the VA publish. Only a definite refusal (wrong
-  // PIN, lockout) stops here. Anything else — no VA PIN set yet (operator_not_configured), an older server,
-  // a network error — falls through to the legacy browser PIN check below. That grants the screens only:
+  // Publishing sign-in); the session it returns is what lets the VA publish. A definite refusal (wrong
+  // PIN, lockout) stops here with its own message; anything else falls through to the fail-closed message below (CEO-017D: no browser PIN check exists any more). Formerly this granted the screens only:
   // once the CEO requires sign-in, the server refuses publishing calls that carry no VA session.
   if(selectedUser&&selectedUser.id==='va'){
     let j=null;
@@ -4180,8 +4177,7 @@ async function tryLogin(){
       return;
     }
   }
-  // CEO-017A — Family signs in on the server too. Until the CEO sets a Family PIN the server answers
-  // family_not_configured and the legacy browser check below stays in place (so nobody is locked out).
+  // CEO-017A — Family signs in on the server too (CEO-017D: this is now the only way; if the server has no Family PIN or cannot be reached, sign-in fails closed below).
   if(selectedUser&&selectedUser.id==='family'){
     let j=null;
     try{
@@ -4203,17 +4199,13 @@ async function tryLogin(){
       return;
     }
   }
-  // CEO-017B RELEASE 1 (transition only): the browser check stays until the CEO has set the Family and VA PINs on the server;
-  // release 2 deletes this block and the literals above (git revert of the 'release 1 transition' commit).
-  if(selectedUser&&selectedUser.pin===pin){
-    document.getElementById('pinInput').value='';
-    await _activateUser(selectedUser);
-  }else{
-    document.getElementById('pinErr').textContent='Wrong PIN. Try again.';
-    document.getElementById('pinErr').style.display='block';
-    document.getElementById('pinInput').value='';
-    document.getElementById('pinInput').focus();
-  }
+  // CEO-017D RELEASE 2 — there is no browser-side PIN any more: CEO, VA and Family are judged by the server only.
+  // Reaching this point means the server could not confirm the PIN (not set yet, unreachable, or an unexpected answer): fail closed.
+  const _perr=document.getElementById('pinErr');
+  _perr.textContent='Could not sign in. If this keeps happening, ask the CEO to set your PIN.';
+  _perr.style.display='block';
+  document.getElementById('pinInput').value='';
+  document.getElementById('pinInput').focus();
 }
 function logout(){
   // v16.32.3 — Phase 2E-F: root cause of "Logout didn't immediately render the login
