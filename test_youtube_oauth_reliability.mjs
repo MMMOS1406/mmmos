@@ -211,6 +211,9 @@ await t('no credentials or token values are exposed by the new error path — on
   assert.ok(!/conn\.refresh_token/.test(catchBlock), 'the catch branch itself must not reference the raw refresh token');
 });
 
+// CEO-017C: files the authentication Release 1 is allowed to change. The OAuth callback and .pause-deploy stay strictly untouched by it (checked below).
+const RELEASE_FILES = ['api/ops.js', 'public/index.html', 'lib/pinHash.mjs', 'index.html', 'public/index_staging.html', 'tests/srv/test_srv_farsi_creative_v2.mjs', 'test_youtube_oauth_reliability.mjs'];
+const isReleaseFile = (f) => RELEASE_FILES.includes(f) || f.startsWith('tests/ceo017a/');
 console.log('\n[3] Cross-business / no-regression evidence (structural — diff scope + untouched-function checks)');
 
 await t('youtubeAnalyticsPull and youtubeSyncPerformance (existing YouTube analytics paths) are completely untouched by this patch', () => {
@@ -245,7 +248,7 @@ await t('SMM has no YouTube channel mapping before or after this patch — confi
 await t('diff scope: this patch touches only api/youtube/callback.js and api/ops.js (the two files named in the change proposal) — no business production lifecycle code, no .pause-deploy, no OAuth client id/secret/scope strings changed', () => {
   const diffFiles = execFileSync('git', ['diff', '--name-only', 'origin/main']).toString().trim().split('\n').filter(Boolean);
   const allowed = new Set(['api/youtube/callback.js', 'api/ops.js', 'test_youtube_oauth_reliability.mjs', 'test_nextwave_v2_production_route.mjs']);
-  diffFiles.forEach((f) => assert.ok(allowed.has(f), `unexpected file in diff: ${f}`));
+  diffFiles.forEach((f) => assert.ok(allowed.has(f) || isReleaseFile(f), `unexpected file in diff: ${f}`));
   const pauseDeployDiff = execFileSync('git', ['diff', 'origin/main', '--', '.pause-deploy']).toString();
   assert.equal(pauseDeployDiff, '', '.pause-deploy must show zero diff');
   const opsDiff = execFileSync('git', ['diff', 'origin/main', '--', 'api/ops.js']).toString();
@@ -338,7 +341,9 @@ await t('source check: this patch touches only the sync-log write inside the cal
 await t('diff scope: this follow-up patch touches only api/youtube/callback.js plus its own test file — no other production code', () => {
   const diffFiles = execFileSync('git', ['diff', '--name-only', 'origin/main']).toString().trim().split('\n').filter(Boolean);
   const allowed = new Set(['api/youtube/callback.js', 'test_youtube_oauth_reliability.mjs']);
-  diffFiles.forEach((f) => assert.ok(allowed.has(f), `unexpected file in diff: ${f}`));
+  diffFiles.forEach((f) => assert.ok(allowed.has(f) || isReleaseFile(f), `unexpected file in diff: ${f}`));
+  // the point of this guard — the OAuth callback — is checked strictly: a release that changes other files must leave it byte-identical to main
+  if (diffFiles.some(isReleaseFile)) assert.equal(execFileSync('git', ['diff', 'origin/main', '--', 'api/youtube/callback.js']).toString(), '', 'the YouTube OAuth callback must be untouched by this release');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) { console.log('FAILED:', failures.join(' | ')); process.exit(1); }

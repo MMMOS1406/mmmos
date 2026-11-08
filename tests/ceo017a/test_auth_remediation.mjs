@@ -61,10 +61,10 @@ const t0 = Date.now(); await verifyPin('same-pin-123', h1); const ms = Date.now(
 const vaBefore = cfg.get('operator_pin_hash_production'); const opTok0 = (await call(mod, 'operator_login', { pin: VA_PIN })).body.operator_session_token;
 check('upgrade flag off: a legacy VA hash is left exactly as it was', cfg.get('operator_pin_hash_production') === vaBefore && isLegacyHash(vaBefore));
 cfg.set('pin_hash_upgrade_on_login', 'on');
-r = await call(mod, 'operator_login', { pin: VA_PIN }); const upgraded = cfg.get('operator_pin_hash_production');
-check('upgrade flag on: VA login succeeds and the stored hash becomes scrypt (same PIN keeps working)', r.code === 200 && r.body.ok && /^scrypt\$v1\$/.test(upgraded));
-r = await call(mod, 'operator_login', { pin: VA_PIN }); check('VA logs in again with the same PIN against the new hash', r.code === 200 && r.body.ok === true);
-check('the VA session issued at upgrade time verifies on the new hash', (await call(mod, 'operator_check_session', { operator_session_token: (await call(mod, 'operator_login', { pin: VA_PIN })).body.operator_session_token })).body.ok === true);
+r = await call(mod, 'operator_login', { pin: VA_PIN });
+check('upgrade flag on: the VA hash is deliberately left alone in Release 1 (the publishing-gate code stays byte-identical to main); VA login works', r.code === 200 && r.body.ok && cfg.get('operator_pin_hash_production') === vaBefore);
+r = await call(mod, 'operator_login', { pin: VA_PIN }); check('VA logs in again with the same PIN', r.code === 200 && r.body.ok === true);
+check('the VA session verifies', (await call(mod, 'operator_check_session', { operator_session_token: (await call(mod, 'operator_login', { pin: VA_PIN })).body.operator_session_token })).body.ok === true);
 r = await call(mod, 'ceo_login', { pin: CEO_PIN }); check('CEO login upgrades too and still works', r.body.ok === true && /^scrypt\$v1\$/.test(cfg.get('ceo_pin_hash_production')));
 /* CEO PIN rotation */
 const oldCeoTok = (await call(mod, 'ceo_login', { pin: CEO_PIN })).body.ceo_session_token; const NEW_CEO = 'test-ceo-pin-ROTATED';

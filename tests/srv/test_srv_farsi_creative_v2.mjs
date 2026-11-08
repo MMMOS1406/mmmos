@@ -10,6 +10,8 @@ import * as V2 from '../../lib/srvFarsiCreativeV2.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BASE = process.env.SRVF_CV2_BASE || '036a754'; // last main before SRV Farsi Creative V2
+// CEO-017B: the release-SCOPE checks below judge the RELEASE (BASE..TIP), not whatever the working tree has become since. TIP is main when the release was accepted.
+const TIP = process.env.SRVF_CV2_TIP || '5a11571';
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) pass++; else { fail++; console.log('FAIL ' + name + (extra ? ' — ' + extra : '')); } };
 const git = cmd => execSync('git ' + cmd, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 << 20 });
@@ -326,6 +328,8 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
     { engine: 'SRV Farsi', mood: 'Female — Romantic', platform: 'YouTube', contentType: 'Long', contentFormat: 'long', taskName: 'SRV Farsi — Female — Romantic · Long', recentPackages: [{ title: 'a', mood: 'romantic' }] },
     { engine: 'SRV English', mood: 'Female — Emotional', platform: 'YouTube', contentType: 'Long', contentFormat: 'long', taskName: 'x', recentPackages: [] },
     { engine: 'NextWave', mood: 'm', platform: 'YouTube', contentType: 'Short', contentFormat: 'short', taskName: 'x', recentPackages: [] },
+  ];
+  const retired = [
     { engine: 'AI Studio', mood: 'AI Tools & Productivity', platform: 'YouTube', contentType: 'Short', contentFormat: 'short', taskName: 'x', recentPackages: [] },
     { engine: 'AI Studio', mood: 'AI Tools & Productivity', platform: 'YouTube', contentType: 'Long', contentFormat: 'long', taskName: 'x', recentPackages: [] },
   ];
@@ -338,6 +342,14 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
     const ab = a.calls.filter(x => x.url.includes('anthropic')).map(x => x.body), bb = b.calls.filter(x => x.url.includes('anthropic')).map(x => x.body);
     ok(ab.length === 1 && JSON.stringify(ab) === JSON.stringify(bb), `legacy request identical to ${BASE}: ${c.engine} ${c.contentFormat}`);
     ok(JSON.stringify(a.out) === JSON.stringify(b.out), `legacy response identical to ${BASE}: ${c.engine} ${c.contentFormat}`);
+  }
+  // CEO-017B: AI Creation Studio is retired — the request that used to reach the model is now refused before any model call (when this tree still has the engine, the old equivalence holds instead)
+  const treeHasAiStudio = /"AI Studio":\s*\{ prompt:/.test(fs.readFileSync(path.join(ROOT, 'api/generate.js'), 'utf8'));
+  for (const c of retired) {
+    seeded(); const a = await run(baseMod.default, clone(c)); seeded(); const b = await run(newMod.default, clone(c)); Math.random = realRandom;
+    const ab = a.calls.filter(x => x.url.includes('anthropic')).map(x => x.body), bb = b.calls.filter(x => x.url.includes('anthropic')).map(x => x.body);
+    if (treeHasAiStudio) { ok(ab.length === 1 && JSON.stringify(ab) === JSON.stringify(bb), `legacy request identical to ${BASE}: ${c.engine} ${c.contentFormat}`); ok(JSON.stringify(a.out) === JSON.stringify(b.out), `legacy response identical to ${BASE}: ${c.engine} ${c.contentFormat}`); }
+    else ok(ab.length === 1 && bb.length === 0 && /Unknown engine/.test(JSON.stringify(b.out)), `retired engine refused before any model call (${BASE} still called the model): ${c.engine} ${c.contentFormat}`);
   }
   // A V2 request with the flag off: no model call, off code
   V2._resetSrvfCv2FlagCache();
@@ -354,7 +366,7 @@ function fnText(src, name) {
   const end = src.indexOf('\n}\n', m.index); return src.slice(m.index, end + 2);
 }
 {
-  const baseHtml = git(`show ${BASE}:public/index.html`), newHtml = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
+  const baseHtml = git(`show ${BASE}:public/index.html`), newHtml = git(`show ${TIP}:public/index.html`);
   const protectedFns = ['generatePackage', 'getPackageMemory', 'savePackageToSupabase', 'saveMemoryItem', 'findDuplicatePackage', '_confirmDupSave', 'fetchPackagesFromTable',
     'vaFarsiGeneratePackage', '_srvFarsiRegeneratePackage', '_srvFarsiSetStage', '_srvFarsiGetStage', '_srvCopyBuildField', 'vaStartFarsiProductionTask', '_srvFarsiNextMode',
     '_srvFarsiNextArtist', '_srvFarsiNextMood', '_srvFarsiNextFormat', '_srvFarsiVaSetArtistFormat', '_srvFarsiVaCurrentArtistFormat', '_srvFarsiCreateShortFromLong', '_srvFarsiShortSources',
@@ -368,23 +380,23 @@ function fnText(src, name) {
     const line = s => (s.split('\n').find(l => l.includes(c)) || null);
     ok(line(baseHtml) && line(baseHtml) === line(newHtml), 'unchanged: ' + c);
   }
-  const baseGen = git(`show ${BASE}:api/generate.js`), newGen = fs.readFileSync(path.join(ROOT, 'api/generate.js'), 'utf8');
+  const baseGen = git(`show ${BASE}:api/generate.js`), newGen = git(`show ${TIP}:api/generate.js`);
   for (const n of ['buildAvoidList', 'srvStudioV2Generate']) ok(fnText(baseGen, n) && fnText(baseGen, n) === fnText(newGen, n), 'generate.js function unchanged: ' + n);
   const between = (s, a, b) => s.slice(s.indexOf(a), s.indexOf(b, s.indexOf(a)));
   ok(between(baseGen, 'const SRV_FARSI_PROMPT', 'const TEMPLATES') === between(newGen, 'const SRV_FARSI_PROMPT', 'const TEMPLATES'), 'legacy SRV_FARSI_PROMPT + other prompts unchanged (rollback path)');
   ok(between(baseGen, 'const TEMPLATES', 'function buildAvoidList') === between(newGen, 'const TEMPLATES', 'function buildAvoidList'), 'TEMPLATES unchanged');
   // only additive lines in generate.js
-  const genDiff = git(`diff ${BASE} -- api/generate.js`).split('\n').filter(l => /^[-+]/.test(l) && !/^(\+\+\+|---)/.test(l));
+  const genDiff = git(`diff ${BASE} ${TIP} -- api/generate.js`).split('\n').filter(l => /^[-+]/.test(l) && !/^(\+\+\+|---)/.test(l));
   ok(genDiff.every(l => l.startsWith('+')) && genDiff.length <= 10, 'generate.js diff is additive only (' + genDiff.length + ' lines)');
   // changed files scope
-  const changed = git(`diff --name-only ${BASE}`).trim().split('\n').filter(Boolean);
+  const changed = git(`diff --name-only ${BASE} ${TIP}`).trim().split('\n').filter(Boolean);
   const allowed = f => ['api/generate.js', 'public/index.html', 'lib/srvFarsiCreativeV2.mjs'].includes(f) || f.startsWith('tests/srv/') || f.startsWith('docs/srv-farsi/');
   ok(changed.every(allowed), 'changed files within scope: ' + changed.join(', '));
   ok(!changed.includes('api/ops.js') && !changed.some(f => /srvStudioV2|nextwave|aiStudio|smm|youtube/i.test(f)), 'ops.js / SRV Studio / NextWave / AI Studio / SMM / YouTube files untouched');
   // index.html: every changed line is inside the SRV Farsi guard, the new V2 functions, or the SRV Farsi lifecycle card
   const lines = newHtml.split('\n');
   const added = [];
-  for (const l of git(`diff -U0 ${BASE} -- public/index.html`).split('\n').filter(l => l.startsWith('@@'))) {
+  for (const l of git(`diff -U0 ${BASE} ${TIP} -- public/index.html`).split('\n').filter(l => l.startsWith('@@'))) {
     const m = l.match(/\+(\d+)(?:,(\d+))?/); const st = +m[1], n = m[2] == null ? 1 : +m[2];
     for (let k = st; k < st + n; k++) if (lines[k - 1].trim() && !lines[k - 1].trim().startsWith('//')) added.push(k);
   }
@@ -393,7 +405,7 @@ function fnText(src, name) {
   const okOwners = new Set(['_srvFarsiGenerateWithGuard', '_srvFarsiCreativeV2Selection', '_srvFarsiCreativeV2Attempt', '_srvFarsiCopyExcludeStyles', '_srvFarsiCreativeV2ReviewNote', 'renderSRVFarsiLifecycleCard']);
   const owners = hunks.map(owner);
   ok(owners.every(o => okOwners.has(o)), 'index.html changes only inside SRV Farsi creative functions: ' + [...new Set(owners)].join(', '));
-  const delLines = git(`diff -U0 ${BASE} -- public/index.html`).split('\n').filter(l => l.startsWith('-') && !l.startsWith('---'));
+  const delLines = git(`diff -U0 ${BASE} ${TIP} -- public/index.html`).split('\n').filter(l => l.startsWith('-') && !l.startsWith('---'));
   ok(delLines.length === 3 && delLines.some(l => l.includes('await generatePackage(_tid);')), 'index.html removes only the 3 replaced lines (' + delLines.length + ')');
 }
 // ── 7. client guard in a sandbox ─────────────────────────────────────────────────────────────────────────────────

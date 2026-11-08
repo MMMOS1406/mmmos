@@ -307,7 +307,7 @@ async function _publisherFromRequest(req) {
   try {
     const [cfg, pub] = await Promise.all([_ceoLoadAuthConfig(), _publishAuthLoad()]);
     if (!pub.pinHash) return null;
-    return _operatorVerifySession(token, _operatorSecret(cfg.sessionSecret), pinFingerprint(pub.pinHash)) ? { role: 'operator' } : null;
+    return _operatorVerifySession(token, _operatorSecret(cfg.sessionSecret), pub.pinHash.slice(0, 12)) ? { role: 'operator' } : null;
   } catch (e) {
     console.error('[publish-auth] operator verify failed:', e.message);
     return null;
@@ -348,7 +348,9 @@ async function operatorLogin(req, res) {
   if (sec.lockedUntil && now < sec.lockedUntil) {
     return res.status(429).json({ ok: false, error: 'temporarily_locked', retry_after_seconds: Math.ceil((sec.lockedUntil - now) / 1000) });
   }
-  if (!(await verifyPin(pin, pub.pinHash))) {
+  const a = Buffer.from(_ceoHashHex(pin), 'utf8');
+  const b = Buffer.from(String(pub.pinHash), 'utf8');
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     const failCount = (sec.failCount || 0) + 1;
     const next = { failCount, lastAttemptAt: new Date(now).toISOString() };
     if (failCount >= CEO_LOGIN_MAX_ATTEMPTS) { next.lockedUntil = now + CEO_LOGIN_LOCKOUT_MS; next.failCount = 0; }
@@ -357,10 +359,13 @@ async function operatorLogin(req, res) {
   }
   if (sec.failCount || sec.lockedUntil) await _ceoAuthConfigUpsert('operator_login_security_production', JSON.stringify({ failCount: 0, lastAttemptAt: new Date(now).toISOString() })).catch(() => {});
   const exp = now + OPERATOR_SESSION_TTL_MS;
-  const pv = pinFingerprint(pub.pinHash);
-  const upgraded = await _pinUpgradeOnLogin('operator_pin_hash_production', pin, pub.pinHash); if (upgraded) _publishAuthCache = null;
-  const token = _ceoSignSession({ sub: 'operator', iat: now, exp, pv: upgraded ? pinFingerprint(upgraded) : pv }, _operatorSecret(cfg.sessionSecret));
+  const token = _ceoSignSession({ sub: 'operator', iat: now, exp, pv: pub.pinHash.slice(0, 12) }, _operatorSecret(cfg.sessionSecret));
   return res.status(200).json({ ok: true, operator_session_token: token, expires_at: new Date(exp).toISOString() });
+}
+
+async function operatorCheckSession(req, res) {
+  const who = await _publisherFromRequest(req);
+  return res.status(200).json({ ok: !!(who && who.role === 'operator') });
 }
 
 // ── CEO-017B — PIN hash upgrade and CEO PIN rotation ───────────────────────────────────────────────
@@ -464,10 +469,6 @@ async function authSetFamilyPin(req, res) {
   } catch (e) { return res.status(502).json({ ok: false, error: 'auth_config_write_failed' }); }
 }
 
-async function operatorCheckSession(req, res) {
-  const who = await _publisherFromRequest(req);
-  return res.status(200).json({ ok: !!(who && who.role === 'operator') });
-}
 
 // CEO-only: what the gate is doing right now. Never returns the PIN hash.
 async function publishAuthStatus(req, res) {
@@ -483,11 +484,11 @@ async function publishAuthStatus(req, res) {
 async function publishAuthSetOperatorPin(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   const pin = (req.body || {}).pin;
-  if (pinPolicyError(pin)) return res.status(400).json({ ok: false, error: pinPolicyError(pin) });
+  if (typeof pin !== 'string' || pin.length < 6 || pin.length > 32 || /^0+$/.test(pin)) return res.status(400).json({ ok: false, error: 'pin_must_be_6_to_32_characters' });
   try {
     const cfg = await _ceoLoadAuthConfig();
-    if (await verifyPin(pin, cfg.pinHash)) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_ceo_pin' });
-    await _ceoAuthConfigUpsert('operator_pin_hash_production', await hashPin(pin));
+    if (_ceoHashHex(pin) === cfg.pinHash) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_ceo_pin' });
+    await _ceoAuthConfigUpsert('operator_pin_hash_production', _ceoHashHex(pin));
     await _ceoAuthConfigUpsert('operator_login_security_production', JSON.stringify({ failCount: 0 })).catch(() => {});
     _publishAuthCache = null;
     const pub = await _publishAuthLoad(true);
