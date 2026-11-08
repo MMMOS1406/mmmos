@@ -1,5 +1,5 @@
 // SRV Farsi Creative V2 — unit, handler, isolation and client-guard tests.
-// Run: node tests/srv/test_srv_farsi_creative_v2.mjs   (BASE=<git ref> to compare against, default origin/main)
+// Run: node tests/srv/test_srv_farsi_creative_v2.mjs   (SRVF_CV2_BASE=<git ref>, default 036a754 = main before V2)
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as V2 from '../../lib/srvFarsiCreativeV2.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const BASE = process.env.BASE || 'origin/main';
+const BASE = process.env.SRVF_CV2_BASE || '036a754'; // last main before SRV Farsi Creative V2
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) pass++; else { fail++; console.log('FAIL ' + name + (extra ? ' — ' + extra : '')); } };
 const git = cmd => execSync('git ' + cmd, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 << 20 });
@@ -236,6 +236,22 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
   f = mockFetch({ flag: 'on' });
   r = await V2.srvfCv2Handle({ ...BODY, format: 'Short' }, { ...ENV, fetchImpl: f });
   ok(r.json.code === 'srv_farsi_creative_v2_off' && !f.calls.some(c => c.url.includes('anthropic')), 'Short never uses V2');
+}
+{ // judge retry + diagnostics
+  const mk = replies => { let k = 0; const f = mockFetch({ flag: 'on' }); return async (url, opt) => {
+    if (String(url).includes('anthropic') && JSON.parse(opt.body).model === V2.SRVF_CV2_JUDGE_MODEL) { const t = replies[Math.min(k++, replies.length - 1)]; return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: t }] }), text: async () => t }; }
+    return f(url, opt); }; };
+  const good = JSON.stringify(Object.fromEntries(['naturalFarsi', 'story', 'hook', 'contrast', 'moodFit', 'artistFit', 'humanNotAI'].map(d => [d, { score: 8, reason: 'ok' }])));
+  V2._resetSrvfCv2FlagCache();
+  let r = await V2.srvfCv2Handle(BODY, { ...ENV, fetchImpl: mk(['{"naturalFarsi":{"score":8,"reason":"tru', good]) });
+  ok(r.json.success === true, 'truncated judge reply → one retry → pass');
+  V2._resetSrvfCv2FlagCache();
+  r = await V2.srvfCv2Handle(BODY, { ...ENV, fetchImpl: mk(['nope', 'still nope']) });
+  ok(r.json.success === false && /unusable judge reply/.test(r.json.gateResults.judgeError || ''), 'two bad judge replies → fail closed, judgeError recorded');
+  V2._resetSrvfCv2FlagCache();
+  r = await V2.srvfCv2Handle(BODY, { ...ENV, fetchImpl: mk(['{"naturalFarsi":{"score":9}}']) });
+  ok(r.json.success === false, 'judge reply missing dimensions is not accepted');
+  ok(/105-135 words/.test(V2.SRVF_CV2_SYSTEM), 'Suno length guidance given in words');
 }
 // ── 5. api/generate.js: V2 branch + legacy byte-identical request bodies vs BASE ────────────────────────────────
 {
