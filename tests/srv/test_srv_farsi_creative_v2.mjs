@@ -251,7 +251,7 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
   V2._resetSrvfCv2FlagCache();
   r = await V2.srvfCv2Handle(BODY, { ...ENV, fetchImpl: mk(['{"naturalFarsi":{"score":9}}']) });
   ok(r.json.success === false, 'judge reply missing dimensions is not accepted');
-  ok(/105-135 words/.test(V2.SRVF_CV2_SYSTEM), 'Suno length guidance given in words');
+  ok(/95-120 words/.test(V2.SRVF_CV2_SYSTEM) && /AUTOMATIC CHECKS/.test(V2.srvfCv2UserPrompt({ artist: 'Duet', mood: 'Happy', memory: {} })) && /male and female duet/.test(V2.srvfCv2UserPrompt({ artist: 'Duet', mood: 'Happy', memory: {} })), 'length in words + automatic checks block in the request');
 }
 { // style cleanup
   const ctx = { artist: 'Female', mood: 'Romantic', raw: GOOD };
