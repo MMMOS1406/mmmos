@@ -274,6 +274,32 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
   const r = await V2.srvfCv2Handle(BODY, { ...ENV, fetchImpl: f });
   ok(r.json.success && r.json.package.sunoPrompt.length < 1000 && r.json.package.creativeGateResults.styleCleanup.changed === true, 'handler applies cleanup and records it');
 }
+{ // language + style quality (from live run 2)
+  let p = clone(GOOD);
+  p.lyrics = LYR_FEMALE.replace('صبح که می‌آیی چای تازه دم است', 'می‌دونم که اونجا تو خونه نمی‌تونم').replace('دیروز گفتی از فردا می‌ترسی', 'می‌خوام بمونم همون جا');
+  ok(V2.srvfCv2TehraniForms(p.lyrics).length === 7, 'Tehrani forms counted (' + V2.srvfCv2TehraniForms(p.lyrics).join(',') + ')');
+  failsOnly(p, 'G4', 'Tehran colloquial dominance');
+  p = clone(GOOD); p.lyrics = LYR_FEMALE.replace('صبح که می‌آیی چای تازه دم است', 'می‌دونم که اونجا هستی');
+  ok(gates(p).G4.pass, 'a light colloquial touch (2 forms) passes G4');
+  ok(V2.srvfCv2TehraniForms(LYR_FEMALE.replace('[CHORUS]', '[CHORUS]\nمی‌دونم').replace('[FINAL CHORUS]', '[FINAL CHORUS]\nمی‌دونم')).length === 1, 'repeated chorus line counted once');
+  p = clone(GOOD); p.sunoPrompt = SP_FEMALE.replace('Polished studio sound, the singer always in front, human and tender.', 'Human and tender.'); failsOnly(p, 'G8', 'no studio sound / singer not in front');
+  p = clone(GOOD); p.sunoPrompt = 'Open with ' + SP_FEMALE.charAt(0).toLowerCase() + SP_FEMALE.slice(1); failsOnly(p, 'G11', '"Open with" opening');
+  const c = V2.srvfCv2CleanStyle('Open with ' + SP_FEMALE.charAt(0).toLowerCase() + SP_FEMALE.slice(1), { artist: 'Female', mood: 'Romantic', raw: GOOD });
+  ok(c.log.rewroteOpening && /^A warm, mature female vocal/.test(c.sunoPrompt) && gates({ ...GOOD, sunoPrompt: c.sunoPrompt }).G11.pass, 'cleanup rewrites "Open with…" into a description');
+  const human = 'Human vocal performance with expressive held notes and natural pauses for breath at every emotional word.';
+  const longEss = SP_FEMALE + ' ' + human + ' ' + human.replace('Human', 'Truly human');
+  const c2 = V2.srvfCv2CleanStyle(longEss, { artist: 'Female', mood: 'Romantic', raw: GOOD });
+  ok(c2.log.droppedSentences.every(x => !/held|breath|human/i.test(x)), 'cleanup never drops a human-performance sentence');
+  ok(c2.log.droppedSentences.length <= 3, 'cleanup drops at most 3 sentences');
+}
+{ // calibration on the real live-run-2 packages (if present locally)
+  const f = path.join(os.homedir(), 'MMM', 'srv-farsi-creative-v2', 'run2.json');
+  if (fs.existsSync(f)) {
+    const R = JSON.parse(fs.readFileSync(f, 'utf8'));
+    const res = R.filter(r => r.package).map(r => { const pk = r.package; const raw = { ...pk, artist: r.artist, mood: r.mood }; const G = V2.srvfCv2DeterministicGates(raw, { artist: r.artist, mood: r.mood, memory: {} }); return r.artist + '-' + r.mood + ':' + Object.entries(G).filter(([, v]) => !v.pass).map(([k]) => k).join('+'); });
+    console.log('  calibration (run 2 packages vs new deterministic gates): ' + res.join(' · '));
+  }
+}
 // ── 5. api/generate.js: V2 branch + legacy byte-identical request bodies vs BASE ────────────────────────────────
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'srvf-cv2-'));
