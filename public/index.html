@@ -2537,14 +2537,9 @@ function applyFinanceState(p){
   if(p.settings){
     D.settings=Object.assign({},D.settings,p.settings);
     const admin=USERS.find(u=>u.id==='admin');
-    if(admin&&D.settings.adminPin)admin.pin=D.settings.adminPin;
     if(admin&&D.settings.profileName)admin.name=D.settings.profileName;
-    if(D.settings.pins){
-      Object.keys(D.settings.pins).forEach(uid=>{
-        const u=USERS.find(x=>x.id===uid);
-        if(u&&D.settings.pins[uid])u.pin=D.settings.pins[uid];
-      });
-    }
+    // CEO-017A step B: PINs are never read from (or kept in) the shared state; any saved by the old Settings screen are purged on the next save.
+    delete D.settings.pins; delete D.settings.adminPin;
   }
   // Critical fields — always restore explicitly
   if(p.availableCash!==undefined)D.availableCash=parseFloat(p.availableCash)||0;
@@ -4185,9 +4180,33 @@ async function tryLogin(){
       return;
     }
   }
+  // CEO-017A — Family signs in on the server too. Until the CEO sets a Family PIN the server answers
+  // family_not_configured and the legacy browser check below stays in place (so nobody is locked out).
+  if(selectedUser&&selectedUser.id==='family'){
+    let j=null;
+    try{
+      const r=await fetch('/api/ops?action=family_login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+      j=await r.json().catch(function(){return null;});
+    }catch(e){ j=null; }
+    if(j&&j.ok===true&&j.family_session_token){
+      try{ sessionStorage.setItem('mmm_family_session', JSON.stringify({token:j.family_session_token,expires_at:j.expires_at})); }catch{}
+      document.getElementById('pinInput').value='';
+      await _activateUser(selectedUser);
+      return;
+    }
+    if(j&&(j.error==='invalid_credentials'||j.error==='temporarily_locked')){
+      const el=document.getElementById('pinErr');
+      el.textContent = j.error==='temporarily_locked' ? ('Too many attempts. Try again in '+(j.retry_after_seconds||900)+'s.') : 'Incorrect PIN.';
+      el.style.display='block';
+      document.getElementById('pinInput').value='';
+      document.getElementById('pinInput').focus();
+      return;
+    }
+  }
+  // CEO-017B RELEASE 1 (transition only): the browser check stays until the CEO has set the Family and VA PINs on the server;
+  // release 2 deletes this block and the literals above (git revert of the 'release 1 transition' commit).
   if(selectedUser&&selectedUser.pin===pin){
-    console.log('[v14.9.0] Login — activating user and loading state...');
-    document.getElementById('pinInput').value=''; // Phase 4.7 security fix — see CEO branch above
+    document.getElementById('pinInput').value='';
     await _activateUser(selectedUser);
   }else{
     document.getElementById('pinErr').textContent='Wrong PIN. Try again.';
@@ -4221,6 +4240,7 @@ function logout(){
   try{ sessionStorage.removeItem('mmm_session_user'); }catch(e){} // v14.9.0 — clear session on explicit logout
   try{ _ceoClearSessionToken(); }catch(e){} // v16.30.0 — clear CEO session on explicit logout
   try{ _operatorClearSessionToken(); }catch(e){} // SRV-STUDIO-V2-017 — and the VA's operator session
+  try{ sessionStorage.removeItem('mmm_family_session'); }catch(e){} // CEO-017A — and the Family session
 }
 
 // ── v14.9.0 GLOBAL APP REFRESH MANAGER ───────────────────────────────────────
@@ -8336,14 +8356,15 @@ function renderSettings(){
         <button onclick="settingsTogglePIN('${u.id}')" style="padding:6px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--text);font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif;flex-shrink:0">Change PIN</button>
       </div>
       <div id="stg-pin-form-${u.id}" style="display:none;margin-top:10px">
+        ${u.id==='admin'?`<div style="margin-bottom:8px"><div style="font-size:9px;color:var(--dim);letter-spacing:1px;margin-bottom:4px;font-family:'JetBrains Mono',monospace">CURRENT PIN</div><input id="stg-curpin-admin" type="password" maxlength="32" autocomplete="off" style="${inputStyle}" placeholder="Current PIN"></div>`:''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
           <div>
             <div style="font-size:9px;color:var(--dim);letter-spacing:1px;margin-bottom:4px;font-family:'JetBrains Mono',monospace">NEW PIN</div>
-            <input id="stg-newpin-${u.id}" type="password" maxlength="8" style="${inputStyle}" placeholder="New PIN">
+            <input id="stg-newpin-${u.id}" type="password" maxlength="32" style="${inputStyle}" placeholder="New PIN">
           </div>
           <div>
             <div style="font-size:9px;color:var(--dim);letter-spacing:1px;margin-bottom:4px;font-family:'JetBrains Mono',monospace">CONFIRM PIN</div>
-            <input id="stg-confirmpin-${u.id}" type="password" maxlength="8" style="${inputStyle}" placeholder="Confirm PIN">
+            <input id="stg-confirmpin-${u.id}" type="password" maxlength="32" style="${inputStyle}" placeholder="Confirm PIN">
           </div>
         </div>
         <div id="stg-pin-err-${u.id}" style="font-size:11px;color:#ef4444;margin-bottom:6px;font-family:'JetBrains Mono',monospace"></div>
@@ -8422,19 +8443,23 @@ function settingsTogglePIN(userId){
   USERS.forEach(u=>{const x=document.getElementById('stg-pin-form-'+u.id);if(x)x.style.display='none';});
   f.style.display=open?'block':'none';
 }
-function settingsSavePIN(userId){
+async function settingsSavePIN(userId){
   const np=(document.getElementById('stg-newpin-'+userId)?.value||'').trim();
   const cp=(document.getElementById('stg-confirmpin-'+userId)?.value||'').trim();
   const err=document.getElementById('stg-pin-err-'+userId);
-  if(np.length<4){if(err)err.textContent='PIN must be at least 4 digits';return;}
+  // CEO-017A step B — PINs are set on the server (hashed) and never stored in the app state.
+  if(np.length<6){if(err)err.textContent='PIN must be at least 6 characters';return;}
   if(np!==cp){if(err)err.textContent='PINs do not match';return;}
+  const action=userId==='family'?'auth_set_family_pin':(userId==='va'?'publish_auth_set_operator_pin':(userId==='admin'?'auth_set_ceo_pin':null));
+  if(!action){if(err)err.textContent='This PIN cannot be changed here.';return;}
+  const body={pin:np};
+  if(userId==='admin'){ body.current_pin=(document.getElementById('stg-curpin-admin')?.value||'').trim(); if(!body.current_pin){if(err)err.textContent='Enter the current PIN';return;} }
+  try{
+    const r=await _ceoAuthedFetch('/api/ops?action='+action,body); const j=await r.json().catch(function(){return {};});
+    if(j&&j.ok&&j.ceo_session_token){ _ceoSetSessionToken(j.ceo_session_token,j.expires_at); }   // PIN change ended every old session; keep this one
+    if(!j.ok){if(err)err.textContent=({pin_must_differ_from_ceo_pin:'Must differ from the CEO PIN',pin_must_differ_from_va_pin:'Must differ from the VA PIN',ceo_authorization_required:'Sign in as the CEO again',current_pin_incorrect:'Current PIN is incorrect',pin_must_be_new:'Choose a different PIN',pin_must_differ_from_other_roles:'Must differ from the VA and Family PINs'})[j.error]||'Could not save the PIN';return;}
+  }catch(e){if(err)err.textContent='Could not save the PIN';return;}
   if(err)err.textContent='';
-  const user=USERS.find(u=>u.id===userId);
-  if(user)user.pin=np;
-  if(userId==='admin')D.settings.adminPin=np;
-  if(!D.settings.pins)D.settings.pins={};
-  D.settings.pins[userId]=np;
-  saveData();
   const f=document.getElementById('stg-pin-form-'+userId);
   if(f)f.style.display='none';
   const b=document.getElementById('stg-pin-saved-'+userId);

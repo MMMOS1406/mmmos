@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
@@ -108,14 +109,15 @@ const CEO_LOGIN_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 let _ceoAuthConfigCache = null;
 async function _ceoLoadAuthConfig() {
-  if (_ceoAuthConfigCache) return _ceoAuthConfigCache;
+  // CEO-017B: the cache now expires (60 s) so a PIN / session-secret rotation reaches every warm server instance quickly.
+  if (_ceoAuthConfigCache && Date.now() - (_ceoAuthConfigCache.at || 0) < 60000) return _ceoAuthConfigCache;
   const rows = await sbGet(`ceo_auth_config?key=in.(ceo_session_secret_production,ceo_pin_hash_production)&select=key,value`);
   const map = {};
   for (const r of (rows || [])) map[r.key] = r.value;
   if (!map.ceo_session_secret_production || !map.ceo_pin_hash_production) {
     throw new Error('ceo_auth_config missing required rows');
   }
-  _ceoAuthConfigCache = { sessionSecret: map.ceo_session_secret_production, pinHash: map.ceo_pin_hash_production };
+  _ceoAuthConfigCache = { sessionSecret: map.ceo_session_secret_production, pinHash: map.ceo_pin_hash_production, at: Date.now() };
   return _ceoAuthConfigCache;
 }
 
@@ -201,7 +203,7 @@ async function ceoLogin(req, res) {
     return res.status(429).json({ ok: false, error: 'temporarily_locked', retry_after_seconds: Math.ceil((sec.lockedUntil - now) / 1000) });
   }
 
-  if (_ceoHashHex(pin) !== cfg.pinHash) {
+  if (!(await verifyPin(pin, cfg.pinHash))) {
     const failCount = (sec.failCount || 0) + 1;
     const next = { failCount, lastAttemptAt: new Date(now).toISOString() };
     if (failCount >= CEO_LOGIN_MAX_ATTEMPTS) {
@@ -215,6 +217,7 @@ async function ceoLogin(req, res) {
 
   // Success — clear throttle state, issue session.
   await _ceoSetLoginSecurity({ failCount: 0, lastAttemptAt: new Date(now).toISOString() });
+  await _pinUpgradeOnLogin('ceo_pin_hash_production', pin, cfg.pinHash);
   const exp = now + CEO_SESSION_TTL_MS;
   const token = _ceoSignSession({ sub: 'ceo', iat: now, exp }, cfg.sessionSecret);
   return res.status(200).json({ ok: true, ceo_session_token: token, expires_at: new Date(exp).toISOString() });
@@ -304,7 +307,7 @@ async function _publisherFromRequest(req) {
   try {
     const [cfg, pub] = await Promise.all([_ceoLoadAuthConfig(), _publishAuthLoad()]);
     if (!pub.pinHash) return null;
-    return _operatorVerifySession(token, _operatorSecret(cfg.sessionSecret), pub.pinHash.slice(0, 12)) ? { role: 'operator' } : null;
+    return _operatorVerifySession(token, _operatorSecret(cfg.sessionSecret), pinFingerprint(pub.pinHash)) ? { role: 'operator' } : null;
   } catch (e) {
     console.error('[publish-auth] operator verify failed:', e.message);
     return null;
@@ -345,9 +348,7 @@ async function operatorLogin(req, res) {
   if (sec.lockedUntil && now < sec.lockedUntil) {
     return res.status(429).json({ ok: false, error: 'temporarily_locked', retry_after_seconds: Math.ceil((sec.lockedUntil - now) / 1000) });
   }
-  const a = Buffer.from(_ceoHashHex(pin), 'utf8');
-  const b = Buffer.from(String(pub.pinHash), 'utf8');
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+  if (!(await verifyPin(pin, pub.pinHash))) {
     const failCount = (sec.failCount || 0) + 1;
     const next = { failCount, lastAttemptAt: new Date(now).toISOString() };
     if (failCount >= CEO_LOGIN_MAX_ATTEMPTS) { next.lockedUntil = now + CEO_LOGIN_LOCKOUT_MS; next.failCount = 0; }
@@ -356,8 +357,111 @@ async function operatorLogin(req, res) {
   }
   if (sec.failCount || sec.lockedUntil) await _ceoAuthConfigUpsert('operator_login_security_production', JSON.stringify({ failCount: 0, lastAttemptAt: new Date(now).toISOString() })).catch(() => {});
   const exp = now + OPERATOR_SESSION_TTL_MS;
-  const token = _ceoSignSession({ sub: 'operator', iat: now, exp, pv: pub.pinHash.slice(0, 12) }, _operatorSecret(cfg.sessionSecret));
+  const pv = pinFingerprint(pub.pinHash);
+  const upgraded = await _pinUpgradeOnLogin('operator_pin_hash_production', pin, pub.pinHash); if (upgraded) _publishAuthCache = null;
+  const token = _ceoSignSession({ sub: 'operator', iat: now, exp, pv: upgraded ? pinFingerprint(upgraded) : pv }, _operatorSecret(cfg.sessionSecret));
   return res.status(200).json({ ok: true, operator_session_token: token, expires_at: new Date(exp).toISOString() });
+}
+
+// ── CEO-017B — PIN hash upgrade and CEO PIN rotation ───────────────────────────────────────────────
+// Upgrade-on-login is OFF until the CEO turns it on (config row pin_hash_upgrade_on_login = 'on'): a legacy SHA-256 hash is
+// replaced by a salted scrypt hash right after the owner proves the PIN. Returns the new hash, or null when nothing changed.
+async function _pinUpgradeOnLogin(key, pin, stored) {
+  try {
+    if (!isLegacyHash(stored)) return null;
+    const flag = await sbGetSafe(`ceo_auth_config?key=eq.pin_hash_upgrade_on_login&select=value&limit=1`);
+    if (!(flag[0] && flag[0].value === 'on')) return null;
+    const h = await hashPin(pin); await _ceoAuthConfigUpsert(key, h); _ceoAuthConfigCache = null; return h;
+  } catch (e) { console.error('[pin-upgrade] failed:', e.message); return null; }
+}
+// CEO-only: change the CEO PIN. Needs the current PIN again (a stolen session alone cannot change it), writes a scrypt hash, and by default
+// replaces the session-signing secret so EVERY existing CEO / VA / Family session ends (the caller receives a fresh CEO session).
+async function authSetCeoPin(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const { current_pin: cur, pin, rotate_sessions: rot } = req.body || {};
+  if (pinPolicyError(pin)) return res.status(400).json({ ok: false, error: pinPolicyError(pin) });
+  try {
+    const cfg = await _ceoLoadAuthConfig();
+    if (!(await verifyPin(cur, cfg.pinHash))) return res.status(401).json({ ok: false, error: 'current_pin_incorrect' });
+    if (await verifyPin(pin, cfg.pinHash)) return res.status(400).json({ ok: false, error: 'pin_must_be_new' });
+    const pub = await _publishAuthLoad(true); const fam = await _familyLoad();
+    if ((pub.pinHash && await verifyPin(pin, pub.pinHash)) || (fam.pinHash && await verifyPin(pin, fam.pinHash))) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_other_roles' });
+    await _ceoAuthConfigUpsert('ceo_pin_hash_production', await hashPin(pin));
+    let secret = cfg.sessionSecret;
+    if (rot !== false) { secret = randomBytes(48).toString('base64url'); await _ceoAuthConfigUpsert('ceo_session_secret_production', secret); }
+    _ceoAuthConfigCache = null; _publishAuthCache = null;
+    const now = Date.now(); const exp = now + CEO_SESSION_TTL_MS;
+    return res.status(200).json({ ok: true, sessionsRotated: rot !== false, ceo_session_token: _ceoSignSession({ sub: 'ceo', iat: now, exp }, secret), expires_at: new Date(exp).toISOString() });
+  } catch (e) { return res.status(502).json({ ok: false, error: 'auth_config_write_failed' }); }
+}
+
+// ── CEO-017A — Family sign-in, validated on the server (same design as the VA sign-in) ───────────────────
+// Until the CEO sets a Family PIN this answers family_not_configured (200) and the browser keeps its legacy
+// local check; once set, the server is the only judge (hash compare, lockout, signed 12 h session). The Family
+// session is READ-ONLY by design: no server action accepts it for a write.
+const FAMILY_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+function _familySecret(ceoSecret) {
+  return createHmac('sha256', String(ceoSecret)).update('mmmos-family-session-v1').digest('base64url');
+}
+function _familyVerifySession(token, secret, pinFingerprint) {
+  if (typeof token !== 'string' || !token.includes('.') || !pinFingerprint) return null;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const expected = createHmac('sha256', secret).update(payload).digest('base64url');
+  const sigBuf = Buffer.from(sig, 'utf8'); const expBuf = Buffer.from(expected, 'utf8');
+  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
+  let obj; try { obj = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; }
+  if (!obj || obj.sub !== 'family' || !obj.exp || Date.now() > obj.exp || obj.pv !== pinFingerprint) return null;
+  return obj;
+}
+async function _familyLoad() {
+  const rows = await sbGet(`ceo_auth_config?key=in.(family_pin_hash_production,family_login_security_production)&select=key,value`);
+  const map = {}; for (const r of (rows || [])) map[r.key] = r.value;
+  let sec = {}; try { sec = JSON.parse(map.family_login_security_production || '{}'); } catch { sec = {}; }
+  return { pinHash: map.family_pin_hash_production || null, sec };
+}
+async function familyLogin(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  const pin = (req.body || {}).pin;
+  if (!pin || typeof pin !== 'string') return res.status(400).json({ ok: false, error: 'pin required' });
+  let cfg, fam;
+  try { [cfg, fam] = await Promise.all([_ceoLoadAuthConfig(), _familyLoad()]); }
+  catch (e) { return res.status(500).json({ ok: false, error: 'auth_config_unavailable' }); }
+  if (!fam.pinHash) return res.status(200).json({ ok: false, error: 'family_not_configured' });
+  const now = Date.now(); const sec = fam.sec || {};
+  if (sec.lockedUntil && now < sec.lockedUntil) return res.status(429).json({ ok: false, error: 'temporarily_locked', retry_after_seconds: Math.ceil((sec.lockedUntil - now) / 1000) });
+  if (!(await verifyPin(pin, fam.pinHash))) {
+    const next = { failCount: (sec.failCount || 0) + 1, lastAttemptAt: new Date(now).toISOString() };
+    if (next.failCount >= CEO_LOGIN_MAX_ATTEMPTS) { next.lockedUntil = now + CEO_LOGIN_LOCKOUT_MS; next.failCount = 0; }
+    await _ceoAuthConfigUpsert('family_login_security_production', JSON.stringify(next)).catch((e) => console.error('[familyLogin] lockout persist failed:', e.message));
+    return res.status(401).json({ ok: false, error: 'invalid_credentials' });
+  }
+  if (sec.failCount || sec.lockedUntil) await _ceoAuthConfigUpsert('family_login_security_production', JSON.stringify({ failCount: 0, lastAttemptAt: new Date(now).toISOString() })).catch(() => {});
+  const exp = now + FAMILY_SESSION_TTL_MS;
+  const upgradedF = await _pinUpgradeOnLogin('family_pin_hash_production', pin, fam.pinHash);
+  const token = _ceoSignSession({ sub: 'family', iat: now, exp, pv: pinFingerprint(upgradedF || fam.pinHash) }, _familySecret(cfg.sessionSecret));
+  return res.status(200).json({ ok: true, family_session_token: token, expires_at: new Date(exp).toISOString() });
+}
+async function familyCheckSession(req, res) {
+  const src = (req.method === 'POST' ? req.body : req.query) || {};
+  try {
+    const [cfg, fam] = await Promise.all([_ceoLoadAuthConfig(), _familyLoad()]);
+    return res.status(200).json({ ok: !!(fam.pinHash && _familyVerifySession(src.family_session_token, _familySecret(cfg.sessionSecret), pinFingerprint(fam.pinHash))) });
+  } catch (e) { return res.status(200).json({ ok: false }); }
+}
+// CEO-only: set or change the Family PIN (6–32 characters; must differ from the CEO and VA PINs; all zeros refused). Changing it signs every Family session out.
+async function authSetFamilyPin(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const pin = (req.body || {}).pin;
+  if (pinPolicyError(pin)) return res.status(400).json({ ok: false, error: pinPolicyError(pin) });
+  try {
+    const cfg = await _ceoLoadAuthConfig(); const pub = await _publishAuthLoad(true);
+    if (await verifyPin(pin, cfg.pinHash)) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_ceo_pin' });
+    if (pub.pinHash && await verifyPin(pin, pub.pinHash)) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_va_pin' });
+    await _ceoAuthConfigUpsert('family_pin_hash_production', await hashPin(pin));
+    await _ceoAuthConfigUpsert('family_login_security_production', JSON.stringify({ failCount: 0 })).catch(() => {});
+    return res.status(200).json({ ok: true, familyPinSet: true });
+  } catch (e) { return res.status(502).json({ ok: false, error: 'auth_config_write_failed' }); }
 }
 
 async function operatorCheckSession(req, res) {
@@ -379,11 +483,11 @@ async function publishAuthStatus(req, res) {
 async function publishAuthSetOperatorPin(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   const pin = (req.body || {}).pin;
-  if (typeof pin !== 'string' || pin.length < 6 || pin.length > 32 || /^0+$/.test(pin)) return res.status(400).json({ ok: false, error: 'pin_must_be_6_to_32_characters' });
+  if (pinPolicyError(pin)) return res.status(400).json({ ok: false, error: pinPolicyError(pin) });
   try {
     const cfg = await _ceoLoadAuthConfig();
-    if (_ceoHashHex(pin) === cfg.pinHash) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_ceo_pin' });
-    await _ceoAuthConfigUpsert('operator_pin_hash_production', _ceoHashHex(pin));
+    if (await verifyPin(pin, cfg.pinHash)) return res.status(400).json({ ok: false, error: 'pin_must_differ_from_ceo_pin' });
+    await _ceoAuthConfigUpsert('operator_pin_hash_production', await hashPin(pin));
     await _ceoAuthConfigUpsert('operator_login_security_production', JSON.stringify({ failCount: 0 })).catch(() => {});
     _publishAuthCache = null;
     const pub = await _publishAuthLoad(true);
@@ -22102,6 +22206,10 @@ export default async function handler(req, res) {
     if (action === 'ceo_login')                     return await ceoLogin(req, res);
     if (action === 'ceo_check_session')              return await ceoCheckSession(req, res);
     if (action === 'operator_login')                 return await operatorLogin(req, res);              // SRV-STUDIO-V2-017
+    if (action === 'family_login')                   return await familyLogin(req, res);                // CEO-017A
+    if (action === 'auth_set_ceo_pin')               return await authSetCeoPin(req, res);              // CEO-017B (CEO session + current PIN required)
+    if (action === 'family_check_session')           return await familyCheckSession(req, res);         // CEO-017A
+    if (action === 'auth_set_family_pin')            return await authSetFamilyPin(req, res);           // CEO-017A (CEO session required)
     if (action === 'operator_check_session')         return await operatorCheckSession(req, res);       // SRV-STUDIO-V2-017
     if (action === 'publish_auth_status')            return await publishAuthStatus(req, res);          // SRV-STUDIO-V2-017 (CEO)
     if (action === 'publish_auth_set_operator_pin')  return await publishAuthSetOperatorPin(req, res);  // SRV-STUDIO-V2-017 (CEO)
