@@ -253,6 +253,27 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
   ok(r.json.success === false, 'judge reply missing dimensions is not accepted');
   ok(/105-135 words/.test(V2.SRVF_CV2_SYSTEM), 'Suno length guidance given in words');
 }
+{ // style cleanup
+  const ctx = { artist: 'Female', mood: 'Romantic', raw: GOOD };
+  let c = V2.srvfCv2CleanStyle(SP_FEMALE.replace('Polished studio sound,', 'Polished studio sound, never harsh, no robotic vocals,'), ctx);
+  ok(!/harsh|robotic/i.test(c.sunoPrompt) && c.log.removedNegations.length === 2 && /Polished studio sound/.test(c.sunoPrompt), 'negated excluded styles removed, rest kept', c.sunoPrompt.slice(-160));
+  ok(gates({ ...GOOD, sunoPrompt: c.sunoPrompt }).G10.pass, 'cleaned prompt passes G10');
+  c = V2.srvfCv2CleanStyle(SP_FEMALE, ctx);
+  ok(c.sunoPrompt === SP_FEMALE && !c.log.changed, 'clean prompt untouched');
+  const long = SP_FEMALE + ' The arrangement breathes like a late evening conversation between old friends who never tire of each other. Every instrument has its own small moment and then steps back for the singer and the story. The final seconds settle softly, like a door closing gently on a happy room.';
+  ok(long.length >= 1000, 'fixture is ≥1000 (' + long.length + ')');
+  c = V2.srvfCv2CleanStyle(long, ctx);
+  ok(c.sunoPrompt.length < 1000 && c.log.droppedSentences.length >= 1 && gates({ ...GOOD, sunoPrompt: c.sunoPrompt }).G13.pass, 'over-long prompt trimmed by whole sentences to <1000 (' + c.sunoPrompt.length + ')');
+  for (const k of ['G1', 'G8', 'G9', 'G10', 'G11']) ok(gates({ ...GOOD, sunoPrompt: c.sunoPrompt })[k].pass, 'trim keeps ' + k);
+  const pad = n => ' ' + Array.from({ length: n }, (_, i) => 'tender' + i).join(' ');
+  const essential = 'A warm female vocal with natural breaths, pauses, held notes, intensity' + pad(55) + '. Rhodes, guitar, setar motif answering the singer, strings, melodic bass line, fills, instruments enter, space, subtle deep house pulse' + pad(45) + '.';
+  c = V2.srvfCv2CleanStyle(essential, ctx);
+  ok(c.sunoPrompt.length >= 1000, 'no trim when it would break a style gate (G13 then fails honestly)');
+  V2._resetSrvfCv2FlagCache();
+  const f = mockFetch({ flag: 'on', genReply: JSON.stringify({ ...GOOD, sunoPrompt: long }) });
+  const r = await V2.srvfCv2Handle(BODY, { ...ENV, fetchImpl: f });
+  ok(r.json.success && r.json.package.sunoPrompt.length < 1000 && r.json.package.creativeGateResults.styleCleanup.changed === true, 'handler applies cleanup and records it');
+}
 // ── 5. api/generate.js: V2 branch + legacy byte-identical request bodies vs BASE ────────────────────────────────
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'srvf-cv2-'));
