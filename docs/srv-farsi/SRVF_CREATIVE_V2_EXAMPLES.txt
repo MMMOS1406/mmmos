@@ -1,0 +1,569 @@
+SRV FARSI CREATIVE V2 — LIVE [TEST] EXAMPLES (validation run 4, production main 528bd7e, flag=test)
+Generated 2026-11-08 UTC by the deployed V2 brain via /api/generate (srvFarsiTest:true). Nothing saved in MMMOS.
+
+======================================================================
+Male — Emotional  | result: failed_after_3 after 3 attempt(s)
+  attempt 1: srv_farsi_creative_v2_gates_failed [G4: 5 of 17 lines are not singable length (2-11 words) | G6: hook has 12 words (3-9)]
+  attempt 2: srv_farsi_creative_v2_gates_failed [G7: 2 chorus lines repeat verse lines]
+  attempt 3: srv_farsi_creative_v2_gates_failed [G12: uses saturated imagery: empty]
+
+======================================================================
+Male — Romantic  | result: pass after 2 attempt(s)
+  attempt 1: srv_farsi_creative_v2_gates_failed [G12: uses saturated imagery: hand]
+  attempt 2: success
+Title: 🌹 لبخندت باغ را روشن کرد 🌹   (Labkhandat Bagh Ra Roshan Kard)
+Hook: لبخندت باغ را روشن کرد
+Mood/vocal/artist/mode: romantic / male / Male / Male — Romantic
+Concept: The transformative power of a lover's smile — how one moment of seeing her joy changed everything.
+Story: A man sings to the woman he loves about the moment he first saw her smile across a garden party. Verse 1 recalls that initial moment of recognition. Verse 2 describes how her laughter has become the center of his world, and he promises to stay close to her.
+Central image / location / hook structure: smile in garden / garden party / sensory-transformation
+Emotional scenario: falling in love at first sight through witnessing her smile — the moment everything changed
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1]
+آن روز تو را دیدم میان باغ
+موهایت به باد می‌رقصید
+لبخندت مثل آفتاب صبح بود
+دلم یک لحظه تپیدن را فراموش کرد
+نگاهت را که دیدم، دنیا ساکت شد
+
+[CHORUS]
+لبخندت باغ را روشن کرد
+انگار بهار یک‌دفعه آمد
+دلم از آن لحظه فقط تو را می‌خواهد
+کنارت می‌مانم، قول می‌دهم
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2]
+حالا صدای خنده‌ات خانه را پر می‌کند
+صبح‌ها با تو شیرین‌تر است
+هر کلمه‌ات مثل ترانه در گوشم می‌ماند
+می‌دانم که تو همان کسی هستی
+که قلبم سال‌ها منتظرش بود
+
+[FINAL CHORUS]
+لبخندت باغ را روشن کرد
+انگار بهار یک‌دفعه آمد
+دلم از آن لحظه فقط تو را می‌خواهد
+کنارت می‌مانم، همیشه می‌مانم
+تو نور زندگی منی
+لبخندت باغ را روشن کرد
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (758 characters)
+Gentle acoustic guitar arpeggios open with a warm melodic motif answered by soft santoor. Male vocal, mature baritone with natural warmth and breathing, clearly in front of the music. Persian romantic love song with singable melody and real emotional movement. Verse: intimate and conversational over sparse guitar and Rhodes. Chorus lifts through wider melody, richer strings, expressive held notes on open vowels. Instrumental break carries the signature guitar-santoor call-and-response. Restrained subtle deep house pulse underneath with soft percussion and smooth bass movement. Living arrangement with instruments entering and leaving naturally. Polished warm studio production. Human performance with natural pauses and gentle vocal intensity changes.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, electronic dance music, four-on-the-floor stomp
+
+YOUTUBE CAPTION
+لحظه‌ای که لبخندش باغ را روشن کرد و زندگی تغییر کرد. داستان عشقی که از یک نگاه ساده شروع شد و به قول ماندن ختم می‌شود. ترانه‌ای از قلب برای کسی که نور زندگی ماست.
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 8, story 8, hook 9, contrast 8, moodFit 9, artistFit 9, humanNotAI 8
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":758,"afterLength":758,"changed":false}
+TIMING: generate 32634 ms, judge 4531 ms
+
+======================================================================
+Male — Happy  | result: pass after 2 attempt(s)
+  attempt 1: srv_farsi_creative_v2_gates_failed [G13: style prompt is 1054 characters (must be 400-999)]
+  attempt 2: success
+Title: ☀️ صبح اول ما ☀️   (Sobhe Avvale Ma)
+Hook: صبح اول ما، تو کنارم
+Mood/vocal/artist/mode: happy / male / Male / Male — Happy
+Concept: The pure joy of waking up next to the person you love in your shared home for the first time.
+Story: A man sings to his lover on the first morning they wake up together in their new shared home. Verse 1 captures the joy of opening his eyes and seeing her beside him. Verse 2 celebrates the simple happiness of making breakfast together and planning their first day as a couple living together.
+Central image / location / hook structure: morning sunlight through window / shared bedroom morning / moment-of-togetherness
+Emotional scenario: the quiet joy of the first morning waking up together in a shared home
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1]
+چشمانم را باز کردم، تو خوابیدی
+نور صبح از پنجره می‌آید
+دستت روی بالش، موهایت پریشان
+اولین صبح ما، در خانه مان
+قلبم می‌خواهد بگوید چیزی
+اما فقط نگاهت می‌کنم
+
+[CHORUS]
+صبح اول ما، تو کنارم
+همه دنیا این لحظه است
+صبح اول ما، دستانمان باهم
+هر روز از این به بعد همین است
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2]
+بلند شدی، چای گذاشتی
+من آشپزخانه را نگاه می‌کنم
+دو فنجان، دو صندلی، دو نفر
+همه چیز حالا مال ماست
+خندیدی، گفتی امروز کجا برویم
+من گفتم همینجا، کنارت خوب است
+
+[FINAL CHORUS]
+صبح اول ما، تو کنارم
+همه دنیا این لحظه است
+صبح اول ما، دستانمان باهم
+هر روز از این به بعد همین است
+صبح اول ما، عشق ما
+تا آخر عمر همین خوشبختی
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (748 characters)
+A man waking beside his lover in their new home for the first time — mature male vocal warmly in front of the music, natural breathing and tender delivery. Melodic Persian love song with memorable singable phrases and clear emotional arc. Verse intimate and conversational over gentle Rhodes piano and soft acoustic guitar. Chorus opens through warmer harmony, melodic lift and joyful vocal expression — delicate santoor motif enters as a signature thread. Instrumental break carries the santoor melody in call-and-response with piano. Living arrangement with space between phrases, subtle deep house movement underneath adding a soft modern pulse. Warm polished studio sound, human performance with natural imperfections and expressive held notes.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, childish energy
+
+YOUTUBE CAPTION
+اولین صبحی که در خانه مشترک کنار هم بیدار می‌شوند. لحظه‌ای ساده اما پر از شادی و عشق — نگاه کردن به او در کنارت، چای گذاشتن با هم، شروع زندگی مشترک.
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 8, story 8, hook 9, contrast 8, moodFit 9, artistFit 9, humanNotAI 9
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":748,"afterLength":748,"changed":false}
+TIMING: generate 33130 ms, judge 4724 ms
+
+======================================================================
+Female — Emotional  | result: pass after 1 attempt(s)
+  attempt 1: success
+Title: 🌧️ صدای باران 🌧️   (Sedaye Baran)
+Hook: هنوز صدای باران تو را یادم می‌اندازد
+Mood/vocal/artist/mode: emotional / female / Female / Female — Emotional
+Concept: The moment when you realize you're still waiting for someone who has already moved on.
+Story: A woman sings to her former lover after a painful separation. In Verse 1 she recalls the last time they spoke—a normal conversation before everything changed. In Verse 2 she admits she still imagines him returning, even though she knows he won't.
+Central image / location / hook structure: rain on window / alone at home / sensory-trigger-memory
+Emotional scenario: waiting for someone who has already left, triggered by the sound of rain
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1]
+آخرین بار که حرف زدیم
+چیزی نگفتی از رفتن
+درباره هوا حرف زدیم
+مثل همیشه، مثل هر شب
+صدای باران پشت پنجره
+حالا فقط تو را یادم می‌آورد
+
+[CHORUS]
+هنوز صدای باران تو را یادم می‌اندازد
+هر قطره روی شیشه، انگار اسم تو
+هنوز صدای باران تو را یادم می‌اندازد
+هنوز منتظرم، هنوز منتظرم
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2]
+گاهی فکر می‌کنم در می‌زنی
+می‌دوم سمت در، کسی نیست
+صدای پایت را می‌شنوم
+ولی فقط باد است، فقط باد
+می‌دانم دیگر بر نمی‌گردی
+اما دلم باور نمی‌کند
+
+[FINAL CHORUS]
+هنوز صدای باران تو را یادم می‌اندازد
+هر قطره روی شیشه، انگار اسم تو
+هنوز صدای باران تو را یادم می‌اندازد
+هنوز منتظرم، هر شب منتظرم
+می‌دانم نمی‌آیی، ولی دلم باور نمی‌کند
+هنوز صدای باران تو را یادم می‌اندازد
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (890 characters)
+A woman alone listening to rain after a painful separation, remembering the last ordinary conversation before everything changed. Mature female vocal in front of the music, warm alto tone with aching held notes and gentle vulnerability, natural breathing and emotional cracks. Melodic Persian love song built around a memorable hook about rain bringing back memories. Verse intimate and conversational over sparse Rhodes and acoustic guitar. Chorus opens through wider melody, richer strings, more vocal intensity—not louder drums. Living arrangement with delicate santoor motif answering the vocal phrases, soft atmospheric strings, melodic bass movement. Instrumental break carries the santoor signature; outro resolves it gently. Subtle deep house movement provides restrained pulse without dominating. Warm polished studio sound, human performance with natural pauses and imperfections.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, cold production, overly bright mix
+
+YOUTUBE CAPTION
+گاهی یک صدای ساده مثل باران تمام خاطرات را بر می‌گرداند. این آهنگ درباره کسی است که هنوز منتظر است، حتی وقتی می‌داند دیگر کسی بر نمی‌گردد. درد جدایی در صدای هر قطره باران.
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 8, story 8, hook 9, contrast 8, moodFit 9, artistFit 9, humanNotAI 9
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":890,"afterLength":890,"changed":false}
+TIMING: generate 26814 ms, judge 3825 ms
+
+======================================================================
+Female — Romantic  | result: pass after 1 attempt(s)
+  attempt 1: success
+Title: 📞 صدای تو شب‌ها 📞   (Sedaye to shab-ha)
+Hook: صدای تو شب‌ها آرامم می‌کند
+Mood/vocal/artist/mode: romantic / female / Female / Female — Romantic
+Concept: The sweetness of hearing your lover's voice on the phone each night when distance keeps you apart.
+Story: A woman sings to the man she loves, confessing how his voice over the phone at night has become her anchor and comfort. Verse 1 describes waiting for his call each evening. Verse 2 reveals how his words fill her heart even when he's far away.
+Central image / location / hook structure: phone receiver / bedroom at night / sensory-confession
+Emotional scenario: the comfort of hearing your lover's voice over the phone each night when distance separates you
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1]
+هر شب که تلفن زنگ می‌زند
+قلبم تند می‌زند، انگار تو اینجایی
+صدای تو را می‌شنوم
+همه دنیا ساکت می‌شود
+لبخند روی لبم می‌آید
+انگار کنارم نشسته‌ای
+
+[CHORUS]
+صدای تو شب‌ها آرامم می‌کند
+انگار دستانت را گرفته‌ام
+هر کلمه‌ات مثل نوازش است
+صدای تو شب‌ها آرامم می‌کند
+دلم پر می‌شود از تو
+حتی از دور
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2]
+وقتی می‌گویی فردا می‌بینمت
+چشمانم را می‌بندم، خیالت را می‌بینم
+صدای تو دارویی است برای تنهایی من
+هر شب منتظر این لحظه می‌مانم
+که بگویی دوستت دارم
+و من بگویم بیشتر از تو
+
+[FINAL CHORUS]
+صدای تو شب‌ها آرامم می‌کند
+انگار دستانت را گرفته‌ام
+هر کلمه‌ات مثل نوازش است
+صدای تو شب‌ها آرامم می‌کند
+دلم پر می‌شود از تو
+حتی از دور
+صدای تو، تنها چیزی است که نیاز دارم
+تا صبح بیاید
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (993 characters)
+Warm Rhodes piano with gentle telephone-ring motif opening into intimate female vocal in front of the music, mature warm mezzo singing a melodic Persian love song about the sweetness of hearing her lover's voice on late-night phone calls. Verse intimately sparse with soft acoustic guitar and delicate setar accents supporting tender conversational delivery. Chorus opens through wider melody, richer strings, fuller arrangement and emotional lift in her voice — warm held notes on the hook line. Instrumental break carries the telephone-ring motif answered by santoor. Subtle deep house movement with smooth bass and restrained gentle percussion supports without dominating. Living arrangement with Rhodes, acoustic guitar, Persian plucked strings, atmospheric strings, natural call-and-response between voice and instruments. Polished warm studio sound, human vocal performance with natural breathing, expressive phrasing, believable Persian pronunciation. Outro resolves the motif tenderly.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, cold digital textures, heavy reverb
+
+YOUTUBE CAPTION
+وقتی صدای عشقت هر شب از تلفن می‌آید و دلت را آرام می‌کند. این ترانه درباره شیرینی شنیدن صدای کسی است که دوستش داری، حتی وقتی که فاصله بین شماست. هر شب منتظر آن لحظه که تلفن زنگ بزند و صدای او دنیا را ساکت کند.
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 8, story 8, hook 9, contrast 8, moodFit 9, artistFit 9, humanNotAI 8
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":993,"afterLength":993,"changed":false}
+TIMING: generate 36289 ms, judge 3911 ms
+
+======================================================================
+Female — Happy  | result: pass after 2 attempt(s)
+  attempt 1: srv_farsi_creative_v2_gates_failed [G12: uses saturated imagery: street; location repeats recent "city streets"]
+  attempt 2: success
+Title: 📞 زنگ ناگهانی تو 📞   (Zang-e Nâgahâni-ye To)
+Hook: صدای تو از گوشی، دلم می‌خندد
+Mood/vocal/artist/mode: happy / female / Female / Female — Happy
+Concept: The happiness of an unexpected call from the person you love transforming a mundane workday into something magical.
+Story: A woman sings to her lover about the joy of receiving his surprise phone call in the middle of an ordinary workday. The first verse captures her delight at hearing his voice unexpectedly. The second verse playfully teases him about why he called, revealing he misses her and wants to see her tonight.
+Central image / location / hook structure: phone screen lighting up / office workspace / sensory-joy-declaration
+Emotional scenario: the happiness of an unexpected loving phone call during a mundane workday
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1]
+وسط کار بودم، گوشی زنگ خورد
+اسم تو روی صفحه، دلم یک لحظه ایستاد
+نمی‌دانستم چه بگویم، فقط لبخند زدم
+صدای تو همه روز خسته را تازه کرد
+
+[CHORUS]
+صدای تو از گوشی، دلم می‌خندد
+انگار همه دنیا یک‌دفعه روشن شد
+نمی‌دانم چی گفتی، فقط می‌دانم خوشحالم
+صدای تو از گوشی، دلم می‌خندد
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2]
+گفتم چرا زنگ زدی، گفتی دلم برایت تنگ شد
+خندیدم و گفتم دیوانه، الان کارم
+گفتی امشب می‌بینمت، قهوه‌ای با هم
+هنوز گوشی را گذاشتم، لبخندم نمی‌رود
+
+[FINAL CHORUS]
+صدای تو از گوشی، دلم می‌خندد
+انگار همه دنیا یک‌دفعه روشن شد
+نمی‌دانم چی گفتی، فقط می‌دانم خوشحالم
+صدای تو از گوشی، دلم می‌خندد
+الان منتظر شبم، منتظر دیدنت
+صدای تو هنوز توی گوشم می‌چرخد
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (877 characters)
+A woman receives a surprise phone call from her lover during work, transforming her ordinary day into pure joy. Warm female vocal in front of the music, mature alto tone with natural breathing and a bright smile in the voice. Melodic Persian love song with playful romantic energy and gentle rhythmic bounce. Verse intimate and conversational with delicate Rhodes piano and soft acoustic guitar. Chorus opens through wider melody, richer harmony and joyful vocal lift — warm strings enter, gentle plucked santur accent, light percussion movement. Signature motif: a rising three-note phrase on Rhodes answered by santur. Instrumental break carries the motif with call-and-response. Subtle deep house groove provides smooth movement without overpowering the song. Living arrangement with space between phrases, warm studio sound, natural imperfections and expressive held notes.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, childish melody, commercial jingle
+
+YOUTUBE CAPTION
+زنگ ناگهانی تلفن از کسی که دوستش داری، می‌تواند یک روز عادی کاری را به یک لحظه شاد و پر از انرژی تبدیل کند. این آهنگ درباره همان لحظه خوشحالی است وقتی صدای عشقت را می‌شنوی و همه چیز روشن می‌شود.
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 8, story 8, hook 9, contrast 8, moodFit 9, artistFit 9, humanNotAI 9
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":877,"afterLength":877,"changed":false}
+TIMING: generate 36957 ms, judge 4073 ms
+
+======================================================================
+Duet — Emotional  | result: pass after 1 attempt(s)
+  attempt 1: success
+Title: 🌙 شب آخر کنار هم 🌙   (Shab-e Akhar Kenaar-e Ham)
+Hook: یادته شب آخر چی گفتیم
+Mood/vocal/artist/mode: emotional / duet / Duet / Duet — Emotional
+Concept: Two lovers separated by circumstance speak to each other through the memory of the last night they spent together, each wondering if the other still holds the same longing.
+Story: A man and woman address each other across separation, each holding onto the memory of their last shared night. He remembers her voice singing softly in the darkness; she remembers his warmth beside her. Both wait for reunion, questioning whether the other still remembers.
+Central image / location / hook structure: moonlight under tree / beneath old tree / question-to-lover
+Emotional scenario: two lovers separated remember their final night together and the promises they made beneath the moon
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1 — MALE]
+صدای تو هنوز توی سکوت می‌پیچد
+انگار که کنارم نشسته‌ای
+شب آخر که رفتی، چیزی نگفتم
+اما دلم پر از حرف بود
+حالا فقط یک تصویر دارم
+چشمان تو زیر نور ماه
+
+[CHORUS — BOTH]
+یادته شب آخر چی گفتیم
+زیر همان درخت قدیمی
+گفتی که برمی‌گردی
+من گفتم منتظرم
+یادته شب آخر چی گفتیم
+هنوز دارم منتظرم
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2 — FEMALE]
+هر شب که ماه می‌آید یادم می‌آید
+گرمای دستان تو
+شب آخر که رفتی، خندیدیم
+اما دلمان می‌شکست
+حالا فقط یک احساس دارم
+انگار که هنوز کنارمی
+
+[FINAL CHORUS — BOTH]
+یادته شب آخر چی گفتیم
+زیر همان درخت قدیمی
+گفتی که برمی‌گردی
+من گفتم منتظرم
+یادته شب آخر چی گفتیم
+هر شب دارم منتظرم
+شاید فردا، شاید امشب
+هنوز دارم منتظرم
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (894 characters)
+Moderate unhurried half-time groove around 102 BPM, soft pulse, male and female duet in front of the music with mature warm voices, conversational intimacy in verses expanding to aching emotional held notes in chorus. Natural Persian love song built on a signature descending santoor motif answered by warm Rhodes chords. Verse one: male voice with minimal sparse accompaniment, gentle plucked setar accents. Chorus opens through wider melodic arc, layered harmonies, atmospheric strings rising beneath the duet, restrained subtle deep house movement supporting the groove. Verse two: female voice with delicate acoustic guitar fills. Final chorus: both voices in full emotional release, signature motif returning. Instrumental break carries the santoor phrase over soft bass movement. Human breathing, natural pauses, gentle vocal warmth. Polished warm studio sound with space between phrases.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, gospel choir
+
+YOUTUBE CAPTION
+دو عاشق که از هم جدا شده‌اند، هر کدام به یاد آخرین شبی که کنار هم بودند. او صدای او را در سکوت می‌شنود، او گرمای دستان او را احساس می‌کند. هر دو منتظر بازگشت، هر دو می‌پرسند: یادته شب آخر چی گفتیم؟
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 8, story 8, hook 9, contrast 8, moodFit 9, artistFit 9, humanNotAI 8
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":894,"afterLength":894,"changed":false}
+TIMING: generate 35257 ms, judge 4129 ms
+
+======================================================================
+Duet — Romantic  | result: pass after 2 attempt(s)
+  attempt 1: srv_farsi_creative_v2_gates_failed [G12: title too close to recent "🌙 آن شب روی بام ❤️"]
+  attempt 2: success
+Title: 📞 صدای تو کافی است 📞   (Sedaye to kafi ast)
+Hook: صدای تو کافی است، دل من آرام است
+Mood/vocal/artist/mode: romantic / duet / Duet / Duet — Romantic
+Concept: Two lovers separated by distance find intimacy through phone conversations and shared promises of devotion.
+Story: A male lover speaks first, confessing how her voice on the phone carries him through lonely days. The female responds, promising she holds him just as close in her thoughts. Together they celebrate the sweetness of their bond despite physical distance.
+Central image / location / hook structure: phone receiver / two separate rooms / direct-reassurance
+Emotional scenario: lovers maintaining intimacy through nightly phone conversations across physical distance
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1 — MALE]
+شب که می‌شود، تلفن را برمی‌دارم
+صدای تو می‌آید، دنیا روشن می‌شود
+می‌خندی، من لبخند می‌زنم
+انگار کنارم نشسته‌ای
+کلمات ساده‌ات مثل نوازش است
+فاصله دیگر معنی ندارد
+
+[CHORUS — BOTH]
+صدای تو کافی است، دل من آرام است
+هر شب که می‌شنوم، نزدیک می‌شوی
+صدای تو کافی است، دل من آرام است
+با یک کلمه تو، همه چیز خوب می‌شود
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2 — FEMALE]
+می‌دانم تنها هستی، من هم همین‌طور
+اما وقتی صحبت می‌کنیم، تنهایی می‌رود
+می‌گویی دلتنگم، من هم همین حس را دارم
+انگار دستت را گرفته‌ام
+هر روز منتظر صدای تو می‌مانم
+چون با تو بودن، همین است
+
+[FINAL CHORUS — BOTH]
+صدای تو کافی است، دل من آرام است
+هر شب که می‌شنوم، نزدیک می‌شوی
+صدای تو کافی است، دل من آرام است
+با یک کلمه تو، همه چیز خوب می‌شود
+فاصله ما کم می‌شود، قلبم پر از تو است
+صدای تو کافی است، عشق من تویی
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (839 characters)
+Smooth gentle tempo around 110 BPM with a warm sway. Male and female duet, mature warm voices clearly in front of the music, natural Persian pronunciation, intimate conversational tone with genuine affection. Melodic Persian love song built around phone conversation intimacy. Verse sparse and personal with delicate acoustic guitar and soft Rhodes piano. Chorus opens through wider vocal melody, warmer harmony, gentle string swells and richer emotional expression. Signature motif played on setar appears in instrumental break as call-and-response with santoor. Living arrangement with bass moving melodically beneath the vocal phrases. Subtle deep house movement provides smooth restrained pulse without dominating. Warm polished studio sound with natural breathing, held notes on emotional words, and real human pauses between phrases.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, telephone effect, heavy reverb
+
+YOUTUBE CAPTION
+دو عاشق از هم دورند، اما صدای یکدیگر را دارند. هر شب تلفن زنگ می‌زند و فاصله کم می‌شود. این آهنگ درباره قدرت یک صدای آشنا و نزدیکی قلبی است.
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 7, story 8, hook 8, contrast 7, moodFit 8, artistFit 8, humanNotAI 8
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":839,"afterLength":839,"changed":false}
+TIMING: generate 34594 ms, judge 3706 ms
+
+======================================================================
+Duet — Happy  | result: pass after 1 attempt(s)
+  attempt 1: success
+Title: 🌳 امروز را می‌دزدیم 🌳   (Emruz ra Midozdim)
+Hook: امروز را می‌دزدیم، فقط من و تو
+Mood/vocal/artist/mode: happy / duet / Duet / Duet — Happy
+Concept: Love as the delightful conspiracy of choosing each other over the ordinary day
+Story: A playful duet between lovers celebrating a spontaneous afternoon date in the park. The man sings about convincing her to skip work and come outside. The woman responds, teasing him while admitting she's already on her way. Both celebrate the simple joy of choosing each other over the routine.
+Central image / location / hook structure: running together in park / sunny afternoon park / playful-conspiracy
+Emotional scenario: lovers spontaneously choosing each other over daily obligations, playful escape into simple togetherness
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1 — MALE]
+صبح که زنگ زدم گفتی کار دارم
+گفتم بیا پارک، آفتاب گرم است
+خندیدی و گفتی دیوانه شده‌ای
+گفتم بله، دیوانه تو شده‌ام
+حالا منتظرم زیر درخت‌ها
+می‌دانم که می‌آیی
+
+[CHORUS — BOTH]
+امروز را می‌دزدیم، فقط من و تو
+کارها بماند، دنیا بماند
+چمن سبز، آسمان آبی
+دست تو در دست من
+امروز را می‌دزدیم، فقط من و تو
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2 — FEMALE]
+گفتم نمی‌آیم اما دارم می‌آیم
+کیفم را برداشتم و در را بستم
+تو همان جایی که گفتی ایستاده‌ای
+لبخند روی لبت، چشمانت می‌خندد
+دستم را گرفتی و گفتی بدو
+مثل بچه‌ها خندیدیم
+
+[FINAL CHORUS — BOTH]
+امروز را می‌دزدیم، فقط من و تو
+کارها بماند، دنیا بماند
+چمن سبز، آسمان آبی
+دست تو در دست من
+امروز را می‌دزدیم، فقط من و تو
+هر لحظه با تو یک هدیه است
+امروز مال ماست
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (959 characters)
+Two lovers stealing a sunny afternoon together, running away from work to the park — male and female duet, mature warm voices in front of the music, playful romantic conversation. A melodic Persian love song first with natural verse-chorus movement. Verse: intimate acoustic guitar and gentle Rhodes, sparse and close. Chorus opens through wider melody, richer harmony, tasteful Persian setar accents and warmer strings — emotional lift through musical expansion, not drums. Living arrangement with a signature ascending motif carried by santoor, call-and-response between voices and setar. The instrumental break develops the motif with delicate plucked strings. Subtle deep house movement underneath — soft pulse, gentle bass, restrained groove supporting the song. Human vocal performance with natural breathing, real warmth, changing intensity, believable Persian pronunciation. Warm polished studio sound, professional balance, organic modern production.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, novelty song
+
+YOUTUBE CAPTION
+داستان دو عاشق که یک بعدازظهر آفتابی را از دست کار و مشغله می‌دزدند و فقط برای هم وقت می‌گذارند. شادی ساده انتخاب کردن یکدیگر در یک روز معمولی.
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 7, story 8, hook 8, contrast 7, moodFit 8, artistFit 8, humanNotAI 8
+STYLE CLEANUP: {"removedNegations":[],"droppedSentences":[],"beforeLength":959,"afterLength":959,"changed":false}
+TIMING: generate 36554 ms, judge 4511 ms
+
+
+======================================================================
+Male — Emotional (from validation run 3, main c331603; run 4 rejected all 3 attempts: G4+G6, G7, G12)
+Title: 📱 صدای تو توی گوشی 📱   (Sedaye to tuye gushi)
+Hook: هر شب پیامت را گوش می‌کنم
+Mood/vocal/artist/mode: emotional / male / Male / Male — Emotional
+Story: A man addresses his former lover through the last voicemail she left on his phone months ago — he still listens to it every night, unable to delete her voice. In Verse 1 he describes the ritual of pressing play in the dark. In Verse 2 he admits he calls her number just to hear the recording, knowing she'll never answer.
+
+LYRICS
+[INTRO — MUSIC]
+
+[VERSE 1]
+شب که می‌شود تاریک
+گوشی را برمی‌دارم
+همان پیام آخر تو
+دوباره پلی می‌کنم
+صدایت می‌لرزد کمی
+می‌گویی فردا صحبت کنیم
+
+[CHORUS]
+هر شب پیامت را گوش می‌کنم
+انگار هنوز کنارم هستی
+صدایت در تاریکی می‌پیچد
+نمی‌توانم پاکش کنم
+هر شب پیامت را گوش می‌کنم
+
+[INSTRUMENTAL BREAK — MUSIC]
+
+[VERSE 2]
+گاهی شماره‌ات را می‌گیرم
+فقط برای شنیدن پیغامت
+می‌دانم جواب نمی‌دهی
+اما صدایت آنجاست
+همان لحن، همان نفس
+تنها چیزی که مانده از تو
+
+[FINAL CHORUS]
+هر شب پیامت را گوش می‌کنم
+انگار هنوز کنارم هستی
+صدایت در تاریکی می‌پیچد
+نمی‌توانم پاکش کنم
+هر شب پیامت را گوش می‌کنم
+صدایت تنها چیزی است که دارم
+هر شب همین پیام قدیمی
+تنها راه دیدن تو
+
+[OUTRO — MUSIC]
+
+SUNO STYLE PROMPT (992 characters)
+Slow half-time groove at 102 BPM with a soulful male vocal, mature warm baritone tone singing an intimate Persian love ballad about longing and quiet heartbreak. The vocal sits clearly in front, emotionally vulnerable with held notes and natural breathing. Verse opens sparse with gentle Rhodes piano and delicate rubab plucks answering the vocal phrases. Chorus expands through wider melody, warm atmospheric strings entering, richer harmony and stronger vocal emotion. The arrangement is living and melodic: soft acoustic guitar fingerpicking, tender bass movement, signature descending piano motif weaving through, small instrumental fills between vocal lines, space around the singer. Instrumental break carries the piano motif with rubab response. Restrained deep house pulse underneath adds gentle modern movement without dominating. Outro resolves the motif softly. Warm studio production, human performance with subtle imperfections and emotional pauses, polished but never synthetic.
+
+EXCLUDE STYLES
+hard kick, dominant bass, festival EDM, aggressive club beat, techno, trance, EDM drop, harsh synths, repetitive electronic loop, robotic vocals, excessive autotune, dry digital mix, dense electronic arrangement, heavy electronic drums, overpowering synth pads
+
+GATES: G1 pass, G2 pass, G3 pass, G4 pass, G5 pass, G6 pass, G7 pass, G8 pass, G9 pass, G10 pass, G11 pass, G12 pass, G13 pass, G14 pass
+JUDGE: naturalFarsi 8, story 8, hook 9, contrast 8, moodFit 9, artistFit 9, humanNotAI 9
