@@ -11,7 +11,7 @@ fx.tables.packages = real.packages; fx.tables.youtube_channels = real.youtube_ch
 const pub = fs.realpathSync(new URL('../../public', import.meta.url).pathname);
 const stub = await startStub({ publicDir: pub, fixture: fx }); const browser = await launch();
 const trunc = (v, n) => { v = String(v); return v.length > n ? v.slice(0, n - 1) + '…' : v; };
-const BIZ = ['SRV Farsi', 'SRV English', 'NextWave']; const st = JSON.parse(real.state);
+const BIZ = ['SRV Farsi', 'SRV English']; const st = JSON.parse(real.state);
 try {
   for (const [w, h, tag] of [[1440, 900, 'desktop'], [375, 812, 'mobile']]) {
     const o = await openPage(browser, stub.origin, { viewport: { width: w, height: h }, realClock: true });
@@ -19,9 +19,9 @@ try {
     await o.page.evaluateOnNewDocument(() => localStorage.setItem('mmm_home_v2', 'on'));
     await o.page.reload(); await login(o.page, stub.origin, 'admin'); await settle(o.page, stub.origin, 1200);
     await o.page.evaluate(() => renderTab('home')); await settle(o.page, stub.origin, 1200);
-    const cards = await o.page.evaluate(() => [...document.querySelectorAll('#mainContent .h2-grid.c3 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.children[0].innerText, r.children[1].innerText])), dot: c.querySelector('.h2-dot').style.background })));
+    const cards = await o.page.evaluate(() => [...document.querySelectorAll('#mainContent .h2-grid.c2 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.children[0].innerText, r.children[1].innerText])), dot: c.querySelector('.h2-dot').style.background })));
     if (tag === 'desktop') {
-      check('three business cards rendered', cards.length === 3 && cards.map((c) => c.name).join() === BIZ.join(), cards.map((c) => c.name).join());
+      check('two business cards rendered', cards.length === 2 && cards.map((c) => c.name).join() === BIZ.join(), cards.map((c) => c.name).join());
       const text = JSON.stringify(cards);
       check('no card says "No packages yet", "No analytics yet", "Could not load" or "Loading…"', !/No packages yet|No analytics yet|Could not load|Loading/.test(text), (text.match(/No packages yet|No analytics yet|Could not load|Loading/g) || []).join());
       for (const [i, b] of BIZ.entries()) {

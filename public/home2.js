@@ -2,7 +2,7 @@
  *
  * Loaded only when this browser opted in (?home=on, stored locally as mmm_home_v2="on") and only acts for the Admin.
  * With the flag off — or for Family / VA — this file is never requested and nothing changes.
- * It adds a ten-item sidebar and a two-row Home (the three businesses; finance and analytics). It READS only (the app's own analytics loader plus one packages read per business),
+ * It adds a nine-item sidebar and a two-row Home (the two retained businesses; finance and analytics). It READS only (the app's own analytics loader plus one packages read per business),
  * writes nothing, calls no write action, and sends no credential. Every other screen still renders through the ORIGINAL router.
  * It stands down when the older CEO-008 shell is on (mmm_shell_admin_v1="on"). Reversible: ?home=off, or "Classic navigation" (this tab).
  */
@@ -18,9 +18,9 @@
   var _renderTab = window.renderTab;
   if (typeof _renderTab !== 'function') return;
 
-  var BIZ = [['SRV Farsi', 'srv_farsi'], ['SRV English', 'srv_english'], ['NextWave', 'nextwave']];
+  var BIZ = [['SRV Farsi', 'srv_farsi'], ['SRV English', 'srv_english']];   // CEO portfolio decision 2026-11-09: two retained businesses
   var SIDE = [
-    ['home', 'Home'], ['biz:SRV Farsi', 'SRV Farsi'], ['biz:SRV English', 'SRV English'], ['biz:NextWave', 'NextWave'],
+    ['home', 'Home'], ['biz:SRV Farsi', 'SRV Farsi'], ['biz:SRV English', 'SRV English'],
     ['analytics', 'Analytics'], ['finance', 'Finance'], ['brain', 'Brain'], ['engineering', 'Engineering'], ['integrations', 'Integrations'], ['settings', 'Access / Settings']
   ];
   var S = { cur: 'home', data: null, at: 0, loading: false };
@@ -50,7 +50,7 @@
       '#h2Side button{white-space:nowrap;flex-shrink:0;padding:9px 11px}#h2Side .sp{display:none}#appScreen.h2-on>#mainContent{grid-column:1;grid-row:3}}',
       '.h2-wrap{font-family:"Syne",sans-serif;padding-bottom:30px}.h2-title{font-size:22px;font-weight:800;color:#fff;margin:2px 0 14px}',
       '.h2-lab{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--dim);font-family:"JetBrains Mono",monospace;text-transform:uppercase;margin:18px 0 8px}',
-      '.h2-grid{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}@media(min-width:900px){.h2-grid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}.h2-grid.c4{grid-template-columns:repeat(4,minmax(0,1fr))}}',
+      '.h2-grid{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}@media(min-width:900px){.h2-grid.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.h2-grid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}.h2-grid.c4{grid-template-columns:repeat(4,minmax(0,1fr))}}',
       '.h2-card{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:var(--radius);padding:14px;min-width:0}',
       '.h2-card h3{margin:0 0 8px;font-size:15px;color:#fff;display:flex;align-items:center;gap:8px}',
       '.h2-dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex-shrink:0}',
@@ -160,12 +160,12 @@
   }
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
-      '<div class="h2-lab">Your three businesses</div><div class="h2-grid c3">' + bizCard(0) + bizCard(1) + bizCard(2) + '</div>' +
+      '<div class="h2-lab">Your two businesses</div><div class="h2-grid c2">' + bizCard(0) + bizCard(1) + '</div>' +
       '<div class="h2-lab">Finance and analytics</div>' + moneyStrip() + '</div>';
   }
   function bizPage(engine) {
     var i = BIZ.map(function (b) { return b[0]; }).indexOf(engine);
-    return '<div class="h2-wrap"><div class="h2-title">' + esc(engine) + '</div><div class="h2-grid c3">' + bizCard(i) + '</div>' +
+    return '<div class="h2-wrap"><div class="h2-title">' + esc(engine) + '</div><div class="h2-grid c2">' + bizCard(i) + '</div>' +
       '<div class="h2-lab">Open the detailed screens</div><div class="h2-card"><div class="h2-sm" style="margin-bottom:6px">These are the existing screens, unchanged.</div>' +
       '<button type="button" class="h2-btn" data-h2="analytics">Analytics</button> <button type="button" class="h2-btn" data-h2="__tasks">Tasks</button> <button type="button" class="h2-btn" data-h2="__packages">Packages</button></div></div>';
   }

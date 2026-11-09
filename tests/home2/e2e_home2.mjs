@@ -36,22 +36,22 @@ try {
   // 2 ON for Admin
   const on = await session('admin', { home: true }); const p = on.page;
   const items = await side(p);
-  check('flag ON: ten-item sidebar in blueprint order', JSON.stringify(items) === JSON.stringify(['home', 'biz:SRV Farsi', 'biz:SRV English', 'biz:NextWave', 'analytics', 'finance', 'brain', 'engineering', 'integrations', 'settings', '__classic']), JSON.stringify(items));
+  check('flag ON: nine-item sidebar (two businesses) in blueprint order', JSON.stringify(items) === JSON.stringify(['home', 'biz:SRV Farsi', 'biz:SRV English', 'analytics', 'finance', 'brain', 'engineering', 'integrations', 'settings', '__classic']), JSON.stringify(items));
   const txt = await p.evaluate(() => document.getElementById('mainContent').innerText);
-  check('Home shows the three business cards', ['SRV Farsi', 'SRV English', 'NextWave'].every((b) => txt.includes(b)));
+  check('Home shows exactly the two retained business cards', ['SRV Farsi', 'SRV English'].every((b) => txt.includes(b)) && !/NextWave|SMM|AI Creation|AI Studio/.test(txt) && (await p.evaluate(() => document.querySelectorAll('#mainContent .h2-grid.c2 .h2-card').length)) === 2);
   check('Home shows the finance and analytics row with links', /Finance and analytics/i.test(txt) && /Monthly income/i.test(txt) && await p.evaluate(() => !!document.querySelector('#mainContent [data-h2="finance"]') && !!document.querySelector('#mainContent [data-h2="analytics"]')));
   check('Home focuses on the businesses: no Needs-you or System row, no old corporate dashboard', !/Needs you|^System$/im.test(txt) && !/CEO Headquarters|Business Directory|Company Health/i.test(txt));
   check('Home has none of the five removed sections', !/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i.test(txt));
   check('Marketing & Sales is not in the sidebar', !(items || []).some((i) => /market/i.test(i)) && !(await p.evaluate(() => /market/i.test(document.getElementById('h2Side').innerText))));
   check('classic navigation bar hidden but still in the page', await p.evaluate(() => { const n = document.getElementById('navBar'); return !!n && getComputedStyle(n).display === 'none'; }));
   const errs0 = on.pageErrors.length;
-  for (const id of ['biz:SRV Farsi', 'biz:SRV English', 'biz:NextWave', 'analytics', 'finance', 'brain', 'engineering', 'integrations', 'settings', 'home']) {
+  for (const id of ['biz:SRV Farsi', 'biz:SRV English', 'analytics', 'finance', 'brain', 'engineering', 'integrations', 'settings', 'home']) {
     await p.evaluate((i) => Home2.go(i), id); await settle(p, stub.origin, 500);
     const len = await p.evaluate(() => document.getElementById('mainContent').innerText.length);
     const sel = await p.evaluate(() => { const b = document.querySelector('#h2Side button.on'); return b ? b.getAttribute('data-h2') : null; });
     check(`route ${id} renders and highlights itself`, len > 40 && sel === id, `len=${len} sel=${sel}`);
   }
-  check('no page errors while navigating all ten routes', on.pageErrors.length === errs0, on.pageErrors.slice(errs0).join(' | '));
+  check('no page errors while navigating all nine routes', on.pageErrors.length === errs0, on.pageErrors.slice(errs0).join(' | '));
   const log = (await fetchJson(stub.origin + '/__stub/log')).log;
   const newWrites = [...WR(log)].filter((w) => !offWrites.has(w));
   check('the new Home adds no write call beyond what the old app already does on its own', newWrites.length === 0, newWrites.join(', '));
