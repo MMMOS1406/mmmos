@@ -27,6 +27,7 @@
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function trunc(x, n) { x = String(x == null ? '' : x); return x.length > n ? x.slice(0, n - 1) + '…' : x; }
   function money(n) { return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n || 0)).toLocaleString('en-US'); }
   function safe(fn, fb) { try { return fn(); } catch (e) { return fb; } }
   function ago(t) { if (!t) return 'never'; var m = Math.round((Date.now() - new Date(t).getTime()) / 60000); if (isNaN(m)) return 'unknown'; return m < 90 ? m + ' min ago' : m < 2880 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; }
@@ -53,7 +54,7 @@
       '.h2-card{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:var(--radius);padding:14px;min-width:0}',
       '.h2-card h3{margin:0 0 8px;font-size:15px;color:#fff;display:flex;align-items:center;gap:8px}',
       '.h2-dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex-shrink:0}',
-      '.h2-kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:#8b9cc4}.h2-kv:last-of-type{border-bottom:0}.h2-kv b{color:#fff;text-align:right;min-width:0;overflow-wrap:anywhere}',
+      '.h2-kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;color:#8b9cc4}.h2-kv:last-of-type{border-bottom:0}.h2-kv>span{flex-shrink:0;white-space:nowrap}.h2-kv b{color:#fff;text-align:right;min-width:0;overflow-wrap:anywhere}',
       '.h2-btn{background:rgba(201,168,76,.12);border:1px solid rgba(201,168,76,.4);color:var(--gold);border-radius:8px;padding:8px 13px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;margin-top:10px}',
       '.h2-big{font-size:20px;font-weight:800;color:#fff}.h2-sm{font-size:11px;color:var(--dim)}.h2-empty{font-size:12px;color:var(--dim);padding:6px 0}',
       '.h2-item{border-top:1px solid var(--border);padding:10px 0;font-size:12.5px;color:#fff}.h2-item:first-child{border-top:0}.h2-item p{margin:3px 0 0;font-size:11.5px;color:#8b9cc4}'
@@ -90,46 +91,71 @@
   /* ------------------------------------------------------------ data (reads only) */
   function rest(path) {
     return fetch(SUPABASE_URL + '/rest/v1/' + path, { headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Cache-Control': 'no-cache' } })
-      .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; });
+      .then(function (r) { return r.ok ? r.json().then(function (rows) { return { ok: true, rows: Array.isArray(rows) ? rows : [] }; }) : { ok: false, rows: [] }; })
+      .catch(function () { return { ok: false, rows: [] }; });
   }
   function load(done) {
     if (S.loading) return;
     if (S.data && Date.now() - S.at < 60000) { done(); return; }
     S.loading = true;
-    safe(function () { if (typeof _ensureYouTubeAnalyticsLoaded === 'function') _ensureYouTubeAnalyticsLoaded(); });
-    var pk = BIZ.map(function (b) { return rest('packages?engine=eq.' + encodeURIComponent(b[0]) + '&select=id,title,created_at,published_at,youtube_video_id&order=created_at.desc&limit=1'); });
-    Promise.all(pk).then(function (r) {
-      S.data = { pkg: r.map(function (a) { return a && a[0] || null; }) };
-      S.at = Date.now(); S.loading = false; done();
-    }).catch(function () { S.data = S.data || { pkg: [] }; S.loading = false; done(); });
+    var pk = BIZ.map(function (b) { return rest('packages?engine=eq.' + encodeURIComponent(b[0]) + '&select=id,title,created_at,published_at,youtube_video_id,full_package&order=created_at.desc&limit=1'); });
+    // per-channel totals are read per channel: the app's shared analytics loader caps at 200 rows across ALL channels and so understates a business
+    Promise.all([Promise.all(pk), rest('youtube_channels?select=channel_id,mmm_engine&mmm_engine=not.is.null')]).then(function (r) {
+      var chans = r[1].rows, yt = {};
+      return Promise.all(BIZ.map(function (b) {
+        var ch = chans.filter(function (c) { return c.mmm_engine === b[0]; })[0];
+        if (!ch) { yt[b[0]] = { ok: r[1].ok, channel: false }; return null; }
+        return rest('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&analytics_synced_at=not.is.null&select=views,subs_gained,analytics_synced_at&limit=1000').then(function (a) {
+          var v = 0, s = 0, last = null; a.rows.forEach(function (x) { v += Number(x.views) || 0; s += Number(x.subs_gained) || 0; if (x.analytics_synced_at && (!last || x.analytics_synced_at > last)) last = x.analytics_synced_at; });
+          yt[b[0]] = { ok: a.ok, channel: true, videos: a.rows.length, views: v, subs: s, lastSync: last };
+        });
+      })).then(function () {
+        S.data = { pkg: r[0].map(function (x) { return { ok: x.ok, row: x.rows[0] || null }; }), yt: yt };
+        S.at = Date.now(); S.loading = false; done();
+      });
+    }).catch(function () { S.data = S.data || { pkg: BIZ.map(function () { return { ok: false, row: null }; }), yt: {} }; S.loading = false; done(); });
   }
-  function yt(engine) { var a = safe(function () { return D.youtubeAnalytics; }, null); return a && a.perEngine ? (a.perEngine.filter(function (e) { return e.engine === engine; })[0] || null) : null; }
-  function openTasks(engine) { return safe(function () { return (D.tasks || []).filter(function (t) { return t && t.engine === engine && t.status !== 'done' && t.status !== 'uploaded' && t.status !== 'posted'; }); }, []); }
+  function openTasks(engine) {
+    return safe(function () { return (D.tasks || []).filter(function (t) { return t && t.engine === engine && t.status !== 'done' && t.status !== 'uploaded' && t.status !== 'posted'; }).sort(function (a, b) { return (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0); }); }, []);
+  }
 
   /* ------------------------------------------------------------ views */
   function health(engine) {
-    var e = yt(engine); if (!e) return ['#6b7280', 'No analytics yet'];
+    var e = S.data && S.data.yt[engine];
+    if (!S.data) return ['#6b7280', 'Loading…'];
+    if (!e || !e.ok) return ['#6b7280', 'Could not load'];
+    if (!e.channel) return ['#f59e0b', 'No YouTube channel linked'];
     var d = e.lastSync ? ageDays(e.lastSync) : null;
-    return d == null ? ['#6b7280', 'Not synced'] : d <= 3 ? ['#22c55e', 'Connected · synced ' + ago(e.lastSync)] : ['#f59e0b', 'Needs attention · last sync ' + ago(e.lastSync)];
+    return d == null ? ['#6b7280', 'No analytics synced yet'] : d <= 3 ? ['#22c55e', 'Syncing · last sync ' + ago(e.lastSync)] : ['#f59e0b', 'Needs attention · last sync ' + ago(e.lastSync)];
   }
-  function stage(p) { return !p ? 'No packages yet' : (p.youtube_video_id || p.published_at) ? 'Published' : 'In production'; }
+  function stage(x) {
+    if (!x) return 'Loading…'; if (!x.ok) return 'Could not load'; var p = x.row; if (!p) return 'No packages yet';
+    var fp = {}; try { fp = typeof p.full_package === 'string' ? JSON.parse(p.full_package) : (p.full_package || {}); } catch (e) { fp = {}; }
+    var pub = fp.srvPublish || {}, vid = p.youtube_video_id || fp.youtubeVideoId || fp._srvYtLongId || pub.videoId || (fp.srvProduction || {}).youtubeVideoId || (fp.srvVa || {}).youtubeVideoId || (fp.srvPilot || {}).youtubeVideoId;
+    if (vid || p.published_at) return pub.privacyStatus === 'private' ? 'On YouTube (private)' : pub.privacyStatus === 'public' ? 'Published' : 'On YouTube';
+    if (fp.lifecycleStage) return 'In production · ' + String(fp.lifecycleStage);
+    if (fp.srvRender) return 'Rendered, not uploaded';
+    return 'Generated (draft)';
+  }
   function bizCard(i) {
-    var b = BIZ[i], p = S.data && S.data.pkg[i], h = health(b[0]), e = yt(b[0]), t = openTasks(b[0]);
+    var b = BIZ[i], px = S.data && S.data.pkg[i], p = px && px.row, h = health(b[0]), e = S.data && S.data.yt[b[0]] && S.data.yt[b[0]].ok ? S.data.yt[b[0]] : null, t = openTasks(b[0]);
+    var ta = t.length ? esc(trunc(t[0].name || t[0].title || 'Open task', 44)) + ' · ' + esc(t[0].status || '') + (t.length > 1 ? ' (+' + (t.length - 1) + ')' : '') : 'Nothing waiting';
     return '<div class="h2-card"><h3><span class="h2-dot" style="background:' + h[0] + '"></span>' + esc(b[0]) + '</h3>' +
-      '<div class="h2-kv"><span>Last package</span><b>' + (p ? esc((p.title || p.id || '').toString().slice(0, 48)) : '—') + '</b></div>' +
-      '<div class="h2-kv"><span>Stage</span><b>' + esc(S.data ? stage(p) : 'Loading…') + '</b></div>' +
-      '<div class="h2-kv"><span>Next action</span><b>' + (t.length ? esc((t[0].title || t[0].name || 'Open task').toString().slice(0, 44)) + (t.length > 1 ? ' (+' + (t.length - 1) + ')' : '') : 'Nothing waiting') + '</b></div>' +
+      '<div class="h2-kv"><span>Last package</span><b>' + (p ? esc(trunc(p.title || ('#' + p.id), 48)) : (S.data ? (px && px.ok ? 'None yet' : 'Could not load') : 'Loading…')) + '</b></div>' +
+      '<div class="h2-kv"><span>Stage</span><b>' + esc(stage(px)) + '</b></div>' +
+      '<div class="h2-kv"><span>Next action</span><b>' + ta + '</b></div>' +
       '<div class="h2-kv"><span>YouTube</span><b>' + esc(h[1]) + '</b></div>' +
-      '<div class="h2-kv"><span>Views (all synced videos)</span><b>' + (e && e.views > 0 ? Number(e.views).toLocaleString() : '—') + '</b></div>' +
-      '<div class="h2-kv"><span>Subscribers gained</span><b>' + (e && e.subsGained > 0 ? '+' + e.subsGained : '—') + '</b></div>' +
+      '<div class="h2-kv"><span>Views (all synced videos)</span><b>' + (e && e.videos ? Number(e.views).toLocaleString() : '—') + '</b></div>' +
+      '<div class="h2-kv"><span>Subscribers gained (from videos)</span><b>' + (e && e.videos ? '+' + Number(e.subs).toLocaleString() : '—') + '</b></div>' +
       '<button type="button" class="h2-btn" data-h2="biz:' + esc(b[0]) + '">Open ' + esc(b[0]) + '</button></div>';
   }
   function moneyStrip() {
     var F = safe(function () { return computeFinanceState(); }, null);
     if (!F) return '<div class="h2-empty">Finance data unavailable.</div>';
+    var src = safe(function () { return D.plaidConnected ? 'Source: linked bank accounts' : 'Source: entries in Finance'; }, '');
     return '<div class="h2-grid c4"><div class="h2-card"><div class="h2-sm">Monthly income</div><div class="h2-big">' + money(F.incomeTotal) + '</div></div>' +
       '<div class="h2-card"><div class="h2-sm">Monthly spend</div><div class="h2-big">' + money(F.expenseTotal) + '</div></div>' +
-      '<div class="h2-card"><div class="h2-sm">Net per month</div><div class="h2-big">' + money((F.incomeTotal || 0) - (F.expenseTotal || 0)) + '</div></div>' +
+      '<div class="h2-card"><div class="h2-sm">Net per month (income minus spend)</div><div class="h2-big">' + money((F.incomeTotal || 0) - (F.expenseTotal || 0)) + '</div><div class="h2-sm">' + esc(src) + '</div></div>' +
       '<div class="h2-card"><div class="h2-sm">More detail</div><button type="button" class="h2-btn" data-h2="finance">Finance</button> <button type="button" class="h2-btn" data-h2="analytics">Analytics</button></div></div>';
   }
   function homePage() {
