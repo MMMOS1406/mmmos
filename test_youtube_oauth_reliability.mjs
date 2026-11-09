@@ -213,7 +213,7 @@ await t('no credentials or token values are exposed by the new error path — on
 
 // CEO-017C/D: files the authentication Release 1 and 2 are allowed to change. The OAuth callback and .pause-deploy stay strictly untouched by it (checked below).
 const RELEASE_FILES = ['api/ops.js', 'public/index.html', 'lib/pinHash.mjs', 'index.html', 'public/index_staging.html', 'tests/srv/test_srv_farsi_creative_v2.mjs', 'test_youtube_oauth_reliability.mjs'];
-const isReleaseFile = (f) => RELEASE_FILES.includes(f) || f.startsWith('tests/ceo017a/') || f.startsWith('tests/preservation/') || f === 'public/home2.js' || f.startsWith('tests/home2/') || f.startsWith('tools/home2/'); // MMMOS homepage v2 (isolated branch): new opt-in module and its tests; // CEO-017D: Release 2 also adjusts the test harness' sign-in
+const isReleaseFile = (f) => RELEASE_FILES.includes(f) || f.startsWith('tests/ceo017a/') || f.startsWith('tests/preservation/') || f.startsWith('tests/ceo017f/') || f === 'lib/dataProxy.mjs' || f === 'public/home2.js' || f.startsWith('tests/home2/') || f.startsWith('tools/home2/');  // CEO-017F stage 1 (data proxy); MMMOS homepage v2 (isolated branch) // CEO-017D: Release 2 also adjusts the test harness' sign-in
 console.log('\n[3] Cross-business / no-regression evidence (structural — diff scope + untouched-function checks)');
 
 await t('youtubeAnalyticsPull and youtubeSyncPerformance (existing YouTube analytics paths) are completely untouched by this patch', () => {
