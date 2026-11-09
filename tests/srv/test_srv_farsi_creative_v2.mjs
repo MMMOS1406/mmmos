@@ -348,7 +348,7 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
   for (const c of retired) {
     seeded(); const a = await run(baseMod.default, clone(c)); seeded(); const b = await run(newMod.default, clone(c)); Math.random = realRandom;
     const ab = a.calls.filter(x => x.url.includes('anthropic')).map(x => x.body), bb = b.calls.filter(x => x.url.includes('anthropic')).map(x => x.body);
-    if (treeHasAiStudio) ok(ab.length === 1 && JSON.stringify(ab) === JSON.stringify(bb), `legacy request identical to ${BASE}: ${c.engine} ${c.contentFormat}`);
+    if (treeHasAiStudio) { ok(ab.length === 1 && JSON.stringify(ab) === JSON.stringify(bb), `legacy request identical to ${BASE}: ${c.engine} ${c.contentFormat}`); ok(JSON.stringify(a.out) === JSON.stringify(b.out), `legacy response identical to ${BASE}: ${c.engine} ${c.contentFormat}`); }
     else ok(ab.length === 1 && bb.length === 0 && /Unknown engine/.test(JSON.stringify(b.out)), `retired engine refused before any model call (${BASE} still called the model): ${c.engine} ${c.contentFormat}`);
   }
   // A V2 request with the flag off: no model call, off code

@@ -33,6 +33,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
   const store = { settings: { ...fixture.settings }, tables: JSON.parse(JSON.stringify(fixture.tables)) };
   const log = [];
   const unknown = new Set();
+  const proxied = [];
   const statics = [];                       // every static file served (so tests can prove what the page did and did not request)
   let origin = '';
 
@@ -47,7 +48,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
 
   function record(req, extra) {
     const u = new URL(req.url, 'http://x');
-    log.push({ method: req.method, path: u.pathname, action: u.searchParams.get('action') || '', ...extra });
+    log.push({ method: req.method, path: u.pathname, action: u.searchParams.get('action') || '', via: req.__via || '', ...extra });
   }
 
   async function readBody(req) {
@@ -57,7 +58,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
     return { raw, json };
   }
 
-  async function handleSupabase(req, res, u) {
+  async function handleSupabase(req, res, u, pre) {   // pre: {json} when the call arrives through the db_proxy action (CEO-017B)
     const rest = u.pathname.replace(/^\/__sb/, '');
     if (req.method === 'GET' || req.method === 'HEAD') {
       const m = rest.match(/^\/rest\/v1\/([a-z0-9_]+)/);
@@ -71,7 +72,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
       }
       return send(res, 200, store.tables[table] || []);
     }
-    const { json } = await readBody(req);
+    const { json } = pre || await readBody(req);
     const rpc = rest.match(/^\/rest\/v1\/rpc\/([a-z0-9_]+)/);
     if (rpc) {
       record(req, { kind: 'sb-write', rpc: rpc[1], key: json && json.p_key });
@@ -90,13 +91,21 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
     const isWrite = req.method !== 'GET' ? cls !== 'read' : cls === 'write';
     record(req, { kind: 'api', cls, write: isWrite });
     if (u.pathname === '/api/ops') {
+      if (action === 'db_proxy') {   // CEO-017B — replay the proxied REST call against the same fixture store; remember it came through the proxy
+        proxied.push({ method: json.method, path: String(json.path).split('?')[0], roles: ['ceo_session_token', 'operator_session_token', 'family_session_token'].filter((k) => json[k]) });
+        const u2 = new URL('/__sb/rest/v1/' + json.path, 'http://x');
+        let pj = null; try { pj = json.body ? JSON.parse(json.body) : null; } catch { pj = null; }
+        return await handleSupabase({ method: json.method || 'GET', headers: {}, url: u2.pathname + u2.search, __via: 'proxy' }, res, u2, { json: pj });
+      }
       if (action === 'ceo_login') return send(res, 200, { ok: true, ceo_session_token: 'stub.session', expires_at: new Date(Date.now() + 3600e3).toISOString() });
+      if (action === 'family_login') return json && json.pin === 'stub-pin' ? send(res, 200, { ok: true, family_session_token: 'stub.family', expires_at: new Date(Date.now() + 3600e3).toISOString() }) : send(res, 401, { ok: false, error: 'invalid_credentials' });
       if (action === 'ceo_check_session') return send(res, 200, { ok: true });
       // SRV-STUDIO-V2-017 — VA sign-in, modelled on production: no VA PIN set → operator_not_configured (the
       // browser keeps its legacy PIN); with fixture.operatorPin set → server-verified session or invalid_credentials.
       if (action === 'operator_login') {
-        if (!fixture.operatorPin) return send(res, 200, { ok: false, error: 'operator_not_configured' });
-        return json && json.pin === fixture.operatorPin
+        // CEO-017A step B: the browser has no PIN of its own any more; the synthetic test PIN 'stub-pin' signs the VA in.
+        if (!fixture.operatorPin && !(json && json.pin === 'stub-pin')) return send(res, 200, { ok: false, error: 'operator_not_configured' });
+        return json && (json.pin === fixture.operatorPin || json.pin === 'stub-pin')
           ? send(res, 200, { ok: true, operator_session_token: 'stub.operator', expires_at: new Date(Date.now() + 3600e3).toISOString() })
           : send(res, 401, { ok: false, error: 'invalid_credentials' });
       }
@@ -115,8 +124,8 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
   const server = http.createServer(async (req, res) => {
     try {
       const u = new URL(req.url, 'http://x');
-      if (u.pathname === '/__stub/log') return send(res, 200, { log, unknown: [...unknown], statics });
-      if (u.pathname === '/__stub/reset') { log.length = 0; unknown.clear(); statics.length = 0; store.settings = { ...fixture.settings }; return send(res, 200, { ok: true }); }
+      if (u.pathname === '/__stub/log') return send(res, 200, { log, unknown: [...unknown], statics, proxied });
+      if (u.pathname === '/__stub/reset') { proxied.length = 0; log.length = 0; unknown.clear(); statics.length = 0; store.settings = { ...fixture.settings }; return send(res, 200, { ok: true }); }
       if (u.pathname === '/__stub/state') return send(res, 200, { value: store.settings[u.searchParams.get('key') || 'mmm_finance_v118'] || null });
       if (u.pathname.startsWith('/__sb/')) return await handleSupabase(req, res, u);
       if (u.pathname.startsWith('/api/')) return await handleApi(req, res, u);
