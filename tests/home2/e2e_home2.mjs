@@ -23,6 +23,11 @@ try {
   check('flag OFF: no sidebar for Admin', (await side(off.page)) === null);
   check('flag OFF: home2.js is never requested', !(await fetchJson(stub.origin + '/__stub/log')).statics.some((s) => /home2\.js/.test(s)));
   check('flag OFF: classic navigation bar visible', await off.page.evaluate(() => getComputedStyle(document.getElementById('navBar')).display !== 'none'));
+  const offHome = await off.page.evaluate(() => { renderTab('home'); return document.getElementById('mainContent').innerText; });
+  check('classic Home (flag OFF) no longer shows the five removed sections', !/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i.test(offHome), offHome.match(/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i)?.[0] || '');
+  check('classic Home still shows net worth, cash and goals', /net worth/i.test(offHome) && /cash/i.test(offHome));
+  check('classic navigation has no Marketing & Sales chip', await off.page.evaluate(() => !/marketing/i.test(document.getElementById('navBar').innerText)));
+  check('Marketing & Sales route is still callable by id (backend untouched)', await off.page.evaluate(() => { renderTab('marketing'); return document.getElementById('mainContent').innerText.length > 40; }));
   await off.page.close();
 
   // 2 ON for Admin
@@ -31,8 +36,10 @@ try {
   check('flag ON: ten-item sidebar in blueprint order', JSON.stringify(items) === JSON.stringify(['home', 'biz:SRV Farsi', 'biz:SRV English', 'biz:NextWave', 'analytics', 'finance', 'brain', 'engineering', 'integrations', 'settings', '__classic']), JSON.stringify(items));
   const txt = await p.evaluate(() => document.getElementById('mainContent').innerText);
   check('Home shows the three business cards', ['SRV Farsi', 'SRV English', 'NextWave'].every((b) => txt.includes(b)));
-  check('Home shows Needs you, Money and System rows', /Needs you/i.test(txt) && /Money/i.test(txt) && /System/i.test(txt));
-  check('Home does not show the old corporate dashboard', !/CEO Headquarters|Executive Inbox|Business Directory/i.test(txt));
+  check('Home shows the finance and analytics row with links', /Finance and analytics/i.test(txt) && /Monthly income/i.test(txt) && await p.evaluate(() => !!document.querySelector('#mainContent [data-h2="finance"]') && !!document.querySelector('#mainContent [data-h2="analytics"]')));
+  check('Home focuses on the businesses: no Needs-you or System row, no old corporate dashboard', !/Needs you|^System$/im.test(txt) && !/CEO Headquarters|Business Directory|Company Health/i.test(txt));
+  check('Home has none of the five removed sections', !/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i.test(txt));
+  check('Marketing & Sales is not in the sidebar', !(items || []).some((i) => /market/i.test(i)) && !(await p.evaluate(() => /market/i.test(document.getElementById('h2Side').innerText))));
   check('classic navigation bar hidden but still in the page', await p.evaluate(() => { const n = document.getElementById('navBar'); return !!n && getComputedStyle(n).display === 'none'; }));
   const errs0 = on.pageErrors.length;
   for (const id of ['biz:SRV Farsi', 'biz:SRV English', 'biz:NextWave', 'analytics', 'finance', 'brain', 'engineering', 'integrations', 'settings', 'home']) {
@@ -60,6 +67,7 @@ try {
   for (const role of ['family', 'va']) {
     const o = await session(role, { home: true });
     check(`${role}: no sidebar with the flag on`, (await side(o.page)) === null);
+    check(`${role}: home has none of the removed sections`, !/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i.test(await o.page.evaluate(() => document.getElementById('mainContent').innerText)));
     check(`${role}: classic navigation visible`, await o.page.evaluate(() => getComputedStyle(document.getElementById('navBar')).display !== 'none' || true));
     await o.page.close();
   }

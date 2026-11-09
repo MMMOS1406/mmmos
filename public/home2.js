@@ -2,7 +2,7 @@
  *
  * Loaded only when this browser opted in (?home=on, stored locally as mmm_home_v2="on") and only acts for the Admin.
  * With the flag off — or for Family / VA — this file is never requested and nothing changes.
- * It adds a ten-item sidebar and a four-row Home. It READS only (the app's own loaders plus three existing GET reads),
+ * It adds a ten-item sidebar and a two-row Home (the three businesses; finance and analytics). It READS only (the app's own analytics loader plus one packages read per business),
  * writes nothing, calls no write action, and sends no credential. Every other screen still renders through the ORIGINAL router.
  * It stands down when the older CEO-008 shell is on (mmm_shell_admin_v1="on"). Reversible: ?home=off, or "Classic navigation" (this tab).
  */
@@ -92,18 +92,16 @@
     return fetch(SUPABASE_URL + '/rest/v1/' + path, { headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Cache-Control': 'no-cache' } })
       .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; });
   }
-  function jget(url) { return fetch(url).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }); }
   function load(done) {
     if (S.loading) return;
     if (S.data && Date.now() - S.at < 60000) { done(); return; }
     S.loading = true;
     safe(function () { if (typeof _ensureYouTubeAnalyticsLoaded === 'function') _ensureYouTubeAnalyticsLoaded(); });
     var pk = BIZ.map(function (b) { return rest('packages?engine=eq.' + encodeURIComponent(b[0]) + '&select=id,title,created_at,published_at,youtube_video_id&order=created_at.desc&limit=1'); });
-    Promise.all([Promise.all(pk), jget('/api/ops?action=get_notifications&requires_ceo_approval=true'), jget('/api/ops?action=list_approvals'), rest('app_settings?key=eq.mmm_system_strip&select=value')]).then(function (r) {
-      var strip = null; safe(function () { var v = r[3] && r[3][0] && r[3][0].value; strip = typeof v === 'string' ? JSON.parse(v) : v; });
-      S.data = { pkg: r[0].map(function (a) { return a && a[0] || null; }), notes: (r[1] && r[1].success && r[1].notifications) || [], approvals: ((r[2] && r[2].approvals) || []).filter(function (a) { return a.status === 'pending'; }), strip: strip };
+    Promise.all(pk).then(function (r) {
+      S.data = { pkg: r.map(function (a) { return a && a[0] || null; }) };
       S.at = Date.now(); S.loading = false; done();
-    }).catch(function () { S.data = S.data || { pkg: [], notes: [], approvals: [], strip: null }; S.loading = false; done(); });
+    }).catch(function () { S.data = S.data || { pkg: [] }; S.loading = false; done(); });
   }
   function yt(engine) { var a = safe(function () { return D.youtubeAnalytics; }, null); return a && a.perEngine ? (a.perEngine.filter(function (e) { return e.engine === engine; })[0] || null) : null; }
   function openTasks(engine) { return safe(function () { return (D.tasks || []).filter(function (t) { return t && t.engine === engine && t.status !== 'done' && t.status !== 'uploaded' && t.status !== 'posted'; }); }, []); }
@@ -126,36 +124,18 @@
       '<div class="h2-kv"><span>Subscribers gained</span><b>' + (e && e.subsGained > 0 ? '+' + e.subsGained : '—') + '</b></div>' +
       '<button type="button" class="h2-btn" data-h2="biz:' + esc(b[0]) + '">Open ' + esc(b[0]) + '</button></div>';
   }
-  function needsYou() {
-    var items = [];
-    if (S.data) {
-      S.data.notes.slice(0, 5).forEach(function (n) { items.push([n.title || 'Escalated notification', n.message || '']); });
-      S.data.approvals.slice(0, 5).forEach(function (a) { items.push([a.title || a.item_title || a.name || (String(a.item_type || 'item').replace(/_/g, ' ') + ' — approval waiting'), a.description || a.summary || a.reason || '']); });
-    }
-    return items.length ? items.map(function (i) { return '<div class="h2-item">' + esc(i[0]) + (i[1] ? '<p>' + esc(String(i[1]).slice(0, 160)) + '</p>' : '') + '</div>'; }).join('') : '<div class="h2-empty">' + (S.data ? 'Nothing needs you right now.' : 'Loading…') + '</div>';
-  }
   function moneyStrip() {
     var F = safe(function () { return computeFinanceState(); }, null);
     if (!F) return '<div class="h2-empty">Finance data unavailable.</div>';
     return '<div class="h2-grid c4"><div class="h2-card"><div class="h2-sm">Monthly income</div><div class="h2-big">' + money(F.incomeTotal) + '</div></div>' +
       '<div class="h2-card"><div class="h2-sm">Monthly spend</div><div class="h2-big">' + money(F.expenseTotal) + '</div></div>' +
       '<div class="h2-card"><div class="h2-sm">Net per month</div><div class="h2-big">' + money((F.incomeTotal || 0) - (F.expenseTotal || 0)) + '</div></div>' +
-      '<div class="h2-card"><div class="h2-sm">Subscriptions and plans</div><div class="h2-big" style="font-size:14px">See Finance</div><button type="button" class="h2-btn" data-h2="finance">Open Finance</button></div></div>';
-  }
-  function systemStrip() {
-    var s = S.data && S.data.strip;
-    if (!s) return '<div class="h2-card"><div class="h2-empty">' + (S.data ? 'Not recorded yet. The system strip is filled by the baseline check.' : 'Loading…') + '</div><button type="button" class="h2-btn" data-h2="engineering">Open Engineering</button></div>';
-    var stale = s.asOf && ageDays(s.asOf) > 7;
-    function kv(a, b) { return '<div class="h2-kv"><span>' + a + '</span><b>' + esc(b == null ? '—' : b) + '</b></div>'; }
-    return '<div class="h2-card"' + (stale ? ' style="border-color:rgba(245,158,11,.4)"' : '') + '>' + kv('As of', s.asOf ? ago(s.asOf) + (stale ? ' (stale)' : '') : '—') + kv('Plan', s.plan) + kv('Storage', s.storageMiB != null ? s.storageMiB + ' MiB of ' + (s.planStorageMiB || '?') + ' MiB' : null) +
-      kv('Last backup', s.backupAt ? ago(s.backupAt) : null) + kv('Last baseline check', s.lastBaselineAt ? ago(s.lastBaselineAt) : null) + kv('Rollback target', s.rollbackTarget) + '<button type="button" class="h2-btn" data-h2="engineering">Open Engineering</button></div>';
+      '<div class="h2-card"><div class="h2-sm">More detail</div><button type="button" class="h2-btn" data-h2="finance">Finance</button> <button type="button" class="h2-btn" data-h2="analytics">Analytics</button></div></div>';
   }
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
       '<div class="h2-lab">Your three businesses</div><div class="h2-grid c3">' + bizCard(0) + bizCard(1) + bizCard(2) + '</div>' +
-      '<div class="h2-lab">Needs you</div><div class="h2-card">' + needsYou() + '</div>' +
-      '<div class="h2-lab">Money</div>' + moneyStrip() +
-      '<div class="h2-lab">System</div>' + systemStrip() + '</div>';
+      '<div class="h2-lab">Finance and analytics</div>' + moneyStrip() + '</div>';
   }
   function bizPage(engine) {
     var i = BIZ.map(function (b) { return b[0]; }).indexOf(engine);
