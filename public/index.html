@@ -469,6 +469,60 @@ canvas.mini-chart{width:100%!important;height:100px!important;display:block}
 const API_URL='/api/generate';
 const SUPABASE_URL='https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_KEY='sb_publishable_ef6g4pLPYfDrXnTwGxSUuA_hAjrrF_i';
+// CEO-017B — database access goes through the server. Every browser call to <SUPABASE_URL>/rest/v1/... is replayed by
+// /api/ops?action=db_proxy with the signed-in user's session (CEO, VA or Family); the server decides what that role may read or
+// write, then talks to the database with its own key. The public key above then no longer needs any table privilege.
+// Transition switch: while MMM_DIRECT_FALLBACK is true, a call made with no session, an older server that does not know the action (404)
+// or a network failure still goes straight to the database as before. A refusal (401/403/413) is never retried directly. Before sign-in only the two
+// public on/off switches (SRV Studio V2, Mix Builder) can be read.
+const MMM_DIRECT_FALLBACK=true;
+(function(){
+  const REST=SUPABASE_URL+'/rest/v1/'; const realFetch=window.fetch.bind(window);
+  function tokens(){
+    const t={};
+    try{ const c=JSON.parse(sessionStorage.getItem('mmm_ceo_session')||'null'); if(c&&c.token)t.ceo_session_token=c.token; }catch(e){}
+    try{ const o=JSON.parse(sessionStorage.getItem('mmm_operator_session')||'null'); if(o&&o.token)t.operator_session_token=o.token; }catch(e){}
+    try{ const f=JSON.parse(sessionStorage.getItem('mmm_family_session')||'null'); if(f&&f.token)t.family_session_token=f.token; }catch(e){}
+    return t;
+  }
+  async function viaProxy(method,path,pick,body,signal,tk){
+    return realFetch('/api/ops?action=db_proxy',{method:'POST',headers:{'Content-Type':'application/json'},signal:signal,body:JSON.stringify(Object.assign({method:method,path:path,headers:pick,body:body},tk))});
+  }
+  // The package list is ~8 MB, more than one server response may carry (4.5 MB). Ask for it in pages (newest first, same order and
+  // fields) and put it back together; if a page is still too large the page size is halved. Returns a normal Response, so callers are unchanged.
+  async function pagedPackages(path,pick,signal,tk){
+    const m=/(^|[?&])limit=(\d+)/.exec(path); const total=m?parseInt(m[2],10):200; let size=Math.min(16,total); let offset=0; const all=[];
+    const strip=path.replace(/([?&])(limit|offset)=\d+&?/g,'$1').replace(/[?&]$/,'');
+    while(offset<total){
+      const take=Math.min(size,total-offset);
+      const r=await viaProxy('GET',strip+(strip.indexOf('?')<0?'?':'&')+'limit='+take+'&offset='+offset,pick,undefined,signal,tk);
+      if(r.status===413&&take>1){ size=Math.max(1,Math.floor(take/2)); continue; }
+      if(!r.ok)return r;
+      const rows=await r.json(); if(!Array.isArray(rows))return new Response(JSON.stringify(rows),{status:200,headers:{'content-type':'application/json'}});
+      all.push.apply(all,rows); offset+=take; if(rows.length<take)break; if(size<16)size=Math.min(16,size*2);
+    }
+    return new Response(JSON.stringify(all),{status:200,headers:{'content-type':'application/json'}});
+  }
+  window.fetch=async function(input,init){
+    const url=typeof input==='string'?input:(input&&input.url)||'';
+    if(url.indexOf(REST)!==0)return realFetch(input,init);
+    const tk=tokens(); const direct=function(){return realFetch(input,init);};
+    // No session at all (someone on the transition sign-in, before their PIN exists on the server): keep the old direct path while the
+    // transition switch is on. Once the database lockdown is applied the switch is turned off and these calls go to the proxy, which
+    // answers only the two public on/off switches.
+    if(!Object.keys(tk).length&&MMM_DIRECT_FALLBACK)return direct();
+    const h=(init&&init.headers)||{}; const pick={}; ['Prefer','Range','Accept'].forEach(function(k){const v=h[k]||h[k.toLowerCase()];if(v)pick[k]=v;});
+    const body=init&&init.body!==undefined&&init.body!==null?(typeof init.body==='string'?init.body:JSON.stringify(init.body)):undefined;
+    const method=(init&&init.method)||'GET'; const path=url.slice(REST.length); const signal=init&&init.signal;
+    let r;
+    try{
+      if(method==='GET'&&/^packages\?/.test(path)&&/select=[^&]*full_package/.test(path)&&/limit=\d{2,}/.test(path))r=await pagedPackages(path,pick,signal,tk);
+      else r=await viaProxy(method,path,pick,body,signal,tk);
+    }catch(e){ if(MMM_DIRECT_FALLBACK&&!(signal&&signal.aborted))return direct(); throw e; }
+    if(r.status===404&&MMM_DIRECT_FALLBACK){ return direct(); }
+    return r;
+  };
+})();
 
 // ── MMM BRAIN — MASTER REGISTRY CONSUMPTION LAYER ──
 // v16.11.0 — CEO Decision (MMM Company OS Phase 2, 2026-08-02): the Brain is the master
@@ -23257,8 +23311,7 @@ async function uploadVideoToSupabase(blob, filename){
       headers:{
         'Authorization':'Bearer '+SUPABASE_KEY,
         'apikey':SUPABASE_KEY,
-        'Content-Type':blob.type||'video/webm',
-        'x-upsert':'true'
+        'Content-Type':blob.type||'video/webm'
       },
       body:blob
     });
@@ -23561,7 +23614,6 @@ async function _srvUploadToStorage(pkgId, file, kind /* 'photo' | 'audio' | 'lon
       'Authorization': 'Bearer ' + SUPABASE_KEY,
       'apikey': SUPABASE_KEY,
       'Content-Type': file.type || 'application/octet-stream',
-      'x-upsert': 'true',
     },
     body: file,
   });
@@ -26830,7 +26882,7 @@ function smmVaRerenderIfMounted(businessId){
 
 async function smmReviewQueueLoad(businessId){
   try{
-    const res=await fetch('/api/ops?action=ceo_review_queue_list&businessId='+encodeURIComponent(businessId)+'&ceo_session_token='+encodeURIComponent(_ceoGetSessionToken()||''));
+    const res=await fetch('/api/ops?action=ceo_review_queue_list&businessId='+encodeURIComponent(businessId),{headers:{'X-MMM-CEO-Session':_ceoGetSessionToken()||''}});
     const json=await res.json().catch(()=>({}));
     if(smmReviewBusinessId!==businessId)return;
     if(!res.ok||!json.ok){ smmReviewError=json.error||('request failed ('+res.status+')'); }
@@ -27143,7 +27195,7 @@ async function smmGapReportLoad(businessId){
   smmGapReportLoading=true;
   smmVaRerenderIfMounted(businessId);
   try{
-    const res=await fetch('/api/ops?action=sm_asset_gap_report&businessId='+encodeURIComponent(businessId)+'&ceo_session_token='+encodeURIComponent(_ceoGetSessionToken()||''));
+    const res=await fetch('/api/ops?action=sm_asset_gap_report&businessId='+encodeURIComponent(businessId),{headers:{'X-MMM-CEO-Session':_ceoGetSessionToken()||''}});
     const json=await res.json().catch(()=>({}));
     if(smmAssetsBusinessId!==businessId)return;
     if(res.ok&&json.ok){ smmGapReport=json; smmGapReportBusinessId=businessId; }
@@ -27154,7 +27206,7 @@ async function smmGapReportLoad(businessId){
 
 async function smmAssetsLoad(businessId){
   try{
-    const res=await fetch('/api/ops?action=sm_content_asset_list&businessId='+encodeURIComponent(businessId)+'&ceo_session_token='+encodeURIComponent(_ceoGetSessionToken()||''));
+    const res=await fetch('/api/ops?action=sm_content_asset_list&businessId='+encodeURIComponent(businessId),{headers:{'X-MMM-CEO-Session':_ceoGetSessionToken()||''}});
     const json=await res.json().catch(()=>({}));
     if(smmAssetsBusinessId!==businessId)return;
     if(!res.ok||!json.ok){ smmAssetsError=json.error||('request failed ('+res.status+')'); }

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
@@ -152,7 +153,8 @@ function _ceoVerifySession(token, secret) {
 // protected action — nothing about client/browser state is trusted.
 async function requireCeoSession(req) {
   const src = (req.method === 'POST' ? req.body : req.query) || {};
-  const token = src.ceo_session_token;
+  // CEO-017F: the token may also arrive in the X-MMM-CEO-Session header so it never appears in a URL; body/query still accepted for older open tabs.
+  const token = src.ceo_session_token || (req.headers && req.headers['x-mmm-ceo-session']);
   if (!token) return false;
   try {
     const cfg = await _ceoLoadAuthConfig();
@@ -366,6 +368,39 @@ async function operatorLogin(req, res) {
 async function operatorCheckSession(req, res) {
   const who = await _publisherFromRequest(req);
   return res.status(200).json({ ok: !!(who && who.role === 'operator') });
+}
+
+// ── CEO-017B — authenticated data proxy: the browser no longer talks to the database with the public key ─────
+// The browser sends the REST call it would have made (method, path, body) plus its session tokens; the role comes ONLY from a
+// verified server session, lib/dataProxy.mjs decides, and the call is replayed with the server key. Family sessions are read-only.
+async function _sessionRole(req) {
+  const src = (req.method === 'POST' ? req.body : req.query) || {};
+  if (await requireCeoSession(req)) return 'ceo';
+  try {
+    const [cfg, pub, fam] = await Promise.all([_ceoLoadAuthConfig(), _publishAuthLoad(), _familyLoad()]);
+    if (src.operator_session_token && pub.pinHash && _operatorVerifySession(src.operator_session_token, _operatorSecret(cfg.sessionSecret), pinFingerprint(pub.pinHash))) return 'operator';
+    if (src.family_session_token && fam.pinHash && _familyVerifySession(src.family_session_token, _familySecret(cfg.sessionSecret), pinFingerprint(fam.pinHash))) return 'family';
+  } catch (e) { console.error('[db-proxy] session check failed:', e.message); }
+  return null;
+}
+async function dbProxy(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  const b = req.body || {}; const method = String(b.method || 'GET').toUpperCase();
+  const bodyStr = b.body === undefined || b.body === null ? '' : (typeof b.body === 'string' ? b.body : JSON.stringify(b.body));
+  const prefer = b.headers && typeof b.headers.Prefer === 'string' ? b.headers.Prefer : '';
+  const role = await _sessionRole(req);
+  const d = dataProxyDecide({ role, method, path: b.path, body: bodyStr, bodyBytes: Buffer.byteLength(bodyStr), prefer });
+  if (!d.allow) { console.warn('[db-proxy] denied ' + (role || 'anonymous') + ' ' + method + ' ' + String(b.path).split('?')[0] + ' · ' + d.reason); return res.status(d.status).json({ ok: false, error: d.reason }); }
+  const headers = { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json' };
+  if (prefer) headers.Prefer = prefer; if (b.headers && typeof b.headers.Range === 'string') headers.Range = b.headers.Range; if (b.headers && b.headers.Accept) headers.Accept = String(b.headers.Accept);
+  let up;
+  try { up = await fetch(`${SUPABASE_URL}/rest/v1/${b.path}`, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : bodyStr }); }
+  catch (e) { return res.status(502).json({ ok: false, error: 'upstream_unreachable' }); }
+  const text = await up.text();
+  // The hosting platform refuses function responses above ~4.5 MB. Say so cleanly (the page then asks for smaller pages) instead of failing with a platform error.
+  if (Buffer.byteLength(text) > 4000000) return res.status(413).json({ ok: false, error: 'response_too_large', bytes: Buffer.byteLength(text) });
+  const ct = up.headers.get('content-type'); if (ct) res.setHeader('Content-Type', ct); const cr = up.headers.get('content-range'); if (cr) res.setHeader('Content-Range', cr);
+  const out = res.status(up.status); return out.send ? out.send(text) : out.end(text);
 }
 
 // ── CEO-017B — PIN hash upgrade and CEO PIN rotation ───────────────────────────────────────────────
@@ -22208,6 +22243,7 @@ export default async function handler(req, res) {
     if (action === 'ceo_check_session')              return await ceoCheckSession(req, res);
     if (action === 'operator_login')                 return await operatorLogin(req, res);              // SRV-STUDIO-V2-017
     if (action === 'family_login')                   return await familyLogin(req, res);                // CEO-017A
+    if (action === 'db_proxy')                       return await dbProxy(req, res);                    // CEO-017F stage 1 (session required)
     if (action === 'auth_set_ceo_pin')               return await authSetCeoPin(req, res);              // CEO-017B (CEO session + current PIN required)
     if (action === 'family_check_session')           return await familyCheckSession(req, res);         // CEO-017A
     if (action === 'auth_set_family_pin')            return await authSetFamilyPin(req, res);           // CEO-017A (CEO session required)
