@@ -32185,6 +32185,10 @@ function renderFactory(){
    is never written to the shared state. shell.js acts for the Admin user only. */
 (function(){try{var m=/[?&]shell=(on|off)\b/.exec(location.search);if(m){localStorage.setItem('mmm_shell_admin_v1',m[1]);}
 if(localStorage.getItem('mmm_shell_admin_v1')==='on'){var s=document.createElement('script');s.src='/shell.js';document.head.appendChild(s);}}catch(e){}})();
+/* MMMOS simplified CEO homepage (blueprint CEO-017) — requested ONLY when this browser has opted in (?home=on, stored locally as mmm_home_v2="on"); default OFF.
+   home2.js acts for the Admin user only, reads only, and stands down while the older shell flag is on. */
+(function(){try{var m=/[?&]home=(on|off)\b/.exec(location.search);if(m){localStorage.setItem('mmm_home_v2',m[1]);}
+if(localStorage.getItem('mmm_home_v2')==='on'&&localStorage.getItem('mmm_shell_admin_v1')!=='on'){var s=document.createElement('script');s.src='/home2.js';document.head.appendChild(s);}}catch(e){}})();
 </script>
 </body>
 </html>
