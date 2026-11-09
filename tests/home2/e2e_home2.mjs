@@ -25,6 +25,7 @@ try {
   check('flag OFF: classic navigation bar visible', await off.page.evaluate(() => getComputedStyle(document.getElementById('navBar')).display !== 'none'));
   const offHome = await off.page.evaluate(() => { renderTab('home'); return document.getElementById('mainContent').innerText; });
   check('classic Home (flag OFF) no longer shows the five removed sections', !/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i.test(offHome), offHome.match(/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i)?.[0] || '');
+  check('CEO classic Home still shows department managers when the registry is loaded', await off.page.evaluate(() => { D.brainDepartments = [{ key: 'finance', manager: 'Test Manager' }]; renderTab('home'); return /Test Manager/.test(document.getElementById('mainContent').innerText); }));
   check('classic Home still shows net worth, cash and goals', /net worth/i.test(offHome) && /cash/i.test(offHome));
   check('classic navigation has no Marketing & Sales, Human Resources or Legal & Compliance chip', await off.page.evaluate(() => !/marketing|human resources|legal/i.test(document.getElementById('navBar').innerText)));
   check('classic Home Department Status has no Human Resources or Legal & Compliance placeholder row', !/human resources|legal & compliance/i.test(offHome));
@@ -70,6 +71,10 @@ try {
     const o = await session(role, { home: true });
     check(`${role}: no sidebar with the flag on`, (await side(o.page)) === null);
     check(`${role}: home has none of the removed sections`, !/weekly (ceo|decision) brief|executive inbox|portfolio intelligence|opportunity pipeline|executive calendar/i.test(await o.page.evaluate(() => document.getElementById('mainContent').innerText)));
+    if (role === 'family') {
+      check('family: classic Home shows no "Loading…" placeholder (department manager row hidden)', !/Loading…/.test(await o.page.evaluate(() => { renderTab('home'); return document.getElementById('mainContent').innerText; })));
+      check('family: Department Status itself is still shown', /DEPARTMENT STATUS/i.test(await o.page.evaluate(() => document.getElementById('mainContent').innerText)));
+    }
     check(`${role}: classic navigation visible`, await o.page.evaluate(() => getComputedStyle(document.getElementById('navBar')).display !== 'none' || true));
     await o.page.close();
   }

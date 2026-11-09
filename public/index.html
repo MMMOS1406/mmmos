@@ -7502,7 +7502,7 @@ function _renderHomeOperatorDashboard(){
            HR & Legal say "no data yet" honestly rather than showing fabricated status. -->
       ${(function(){
         const bd=D.brainDepartments||[];
-        const mgr=(key)=>{const row=bd.find(d=>d.key===key);return row?row.manager:'Loading…';};
+        const mgr=(key)=>{const row=bd.find(d=>d.key===key);return row&&row.manager?row.manager:'';};   // no manager data (Family cannot read the registry) -> no line at all, never a "Loading…" placeholder
         const rows=[
           {key:'finance',label:'💰 Finance',h:dept.finance},
           {key:'operations',label:'🏭 Operations',h:dept.operations},
@@ -7513,7 +7513,7 @@ function _renderHomeOperatorDashboard(){
           <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">DEPARTMENT STATUS</div>
           <div style="display:flex;flex-direction:column;gap:6px">
             ${rows.map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(0,0,0,0.2);border-radius:8px">
-              <div><div style="font-size:12px;font-weight:700;color:#fff">${r.label}</div><div style="font-size:9px;color:var(--dim);margin-top:2px">${mgr(r.key)}</div></div>
+              <div><div style="font-size:12px;font-weight:700;color:#fff">${r.label}</div>${mgr(r.key)?`<div style="font-size:9px;color:var(--dim);margin-top:2px">${mgr(r.key)}</div>`:''}</div>
               <div style="font-size:11px;font-weight:700;color:${trafficColor[r.h.state]};text-transform:uppercase;letter-spacing:1px;white-space:nowrap;text-align:right">${trafficDot(r.h.state)}${r.h.label}</div>
             </div>`).join('')}
           </div>
