@@ -212,7 +212,7 @@ await t('no credentials or token values are exposed by the new error path — on
 });
 
 // CEO-017B: files the AI Creation Studio retirement is allowed to change (tests/ceo017 proves, function by function, what changed). The OAuth callback and .pause-deploy stay strictly untouched by it.
-const RETIREMENT_FILES = ['api/generate.js', 'api/reports/weekly.js', 'api/tiktok/callback.js', 'api/instagram/callback.js', 'api/youtube/detect.js', 'public/index.html', 'api/ops.js', 'test_youtube_oauth_reliability.mjs', 'tests/srv/test_srv_farsi_creative_v2.mjs', 'tests/srv/test_srv_farsi_short_publish.cjs', 'tests/srv/test_srv_studio_v2_037_suno_steps.mjs'];
+const RETIREMENT_FILES = ['api/generate.js', 'api/reports/weekly.js', 'api/tiktok/callback.js', 'api/instagram/callback.js', 'api/youtube/detect.js', 'public/index.html', 'api/ops.js', 'test_youtube_oauth_reliability.mjs', 'tests/srv/test_srv_farsi_creative_v2.mjs', 'tests/srv/test_srv_farsi_short_publish.cjs', 'tests/srv/test_srv_studio_v2_037_suno_steps.mjs', 'tests/platform/test_publish_auth.mjs'];
 const isRetirementFile = (f) => RETIREMENT_FILES.includes(f) || f.startsWith('tests/ceo017/') || f.startsWith('tests/ceo017a/') || f.startsWith('migrations/017b_') || f.startsWith('lib/pinHash') || f.startsWith('lib/dataProxy');
 // CEO-017C/D: files the authentication Release 1 and 2 are allowed to change. The OAuth callback and .pause-deploy stay strictly untouched by it (checked below).
 const RELEASE_FILES = ['api/ops.js', 'public/index.html', 'lib/pinHash.mjs', 'index.html', 'public/index_staging.html', 'tests/srv/test_srv_farsi_creative_v2.mjs', 'test_youtube_oauth_reliability.mjs'];
