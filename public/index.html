@@ -734,8 +734,6 @@ const NAV_ITEMS=[
   {id:"home",label:"🏛️ CEO Headquarters",short:"🏛️"},
   {id:"finance",label:"💰 Finance",short:"💰"},
   {id:"engines",label:"🏭 Operations",short:"🏭"},
-  {id:"human_resources",label:"👥 Human Resources",short:"👥"},
-  {id:"legal_compliance",label:"⚖️ Legal & Compliance",short:"⚖️"},
   {id:"system",label:"🖥️ Technology",short:"🖥️"},
   // v16.12.0 — restored: VA user's access array is ["tasks","system"]; without this entry
   // renderNav() (filters NAV_ITEMS by currentUser.access) would drop VA to a single visible
@@ -7455,8 +7453,6 @@ function _renderHomeOperatorDashboard(){
           {key:'finance',label:'💰 Finance',h:dept.finance},
           {key:'operations',label:'🏭 Operations',h:dept.operations},
           {key:'marketing_sales',label:'📣 Marketing & Sales',h:dept.marketing_sales},
-          {key:'human_resources',label:'👥 Human Resources',h:dept.human_resources},
-          {key:'legal_compliance',label:'⚖️ Legal & Compliance',h:dept.legal_compliance},
           {key:'technology',label:'🖥️ Technology',h:dept.technology},
         ];
         return `<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px">
