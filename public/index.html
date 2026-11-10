@@ -788,9 +788,6 @@ const NAV_ITEMS=[
   {id:"home",label:"🏛️ CEO Headquarters",short:"🏛️"},
   {id:"finance",label:"💰 Finance",short:"💰"},
   {id:"engines",label:"🏭 Operations",short:"🏭"},
-  {id:"marketing",label:"📣 Marketing & Sales",short:"📣"},
-  {id:"human_resources",label:"👥 Human Resources",short:"👥"},
-  {id:"legal_compliance",label:"⚖️ Legal & Compliance",short:"⚖️"},
   {id:"system",label:"🖥️ Technology",short:"🖥️"},
   // v16.12.0 — restored: VA user's access array is ["tasks","system"]; without this entry
   // renderNav() (filters NAV_ITEMS by currentUser.access) would drop VA to a single visible
@@ -7266,61 +7263,7 @@ function computeWeeklyCEOBrief(pi, F){
     generatedAt:new Date().toISOString(),
   };
 }
-function _renderWeeklyCEOBrief(brief){
-  const confColor={High:'#22c55e',Medium:'#f59e0b',Low:'#ef4444'};
-  // v16.19.0 — CSE V2 refinements #1/#3/#4 (CEO-approved 2026-08-03): render Business Impact
-  // and Time to Impact on every answer, and "why this is highest" on the opportunity answer,
-  // when the underlying compute function actually populated them (never fabricated in the UI).
-  const qRow=(label,q,last)=>{
-    const extra=[];
-    if(q.why) extra.push(`<div style="font-size:11px;color:#8b9cc4;margin-top:6px;line-height:1.5"><b style="font-size:9px;color:#4a5568;letter-spacing:0.6px;font-family:'JetBrains Mono',monospace">WHY HIGHEST&nbsp; </b>${escHTML(q.why)}</div>`);
-    if(q.impact) extra.push(`<div style="font-size:11px;color:#c9a84c;margin-top:6px;line-height:1.5"><b style="font-size:9px;color:#4a5568;letter-spacing:0.6px;font-family:'JetBrains Mono',monospace">BUSINESS IMPACT&nbsp; </b>${escHTML(q.impact)}</div>`);
-    if(q.timeToImpact) extra.push(`<div style="font-size:11px;color:#60a5fa;margin-top:6px;line-height:1.5"><b style="font-size:9px;color:#4a5568;letter-spacing:0.6px;font-family:'JetBrains Mono',monospace">TIME TO IMPACT&nbsp; </b>${escHTML(q.timeToImpact)}</div>`);
-    return `<div style="margin-bottom:${last?0:14}px;${last?'':'padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.05)'}">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;gap:8px">
-        <div style="font-size:9px;font-weight:700;color:var(--dim);letter-spacing:0.8px;font-family:'JetBrains Mono',monospace">${label.toUpperCase()}</div>
-        <span style="font-size:8px;font-weight:800;color:${confColor[q.confidence]||'#6b7280'};padding:1px 6px;background:${confColor[q.confidence]||'#6b7280'}18;border:1px solid ${confColor[q.confidence]||'#6b7280'}40;border-radius:4px;letter-spacing:0.5px;white-space:nowrap">${q.confidence.toUpperCase()} CONFIDENCE</span>
-      </div>
-      <div style="font-size:13px;color:#fff;line-height:1.5">${escHTML(q.text)}</div>
-      ${extra.join('')}
-    </div>`;
-  };
-  // v16.27.0 — Decision Brief (CEO-mandated 2026-08-04): "the dashboard should answer one
-  // question before anything else — what are the top 3 decisions that will most increase the
-  // probability of reaching $10,000/month." Rendered as the new lead block, above the existing
-  // 4-question brief (which remains, unchanged, as supporting detail underneath — the CEO asked
-  // for this to come first, not for the validated existing content to be deleted).
-  const top3=brief.top3Decisions||[];
-  const decisionCard=(d,i)=>{
-    const mgmt=MANAGEMENT_RECS[d.managementRec]||MANAGEMENT_RECS.continue;
-    const mgmtColor = d.managementRec==='scale' ? '#22c55e' : d.managementRec==='request_ceo_approval' ? '#c9a84c' : d.managementRec==='pause' ? '#6b7280' : d.managementRec==='change_strategy' ? '#f59e0b' : '#60a5fa';
-    return `<div style="margin-bottom:${i===top3.length-1?0:12}px;padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px">
-        <div style="font-size:9px;font-weight:800;color:#4a5568;letter-spacing:0.6px;font-family:'JetBrains Mono',monospace">DECISION ${i+1}</div>
-        <span style="font-size:8px;font-weight:800;color:${mgmtColor};padding:2px 7px;background:${mgmtColor}18;border:1px solid ${mgmtColor}40;border-radius:4px;letter-spacing:0.5px;white-space:nowrap">${mgmt.icon} ${mgmt.label.toUpperCase()}</span>
-      </div>
-      <div style="font-size:13px;color:#fff;line-height:1.5;font-weight:600">${escHTML(d.title)}</div>
-      ${d.why?`<div style="font-size:11px;color:#8b9cc4;margin-top:6px;line-height:1.5">${escHTML(d.why)}</div>`:''}
-      ${d.inactionCost?`<div style="font-size:11px;color:#ef4444;margin-top:6px;line-height:1.5"><b style="font-size:9px;color:#4a5568;letter-spacing:0.6px;font-family:'JetBrains Mono',monospace">IF UNADDRESSED&nbsp; </b>${escHTML(d.inactionCost)}</div>`:''}
-      <div style="font-size:9px;color:#4a5568;margin-top:8px;letter-spacing:0.4px;font-family:'JetBrains Mono',monospace">PRIORITY SCORE ${d.score}/100${d.reason?' — '+escHTML(d.reason):''}</div>
-    </div>`;
-  };
-  const top3Block = top3.length ? `<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08)">
-      <div style="font-size:10px;font-weight:700;color:#c9a84c;letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🎯 TOP 3 DECISIONS THIS WEEK</div>
-      ${top3.map(decisionCard).join('')}
-    </div>` : `<div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.08)">
-      <div style="font-size:10px;font-weight:700;color:#c9a84c;letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🎯 TOP 3 DECISIONS THIS WEEK</div>
-      <div style="font-size:13px;color:#8b9cc4;line-height:1.5">No qualifying decisions in the active queue this week — portfolio is stable and Marketing's inbox is clear.</div>
-    </div>`;
-  return `<div style="background:rgba(59,130,246,0.05);border:1px solid rgba(59,130,246,0.28);border-radius:14px;padding:16px;margin-bottom:12px">
-    <div style="font-size:10px;font-weight:700;color:#60a5fa;letter-spacing:1.5px;margin-bottom:12px;font-family:'JetBrains Mono',monospace">📋 WEEKLY DECISION BRIEF <span style="color:var(--dim);font-weight:400">— V3</span></div>
-    ${top3Block}
-    ${qRow('Highest-impact action this week', brief.highestImpactAction)}
-    ${qRow('Biggest current risk', brief.biggestRisk)}
-    ${qRow('Biggest current opportunity', brief.biggestOpportunity)}
-    ${qRow('What should the company stop doing', brief.whatToStop, true)}
-  </div>`;
-}
+// Kept (dependency verified 2026-11-10): the older admin shell (public/shell.js, Finance accordion) still calls this.
 function _renderPortfolioIntelligence(pi){
   const confColor={high:'#22c55e',medium:'#f59e0b',low:'#ef4444',none:'#6b7280'};
   const trendColor={Growing:'#22c55e',Stable:'#6b7280',Declining:'#ef4444','No data':'#6b7280'};
@@ -7413,17 +7356,8 @@ function _renderHomeOperatorDashboard(){
   const _monitored=[dept.finance,dept.operations,dept.marketing_sales,dept.technology];
   const _companyWorst = _monitored.some(d=>d.state==='red') ? 'red' : _monitored.some(d=>d.state==='yellow') ? 'yellow' : 'green';
   const _companyLabel = _companyWorst==='red' ? 'Needs attention' : _companyWorst==='yellow' ? 'Stable — minor items open' : 'Healthy';
-  // v16.18.0 — Company Strategy Engine V1: Weekly CEO Brief computed here, first thing
-  // rendered on Home, per the CEO's explicit instruction ("the first thing I see when
-  // opening CEO Headquarters").
-  const _pi=computePortfolioIntelligence();
-  const _brief=computeWeeklyCEOBrief(_pi, F);
   return `
     <div style="max-width:520px;margin:0 auto;padding:8px 4px 28px">
-      <!-- 0. WEEKLY CEO BRIEF — Company Strategy Engine V1 (CEO-approved 2026-08-03).
-           Answers the CEO's own 4 mandated questions from Portfolio Intelligence + F.signals
-           only. Confidence-annotated; says so honestly when evidence is too thin. -->
-      ${_renderWeeklyCEOBrief(_brief)}
       <!-- 1. COMPANY HEALTH — v16.14.0: single executive signal (CEO Phase 4 approval note),
            no sub-stats. Detail per department lives on each department's own page. -->
       <div style="background:${_companyWorst==='red'?'rgba(239,68,68,0.06)':_companyWorst==='yellow'?'rgba(245,158,11,0.06)':'rgba(34,197,94,0.06)'};border:1px solid ${trafficColor[_companyWorst]}45;border-radius:14px;padding:14px 16px;margin-bottom:12px">
@@ -7538,134 +7472,6 @@ function _renderHomeOperatorDashboard(){
           </div>`).join(''):'<div style="font-size:12px;color:var(--dim)">No open financial risks.</div>'}
         </div>`;
       })()}
-      <!-- 9a. EXECUTIVE INBOX (v16.13.0 — renamed from CEO Command Center; real
-           ceo_decision_protocol CDP feed, already wired to Approve/Reject/Details).
-           v16.14.0 — CEO decisions only, per the CEO's Phase 4 approval note ("Executive
-           Inbox should contain only CEO decisions"). The engineering-approval line moved to
-           Technology's own Department Inbox (see _deptInbox()). -->
-      ${(function(){
-        // v16.20.0 — Marketing & Sales Department Autonomy (CEO-approved 2026-08-03):
-        // removed the entire "Phase 2" scorecard/revenue/KPI/monetization/issues/recs
-        // computation that used to live here (~115 lines). Verified via grep before removal
-        // that every one of scorecard, topE, underE, revCur/revTgt/revPct/revGap, _contentInc,
-        // _totalSubs, _totalUploadsW, _runningContent, _maintContent, _nearMon, _offline,
-        // _stale, _ieStale, issues, recs, displayRecs, and the scoreCol/statusBadge/priCol/
-        // riskCol/sevCol/kpi render helpers were computed every render and never referenced
-        // by the returned template below — pure dead code. The one real recommendation this
-        // block used to produce (recs/displayRecs) now has a real home: it's the canonical
-        // computeMarketingRecommendations() function, rendered live in Marketing & Sales's own
-        // Department Inbox and Backlog (see renderDepartmentDashboard / _deptInbox /
-        // _deptBacklog) instead of being computed here for nowhere. Only what the header badge
-        // below actually needs survives: task failures and the YouTube connection flag. `btn`
-        // is kept — it's genuinely used by the CDP/escalated cards further down.
-        const _tasks=D.tasks||[];
-        const _fails=_tasks.filter(t=>t&&(t.status==='upload_failed'||t.status==='render_failed'));
-        const _ytDiscon=!(D.integrations&&D.integrations.youtube&&D.integrations.youtube.connected);
-        const btn=(label,col,oc)=>`<button onclick="${oc}" style="padding:5px 12px;background:${col}18;border:1px solid ${col}45;border-radius:6px;color:${col};font-size:10px;font-weight:800;cursor:pointer;font-family:'Syne',sans-serif;letter-spacing:0.5px">${label}</button>`;
-
-        return `
-        <div style="background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.22);border-radius:14px;padding:16px;margin-bottom:12px">
-          <!-- HEADER -->
-          ${(function(){
-            var _ytOk=!_ytDiscon;
-            var _plOk=!!D.plaidConnected;
-            var _noFails=!_fails.length;
-            var _liveStatus=(_ytOk&&_plOk&&_noFails)?'LIVE':(_ytOk||_plOk)?'PARTIAL':'LIMITED';
-            var _liveCol=_liveStatus==='LIVE'?'#22c55e':_liveStatus==='PARTIAL'?'#f59e0b':'#ef4444';
-            return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">'
-              +'<div style="font-size:10px;font-weight:700;color:#c9a84c;letter-spacing:1.5px;font-family:\'JetBrains Mono\',monospace">🏢 EXECUTIVE INBOX</div>'
-              +'<div style="font-size:9px;font-weight:700;color:'+_liveCol+';padding:2px 7px;background:'+_liveCol+'18;border:1px solid '+_liveCol+'45;border-radius:4px;letter-spacing:1px">'+_liveStatus+'</div>'
-              +'</div>';
-          })()}
-
-          <!-- EXECUTIVE INBOX DECISIONS -->
-          <div style="display:flex;flex-direction:column;gap:10px">
-            ${(function(){
-              // v14.8.7 — Final frozen card spec: priority badge + title + why + if approved + business impact + 3 buttons. Max 5.
-              var _pBadge=function(p){
-                var map={'High':['🔴','#ef4444'],'Medium':['🟡','#f59e0b'],'Low':['🟢','#22c55e']};
-                var _m=map[p]||map['Low'];
-                return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:800;color:'+_m[1]+';padding:2px 8px;background:'+_m[1]+'18;border:1px solid '+_m[1]+'40;border-radius:4px;font-family:\'JetBrains Mono\',monospace;letter-spacing:0.5px">'+_m[0]+' '+p.toUpperCase()+'</span>';
-              };
-              // v15.12.0 — CEO Command Center: EXECUTABLE CDP DECISIONS ONLY.
-              // Removed entirely: the legacy "operational pool" (Diversify Machine Income,
-              // Monetization Sprint, Pivot Content Strategy, Increase Production Investment,
-              // Update Investment Engine Portfolio Data, Resolve Content Pipeline Failure).
-              // Those cards' Approve button (_ceoCCDecide) only ever wrote a UI-only flag to
-              // app_settings — zero MMMOS state ever changed. Confirmed via live production
-              // trace: two of these were approved and produced no downstream effect whatsoever.
-              // Only real ceo_decision_protocol rows with a genuinely executable proposed
-              // change (content_mix / pipeline_flag / automation_recovery — the types that
-              // cdpExecute actually performs a real, verified mutation for) may appear here.
-              // Advisory-only, protected, or "nothing new" signals are filtered out below as
-              // defense-in-depth (the backend generator also no longer creates a pending_ceo
-              // row for those — see cdpGenerateRecommendations v15.12.0), and route_engineering_task/
-              // route_new_regressions are auto-routed to Engineering at generation time instead
-              // of waiting on a CEO click that would only ever create a ticket.
-              // NOTE: content_mix decisions carry the executable type at the TOP level
-              // (decision_type==='content_mix'), not inside proposed_exact_change — that
-              // object has no .type field for NextWave rows. system_alert decisions carry
-              // their sub-type inside proposed_exact_change.type instead. Both must be
-              // checked correctly or NextWave cards would be silently filtered out.
-              var EXECUTABLE_ALERT_TYPES=['pipeline_flag','automation_recovery'];
-              var _isExecutableCdp=function(cdp){
-                if (cdp.decision_type === 'content_mix') return true;
-                var t=(cdp.proposed_exact_change&&cdp.proposed_exact_change.type)||'';
-                return EXECUTABLE_ALERT_TYPES.indexOf(t)>=0;
-              };
-              var _cdpCards=(D.cdpPendingDecisions||[])
-                .filter(_isExecutableCdp)
-                .map(function(cdp){
-                var _id=cdp.id;
-                var _dec=(D.ceoCCDecisions&&D.ceoCCDecisions['cdp_'+_id])||null;
-                var _safeT=(cdp.recommendation_title||'CDP Decision').replace(/'/g,' ').slice(0,80);
-                var _priority=cdp.decision_type==='system_alert'?'High':'Medium';
-                var _btnRow=_dec
-                  ?('<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-                    +'<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;background:'+(_dec.decision==='approved'?'rgba(34,197,94,0.12)':'rgba(239,68,68,0.12)')+';border:1px solid '+(_dec.decision==='approved'?'rgba(34,197,94,0.35)':'rgba(239,68,68,0.35)')+'"><span style="font-size:11px;font-weight:800;color:'+(_dec.decision==='approved'?'#22c55e':'#ef4444')+'">'+(_dec.decision==='approved'?'✅ Approved':'❌ Rejected')+'</span></div>'
-                    +'</div>')
-                  :('<div style="display:flex;gap:6px">'+btn('✅ Approve','#22c55e','_cdpCCApprove(\''+_id+'\',\''+_safeT+'\')')+btn('❌ Reject','#ef4444','_cdpCCReject(\''+_id+'\',\''+_safeT+'\')')+btn('👁 Details','#c9a84c','_cdpCCDetails(\''+_id+'\')')+'</div>');
-                return {priority:_priority,_isCDP:true,_id:_id,_btnRow:_btnRow,_safeT:_safeT,
-                  title:cdp.recommendation_title||'CDP Decision',
-                  why:(cdp.analysis_summary||'').slice(0,200)+(cdp.analysis_summary&&cdp.analysis_summary.length>200?'…':''),
-                  ifApproved:cdp.authorization_boundary||'Scoped change only — reverts on reject.',
-                  impact:cdp.expected_business_impact||'—'};
-              });
-
-              // v16.15.0 — Phase 6: merge in real escalated notifications (requires_ceo_approval=
-              // true only — routine department events never reach here, see _deptInbox()/ _deptRisks()).
-              var _escCards=(D.ceoEscalatedNotifications||[]).map(function(n){
-                return {priority:'High', _isEsc:true, _id:n.id,
-                  title:n.title||'Escalated notification',
-                  why:n.message||'—',
-                  ifApproved:'Acknowledging marks this reviewed. No automated action is taken.',
-                  impact:'—',
-                  _btnRow:'<div style="display:flex;gap:6px">'+btn('✅ Acknowledge','#22c55e','_ackEscalatedNotif(\''+n.id+'\')')+'</div>'};
-              });
-              var _allCards=_escCards.concat(_cdpCards).slice(0,5);
-              if(!_allCards.length)return '<div style="padding:14px 0;font-size:12px;color:var(--dim)">No decisions requiring CEO approval.</div>';
-
-              // v15.12.0 — unified render for real, executable CDP cards; v16.15.0 adds
-              // escalated department notifications (_isEsc) using the same card shape.
-              return _allCards.map(function(d){
-                var _btnRow=d._btnRow;
-                var _tag=d._isEsc?'🔔 ESCALATED':'⚡ CDP';
-                return '<div style="background:rgba(0,0,0,0.20);border:1px solid rgba(201,168,76,0.15);border-radius:12px;padding:16px">'
-                  +'<div style="margin-bottom:6px"><span style="font-size:8px;font-weight:700;color:#c9a84c;letter-spacing:1px;font-family:\'JetBrains Mono\',monospace;background:rgba(201,168,76,0.12);padding:2px 6px;border-radius:3px">'+_tag+'</span></div>'
-                  +'<div style="margin-bottom:10px">'+_pBadge(d.priority)+'</div>'
-                  +'<div style="font-size:13px;font-weight:700;color:#fff;line-height:1.5;margin-bottom:12px">'+d.title+'</div>'
-                  +'<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px">'
-                  +'<div style="font-size:11px;color:#8b9cc4;line-height:1.6"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:\'JetBrains Mono\',monospace">WHY  </b>'+(d.why||'—')+'</div>'
-                  +'<div style="font-size:11px;color:#8b9cc4;line-height:1.6"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:\'JetBrains Mono\',monospace">IF APPROVED  </b>'+(d.ifApproved||'—')+'</div>'
-                  +'<div style="font-size:11px;color:#c9a84c;line-height:1.6"><b style="font-size:9px;color:#4a5568;letter-spacing:0.8px;font-family:\'JetBrains Mono\',monospace">BUSINESS IMPACT  </b>'+(d.impact||'—')+'</div>'
-                  +'</div>'
-                  +_btnRow
-                  +'</div>';
-              }).join('');
-            })()}
-          </div>
-        </div>`;
-      })()}
       <!-- 9a2. OTHER PENDING REVIEWS — Phase 2E acceptance-fix (CEO-approved 2026-08-16):
            advisory-only ceo_decision_protocol rows are intentionally excluded from the
            Executive Inbox above (only genuinely executable decisions belong there — see
@@ -7708,40 +7514,23 @@ function _renderHomeOperatorDashboard(){
            HR & Legal say "no data yet" honestly rather than showing fabricated status. -->
       ${(function(){
         const bd=D.brainDepartments||[];
-        const mgr=(key)=>{const row=bd.find(d=>d.key===key);return row?row.manager:'Loading…';};
+        const mgr=(key)=>{const row=bd.find(d=>d.key===key);return row&&row.manager?row.manager:'';};   // no manager data (Family cannot read the registry) -> no line at all, never a "Loading…" placeholder
         const rows=[
           {key:'finance',label:'💰 Finance',h:dept.finance},
           {key:'operations',label:'🏭 Operations',h:dept.operations},
           {key:'marketing_sales',label:'📣 Marketing & Sales',h:dept.marketing_sales},
-          {key:'human_resources',label:'👥 Human Resources',h:dept.human_resources},
-          {key:'legal_compliance',label:'⚖️ Legal & Compliance',h:dept.legal_compliance},
           {key:'technology',label:'🖥️ Technology',h:dept.technology},
         ];
         return `<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px">
           <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">DEPARTMENT STATUS</div>
           <div style="display:flex;flex-direction:column;gap:6px">
             ${rows.map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(0,0,0,0.2);border-radius:8px">
-              <div><div style="font-size:12px;font-weight:700;color:#fff">${r.label}</div><div style="font-size:9px;color:var(--dim);margin-top:2px">${mgr(r.key)}</div></div>
+              <div><div style="font-size:12px;font-weight:700;color:#fff">${r.label}</div>${mgr(r.key)?`<div style="font-size:9px;color:var(--dim);margin-top:2px">${mgr(r.key)}</div>`:''}</div>
               <div style="font-size:11px;font-weight:700;color:${trafficColor[r.h.state]};text-transform:uppercase;letter-spacing:1px;white-space:nowrap;text-align:right">${trafficDot(r.h.state)}${r.h.label}</div>
             </div>`).join('')}
           </div>
         </div>`;
       })()}
-      <!-- 9b2. PORTFOLIO INTELLIGENCE + OPPORTUNITY PIPELINE — Company Strategy Engine V1
-           (CEO-approved 2026-08-03). Ranked, confidence-annotated cross-engine comparison
-           (Uber, Investment Engine, all 4 content engines) + the real (currently empty)
-           brain_expansion_ideas registry. No Business Cases yet, no North Star gating yet
-           (COMPANY_NORTH_STAR.gatingActive stays false until V2) — V1 is observability only. -->
-      ${_renderPortfolioIntelligence(_pi)}
-      <!-- 9c. EXECUTIVE CALENDAR — v16.16.0 Phase 7: now reads real brain_documents.
-           expiration_date rows (any department, not just Legal). Still says so honestly
-           when nothing is on file — this is not a mocked-up calendar UI. -->
-      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:4px">
-        <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">EXECUTIVE CALENDAR</div>
-        ${(D.brainUpcomingDeadlines||[]).length
-          ? (D.brainUpcomingDeadlines||[]).map(d=>`<div style="font-size:12px;color:#fff;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04)">${escHTML(d.title||'Untitled')} <span style="color:var(--dim)">— ${escHTML(d.expiration_date||'')}</span></div>`).join('')
-          : '<div style="font-size:12px;color:var(--dim)">No calendar items yet — populates once any department has real filing, contract, or renewal dates on file.</div>'}
-      </div>
     </div>
   `;
 }
@@ -31329,6 +31118,10 @@ function renderFactory(){
    is never written to the shared state. shell.js acts for the Admin user only. */
 (function(){try{var m=/[?&]shell=(on|off)\b/.exec(location.search);if(m){localStorage.setItem('mmm_shell_admin_v1',m[1]);}
 if(localStorage.getItem('mmm_shell_admin_v1')==='on'){var s=document.createElement('script');s.src='/shell.js';document.head.appendChild(s);}}catch(e){}})();
+/* MMMOS simplified CEO homepage (blueprint CEO-017) — requested ONLY when this browser has opted in (?home=on, stored locally as mmm_home_v2="on"); default OFF.
+   home2.js acts for the Admin user only, reads only, and stands down while the older shell flag is on. */
+(function(){try{var m=/[?&]home=(on|off)\b/.exec(location.search);if(m){localStorage.setItem('mmm_home_v2',m[1]);}
+if(localStorage.getItem('mmm_home_v2')==='on'&&localStorage.getItem('mmm_shell_admin_v1')!=='on'){var s=document.createElement('script');s.src='/home2.js';document.head.appendChild(s);}}catch(e){}})();
 </script>
 </body>
 </html>

@@ -39,15 +39,15 @@ export async function openPage(browser, stubOrigin, opts = {}) {
   page.on('pageerror', (e) => pageErrors.push(String(e.message).slice(0, 300)));
   await page.setViewport(opts.viewport || { width: 1440, height: 900 });
   await page.emulateTimezone('UTC');
-  await page.evaluateOnNewDocument((FIXED, flag) => {
+  await page.evaluateOnNewDocument((FIXED, flag, realClock) => {
     const RealDate = Date; const t0 = performance.now();
     class FDate extends RealDate {
       constructor(...a) { if (a.length === 0) super(FIXED + (performance.now() - t0)); else super(...a); }
       static now() { return FIXED + (performance.now() - t0); }
     }
-    window.Date = FDate;
+    if (!realClock) window.Date = FDate;   // realClock: real-data replays need the real date
     try { if (flag) localStorage.setItem('mmm_shell_admin_v1', 'on'); else localStorage.removeItem('mmm_shell_admin_v1'); } catch { /* ignore */ }
-  }, FIXED_NOW, !!opts.flag);
+  }, FIXED_NOW, !!opts.flag, !!opts.realClock);
   await page.setRequestInterception(true);
   page.on('request', (req) => {
     const u = req.url();

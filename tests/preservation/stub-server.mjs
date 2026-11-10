@@ -29,6 +29,20 @@ export function classifyAction(action) {
   return 'unclassified';
 }
 
+// Opt-in (fixture.restFilter): the PostgREST subset the simplified Home uses — eq.X, not.is.null, order=col.asc|desc, limit.
+function pgFilter(rows, params) {
+  let out = rows.slice();
+  for (const [k, v] of params) {
+    if (['select', 'order', 'limit', 'offset', 'apikey'].includes(k)) continue;
+    if (v.startsWith('eq.')) out = out.filter((r) => String(r[k]) === decodeURIComponent(v.slice(3)));
+    else if (v === 'not.is.null') out = out.filter((r) => r[k] != null);
+  }
+  const o = params.get('order');
+  if (o) { const [col, dir] = o.split('.'); out.sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (dir === 'desc' ? -1 : 1)); }
+  const l = Number(params.get('limit')); if (l > 0) out = out.slice(0, l);
+  return out;
+}
+
 export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet = true } = {}) {
   const store = { settings: { ...fixture.settings }, tables: JSON.parse(JSON.stringify(fixture.tables)) };
   const log = [];
@@ -70,7 +84,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
         if (k && k in store.settings) return send(res, 200, [{ key: k, value: store.settings[k] }]);
         return send(res, 200, []);
       }
-      return send(res, 200, store.tables[table] || []);
+      return send(res, 200, fixture.restFilter ? pgFilter(store.tables[table] || [], u.searchParams) : (store.tables[table] || []));   // restFilter: opt-in PostgREST subset (eq / not.is.null / order / limit) for real-data replays
     }
     const { json } = pre || await readBody(req);
     const rpc = rest.match(/^\/rest\/v1\/rpc\/([a-z0-9_]+)/);
