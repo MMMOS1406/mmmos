@@ -16,7 +16,7 @@ check('listed retired channels are skipped; SRV Farsi / SRV English never; unkno
 check('engine map is used when rows carry no tag', L.filterEnabled([{ channel_id: 'X' }], new Set(['X']), 'channel_id', { X: 'NextWave' }).length === 0 && L.filterEnabled([{ channel_id: 'X' }], new Set(['X']), 'channel_id', { X: 'SRV Farsi' }).length === 1);
 // ---- the real handlers in a fake world
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'chsync-'));
-const baseAuto = path.join(tmp, 'autosync_main.mjs'); fs.writeFileSync(baseAuto, execFileSync('git', ['show', 'origin/main:api/youtube/autosync.js']).toString());
+const baseAuto = path.join(tmp, 'autosync_main.mjs'); fs.writeFileSync(baseAuto, execFileSync('git', ['show', '72a476c:api/youtube/autosync.js'])   /* the autosync BEFORE the per-channel switch (merge #91) */.toString());
 let world; const calls = [];
 const json = (o, status = 200) => ({ ok: status < 400, status, headers: { get: () => 'application/json' }, json: async () => o, text: async () => JSON.stringify(o) });
 const WORLD = () => ({
