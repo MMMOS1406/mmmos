@@ -34,8 +34,6 @@ const ENGINE_TO_CHANNEL = {
   'SRV Studio English': 'SRV Studio English',
   'NextWave':           'NextWave Systems',
   'NextWave Systems':   'NextWave Systems',
-  'AI Studio':          'AI Creation Studio',
-  'AI Creation Studio': 'AI Creation Studio',
 };
 
 async function sbGet(path) {

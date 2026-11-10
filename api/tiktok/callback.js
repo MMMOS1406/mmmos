@@ -20,7 +20,7 @@ const SCOPES       = 'user.info.basic,user.info.stats,video.list,video.upload';
 // engine tag → human label, embedded in the OAuth `state` param so the callback
 // knows which MMMOS engine this connection belongs to (fixes the pre-v15.18.0
 // ambiguous single-row-no-engine-tag problem).
-const ENGINE_LABELS = { ai_studio: 'AI Studio', nextwave: 'NextWave', srv_farsi: 'SRV Farsi', srv_english: 'SRV English' };
+const ENGINE_LABELS = { nextwave: 'NextWave', srv_farsi: 'SRV Farsi', srv_english: 'SRV English' };
 
 // ── Supabase helper ──────────────────────────────────────────────────────────
 async function sbUpsert(table, data, onConflict) {
