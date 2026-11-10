@@ -17,6 +17,7 @@ import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, c
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
+import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
@@ -9567,9 +9568,10 @@ async function youtubeAnalyticsPull(req, res) {
   // response, so the existing null-guard already handles this honestly with no further change.
   const metrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained';
   try {
-    const conns = await sbGet('youtube_connections?select=channel_id,refresh_token,scope&order=connected_at.desc');
+    let conns = await sbGet('youtube_connections?select=channel_id,refresh_token,scope&order=connected_at.desc');
     if (!Array.isArray(conns) || !conns.length) return res.status(404).json({ ok:false, error:'no_connections' });
     const channels = await sbGet('youtube_channels?select=channel_id,title,mmm_engine');
+    { const _dis = await _syncLoadDisabled(sbGet); if (_dis.youtube.size) { const _eng = {}; (Array.isArray(channels) ? channels : []).forEach(c => { _eng[c.channel_id] = c.mmm_engine; }); conns = _syncFilterEnabled(conns, _dis.youtube, 'channel_id', _eng); } }
     const titleByCh = {};
     if (Array.isArray(channels)) channels.forEach(c => { titleByCh[c.channel_id] = { title: c.title, engine: c.mmm_engine }; });
     const results = [];
@@ -9651,8 +9653,9 @@ async function youtubeAnalyticsPull(req, res) {
 // via cron OR on-demand from the dashboard.
 async function youtubeSnapshotNow(req, res) {
   try {
-    const videos = await sbGet('youtube_videos?select=video_id,channel_id,views,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,likes,comments&analytics_synced_at=not.is.null');
-    const channels = await sbGet('youtube_channels?select=channel_id,subscribers,total_views,total_videos');
+    let videos = await sbGet('youtube_videos?select=video_id,channel_id,views,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,likes,comments&analytics_synced_at=not.is.null');
+    let channels = await sbGet('youtube_channels?select=channel_id,subscribers,total_views,total_videos,mmm_engine');
+    { const _dis = await _syncLoadDisabled(sbGet); if (_dis.youtube.size && Array.isArray(channels)) { const _eng = {}; channels.forEach(c => { _eng[c.channel_id] = c.mmm_engine; }); const _skip = (id) => _syncIsSkipped(_dis.youtube, id, (x) => _eng[x] || null); channels = channels.filter(c => !_skip(c.channel_id)); if (Array.isArray(videos)) videos = videos.filter(v => !_skip(v.channel_id)); } }
     const today = new Date().toISOString().slice(0,10);
     const vSnaps = (Array.isArray(videos) ? videos : []).map(v => ({
       video_id: v.video_id, channel_id: v.channel_id, snapshot_date: today,
