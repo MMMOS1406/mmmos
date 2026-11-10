@@ -39,7 +39,7 @@ try {
         check(`${b}: views ${views.toLocaleString()} = sum over ALL ${rows.length} synced videos`, c['Views (all synced videos)'] === views.toLocaleString(), c['Views (all synced videos)']);
         check(`${b}: subscribers gained +${subs} = sum over all synced videos`, c['Subscribers gained (from videos)'] === '+' + subs.toLocaleString(), c['Subscribers gained (from videos)']);
         const age = (Date.now() - new Date(last).getTime()) / 86400000;
-        check(`${b}: YouTube health reflects last sync (${age.toFixed(1)} days ago)`, age <= 3 ? /^Syncing/.test(c['YouTube']) && /22c55e|34, 197, 94/.test(cards[i].dot) : /^Needs attention/.test(c['YouTube']), c['YouTube']);
+        check(`${b}: YouTube health reflects last sync (${age.toFixed(1)} days ago)`, age <= 3 ? /^Connected/.test(c['YouTube']) && /22c55e|34, 197, 94/.test(cards[i].dot) : /^Needs attention/.test(c['YouTube']), c['YouTube']);
       }
       // the shared loader would have understated the totals — prove the capped loader differs so the per-channel read is needed
       const capped = real.youtube_videos_analytics.slice().sort((a, b) => (Number(b.views) || 0) - (Number(a.views) || 0)).slice(0, 200);
