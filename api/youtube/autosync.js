@@ -4,6 +4,8 @@
 // Loads all connected channels, syncs each one, retries once on failure,
 // logs every result to youtube_sync_logs.
 
+import { loadDisabled, filterEnabled } from '../../lib/channelSyncControl.mjs'; // per-channel sync switch (default: nothing disabled = unchanged behaviour)
+
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -59,11 +61,14 @@ async function syncChannel(channelId, appUrl) {
 // or block the YouTube sync that already completed above, and each account retries/logs
 // independently so one failed account never blocks another.
 async function syncAllTikTokAccounts(appUrl) {
-  const connections = await sbGet('tiktok_connections?status=eq.connected&select=open_id&limit=20');
-  if (!connections || !connections.length) {
+  const allConnections = await sbGet('tiktok_connections?status=eq.connected&select=open_id,mmm_engine&limit=20');
+  if (!allConnections || !allConnections.length) {
     console.log('[v16.7.0] No connected TikTok accounts — done');
     return { message: 'No accounts connected', total: 0, succeeded: 0, failed: 0, results: [] };
   }
+  const disabledTt = await loadDisabled(sbGet);   // per-account switch (retired businesses only; retained engines can never be skipped)
+  const connections = filterEnabled(allConnections, disabledTt.tiktok, 'open_id');
+  if (connections.length !== allConnections.length) console.log('[sync-control] skipping disabled TikTok account(s):', allConnections.filter(c => !connections.includes(c)).map(c => c.open_id).join(', '));
   console.log('[v16.7.0] TikTok accounts to sync:', connections.map(c => c.open_id).join(', '));
   const results = [];
   for (const conn of connections) {
@@ -140,11 +145,20 @@ export default async function handler(req, res) {
     return res.status(200).json({ message: 'No channels connected', synced: [] });
   }
 
-  console.log('[v12.1] Channels to sync:', connections.map(c => c.channel_id).join(', '));
+  // Per-channel switch: a retired business's channel can be listed in app_settings.sync_disabled_channels and is then skipped here. Retained engines can never be skipped.
+  const disabled = await loadDisabled(sbGet);
+  let toSync = connections;
+  if (disabled.youtube.size) {
+    const engMap = {}; ((await sbGet('youtube_channels?select=channel_id,mmm_engine')) || []).forEach(c => { engMap[c.channel_id] = c.mmm_engine; });
+    toSync = filterEnabled(connections, disabled.youtube, 'channel_id', engMap);
+    const skipped = connections.filter(c => !toSync.includes(c)).map(c => c.channel_id);
+    if (skipped.length) console.log('[sync-control] skipping disabled channel(s):', skipped.join(', '));
+  }
+  console.log('[v12.1] Channels to sync:', toSync.map(c => c.channel_id).join(', '));
 
   const results = [];
 
-  for (const conn of connections) {
+  for (const conn of toSync) {
     const channelId = conn.channel_id;
     let success = false;
     let lastError = null;
