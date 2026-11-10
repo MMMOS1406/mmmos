@@ -15,8 +15,8 @@ const BIZ = ['SRV Farsi', 'SRV English']; const st = JSON.parse(real.state);
 try {
   for (const [w, h, tag] of [[1440, 900, 'desktop'], [375, 812, 'mobile']]) {
     const o = await openPage(browser, stub.origin, { viewport: { width: w, height: h }, realClock: true });
-    await o.page.evaluate(() => localStorage.setItem('mmm_home_v2', 'on'));
-    await o.page.evaluateOnNewDocument(() => localStorage.setItem('mmm_home_v2', 'on'));
+    await o.page.evaluate(() => localStorage.removeItem('mmm_home_v2'));   // default behaviour: no flag
+    await o.page.evaluateOnNewDocument(() => localStorage.removeItem('mmm_home_v2'));
     await o.page.reload(); await login(o.page, stub.origin, 'admin'); await settle(o.page, stub.origin, 1200);
     await o.page.evaluate(() => renderTab('home')); await settle(o.page, stub.origin, 1200);
     const cards = await o.page.evaluate(() => [...document.querySelectorAll('#mainContent .h2-grid.c2 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.children[0].innerText, r.children[1].innerText])), dot: c.querySelector('.h2-dot').style.background })));
