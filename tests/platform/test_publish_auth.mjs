@@ -174,12 +174,13 @@ ok('TikTok stays frozen for a signed-in VA', r.body.error === 'production_frozen
 
 // ── 4. Channel routing (exact) ──
 const routed = (engine) => calls.filter((c) => c.url === 'https://oauth2.googleapis.com/token').map((c) => c.url) && calls;
-for (const [engine, rt] of [['SRV English', 'rt-studio'], ['SRV Farsi', 'rt-srv'], ['NextWave', 'rt-nw'], ['AI Studio', 'rt-ai'], ['AI Creation Studio', 'rt-ai'], ['NextWave Systems', 'rt-nw']]) {
+for (const [engine, rt] of [['SRV English', 'rt-studio'], ['SRV Farsi', 'rt-srv'], ['NextWave', 'rt-nw'], ['NextWave Systems', 'rt-nw']]) {   // CEO-017B: AI Creation Studio is retired (its refusal is asserted right below)
   reset();
   r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, engine }) });
   const tok = calls.find((c) => c.url === 'https://oauth2.googleapis.com/token');
   ok(`routing: engine ${engine} uploads to its own channel`, r.body.ok === true && tok && JSON.stringify(tok).length > 0 && r.body.channelId && db.youtube_connections.find((x) => x.channel_id === r.body.channelId).refresh_token === rt, r.body);
 }
+for (const engine of ['AI Studio', 'AI Creation Studio']) { reset(); r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, engine }) }); ok(`routing: retired engine ${engine} is refused before any call to Google`, r.code === 400 && r.body.error === 'no_engine_mapping' && !calls.some((c) => /googleapis/.test(c.url))); }
 r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, engine: 'Unknown' }) });
 ok('routing: an unmapped engine is refused', r.code === 400 && r.body.error === 'no_engine_mapping');
 r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, channelHandle: 'Some Other Channel' }) });
@@ -216,11 +217,11 @@ reset();
 r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: 'https://attacker.example/x?submagic.co' }) });
 ok('F-A fixed: a URL that merely contains "submagic.co" never receives the Submagic key (and is never fetched)', !calls.some((c) => c.url.startsWith('https://attacker.example')), calls.map((c) => c.url));
 reset();
-r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: 'https://files2.heygen.ai/v/clip.mp4', engine: 'AI Studio' }) });
-ok('allowlist accepts HeyGen CDN (AI Studio / NextWave raw renders)', r.body.ok === true, r.body);
+r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: 'https://files2.heygen.ai/v/clip.mp4', engine: 'NextWave' }) });
+ok('allowlist accepts HeyGen CDN (NextWave raw renders)', r.body.ok === true, r.body);
 ok('the Submagic key is NOT sent to HeyGen', !calls.some((c) => c.headers['x-api-key']));
 reset();
-r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: '11111111-2222-3333-4444-555555555555', engine: 'AI Studio' }) });
+r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: '11111111-2222-3333-4444-555555555555', engine: 'NextWave' }) });
 const cdn = calls.find((c) => c.url === 'https://cdn.submagic.co/out/final.mp4');
 ok('Submagic project id resolves through the Submagic API and uploads', r.body.ok === true && cdn, r.body);
 ok('the Submagic key goes to the real submagic.co CDN host', cdn && cdn.headers['x-api-key'] === 'sk-submagic-test');
