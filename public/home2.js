@@ -1,20 +1,17 @@
-/* MMMOS — simplified CEO homepage (blueprint CEO_017_SIMPLIFIED_INTERFACE.md). ISOLATED BRANCH, default OFF.
+/* MMMOS — CEO homepage (blueprint CEO_017_SIMPLIFIED_INTERFACE.md). DEFAULT for the Admin (CEO decision 2026-11-10: replaces the legacy CEO Headquarters dashboard).
  *
- * Loaded only when this browser opted in (?home=on, stored locally as mmm_home_v2="on") and only acts for the Admin.
- * With the flag off — or for Family / VA — this file is never requested and nothing changes.
- * It adds a nine-item sidebar and a two-row Home (the two retained businesses; finance and analytics). It READS only (the app's own analytics loader plus one packages read per business),
- * writes nothing, calls no write action, and sends no credential. Every other screen still renders through the ORIGINAL router.
- * It stands down when the older CEO-008 shell is on (mmm_shell_admin_v1="on"). Reversible: ?home=off, or "Classic navigation" (this tab).
+ * Loaded for every session but acts ONLY for the Admin; Family and VA never see it (this file then only passes every call through).
+ * It adds a nine-item sidebar and a two-business Home (SRV Farsi, SRV English; finance and analytics). It READS only (one packages read and
+ * one analytics read per business), writes nothing, calls no write action, and sends no credential. Every other screen — Tasks, Packages,
+ * Analytics, Finance, Brain, Engineering, Integrations, Settings, and every sub-tab chip row inside them — still renders through the ORIGINAL router.
+ * There is no opt-in flag, no "classic navigation" switch and no second CEO homepage; rollback is a deployment rollback.
  */
 (function () {
   'use strict';
   if (window.Home2) return;
-  var FLAG = 'mmm_home_v2', CLASSIC = 'mmm_home_classic', SHELL = 'mmm_shell_admin_v1';
-  function ls(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
-  function ss(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
   function isAdmin() { return typeof currentUser !== 'undefined' && !!currentUser && currentUser.id === 'admin'; }
-  function authorized() { return ls(FLAG) === 'on' && ls(SHELL) !== 'on' && isAdmin(); }
-  function active() { return authorized() && ss(CLASSIC) !== '1'; }
+  function authorized() { return isAdmin(); }
+  function active() { return authorized(); }
   var _renderTab = window.renderTab;
   if (typeof _renderTab !== 'function') return;
 
@@ -67,7 +64,7 @@
     var el = $('h2Side'), app = $('appScreen'); if (!app) return;
     if (!el) { el = document.createElement('nav'); el.id = 'h2Side'; el.setAttribute('aria-label', 'Main'); app.insertBefore(el, $('mainContent')); }
     el.innerHTML = SIDE.map(function (s) { return '<button type="button" data-h2="' + s[0] + '" class="' + (S.cur === s[0] ? 'on' : '') + '">' + esc(s[1]) + '</button>'; }).join('') +
-      '<div class="sp"></div><button type="button" class="cl" data-h2="__classic">Classic navigation</button>';
+      '<div class="sp"></div>';
     app.classList.add('h2-on');
   }
   function scrub() {
@@ -76,7 +73,6 @@
   }
   function legacy(tab, cur, then) { _renderTab(tab); if (then) safe(then); S.cur = cur || tab; paintSide(); }
   function go(id) {
-    if (id === '__classic') { try { sessionStorage.setItem(CLASSIC, '1'); } catch (e) { /* ignore */ } scrub(); window.renderTab('home'); return; }
     if (id === 'home') { window.renderTab('home'); return; }
     if (id.indexOf('biz:') === 0) { S.cur = id; paintSide(); paintMain(bizPage(id.slice(4))); load(function () { paintMain(bizPage(id.slice(4))); }); return; }
     if (id === 'analytics') return legacy('engines', 'analytics', function () { setEnginesSub('analytics'); });
@@ -171,7 +167,11 @@
   }
 
   /* ------------------------------------------------------------ router hook */
+  // Router ids the original app renders. For the Admin anything else (retired routes such as social_media_manager, or an empty id) used to fall
+  // through to the legacy CEO Headquarters dashboard; it now lands on the new Home instead, so the legacy dashboard is unreachable.
+  var KNOWN = ['home', 'finance', 'tasks', 'engines', 'marketing', 'human_resources', 'legal_compliance', 'system', 'analytics', 'content', 'packages', 'integrations', 'constitution', 'factory', 'continuity', 'settings'];
   window.renderTab = function (tab) {
+    if (active() && KNOWN.indexOf(tab) < 0) tab = 'home';
     if (!active() || tab !== 'home') {
       var r = _renderTab.apply(this, arguments);
       if (active()) { S.cur = tab === 'home' ? 'home' : (SIDE.some(function (s) { return s[0] === tab; }) ? tab : S.cur); paintSide(); } else if (!authorized()) scrub();
@@ -180,6 +180,15 @@
     if (typeof currentTab !== 'undefined') currentTab = 'home';
     S.cur = 'home'; style(); paintSide(); paintMain(homePage()); load(function () { if (S.cur === 'home' && active()) paintMain(homePage()); });
   };
+  /* The app's own saveAppState() ends in syncState(), which writes the LEGACY Home straight into #mainContent (it bypasses the router).
+     For the Admin that would bring the old dashboard back after the first save, so it repaints the new Home instead. Other roles: untouched. */
+  var _syncState = window.syncState;
+  if (typeof _syncState === 'function') {
+    window.syncState = function () {
+      if (active() && typeof currentTab !== 'undefined' && currentTab === 'home' && $('mainContent')) { paintMain(homePage()); return; }
+      return _syncState.apply(this, arguments);
+    };
+  }
   document.addEventListener('click', function (ev) {
     var t = ev.target && ev.target.closest && ev.target.closest('[data-h2]'); if (!t || !active()) return;
     var id = t.getAttribute('data-h2');
