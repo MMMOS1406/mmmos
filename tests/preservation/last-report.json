@@ -1,121 +1,121 @@
 {
- "at": "2026-10-13T21:39:21.690Z",
+ "at": "2026-11-10T18:41:29.373Z",
  "total": 141,
- "failed": 0,
+ "failed": 42,
  "results": [
   {
    "name": "flag OFF · admin · home identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 2446d5b5e24b30d5 vs cbe63f67e8414000"
   },
   {
    "name": "flag OFF · admin · finance identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash c4dbdc4783ef49b3 vs 63e1facfe5ec3fb6"
   },
   {
    "name": "flag OFF · admin · tasks identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 0a70d9111a05c228 vs 82b962fda1ffde52"
   },
   {
    "name": "flag OFF · admin · engines:overview identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 1fb16d745f0abccc vs e443613f5bcadb94"
   },
   {
    "name": "flag OFF · admin · engines:analytics identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 8e4f05e2666289ab vs 44af3001c840941f"
   },
   {
    "name": "flag OFF · admin · engines:packages identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 76dc2daf09564adf vs fe1db8d85d8dd392"
   },
   {
    "name": "flag OFF · admin · marketing identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 64130a41552e86d7 vs 1d7026e8527a9090"
   },
   {
    "name": "flag OFF · admin · human_resources identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash c146dc666bf1f7a8 vs c146dc666bf1f7a8"
   },
   {
    "name": "flag OFF · admin · legal_compliance identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash c9ad945bb9b755d2 vs c9ad945bb9b755d2"
   },
   {
    "name": "flag OFF · admin · system:settings identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 9dc3f6ac33669169 vs 695719ff64ec7743"
   },
   {
    "name": "flag OFF · admin · system:integrations identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash f45eeaf03f1a9709 vs 473d76053634050e"
   },
   {
    "name": "flag OFF · admin · system:engineering identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash d38ed2eaf8a67b92 vs d38ed2eaf8a67b92"
   },
   {
    "name": "flag OFF · admin · system:brain_validation identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 661540e41544a1d5 vs 661540e41544a1d5"
   },
   {
    "name": "flag OFF · admin · social_media_manager identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 2446d5b5e24b30d5 vs a7bdcb73565375ee"
   },
   {
    "name": "flag OFF · admin · constitution identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 27fbb53f8aa6736f vs 5aa4602a8a3897bf"
   },
   {
    "name": "flag OFF · admin · continuity identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 27fbb53f8aa6736f vs 5aa4602a8a3897bf"
   },
   {
    "name": "flag OFF · admin · factory identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 27fbb53f8aa6736f vs 5aa4602a8a3897bf"
   },
   {
    "name": "flag OFF · admin · packages identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 50c850a1a29216f2 vs 9cf3d6417bcdb8e9"
   },
   {
    "name": "flag OFF · admin · analytics identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 2c10db215841d2d8 vs 7ad7ad848196258d"
   },
   {
    "name": "flag OFF · admin · integrations identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash dadaead4741ae796 vs 03e8f69d0869c67b"
   },
   {
    "name": "flag OFF · admin · settings identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash a066ba9e39e9192d vs e5e28e5c4d9ff066"
   },
   {
    "name": "flag OFF · admin · login makes the same set of requests",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
    "name": "flag OFF · admin · final task count identical (14)",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -125,22 +125,22 @@
   },
   {
    "name": "flag OFF · family · home identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 838353024f647b88 vs 539b92bec751c9c8"
   },
   {
    "name": "flag OFF · family · finance identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 94b8d480412951d8 vs 94b8d480412951d8"
   },
   {
    "name": "flag OFF · family · engines:overview identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash df361aa49a7ad3fd vs 2d2e02856a8674d2"
   },
   {
    "name": "flag OFF · family · login makes the same set of requests",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -155,12 +155,12 @@
   },
   {
    "name": "flag OFF · va · tasks identical to baseline",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "hash 7a72ea445401f170 vs a3f3d43adb72cd52"
   },
   {
    "name": "flag OFF · va · login makes the same set of requests",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -185,7 +185,7 @@
   },
   {
    "name": "flag ON · family · home identical to baseline",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -195,12 +195,12 @@
   },
   {
    "name": "flag ON · family · engines:overview identical to baseline",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
    "name": "flag ON · va · tasks identical to baseline",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -220,8 +220,8 @@
   },
   {
    "name": "flag ON · Admin login performs the same distinct write requests as classic login",
-   "ok": true,
-   "detail": "{\"shell\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\",\"POST /api/ops?action=finance_snapshot_save\",\"POST /api/ops?action=sync_marketing_work_items\"],\"classic\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\","
+   "ok": false,
+   "detail": "{\"shell\":[\"POST /__sb/rest/v1/rpc/mmm_state_save rpc:mmm_state_save\",\"POST /api/ops?action=ceo_login\",\"POST /api/ops?action=db_proxy\",\"POST /api/ops?action=engineering_task_home_list\",\"POST /api/ops?action=finance_snapshot_save\",\"POST /api/ops?action=sync_marketing_work_items\"],\"classic\":[\"POST /__s"
   },
   {
    "name": "flag ON · Admin login adds no read request the classic login does not make",
@@ -275,7 +275,7 @@
   },
   {
    "name": "CEO surface lists all five engines",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -375,8 +375,8 @@
   },
   {
    "name": "CEO-007 inventory: every named function still exists (96 checks)",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "E5:renderAIStudioLifecycleCard, E5:_aiStudioSetStage"
   },
   {
    "name": "CEO-007 inventory: all 77 capability rows are accounted for",
@@ -385,8 +385,8 @@
   },
   {
    "name": "every classic screen opened through the shell is identical to the classic navigation (21 routes)",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "home: DOM differs from classic; finance: DOM differs from classic; tasks: DOM differs from classic; engines:overview: DOM differs from classic; engines:analytics: DOM differs from classic; engines:packages: DOM differs from classic; marketing: DOM differs from classic; system:settings: DOM differs from classic; system:integrations: DOM differs from classic; social_media_manager: DOM differs from classic; constitution: DOM differs from classic; packages: DOM differs from classic; analytics: DOM differs from classic; integrations: DOM differs from classic; settings: DOM differs from classic"
   },
   {
    "name": "Continuity and Factory (hidden today) stay reachable and behave exactly as they do today",
@@ -435,8 +435,8 @@
   },
   {
    "name": "\"Classic navigation\" restores the existing nine primary tabs",
-   "ok": true,
-   "detail": "🏛️ CEO Headquarters | 💰 Finance | 🏭 Operations | 📣 Marketing & Sales | 👥 Human Resources | ⚖️ Legal & Compliance | 🖥️ Technology | 📋 Tasks | 📱 Social Media Manager | 🧭 New layout"
+   "ok": false,
+   "detail": "🏛️ CEO Headquarters | 💰 Finance | 🏭 Operations | 📣 Marketing & Sales | 👥 Human Resources | ⚖️ Legal & Compliance | 🖥️ Technology | 📋 Tasks | 🧭 New layout"
   },
   {
    "name": "classic mode offers a way back (\"New layout\")",
@@ -461,12 +461,12 @@
   {
    "name": "Tasks/cadence: opening Tasks creates the week's tasks (classic)",
    "ok": true,
-   "detail": "6 -> 14"
+   "detail": "6 -> 12"
   },
   {
    "name": "Tasks/cadence: the shell path creates exactly the same tasks as classic",
    "ok": true,
-   "detail": "6 -> 14 vs 6 -> 14"
+   "detail": "6 -> 12 vs 6 -> 12"
   },
   {
    "name": "Tasks/cadence: not duplicated on a second open",
@@ -476,7 +476,7 @@
   {
    "name": "Tasks/cadence: same number of state saves as classic",
    "ok": true,
-   "detail": "4 vs 4"
+   "detail": "5 vs 5"
   },
   {
    "name": "Shared state: no shell/UI preference ever reaches the shared state blob",
@@ -485,17 +485,17 @@
   },
   {
    "name": "Engine lifecycles (SRV Farsi · SRV English · AI Studio · NextWave): a stage advance behaves identically through the shell path",
-   "ok": true,
-   "detail": "{\"SRV Farsi\":\"review\",\"SRV English\":\"review\",\"AI Studio\":\"review\",\"NextWave\":\"review\"}"
+   "ok": false,
+   "detail": "{\"SRV Farsi\":\"review\",\"SRV English\":\"review\",\"AI Studio\":\"ERR window[set] is not a function\",\"NextWave\":\"review\"}"
   },
   {
    "name": "Engine lifecycles: the same number of shared-state saves as classic",
    "ok": true,
-   "detail": "4 vs 4"
+   "detail": "3 vs 3"
   },
   {
    "name": "flag default OFF: Admin sees the classic nine tabs and no shell",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -505,7 +505,7 @@
   },
   {
    "name": "?shell=off turns it off again (immediate rollback)",
-   "ok": true,
+   "ok": false,
    "detail": ""
   },
   {
@@ -526,7 +526,7 @@
   {
    "name": "only the files this order authorizes were changed (public/shell.js and tests/preservation/ — no index.html, api/, vercel.json, migrations, lib, engine files)",
    "ok": true,
-   "detail": "public/shell.js, tests/preservation/role-switch-checks.mjs, tests/preservation/run.mjs, tests/preservation/shell-checks.mjs"
+   "detail": ""
   },
   {
    "name": "public/index.html: untouched by this change (the CEO-008 loader is unchanged and remains the only shell hook)",
@@ -534,14 +534,14 @@
    "detail": ""
   },
   {
-   "name": "no top-level function removed or renamed (879 existing functions)",
+   "name": "no top-level function removed or renamed (1103 existing functions)",
    "ok": true,
    "detail": ""
   },
   {
    "name": "all 114 existing screen/section render functions listed in CEO-007 still exist",
-   "ok": true,
-   "detail": ""
+   "ok": false,
+   "detail": "_renderAIStudioOperatorPanel, renderAIStudioLifecycleCard"
   },
   {
    "name": "shell.js performs no network call and no state write (no fetch/XHR, no saveAppState, no D assignment)",
@@ -690,8 +690,8 @@
   },
   {
    "name": "9. shell flag turned OFF mid-session: Admin is back on the classic nine tabs with no shell chrome",
-   "ok": true,
-   "detail": "nav=9 bar=false"
+   "ok": false,
+   "detail": "nav=8 bar=false"
   },
   {
    "name": "9. …and ShellApp.* is refused while the flag is OFF",

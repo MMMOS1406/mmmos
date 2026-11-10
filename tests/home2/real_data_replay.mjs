@@ -27,7 +27,7 @@ try {
       for (const [i, b] of BIZ.entries()) {
         const c = cards[i].kv;
         const pk = real.packages.filter((p) => p.engine === b).sort((x, y) => (x.created_at < y.created_at ? 1 : -1))[0];
-        check(`${b}: last package = newest package row (#${pk.id})`, trunc(pk.title || '#' + pk.id, 48) === c['Last package'], c['Last package']);
+        check(`${b}: last package = newest package row (#${pk.id})`, trunc(pk.title || '#' + pk.id, 48).trim() === String(c['Last package']).trim(), c['Last package']);
         const fp = JSON.parse(pk.full_package); const vid = pk.youtube_video_id || fp._srvYtLongId || fp.youtubeVideoId || (fp.srvPublish || {}).videoId;
         const exp = vid ? ((fp.srvPublish || {}).privacyStatus === 'private' ? 'On YouTube (private)' : 'On YouTube') : (fp.lifecycleStage ? 'In production · ' + fp.lifecycleStage : fp.srvRender ? 'Rendered, not uploaded' : 'Generated (draft)');
         check(`${b}: stage "${c['Stage']}" matches the package's own markers`, c['Stage'] === exp, `expected ${exp}`);

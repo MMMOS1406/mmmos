@@ -7263,6 +7263,47 @@ function computeWeeklyCEOBrief(pi, F){
     generatedAt:new Date().toISOString(),
   };
 }
+// Kept (dependency verified 2026-11-10): the older admin shell (public/shell.js, Finance accordion) still calls this.
+function _renderPortfolioIntelligence(pi){
+  const confColor={high:'#22c55e',medium:'#f59e0b',low:'#ef4444',none:'#6b7280'};
+  const trendColor={Growing:'#22c55e',Stable:'#6b7280',Declining:'#ef4444','No data':'#6b7280'};
+  const trendArrow={Growing:'↑',Stable:'→',Declining:'↓','No data':'—'};
+  // v16.19.0 — CSE V2 refinement #2 (CEO-approved 2026-08-03): unified Trend indicator
+  // (Growing/Stable/Declining/No data) rendered for every entry, with an honest trendNote
+  // when real historical data isn't available yet (Uber, Investment Engine).
+  const row=(e)=>{
+    const rev='$'+Math.round(e.monthlyRevenue||0).toLocaleString()+'/mo';
+    const tl=e.trendLabel||'No data';
+    return `<div style="padding:10px;background:rgba(0,0,0,0.2);border-radius:8px;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div style="font-size:12px;font-weight:700;color:#fff">${e.icon} ${escHTML(e.name)}</div>
+        <span style="font-size:8px;font-weight:800;color:${confColor[e.confidence]||'#6b7280'};padding:1px 6px;background:${confColor[e.confidence]||'#6b7280'}18;border:1px solid ${confColor[e.confidence]||'#6b7280'}40;border-radius:4px;white-space:nowrap">${e.confidence.toUpperCase()} CONFIDENCE</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+        <div style="font-size:11px;color:#c9a84c;font-weight:700">${rev}</div>
+        <span style="font-size:10px;font-weight:800;color:${trendColor[tl]||'#6b7280'}">${trendArrow[tl]||'—'} ${escHTML(tl)}</span>
+      </div>
+      <div style="font-size:10px;color:var(--dim);margin-top:3px;line-height:1.4">${escHTML(e.confidenceNote||'')}</div>
+      ${e.trendNote?`<div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.4">${escHTML(e.trendNote)}</div>`:''}
+    </div>`;
+  };
+  const targetRows=(pi.targetEngines||pi.ranked.filter(e=>e.countsTowardTarget)).map(row).join('');
+  const otherRows=(pi.otherEngines||pi.ranked.filter(e=>!e.countsTowardTarget)).map(row).join('');
+  const ideas=D.brainExpansionIdeas||[];
+  const ideasHtml = ideas.length
+    ? ideas.map(i=>`<div style="font-size:12px;color:#fff;padding:4px 0">• ${escHTML(i.title||i.name||'Untitled idea')}</div>`).join('')
+    : '<div style="font-size:12px;color:var(--dim);line-height:1.5">No opportunities logged yet. Per the CEO-approved CSE architecture, this pipeline is observation-only — it never autonomously researches, scores, or executes ideas; entries only appear once added to the Brain.</div>';
+  return `<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px">
+    <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">🧭 PORTFOLIO INTELLIGENCE <span style="color:#6b7280;font-weight:400">— ranked toward the $${(pi.machineGoal||MACHINE_INCOME_TARGET).toLocaleString()}/mo objective</span></div>
+    <div style="font-size:9px;font-weight:700;color:#c9a84c;letter-spacing:1px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">COUNTS TOWARD MACHINE INCOME TARGET</div>
+    ${targetRows}
+    <div style="font-size:9px;font-weight:700;color:var(--dim);letter-spacing:1px;margin:12px 0 6px;font-family:'JetBrains Mono',monospace">ACTIVE INCOME — OUTSIDE THE TARGET, BY DESIGN</div>
+    ${otherRows}
+    <div style="font-size:9px;color:var(--dim);margin-top:6px;line-height:1.5">Note: the $${(pi.machineGoal||MACHINE_INCOME_TARGET).toLocaleString()}/mo Machine Income target (Strategic Goals) tracks passive + content engines only, by design — Uber's active income is shown here for full-portfolio visibility but is not counted toward that target.</div>
+    <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin:14px 0 8px;font-family:'JetBrains Mono',monospace">💡 OPPORTUNITY PIPELINE</div>
+    ${ideasHtml}
+  </div>`;
+}
 function _renderHomeOperatorDashboard(){
   // Kick off background fetch (non-blocking) — first render uses stale values
   if(!window._homeSyncFetched){ window._homeSyncFetched=true; _homeFetchAnalyticsSync().then(()=>{
