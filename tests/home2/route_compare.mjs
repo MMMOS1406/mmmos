@@ -16,7 +16,7 @@ async function run(pub, role, routes) {
 for (const [role, routes] of [['admin', ADMIN_ROUTES], ['family', FAMILY_ROUTES], ['va', VA_ROUTES]]) {
   const a = await run(mainPub, role, routes), b = await run(brPub, role, routes);
   const diff = Object.keys(a).filter((k) => a[k] !== b[k]);
-  const allowed = (k) => /^home\b/.test(k);
+  const allowed = (k) => /^(home|social_media_manager)\b/.test(k);   // Home (sections removed by CEO order); social_media_manager is a retired route that now falls through to Home
   check(`${role}: ${Object.keys(a).length} routes compared; only Home may differ`, diff.every(allowed), `differing: ${diff.join(', ') || 'none'}`);
 }
 const f = R.filter((x) => !x).length; console.log(`${R.length - f}/${R.length}`); process.exit(f ? 1 : 0);

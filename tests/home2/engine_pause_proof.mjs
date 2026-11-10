@@ -28,7 +28,7 @@ try {
   const base = await run({ SMM: 'test', NextWave: 'test' });                                    // production state BEFORE the pause
   const paused = await run({ SMM: 'test', NextWave: 'test', 'AI Studio': 'paused' });           // production state AFTER the pause
   console.log('before pause:', JSON.stringify(base)); console.log('after pause :', JSON.stringify(paused));
-  check('before the pause AI Studio would still generate tasks (this is why it is paused)', (base.created['AI Studio'] || 0) > 0);
+  check('after the retirement release no retired engine generates tasks in either state (the engine entries are gone from the active app; the pause row stays as a second, independent stop)', !base.created['AI Studio'] && !paused.created['AI Studio'] && !base.created.NextWave && !base.created.SMM);
   check('NextWave and SMM generate nothing in either state (already stopped by their test state)', !base.created.NextWave && !paused.created.NextWave && !base.created.SMM && !paused.created.SMM);
   check('after the pause AI Studio generates no task', !(paused.created['AI Studio'] > 0));
   // the run creates at most 8 tasks in total: before the pause AI Studio used 2 of them, which can crowd out SRV Farsi's last (long-form) slot — after the pause it is never fewer
