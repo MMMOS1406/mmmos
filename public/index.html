@@ -768,7 +768,7 @@ const USERS=[
   // v13.69.46 — MMMOS Simplification: access lists now reference the 5 primary tabs (home/tasks/engines/finance/system).
   // Legacy sub-routes (content, packages, integrations, constitution, factory, continuity, settings) remain callable
   // via renderTab(id) for backward compat; they just don't appear in the top nav anymore.
-  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","tasks","engines","finance","system","marketing","human_resources","legal_compliance","social_media_manager"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against. v16.67.1 — restored "tasks": the v13.69.46 5-tabs consolidation's own comment says access lists cover the 5 primary tabs (home/tasks/engines/finance/system), yet admin's array omitted "tasks" — the one place the Developer Options/quick-generate Long-or-Short test control (renderDeveloperCard, called only from renderTasks) renders, so it silently became unreachable for admin/CEO while VA (whose access already includes "tasks") was unaffected.
+  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","tasks","engines","finance","system","marketing","human_resources","legal_compliance"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against. v16.67.1 — restored "tasks": the v13.69.46 5-tabs consolidation's own comment says access lists cover the 5 primary tabs (home/tasks/engines/finance/system), yet admin's array omitted "tasks" — the one place the Developer Options/quick-generate Long-or-Short test control (renderDeveloperCard, called only from renderTasks) renders, so it silently became unreachable for admin/CEO while VA (whose access already includes "tasks") was unaffected.
   {id:"family",name:"Family",role:"Family Access",emoji:"👨‍👩‍👧",access:["home","finance","engines"]},
   {id:"va",name:"VA",role:"Operator",emoji:"⚙️",access:["tasks","system"]},
 ];
@@ -797,7 +797,6 @@ const NAV_ITEMS=[
   // chip. VA's actual content routing is unaffected either way (renderTab intercepts to
   // renderVAOperatorMode for any non-'factory' tab), this only affects the top nav chip itself.
   {id:"tasks",label:"📋 Tasks",short:"📋"},
-  {id:"social_media_manager",label:"📱 Social Media Manager",short:"📱"}, // v16.28.0 — Vertical Slice Milestone 1: Business UI (pilot: Urban Halal Shack)
 ];
 // v13.69.46 — sub-tab routing inside the consolidated tabs.
 // v13.69.46 — Pipeline migrated here from Tasks (engine-output state belongs with engine outputs).
@@ -833,6 +832,9 @@ const SYSTEM_VISIBLE_SUBTABS = SYSTEM_SUBTABS.filter(s=>['settings','integration
 let currentEnginesSub = 'overview'; // v13.69.46 — default landing is Overview (full engine portfolio)
 let currentSystemSub = 'settings';
 
+// CEO portfolio decision 2026-11-09: NextWave, SMM and AI Creation Studio are retired. Their records stay untouched in the shared state and the database (and in the archives);
+// this predicate only keeps them out of every ACTIVE list the app renders. It never changes data.
+function _isRetiredBusiness(v){ return /next\s?wave|ai[ _-]?creation|ai[ _-]?studio|^smm$|social[ _-]?media[ _-]?manager/i.test(String(v==null?'':v)); }
 const ENGINES_CONFIG=[
   {id:"srv_farsi",name:"SRV Farsi",icon:"🌹",hint:"Persian emotional songs",
    modes:["Female — Emotional","Female — Romantic","Female — Happy","Male — Emotional","Male — Romantic","Male — Happy","Duet — Emotional","Duet — Romantic","Duet — Happy"],
@@ -921,18 +923,7 @@ const ENGINES_CONFIG=[
    },
    lifecycle:{musicAdapter:'manual',imageAdapter:'pexels',rendererAdapter:'canvas',requireApprove:true},
   }, // v13.28 — Phase 8 slice 1 | v13.38 — slice 3a cadence | v13.69.50 — lifecycle enabled | v13.69.80 — avatar library
-  {id:"nextwave",name:"NextWave",icon:"⚡",hint:"Colin finance/AI/motivation shorts",
-   modes:["Finance","AI / Tech","Motivation"],
-   type:"script",weeklyCapacity:3,cadenceDays:["Monday","Tuesday","Wednesday","Thursday"], // v15.7.0 — 3 slots/week; production Mon-Thu; Fri=Long/Sat=Short/Sun=Short
-   longFormDay:"Wednesday",longFormMode:"Finance",
-   lifecycle:{requireApprove:true}}, // v13.94.0 Phase 4: lifecycle enabled | v13.28 | v13.38 | v13.69.462
-  // v16.52.0 — CEO Decision #26: SMM registered as an Operator Mode engine so its VA task
-  // appears in the shared VA Portal lifecycle (Generate→Review→Build→Approve→Publish→Done),
-  // same bar/labels as the engines above. No weeklyCapacity/cadenceDays/modes — SMM tasks are
-  // per-client (business_id), not a fixed weekly content calendar; stage is read live from the
-  // real sm_va_tasks/sm_production_packages/sm_video_productions tables, not a manual clicker.
-  {id:"smm",name:"SMM",icon:"📱",hint:"Client social media video ads (per-business)",
-   type:"video",lifecycle:{requireApprove:true}},
+  // CEO portfolio decision 2026-11-09: NextWave, SMM and AI Creation Studio are RETIRED — their engine entries are gone from the active app (data and archives preserved).
 ];
 
 // ── CHANNEL AVATAR AUTOMATION (R2 Slice AA-2) ──────────────────────────────
@@ -3164,8 +3155,8 @@ async function ytStrategyLoad(){
     const r = await fetch('/api/ops?action=strategy_state');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error)+'</div>'; return; }
-    const focus = d.channels.filter(c => c.engine === 'NextWave');
-    const others = d.channels.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.channels.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     const statusColor = { continue:'#3b82f6', scale:'#22c55e', reduce:'#f59e0b', pause:'#ef4444' };
     const renderChannel = (c) => {
       const sc = statusColor[c.status] || '#888';
@@ -3231,7 +3222,7 @@ async function ytLoadOptimizationState(){
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error||'failed')+'</div>'; return; }
     window._mmmOptState = d;
-    const FOCUS_ENGINES = ['NextWave'];
+    const FOCUS_ENGINES = [];   // NextWave retired
     const OTHER_ENGINES = ['SRV Farsi', 'SRV English'];
     let html = '';
     // Auto-apply toggles
@@ -3295,8 +3286,8 @@ async function ytRevenueDashboard(){
     const r = await fetch('/api/ops?action=revenue_dashboard');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error||'failed')+'</div>'; return; }
-    const focus = d.perChannel.filter(c => c.engine === 'NextWave');
-    const others = d.perChannel.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.perChannel.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     const bar = (pct, color) => '<div style="display:inline-block;width:100%;height:6px;background:rgba(255,255,255,0.05);border-radius:3px;overflow:hidden;vertical-align:middle"><div style="width:'+Math.min(100,pct)+'%;height:100%;background:'+color+';transition:width 0.3s"></div></div>';
     const renderChannel = (c) => {
       const eta = c.etaToYppDays != null ? Math.round(c.etaToYppDays)+' days to 1k subs at current growth' : (c.yppReady ? 'YPP-READY' : 'no growth signal yet');
@@ -3338,8 +3329,8 @@ async function ytDecisionEngine(){
     const r = await fetch('/api/ops?action=decision_engine&days=30');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error||'failed')+'</div>'; return; }
-    const focus = d.perChannel.filter(c => c.engine === 'NextWave');
-    const others = d.perChannel.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.perChannel.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     const actionColor = { INCREASE:'#22c55e', CONTINUE:'#3b82f6', TEST:'#f59e0b', REDUCE:'#ef4444', STOP:'#ef4444' };
     const priorityBadge = { high:'🔥', medium:'•', low:'·' };
     const renderChannel = (c) => {
@@ -3384,8 +3375,8 @@ async function ytFoundationReport(){
     const r = await fetch('/api/ops?action=analytics_foundation&days=30');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+ (d.message||d.error||'failed') +'</div>'; return; }
-    const focus = d.perChannel.filter(c => c.engine === 'NextWave');
-    const others = d.perChannel.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.perChannel.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     let html = '';
     const renderChannel = (c) => {
       const g = c.growth, w = c.window;
@@ -4369,14 +4360,12 @@ function renderTab(tab){
     factory:renderFactory,
     continuity:renderContinuity,
     settings:renderSettings,
-    social_media_manager:renderSocialMediaManager, // v16.28.0 — Vertical Slice Milestone 1
   };
   c.innerHTML=(map[tab]||renderHome)();
   attachEditors();
   if(tab==='home'){drawGraph(graphRange);loadWeeklyReport();loadOperatorTasks();loadApprovals();loadEngTasksHome();_ensureYouTubeAnalyticsLoaded();if(currentUser?.id==='admin'){loadAIRecommendations();loadReliabilityMetrics();}}
   if(tab==='finance')setTimeout(()=>drawAllFinanceCharts(finAnalyticsRange),100);
   if(tab==='packages')loadAndShowPackages();
-  if(tab==='social_media_manager')loadAndShowSocialMediaManager(); // v16.28.0
   // v16.14.0 — Phase 5: every department tab needs the same Brain roster data as Home.
   if(['finance','engines','marketing','human_resources','legal_compliance','system'].indexOf(tab)>=0){
     _ensureBrainDeptDataLoaded();
@@ -4825,7 +4814,7 @@ function computeNextRecommendedAction(){
     return {headline:`Continue task: ${_name}${_eng?(' — '+_eng):''}`,cta:'Open Tasks',target:'tasks',tone:'info'};
   }
   const sevenDaysAgo=Date.now()-7*86400000;
-  const engineNames=['SRV Farsi','SRV English','NextWave'];
+  const engineNames=['SRV Farsi','SRV English'];
   // v13.62.9 H1 patch — exclude paused engines from cold check (reuses _pause above)
   const coldEngines=engineNames.filter(name=>{
     if(_pause[name]) return false;
@@ -4922,7 +4911,7 @@ function _engineStatsThisWeek(){
   const STUCK_MS=48*60*60*1000;
   const nowTs=Date.now();
   const sevenDaysAgo=nowTs-7*86400000;
-  const engineNames=['SRV Farsi','SRV English','NextWave'];
+  const engineNames=['SRV Farsi','SRV English'];
   return engineNames.map(name=>{
     const etasks=tasks.filter(t=>t&&t.engine===name);
     const done7=etasks.filter(t=>t&&t.status==='done'&&t.updatedAt&&new Date(t.updatedAt).getTime()>sevenDaysAgo).length;
@@ -5421,7 +5410,6 @@ function cmdResumeEngine(q,opts){
 const _ENGINE_STATE_DEFS=[
   {name:'SRV Farsi',    icon:'🌹', id:'srv_farsi'},
   {name:'SRV English',  icon:'🎵', id:'srv_english'},
-  {name:'NextWave',     icon:'⚡', id:'nextwave'},
   {name:'Uber Engine', icon:'🚗', id:'uber'},
   {name:'Investment Engine',icon:'📈',id:'investment'},
 ];
@@ -6404,7 +6392,6 @@ function computeMarketingRecommendations(){
   const _eDefs=[
     {name:'SRV Farsi',   icon:'🌹', key:'SRV Farsi'},
     {name:'SRV English', icon:'🎵', key:'SRV English'},
-    {name:'NextWave',    icon:'⚡', key:'NextWave'},
   ];
   function _ch(k){const n=_ENGINE_CH[k]||k;return(D.channels||[]).find(c=>c.name===n)||null;}
   const scorecard=_eDefs.map(e=>{
@@ -7075,7 +7062,6 @@ function computePortfolioIntelligence(){
   const _eDefs=[
     {name:'SRV Farsi',   icon:'🌹', key:'SRV Farsi'},
     {name:'SRV English', icon:'🎵', key:'SRV English'},
-    {name:'NextWave',    icon:'⚡', key:'NextWave'},
   ];
   function _ch(k){const n=_ENGINE_CH[k]||k;return(D.channels||[]).find(c=>c.name===n)||null;}
   const _uberInc=(()=>{const p=(D.plaidIncomeBySource||[]).find(s=>s.source==='Uber');if(p&&p.monthly)return p.monthly;const m=(D.income||[]).find(i=>i.label==='Uber');return m?m.amount:0;})();
@@ -7413,7 +7399,6 @@ function _renderHomeOperatorDashboard(){
   const engines=[
     {name:'Uber Engine',      icon:'🚗', status:'running',  detail:'Active Income Engine · Weekly Earnings Tracking · Funds MMMOS Operations'},
     {name:'Investment Engine',icon:'📈', status:'running',  detail:'Monthly DCA Active · Portfolio Synced · Long-Term Wealth Machine'},
-    {name:'NextWave',         icon:'⚡', status:_homeEngineStatus('NextWave'),   detail:'Finance & Technology Engine · Shorts & Long Videos · Growth Engine'},
     {name:'SRV Farsi',        icon:'🌹', status:_homeEngineStatus('SRV Farsi'), detail:'Persian Music Engine · Long Songs & Shorts · Audience Building'},
     {name:'SRV English',      icon:'🎵', status:_homeEngineStatus('SRV English'),detail:'SRV Studio · Female Emotional Deep House · Long videos · Global Audience'},
   ];
@@ -8052,7 +8037,6 @@ function _renderHomeLegacy(){
       const engines=[
         {name:'SRV Farsi',key:'SRV Farsi'},
         {name:'SRV English',key:'SRV English'},
-        {name:'NextWave',key:'NextWave'},
       ];
       const STUCK_MS=48*60*60*1000;
       const nowTs=Date.now();
@@ -8798,7 +8782,6 @@ const ENGINE_REVENUE_KEYS=[
   {key:'Investment Engine',name:'Investment Engine',icon:'📈'},
   {key:'SRV Farsi',name:'SRV Farsi',icon:'🌹'},
   {key:'SRV English',name:'SRV English',icon:'🎵'},
-  {key:'NextWave',name:'NextWave',icon:'⚡'},
 ];
 function currentYM(){const d=new Date();return d.toISOString().slice(0,7);}
 function shiftYM(ym,delta){
@@ -8899,7 +8882,7 @@ function engineWindowPnL(engineKey,startMs,endMs){
   const spend=engineCostInWindow(engineKey,startMs,endMs);
   return {earn,spend,profit:earn-spend,hasData:earn>0||spend>0};
 }
-const HOME_ENGINE_KEYS=['SRV Farsi','SRV English','NextWave'];
+const HOME_ENGINE_KEYS=['SRV Farsi','SRV English'];
 function weeklyTotalProfit(startMs,endMs){
   return HOME_ENGINE_KEYS.reduce((s,k)=>s+engineWindowPnL(k,startMs,endMs).profit,0);
 }
@@ -9995,7 +9978,7 @@ function renderEngineAnalytics(){
           </div>
         </div>`
     }
-    <div style="margin-bottom:12px">${D.channels.map(ch=>{
+    <div style="margin-bottom:12px">${D.channels.filter(ch=>!_isRetiredBusiness(ch.name)&&!_isRetiredBusiness(ch.engine)&&!_isRetiredBusiness(ch.id)).map(ch=>{
       const isExpanded=expandedChannels.has(ch.id);
       const hasVideos=ch.ytConnected&&ch.recentVideos&&ch.recentVideos.length>0;
       const intel=calculateIntelligence(ch);
@@ -10419,7 +10402,7 @@ async function loadYouTubeAnalytics(){
     ]);
     const channels=chRes.ok?await chRes.json():[];
     const videos=vidRes.ok?await vidRes.json():[];
-    const ENGINE_ICONS={'SRV Farsi':'🌹','SRV English':'🎵','NextWave':'⚡'};
+    const ENGINE_ICONS={'SRV Farsi':'🌹','SRV English':'🎵'};
     const perEngine=(Array.isArray(channels)?channels:[]).map(function(ch){
       const chVids=(Array.isArray(videos)?videos:[]).filter(function(v){return v.channel_id===ch.channel_id;});
       const totalViews=chVids.reduce(function(a,v){return a+(Number(v.views)||0);},0);
@@ -10471,10 +10454,10 @@ function _renderYouTubeAnalyticsDetail(){
     h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">Loading analytics…</div>';
   }else if(a&&a.error){
     h+='<div style="font-size:11px;color:#ef4444;padding:8px 0">Error: '+escHTML(a.error)+'</div>';
-  }else if(a&&a.perEngine&&a.perEngine.length){
+  }else if(a&&a.perEngine&&a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle);}).length){
     h+='<table style="width:100%;border-collapse:collapse;font-size:11px;font-family:\'JetBrains Mono\',monospace">';
     h+='<tr style="color:var(--dim);border-bottom:1px solid rgba(255,255,255,0.08)"><th style="text-align:left;padding:4px 6px;font-weight:700">Engine</th><th style="text-align:right;padding:4px 6px;font-weight:700">Views</th><th style="text-align:right;padding:4px 6px;font-weight:700">Watch hrs</th><th style="text-align:right;padding:4px 6px;font-weight:700">Ret%</th><th style="text-align:right;padding:4px 6px;font-weight:700">Subs+</th><th style="text-align:right;padding:4px 6px;font-weight:700">Vids</th><th style="text-align:right;padding:4px 6px;font-weight:700">Synced</th></tr>';
-    a.perEngine.forEach(function(e){
+    a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle);}).forEach(function(e){
       const ret=e.avgRetentionPct!=null?(e.avgRetentionPct.toFixed(1)+'%'):'—';
       const retCol=e.avgRetentionPct!=null?(e.avgRetentionPct>=40?'#22c55e':e.avgRetentionPct>=25?'#c9a84c':'#ef4444'):'var(--dim)';
       const syncedLbl=e.lastSync?timeAgo(new Date(e.lastSync).getTime()):'never';
@@ -10682,7 +10665,6 @@ function renderEngines(){
   const _contentDefs=[
     {cfgName:'SRV Farsi',  icon:'🌹',color:'#c9a84c',desc:'Persian Music · Silk Road Voices',  day:'Monday'},
     {cfgName:'SRV English',icon:'🎵',color:'#8b5cf6',desc:'English Music · Global Audience',    day:'Thursday'},
-    {cfgName:'NextWave',   icon:'⚡',color:'#3b82f6',desc:'Finance & Technology · Growth Engine',day:'Tue · Fri'},
   ];
   const contentCards=_contentDefs.map(e=>{
     const rawStatus=_homeEngineStatus(e.cfgName);
@@ -12312,7 +12294,7 @@ function renderVAOperatorMode(tab){
     html+='<div style="font-size:10px;color:var(--dim);font-family:\'JetBrains Mono\',monospace;margin-bottom:10px">UP NEXT</div>';
     otherPending.slice(1,4).forEach(function(t){
       html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">';
-      const engEmoji={'SRV Farsi':'🌹','SRV English':'🎵','NextWave':'⚡'};
+      const engEmoji={'SRV Farsi':'🌹','SRV English':'🎵'};
   html+='<span style="font-size:16px">'+(engEmoji[t.engine]||'⚙️')+'</span>';
       html+='<div style="flex:1"><div style="font-size:12px;font-weight:600">'+(t.name||t.title||t.task||'Task')+'</div>';
       html+='<div style="font-size:10px;color:var(--dim);margin-top:2px">'+(t.engine||'')+'</div></div>';
@@ -12327,7 +12309,7 @@ function renderVAOperatorMode(tab){
 }
 
 function vaLaunchFactory(engine){
-  const engineMap={'SRV Farsi':'srv_farsi','SRV English':'srv_english','NextWave':'nextwave'};
+  const engineMap={'SRV Farsi':'srv_farsi','SRV English':'srv_english'};
   const engineId=engineMap[engine]||null;
   const pending=D.tasks.filter(function(t){return t.status!=='done'&&t.status!=='uploaded';});
   const currentTask=(vaFocusTaskId?pending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null)||pending[0]||null;
@@ -12336,7 +12318,7 @@ function vaLaunchFactory(engine){
 }
 
 function openFactoryForEngine(engineId){
-  const engineNameMap={srv_farsi:'SRV Farsi',srv_english:'SRV English',nextwave:'NextWave'};
+  const engineNameMap={srv_farsi:'SRV Farsi',srv_english:'SRV English'};
   const engineName=engineNameMap[engineId]||null;
   const matchingTask=D.tasks.find(function(t){
     return (t.engine===engineName||t.channel===engineName)&&t.status!=='done'&&t.status!=='uploaded';
@@ -12347,7 +12329,7 @@ function openFactoryForEngine(engineId){
 
 function engineIdForTask(task){
   if(!task)return null;
-  const map={'SRV Farsi':'srv_farsi','SRV English':'srv_english','NextWave':'nextwave'};
+  const map={'SRV Farsi':'srv_farsi','SRV English':'srv_english'};
   return map[task.engine]||map[task.channel]||null;
 }
 
@@ -14403,7 +14385,7 @@ function nextNDaysSchedule(n){
     const mShort=d.toLocaleString('en-US',{month:'short'});
     const iso=_isoOfDay(d);
     const tasks=Array.isArray(D.tasks)?D.tasks.filter(t=>{
-      if(!t)return false;
+      if(!t||_isRetiredBusiness(t.engine))return false;   // retired businesses are not scheduled or listed
       if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
       if(t.isoDate)return String(t.isoDate)===iso;
       return String(t.day||'').trim()===dayName;
@@ -24999,7 +24981,7 @@ async function loadAndShowPackages(){
   }
   const el=document.getElementById('pkgList'),title=document.getElementById('pkgCardTitle');
   if(!el)return;
-  const pkgs=[...D.packages].reverse();
+  const pkgs=[...D.packages].filter(p=>!_isRetiredBusiness(p.engine)&&!_isRetiredBusiness(p.engineId)).reverse();   // retired businesses' packages stay in the database and the archives, not in the active list
   let filterEngine=window.pkgFilterEngine||'';
   let filterMood=window.pkgFilterMood||'';
   let filterStatus=window.pkgFilterStatus||'';
@@ -25026,7 +25008,6 @@ async function loadAndShowPackages(){
     +'<option value="">All Engines</option>'
     +'<option value="SRV Farsi"'+(filterEngine==='SRV Farsi'?' selected':'')+'>SRV Farsi</option>'
     +'<option value="SRV English"'+(filterEngine==='SRV English'?' selected':'')+'>SRV English</option>'
-    +'<option value="NextWave"'+(filterEngine==='NextWave'?' selected':'')+'>NextWave</option>'
     +'</select>'
     +'<select onchange="window.pkgFilterMood=this.value;loadAndShowPackages()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:12px;font-family:\'Syne\',sans-serif">'
     +'<option value="">All Moods</option>'
@@ -26947,10 +26928,8 @@ function renderConstitution(){
   // SRV engines remain active assets but receive only maintenance effort (MONITOR).
   const ENGINE_STATUS_BASELINE = [
     {icon: '📈', name: 'Investment Engine',  status: 'LIVE · AUTOPILOT', tone: 'green', star: true},
-    {icon: '🤖', name: 'AI Creation Studio', status: 'PRIMARY FOCUS',    tone: 'gold',  star: true},
-    {icon: '⚡', name: 'NextWave Systems',   status: 'GROWTH FOCUS',     tone: 'gold'},
-    {icon: '🌹', name: 'SRV Farsi',          status: 'MONITOR',          tone: 'blue'},
-    {icon: '🎵', name: 'SRV English',        status: 'MONITOR',          tone: 'blue'},
+    {icon: '🌹', name: 'SRV Farsi',          status: 'ACTIVE · CORE',    tone: 'green', star: true},
+    {icon: '🎵', name: 'SRV English',        status: 'ACTIVE · CORE',    tone: 'green', star: true},
   ];
   const ENGINE_STATUS = ENGINE_STATUS_BASELINE.map(e => {
     const paused = (typeof _isEnginePaused === 'function') ? _isEnginePaused(e.name) : false;
@@ -27915,7 +27894,7 @@ function selectMode(mode,el){
 function goStep3(){
   if(!fMode)return;
   const sel=document.getElementById('taskAttachSelect');
-  const engineTaskMap={'srv_farsi':'SRV Farsi','srv_english':'SRV English','nextwave':'NextWave'};
+  const engineTaskMap={'srv_farsi':'SRV Farsi','srv_english':'SRV English'};
   const currentEngineName=fEngine?engineTaskMap[fEngine.id]||null:null;
   sel.innerHTML='<option value="">— No task, generate standalone —</option>'+
     D.tasks.filter(q=>!currentEngineName||q.engine===currentEngineName||q.channel===currentEngineName).map(q=>`<option value="${q.id}" ${String(fTaskId)===String(q.id)?'selected':''}>${q.day} — ${q.channel}: ${q.name}</option>`).join('');
@@ -28618,7 +28597,7 @@ function renderContinuity(){
   html+='<div class="card-title">✅ MASTER UPLOAD CHECKLIST</div>';
   html+='<div style="font-size:11px;color:var(--dim);margin-bottom:14px">Complete every item before marking a task as uploaded. Select engine to filter.</div>';
   html+='<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">';
-  html+=['All','SRV Farsi','SRV English','NextWave'].map(function(e){return '<button onclick="filterChecklist(\''+e+'\')" id="chk-btn-'+e.replace(/ /g,'-')+'" style="font-size:10px;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--dim);font-family:\'Syne\',sans-serif;cursor:pointer">'+e+'</button>';}).join('');
+  html+=['All','SRV Farsi','SRV English'].map(function(e){return '<button onclick="filterChecklist(\''+e+'\')" id="chk-btn-'+e.replace(/ /g,'-')+'" style="font-size:10px;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--dim);font-family:\'Syne\',sans-serif;cursor:pointer">'+e+'</button>';}).join('');
   html+='</div>';
   html+='<div id="checklistItems">';
   var allChecks=[
@@ -29408,7 +29387,7 @@ function renderEngineeringBrain(){
         <div style="display:flex;gap:6px;align-items:center">
           <select id="ll-engine" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;flex:1">
             <option value="">Engine (optional)</option>
-            ${['mmm_os','Finance','SRV Farsi','SRV English','NextWave'].map(e=>`<option value="${e}">${e}</option>`).join('')}
+            ${['mmm_os','Finance','SRV Farsi','SRV English'].map(e=>`<option value="${e}">${e}</option>`).join('')}
           </select>
           <button onclick="_ebSaveLesson()" style="padding:5px 16px;border-radius:6px;border:none;background:#22c55e;color:#000;font-size:11px;font-weight:700;cursor:pointer">Save</button>
           <button onclick="window._lShowAdd=false;renderTab('system')" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:11px;cursor:pointer">Cancel</button>
