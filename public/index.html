@@ -2230,6 +2230,11 @@ async function saveAppState(){
     await storageSafe(STORAGE_KEY, JSON.stringify(localState));
   } catch(e) { console.warn('[v12.5] localStorage save failed:', e.message); }
 
+  // CEO-017F stage 1 follow-up: Family is read-only on the server (the proxy refuses its shared-state writes), and the load-time save
+  // (end of loadAppState) runs for every role. A Family tab therefore sent a write that could only be refused and then showed the persistent
+  // "save failed" badge. Family never changes shared state, so it skips the remote save; local storage above is unchanged.
+  if(currentUser&&currentUser.id==='family'){ syncState(); return; }
+
   // 2. Supabase finance upsert
   // v15.21.1 — Engineering Task 32093748-9952-4c81-8792-9eae14e5319a (Investment Engine data
   // reset + stale "UPDATED" date). Root cause: this write used to be fire-and-forget — on
