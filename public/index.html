@@ -768,7 +768,7 @@ const USERS=[
   // v13.69.46 — MMMOS Simplification: access lists now reference the 5 primary tabs (home/tasks/engines/finance/system).
   // Legacy sub-routes (content, packages, integrations, constitution, factory, continuity, settings) remain callable
   // via renderTab(id) for backward compat; they just don't appear in the top nav anymore.
-  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","tasks","engines","finance","system","marketing","human_resources","legal_compliance","social_media_manager"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against. v16.67.1 — restored "tasks": the v13.69.46 5-tabs consolidation's own comment says access lists cover the 5 primary tabs (home/tasks/engines/finance/system), yet admin's array omitted "tasks" — the one place the Developer Options/quick-generate Long-or-Short test control (renderDeveloperCard, called only from renderTasks) renders, so it silently became unreachable for admin/CEO while VA (whose access already includes "tasks") was unaffected.
+  {id:"admin",name:"Mansoor",role:"Admin",emoji:"👑",ceoAuth:true,access:["home","tasks","engines","finance","system","marketing","human_resources","legal_compliance"]}, // v16.28.0 — added social_media_manager (Vertical Slice); v16.30.0 — Phase 2C: no client-side pin. Admin/CEO login is verified server-side via action=ceo_login; this account has no local credential to compare against. v16.67.1 — restored "tasks": the v13.69.46 5-tabs consolidation's own comment says access lists cover the 5 primary tabs (home/tasks/engines/finance/system), yet admin's array omitted "tasks" — the one place the Developer Options/quick-generate Long-or-Short test control (renderDeveloperCard, called only from renderTasks) renders, so it silently became unreachable for admin/CEO while VA (whose access already includes "tasks") was unaffected.
   {id:"family",name:"Family",role:"Family Access",emoji:"👨‍👩‍👧",access:["home","finance","engines"]},
   {id:"va",name:"VA",role:"Operator",emoji:"⚙️",access:["tasks","system"]},
 ];
@@ -794,7 +794,6 @@ const NAV_ITEMS=[
   // chip. VA's actual content routing is unaffected either way (renderTab intercepts to
   // renderVAOperatorMode for any non-'factory' tab), this only affects the top nav chip itself.
   {id:"tasks",label:"📋 Tasks",short:"📋"},
-  {id:"social_media_manager",label:"📱 Social Media Manager",short:"📱"}, // v16.28.0 — Vertical Slice Milestone 1: Business UI (pilot: Urban Halal Shack)
 ];
 // v13.69.46 — sub-tab routing inside the consolidated tabs.
 // v13.69.46 — Pipeline migrated here from Tasks (engine-output state belongs with engine outputs).
@@ -830,6 +829,9 @@ const SYSTEM_VISIBLE_SUBTABS = SYSTEM_SUBTABS.filter(s=>['settings','integration
 let currentEnginesSub = 'overview'; // v13.69.46 — default landing is Overview (full engine portfolio)
 let currentSystemSub = 'settings';
 
+// CEO portfolio decision 2026-11-09: NextWave, SMM and AI Creation Studio are retired. Their records stay untouched in the shared state and the database (and in the archives);
+// this predicate only keeps them out of every ACTIVE list the app renders. It never changes data.
+function _isRetiredBusiness(v){ return /next\s?wave|ai[ _-]?creation|ai[ _-]?studio|^smm$|social[ _-]?media[ _-]?manager/i.test(String(v==null?'':v)); }
 const ENGINES_CONFIG=[
   {id:"srv_farsi",name:"SRV Farsi",icon:"🌹",hint:"Persian emotional songs",
    modes:["Female — Emotional","Female — Romantic","Female — Happy","Male — Emotional","Male — Romantic","Male — Happy","Duet — Emotional","Duet — Romantic","Duet — Happy"],
@@ -918,29 +920,7 @@ const ENGINES_CONFIG=[
    },
    lifecycle:{musicAdapter:'manual',imageAdapter:'pexels',rendererAdapter:'canvas',requireApprove:true},
   }, // v13.28 — Phase 8 slice 1 | v13.38 — slice 3a cadence | v13.69.50 — lifecycle enabled | v13.69.80 — avatar library
-  {id:"nextwave",name:"NextWave",icon:"⚡",hint:"Colin finance/AI/motivation shorts",
-   modes:["Finance","AI / Tech","Motivation"],
-   type:"script",weeklyCapacity:3,cadenceDays:["Monday","Tuesday","Wednesday","Thursday"], // v15.7.0 — 3 slots/week; production Mon-Thu; Fri=Long/Sat=Short/Sun=Short
-   longFormDay:"Wednesday",longFormMode:"Finance",
-   lifecycle:{requireApprove:true}}, // v13.94.0 Phase 4: lifecycle enabled | v13.28 | v13.38 | v13.69.462
-  // ━━━ AI STUDIO — v13.75.0 LIFECYCLE MIGRATION (2026-07-10) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Migrated to SRV-standard lifecycle: Generate→Review→Build→Approve→Publish→Done
-  // Schedule: Friday (Long) · Saturday (Short) · Sunday (Short) — mirrors SRV cadence
-  // Mood: auto-rotates via AI_STUDIO_ROTATION_MODES (no manual selection)
-  // Avatar/voice/HeyGen pipeline unchanged. Logo + background music added in Build stage.
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  {id:"ai_studio",name:"AI Studio",icon:"🤖",hint:"Kelly AI curiosity shorts",
-   modes:["AI Tools & Productivity","Psychology & Self Growth","Surprising Facts & News"],
-   type:"script",weeklyCapacity:3,cadenceDays:["Monday","Tuesday","Wednesday","Thursday"], // v15.7.0 — Mon-Thu = VA production; Fri=Long/Sat=Short/Sun=Short (publish)
-   longFormDay:"Friday",longFormMode:"AI Tools & Productivity",
-   lifecycle:{requireApprove:true}}, // v13.75.0 — SRV-standard lifecycle; Fri(Long)/Sat(Short)/Sun(Short)
-  // v16.52.0 — CEO Decision #26: SMM registered as an Operator Mode engine so its VA task
-  // appears in the shared VA Portal lifecycle (Generate→Review→Build→Approve→Publish→Done),
-  // same bar/labels as the engines above. No weeklyCapacity/cadenceDays/modes — SMM tasks are
-  // per-client (business_id), not a fixed weekly content calendar; stage is read live from the
-  // real sm_va_tasks/sm_production_packages/sm_video_productions tables, not a manual clicker.
-  {id:"smm",name:"SMM",icon:"📱",hint:"Client social media video ads (per-business)",
-   type:"video",lifecycle:{requireApprove:true}},
+  // CEO portfolio decision 2026-11-09: NextWave, SMM and AI Creation Studio are RETIRED — their engine entries are gone from the active app (data and archives preserved).
 ];
 
 // ── CHANNEL AVATAR AUTOMATION (R2 Slice AA-2) ──────────────────────────────
@@ -1082,8 +1062,6 @@ const SUBMAGIC_DEFAULT_CONFIG = {
 const SUBMAGIC_CHANNEL_CONFIG = {
   // AI Creation Studio (Sophia) — v13.83.0: magicZooms DISABLED — Submagic zoom crops top/bottom banners where logo lives.
   // B-roll 40% so logo visible on 60% of avatar frames. Logo is baked into canvas WebM.
-  'AI Studio':           { templateName: 'Hormozi 2', magicZooms: false, magicBrolls: true, magicBrollsPercentage: 40 },
-  'AI Creation Studio':  { templateName: 'Hormozi 2', magicZooms: false, magicBrolls: true, magicBrollsPercentage: 40 },
   // NextWave (Paul) — slightly less B-roll, more presenter. Authority-led content holds attention via host.
   'NextWave':            { templateName: 'Hormozi 2', magicZooms: true, magicBrolls: true, magicBrollsPercentage: 70 },
   'NextWave Systems':    { templateName: 'Hormozi 2', magicZooms: true, magicBrolls: true, magicBrollsPercentage: 70 },
@@ -1142,7 +1120,7 @@ function _commitAvatarRotation(channelId, topic, look){
 // "AI/Tech" but CHANNEL_AVATAR_MAP uses "AI / Tech"). Returns null for SRV (music — no avatar).
 function _resolveChannelAndTopic(task){
   if(!task) return {channelId:null, topic:null};
-  const engineToChannel = {'NextWave':'nextwave', 'AI Studio':'ai_studio'};
+  const engineToChannel = {'NextWave':'nextwave'};
   const channelId = engineToChannel[task.engine] || null;
   if(!channelId) return {channelId:null, topic:null};
   const channelCfg = CHANNEL_AVATAR_MAP[channelId];
@@ -1633,7 +1611,6 @@ const _ENGINE_CH={
   'SRV Farsi':'SRV — Silk Road Voices','SRV — Silk Road Voices':'SRV — Silk Road Voices',
   'SRV English':'SRV Studio English','SRV Studio English':'SRV Studio English',
   'NextWave':'NextWave Systems','NextWave Systems':'NextWave Systems',
-  'AI Studio':'AI Creation Studio','AI Creation Studio':'AI Creation Studio',
 };
 
 function computeContentHealth(){
@@ -3053,7 +3030,7 @@ async function ytForceUploadLatest(){
       alert('Aborted — invalid URL.');
       return;
     }
-    engine = prompt('Which engine? Type one of:\n• AI Studio  (→ AICreation-tool channel)\n• NextWave  (→ NextWaveSys channel)\n• SRV Farsi  (→ SilkRoadVoices channel)\n• SRV English  (→ SRVStudioMusic channel)\n\nDefault: AI Studio', 'AI Studio');
+    engine = prompt('Which engine? Type one of:\n• NextWave  (→ NextWaveSys channel)\n• SRV Farsi  (→ SilkRoadVoices channel)\n• SRV English  (→ SRVStudioMusic channel)\n\nDefault: NextWave', 'NextWave');
     if(!engine){ alert('Aborted — no engine.'); return; }
     title = prompt('Video title (max 100 chars). Default: "MMM Test Upload"', 'MMM Test Upload ' + new Date().toISOString().slice(0,10)) || 'MMM Test Upload';
     description = 'Test upload via MMM v13.54.5 — auto-pipeline validation.';
@@ -3175,8 +3152,8 @@ async function ytStrategyLoad(){
     const r = await fetch('/api/ops?action=strategy_state');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error)+'</div>'; return; }
-    const focus = d.channels.filter(c => c.engine === 'AI Studio' || c.engine === 'NextWave');
-    const others = d.channels.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.channels.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     const statusColor = { continue:'#3b82f6', scale:'#22c55e', reduce:'#f59e0b', pause:'#ef4444' };
     const renderChannel = (c) => {
       const sc = statusColor[c.status] || '#888';
@@ -3242,7 +3219,7 @@ async function ytLoadOptimizationState(){
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error||'failed')+'</div>'; return; }
     window._mmmOptState = d;
-    const FOCUS_ENGINES = ['AI Studio', 'NextWave'];
+    const FOCUS_ENGINES = [];   // NextWave retired
     const OTHER_ENGINES = ['SRV Farsi', 'SRV English'];
     let html = '';
     // Auto-apply toggles
@@ -3306,8 +3283,8 @@ async function ytRevenueDashboard(){
     const r = await fetch('/api/ops?action=revenue_dashboard');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error||'failed')+'</div>'; return; }
-    const focus = d.perChannel.filter(c => c.engine === 'AI Studio' || c.engine === 'NextWave');
-    const others = d.perChannel.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.perChannel.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     const bar = (pct, color) => '<div style="display:inline-block;width:100%;height:6px;background:rgba(255,255,255,0.05);border-radius:3px;overflow:hidden;vertical-align:middle"><div style="width:'+Math.min(100,pct)+'%;height:100%;background:'+color+';transition:width 0.3s"></div></div>';
     const renderChannel = (c) => {
       const eta = c.etaToYppDays != null ? Math.round(c.etaToYppDays)+' days to 1k subs at current growth' : (c.yppReady ? 'YPP-READY' : 'no growth signal yet');
@@ -3349,8 +3326,8 @@ async function ytDecisionEngine(){
     const r = await fetch('/api/ops?action=decision_engine&days=30');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error||'failed')+'</div>'; return; }
-    const focus = d.perChannel.filter(c => c.engine === 'AI Studio' || c.engine === 'NextWave');
-    const others = d.perChannel.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.perChannel.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     const actionColor = { INCREASE:'#22c55e', CONTINUE:'#3b82f6', TEST:'#f59e0b', REDUCE:'#ef4444', STOP:'#ef4444' };
     const priorityBadge = { high:'🔥', medium:'•', low:'·' };
     const renderChannel = (c) => {
@@ -3395,8 +3372,8 @@ async function ytFoundationReport(){
     const r = await fetch('/api/ops?action=analytics_foundation&days=30');
     const d = await r.json();
     if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+ (d.message||d.error||'failed') +'</div>'; return; }
-    const focus = d.perChannel.filter(c => c.engine === 'AI Studio' || c.engine === 'NextWave');
-    const others = d.perChannel.filter(c => c.engine !== 'AI Studio' && c.engine !== 'NextWave');
+    const focus = [];   // NextWave retired: no focus channel
+    const others = d.perChannel.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
     let html = '';
     const renderChannel = (c) => {
       const g = c.growth, w = c.window;
@@ -4380,14 +4357,12 @@ function renderTab(tab){
     factory:renderFactory,
     continuity:renderContinuity,
     settings:renderSettings,
-    social_media_manager:renderSocialMediaManager, // v16.28.0 — Vertical Slice Milestone 1
   };
   c.innerHTML=(map[tab]||renderHome)();
   attachEditors();
   if(tab==='home'){drawGraph(graphRange);loadWeeklyReport();loadOperatorTasks();loadApprovals();loadEngTasksHome();_ensureYouTubeAnalyticsLoaded();if(currentUser?.id==='admin'){loadAIRecommendations();loadReliabilityMetrics();}}
   if(tab==='finance')setTimeout(()=>drawAllFinanceCharts(finAnalyticsRange),100);
   if(tab==='packages')loadAndShowPackages();
-  if(tab==='social_media_manager')loadAndShowSocialMediaManager(); // v16.28.0
   // v16.14.0 — Phase 5: every department tab needs the same Brain roster data as Home.
   if(['finance','engines','marketing','human_resources','legal_compliance','system'].indexOf(tab)>=0){
     _ensureBrainDeptDataLoaded();
@@ -4836,7 +4811,7 @@ function computeNextRecommendedAction(){
     return {headline:`Continue task: ${_name}${_eng?(' — '+_eng):''}`,cta:'Open Tasks',target:'tasks',tone:'info'};
   }
   const sevenDaysAgo=Date.now()-7*86400000;
-  const engineNames=['SRV Farsi','SRV English','NextWave','AI Studio'];
+  const engineNames=['SRV Farsi','SRV English'];
   // v13.62.9 H1 patch — exclude paused engines from cold check (reuses _pause above)
   const coldEngines=engineNames.filter(name=>{
     if(_pause[name]) return false;
@@ -4933,7 +4908,7 @@ function _engineStatsThisWeek(){
   const STUCK_MS=48*60*60*1000;
   const nowTs=Date.now();
   const sevenDaysAgo=nowTs-7*86400000;
-  const engineNames=['SRV Farsi','SRV English','NextWave','AI Studio'];
+  const engineNames=['SRV Farsi','SRV English'];
   return engineNames.map(name=>{
     const etasks=tasks.filter(t=>t&&t.engine===name);
     const done7=etasks.filter(t=>t&&t.status==='done'&&t.updatedAt&&new Date(t.updatedAt).getTime()>sevenDaysAgo).length;
@@ -5432,8 +5407,6 @@ function cmdResumeEngine(q,opts){
 const _ENGINE_STATE_DEFS=[
   {name:'SRV Farsi',    icon:'🌹', id:'srv_farsi'},
   {name:'SRV English',  icon:'🎵', id:'srv_english'},
-  {name:'NextWave',     icon:'⚡', id:'nextwave'},
-  {name:'AI Studio',   icon:'🤖', id:'ai_studio'},
   {name:'Uber Engine', icon:'🚗', id:'uber'},
   {name:'Investment Engine',icon:'📈',id:'investment'},
 ];
@@ -6416,8 +6389,6 @@ function computeMarketingRecommendations(){
   const _eDefs=[
     {name:'SRV Farsi',   icon:'🌹', key:'SRV Farsi'},
     {name:'SRV English', icon:'🎵', key:'SRV English'},
-    {name:'NextWave',    icon:'⚡', key:'NextWave'},
-    {name:'AI Studio',   icon:'🤖', key:'AI Studio'},
   ];
   function _ch(k){const n=_ENGINE_CH[k]||k;return(D.channels||[]).find(c=>c.name===n)||null;}
   const scorecard=_eDefs.map(e=>{
@@ -6577,7 +6548,6 @@ function computeGrowthExperiments(){
     {name:'SRV Farsi',   icon:'🌹'},
     {name:'SRV English', icon:'🎵'},
     {name:'NextWave',    icon:'⚡'},
-    {name:'AI Studio',   icon:'🤖'},
   ];
   const sigs=_eDefs.map(e=>({...e, sig:_engineOpportunitySignals(e.name)})).filter(e=>e.sig);
   const nowIso=new Date().toISOString();
@@ -7089,8 +7059,6 @@ function computePortfolioIntelligence(){
   const _eDefs=[
     {name:'SRV Farsi',   icon:'🌹', key:'SRV Farsi'},
     {name:'SRV English', icon:'🎵', key:'SRV English'},
-    {name:'NextWave',    icon:'⚡', key:'NextWave'},
-    {name:'AI Studio',   icon:'🤖', key:'AI Studio'},
   ];
   function _ch(k){const n=_ENGINE_CH[k]||k;return(D.channels||[]).find(c=>c.name===n)||null;}
   const _uberInc=(()=>{const p=(D.plaidIncomeBySource||[]).find(s=>s.source==='Uber');if(p&&p.monthly)return p.monthly;const m=(D.income||[]).find(i=>i.label==='Uber');return m?m.amount:0;})();
@@ -7333,8 +7301,6 @@ function _renderHomeOperatorDashboard(){
   const engines=[
     {name:'Uber Engine',      icon:'🚗', status:'running',  detail:'Active Income Engine · Weekly Earnings Tracking · Funds MMMOS Operations'},
     {name:'Investment Engine',icon:'📈', status:'running',  detail:'Monthly DCA Active · Portfolio Synced · Long-Term Wealth Machine'},
-    {name:'AI Studio',        icon:'🤖', status:_homeEngineStatus('AI Studio'),  detail:'AI Education Engine · Shorts & Long Videos · Audience Growth'},
-    {name:'NextWave',         icon:'⚡', status:_homeEngineStatus('NextWave'),   detail:'Finance & Technology Engine · Shorts & Long Videos · Growth Engine'},
     {name:'SRV Farsi',        icon:'🌹', status:_homeEngineStatus('SRV Farsi'), detail:'Persian Music Engine · Long Songs & Shorts · Audience Building'},
     {name:'SRV English',      icon:'🎵', status:_homeEngineStatus('SRV English'),detail:'SRV Studio · Female Emotional Deep House · Long videos · Global Audience'},
   ];
@@ -7819,8 +7785,6 @@ function _renderHomeLegacy(){
       const engines=[
         {name:'SRV Farsi',key:'SRV Farsi'},
         {name:'SRV English',key:'SRV English'},
-        {name:'NextWave',key:'NextWave'},
-        {name:'AI Studio',key:'AI Studio'},
       ];
       const STUCK_MS=48*60*60*1000;
       const nowTs=Date.now();
@@ -8566,8 +8530,6 @@ const ENGINE_REVENUE_KEYS=[
   {key:'Investment Engine',name:'Investment Engine',icon:'📈'},
   {key:'SRV Farsi',name:'SRV Farsi',icon:'🌹'},
   {key:'SRV English',name:'SRV English',icon:'🎵'},
-  {key:'NextWave',name:'NextWave',icon:'⚡'},
-  {key:'AI Studio',name:'AI Studio',icon:'🤖'},
 ];
 function currentYM(){const d=new Date();return d.toISOString().slice(0,7);}
 function shiftYM(ym,delta){
@@ -8613,7 +8575,6 @@ const ENGINE_CARD_TO_KEY={
   'SRV Farsi':'SRV Farsi',
   'SRV English':'SRV English',
   'NextWave Systems':'NextWave',
-  'AI Creation Studio':'AI Studio',
 };
 function engineMonthlyPnL(cardName,ym){
   const key=ENGINE_CARD_TO_KEY[cardName];
@@ -8669,7 +8630,7 @@ function engineWindowPnL(engineKey,startMs,endMs){
   const spend=engineCostInWindow(engineKey,startMs,endMs);
   return {earn,spend,profit:earn-spend,hasData:earn>0||spend>0};
 }
-const HOME_ENGINE_KEYS=['SRV Farsi','SRV English','NextWave','AI Studio'];
+const HOME_ENGINE_KEYS=['SRV Farsi','SRV English'];
 function weeklyTotalProfit(startMs,endMs){
   return HOME_ENGINE_KEYS.reduce((s,k)=>s+engineWindowPnL(k,startMs,endMs).profit,0);
 }
@@ -9765,7 +9726,7 @@ function renderEngineAnalytics(){
           </div>
         </div>`
     }
-    <div style="margin-bottom:12px">${D.channels.map(ch=>{
+    <div style="margin-bottom:12px">${D.channels.filter(ch=>!_isRetiredBusiness(ch.name)&&!_isRetiredBusiness(ch.engine)&&!_isRetiredBusiness(ch.id)).map(ch=>{
       const isExpanded=expandedChannels.has(ch.id);
       const hasVideos=ch.ytConnected&&ch.recentVideos&&ch.recentVideos.length>0;
       const intel=calculateIntelligence(ch);
@@ -10189,7 +10150,7 @@ async function loadYouTubeAnalytics(){
     ]);
     const channels=chRes.ok?await chRes.json():[];
     const videos=vidRes.ok?await vidRes.json():[];
-    const ENGINE_ICONS={'SRV Farsi':'🌹','SRV English':'🎵','AI Studio':'🤖','NextWave':'⚡'};
+    const ENGINE_ICONS={'SRV Farsi':'🌹','SRV English':'🎵'};
     const perEngine=(Array.isArray(channels)?channels:[]).map(function(ch){
       const chVids=(Array.isArray(videos)?videos:[]).filter(function(v){return v.channel_id===ch.channel_id;});
       const totalViews=chVids.reduce(function(a,v){return a+(Number(v.views)||0);},0);
@@ -10241,10 +10202,10 @@ function _renderYouTubeAnalyticsDetail(){
     h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">Loading analytics…</div>';
   }else if(a&&a.error){
     h+='<div style="font-size:11px;color:#ef4444;padding:8px 0">Error: '+escHTML(a.error)+'</div>';
-  }else if(a&&a.perEngine&&a.perEngine.length){
+  }else if(a&&a.perEngine&&a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle);}).length){
     h+='<table style="width:100%;border-collapse:collapse;font-size:11px;font-family:\'JetBrains Mono\',monospace">';
     h+='<tr style="color:var(--dim);border-bottom:1px solid rgba(255,255,255,0.08)"><th style="text-align:left;padding:4px 6px;font-weight:700">Engine</th><th style="text-align:right;padding:4px 6px;font-weight:700">Views</th><th style="text-align:right;padding:4px 6px;font-weight:700">Watch hrs</th><th style="text-align:right;padding:4px 6px;font-weight:700">Ret%</th><th style="text-align:right;padding:4px 6px;font-weight:700">Subs+</th><th style="text-align:right;padding:4px 6px;font-weight:700">Vids</th><th style="text-align:right;padding:4px 6px;font-weight:700">Synced</th></tr>';
-    a.perEngine.forEach(function(e){
+    a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle);}).forEach(function(e){
       const ret=e.avgRetentionPct!=null?(e.avgRetentionPct.toFixed(1)+'%'):'—';
       const retCol=e.avgRetentionPct!=null?(e.avgRetentionPct>=40?'#22c55e':e.avgRetentionPct>=25?'#c9a84c':'#ef4444'):'var(--dim)';
       const syncedLbl=e.lastSync?timeAgo(new Date(e.lastSync).getTime()):'never';
@@ -10452,8 +10413,6 @@ function renderEngines(){
   const _contentDefs=[
     {cfgName:'SRV Farsi',  icon:'🌹',color:'#c9a84c',desc:'Persian Music · Silk Road Voices',  day:'Monday'},
     {cfgName:'SRV English',icon:'🎵',color:'#8b5cf6',desc:'English Music · Global Audience',    day:'Thursday'},
-    {cfgName:'NextWave',   icon:'⚡',color:'#3b82f6',desc:'Finance & Technology · Growth Engine',day:'Tue · Fri'},
-    {cfgName:'AI Studio',  icon:'🤖',color:'#22c55e',desc:'AI Education · Kelly AI Shorts',     day:'Mon · Wed'},
   ];
   const contentCards=_contentDefs.map(e=>{
     const rawStatus=_homeEngineStatus(e.cfgName);
@@ -11219,46 +11178,6 @@ function _renderEnglishOperatorPanel(eCurrent){
   h+='</div>';
   return h;
 }
-// ── v13.75.0 — AI Studio self-contained operator panel ────────────────────────
-function _renderAIStudioOperatorPanel(aiCurrent){
-  if(!(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).find(e=>e.id==='ai_studio'))return'';
-  var h='';
-  h+='<div class="card" style="margin-bottom:12px;padding:20px;border-color:rgba(34,197,94,0.2)">';
-  h+='<div style="font-size:11px;font-weight:800;color:#22c55e;letter-spacing:1.5px;font-family:\'JetBrains Mono\',monospace;margin-bottom:14px">🤖 AI STUDIO</div>';
-  if(!aiCurrent){
-    // v15.7.0 — weekly cap check
-    const _aiWeekCount=_engineWeeklyTasksThisWeek('AI Studio');
-    if(_aiWeekCount>=3){
-      const _d=_weeklyPublishDates();
-      h+='<div style="font-size:12px;font-weight:800;color:#22c55e;margin-bottom:6px">✅ COMPLETED FOR THIS WEEK</div>';
-      h+='<div style="font-size:10px;color:var(--dim);margin-bottom:14px">3/3 packages generated · Publishes Fri '+_d.friDisplay+' · Sat '+_d.satDisplay+' · Sun '+_d.sunDisplay+'</div>';
-      h+='<button onclick="_aiStudioResetPublishCalendar()" style="width:100%;padding:9px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:8px;color:#22c55e;font-weight:700;font-size:11px;cursor:pointer;font-family:\'JetBrains Mono\',monospace">↺ Reset Calendar</button>';
-    } else {
-      const _aiPeekMode=(typeof _aiStudioPeekNextMode==='function')?_aiStudioPeekNextMode():'AI Tools & Productivity';
-      const _aiPeekFmt=(typeof _aiStudioPeekFormat==='function')?_aiStudioPeekFormat():'short';
-      const _aiIsLong=_aiPeekFmt==='long';
-      const _aiDayLabel=_aiIsLong?'Friday':(D.aiStudioTaskSeq%3===1?'Saturday':'Sunday');
-      h+='<div style="font-size:10px;color:#22c55e;font-weight:700;font-family:\'JetBrains Mono\',monospace;margin-bottom:4px">READY · '+_aiWeekCount+'/3 this week</div>';
-      h+='<div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:\'JetBrains Mono\',monospace;margin-bottom:4px">NEXT UP · PUBLISHES '+_aiDayLabel.toUpperCase()+' @ 9AM</div>';
-      h+='<div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:14px">'+escHTML(_aiPeekMode)+' · '+(_aiIsLong?'Long':'Short')+'</div>';
-      h+='<button onclick="vaStartAIStudioProductionTask()" style="width:100%;padding:13px;background:#22c55e;border:none;border-radius:10px;color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-bottom:8px">🤖 Start AI Studio Task</button>';
-      h+='<button onclick="_aiStudioResetPublishCalendar()" style="width:100%;padding:7px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.22);border-radius:8px;color:rgba(34,197,94,0.6);font-weight:600;font-size:10px;cursor:pointer;font-family:\'JetBrains Mono\',monospace">↺ Reset Calendar</button>';
-    }
-  } else {
-    // Task in progress — show lifecycle bar + Open Lifecycle
-    const _lcStage=(typeof _aiStudioGetStage==='function')?_aiStudioGetStage(aiCurrent.id):'generate';
-    const _lcLabels={generate:'Generate',review:'Review',build:'Build',approve:'Approve',publish:'Publish',done:'Done'};
-    const _lcColors={generate:'#c9a84c',review:'#3b82f6',build:'#8b5cf6',approve:'#f59e0b',publish:'#22c55e',done:'#22c55e'};
-    const _lcCol=_lcColors[_lcStage]||'#c9a84c';
-    const _isLongTask=!!(aiCurrent.isLong||aiCurrent.contentFormat==='long');
-    h+=_renderOperatorLifecycleBar(_lcStage,_lcCol);
-    h+='<div style="font-size:15px;font-weight:800;color:#fff;margin-bottom:4px">'+escHTML(aiCurrent.name||'AI Studio Task')+'</div>';
-    h+='<div style="font-size:11px;color:var(--dim);margin-bottom:14px">'+escHTML(aiCurrent.mood||'')+(aiCurrent.mood?' · ':'')+(_isLongTask?'Long':'Short')+'</div>';
-    h+='<button onclick="openExec(\''+aiCurrent.id+'\')" style="width:100%;padding:12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.40);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif">🤖 Open Lifecycle → '+(_lcLabels[_lcStage]||_lcStage)+'</button>';
-  }
-  h+='</div>';
-  return h;
-}
 // ── v16.55.0 — CEO Decision #26 continuation: SMM Operator Exec Mode ──────────────────────────
 // The v16.52.0-v16.54.0 SMM panel derived "Done" from a single marker (sm_va_tasks.status=
 // 'published') and its "Open" button routed to the whole Urban Halal Shack business page. CEO
@@ -11710,25 +11629,22 @@ function renderVAOperatorMode(tab){
   // v13.75.0 — AI Studio added as independent panel alongside Farsi + English
   const farsiPending=allPending.filter(function(t){return t.engine==='SRV Farsi';});
   const engPending=allPending.filter(function(t){return t.engine==='SRV English';});
-  const aiStudioPending=allPending.filter(function(t){return t.engine==='AI Studio';});
   // v13.94.0 — NextWave now has its own lifecycle panel; extracted from otherPending
   const nwPending=allPending.filter(function(t){return t.engine==='NextWave'||t.engine==='NextWave Systems';});
   // v13.88.0 — exclude non-content engines from generic "current" task slot
   // v13.94.0 — also exclude NextWave (now has own panel)
   const _OPERATOR_CONTENT_ENGINES=['nextwave','nextwave systems','nextwave ai'];
   const otherPending=allPending.filter(function(t){
-    if(t.engine==='SRV Farsi'||t.engine==='SRV English'||t.engine==='AI Studio')return false;
+    if(t.engine==='SRV Farsi'||t.engine==='SRV English')return false;
     if(t.engine==='NextWave'||t.engine==='NextWave Systems')return false; // v13.94.0
     const _eng=String(t.engine||'').toLowerCase().trim();
     return _OPERATOR_CONTENT_ENGINES.some(function(e){return _eng===e||_eng.includes('nextwave');});
   });
   const _fFoc=vaFocusTaskId?farsiPending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null;
   const _eFoc=vaFocusTaskId?engPending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null;
-  const _aiFoc=vaFocusTaskId?aiStudioPending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null;
   const _nwFoc=vaFocusTaskId?nwPending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null; // v13.94.0
   const farsiCurrent=_fFoc||farsiPending[0]||null;
   const engCurrent=_eFoc||engPending[0]||null;
-  const aiStudioCurrent=_aiFoc||aiStudioPending[0]||null;
   // Phase 4.4B — vaFocusTaskId is in-memory only (let vaFocusTaskId=null at
   // module scope) and does not survive a page reload/new tab, at which point
   // this used to silently fall back to nwPending[0] -- the OLDEST non-done
@@ -11767,22 +11683,19 @@ function renderVAOperatorMode(tab){
     const _testEngines=(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).filter(e=>_getEngineState(e.name)==='test');
     const _farsiFarsiEng=(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).find(e=>e.id==='srv_farsi');
     const _englishEng=(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).find(e=>e.id==='srv_english');
-    const _aiStudioEng=(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).find(e=>e.id==='ai_studio'); // v13.75.0
     const _nwEng=(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).find(function(e){return e.id==='nextwave';}); // v13.94.0
     const _smmEng=(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).find(function(e){return e.id==='smm';}); // v16.52.0 — CEO Decision #26
     const _farsiPeek=(typeof _srvFarsiPeekNextMode==='function')?_srvFarsiPeekNextMode():'';
     const _englishPeek=(typeof _srvEnglishPeekNextMode==='function')?_srvEnglishPeekNextMode():'';
     const _fState=(typeof _getEngineState==='function')?_getEngineState('SRV Farsi'):'running';
     const _eState=(typeof _getEngineState==='function')?_getEngineState('SRV English'):'running';
-    const _aiState=(typeof _getEngineState==='function')?_getEngineState('AI Studio'):'running'; // v13.75.0
     const _nwState=(typeof _getEngineState==='function')?_getEngineState('NextWave'):'running'; // v13.94.0
     const _smmState=(typeof _getEngineState==='function')?_getEngineState('SMM'):'running'; // v16.52.0
     const _farsiActive=_farsiFarsiEng&&_fState!=='paused'&&_fState!=='maintenance';
     const _engActive=_englishEng&&_eState!=='paused'&&_eState!=='maintenance';
-    const _aiActive=_aiStudioEng&&_aiState!=='paused'&&_aiState!=='maintenance'; // v13.75.0
     const _nwActive=_nwEng&&_nwState!=='paused'&&_nwState!=='maintenance'; // v13.94.0
     const _smmActive=_smmEng&&_smmState!=='paused'&&_smmState!=='maintenance'; // v16.52.0
-    if(_smmActive||_farsiActive||_engActive||_aiActive||_nwActive){
+    if(_smmActive||_farsiActive||_engActive||_nwActive){
       // v14.6.9 — Reordered: NextWave → AI Studio → SRV Farsi → SRV English (business priority order)
       // v16.52.0 — CEO Decision #26 (SMM Revenue-First): SMM card shown first — delegate to _renderSmmOperatorPanel
       if(_smmActive){
@@ -11791,10 +11704,6 @@ function renderVAOperatorMode(tab){
       // ── NextWave card (v13.94.0) — delegate to _renderNextWaveOperatorPanel ──
       if(_nwActive){
         html+=(typeof _renderNextWaveOperatorPanel==='function')?_renderNextWaveOperatorPanel(nwCurrent):'';
-      }
-      // ── AI Studio card (v13.75.0) — delegate to _renderAIStudioOperatorPanel ──
-      if(_aiActive){
-        html+=(typeof _renderAIStudioOperatorPanel==='function')?_renderAIStudioOperatorPanel(aiStudioCurrent):'';
       }
       // ── SRV Farsi card — delegate to _renderFarsiOperatorPanel so lifecycle shows when task exists ──
       // v13.89.0: replaced hardcoded "Start" block; _renderFarsiOperatorPanel has correct if/else:
@@ -11835,7 +11744,7 @@ function renderVAOperatorMode(tab){
   html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">';
   if(current.day) html+='<span style="font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(201,168,76,0.12);color:var(--gold);font-family:\'JetBrains Mono\',monospace;font-weight:600">📅 '+current.day+'</span>';
   if(current.platform) html+='<span style="font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(59,130,246,0.12);color:#3b82f6;font-family:\'JetBrains Mono\',monospace;font-weight:600">📤 '+current.platform+'</span>';
-  if(current.mood&&!current.engine.includes('AI Studio')) html+='<span style="font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(139,92,246,0.12);color:#a78bfa;font-family:\'JetBrains Mono\',monospace;font-weight:600">🎭 '+current.mood+'</span>';
+  if(current.mood) html+='<span style="font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(139,92,246,0.12);color:#a78bfa;font-family:\'JetBrains Mono\',monospace;font-weight:600">🎭 '+current.mood+'</span>';
   if(current.contentType) html+='<span style="font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(34,197,94,0.12);color:#22c55e;font-family:\'JetBrains Mono\',monospace;font-weight:600">📦 '+current.contentType+'</span>';
   html+='</div>';
 
@@ -11844,7 +11753,6 @@ function renderVAOperatorMode(tab){
   var buttons='';
   const isSRV=engine.includes('SRV')||engine.includes('Silk');
   const isNextWave=engine.includes('NextWave');
-  const isAIStudio=engine.includes('AI Studio');
   const btnStyle2='display:block;width:100%;padding:13px;border-radius:10px;font-weight:700;font-size:13px;text-align:center;text-decoration:none;margin-bottom:8px;font-family:\'Syne\',sans-serif;border:1px solid var(--border);background:rgba(255,255,255,0.06);color:var(--text)';
   const btnStyleGold='display:block;width:100%;padding:13px;background:var(--gold);border:none;border-radius:10px;color:#000;font-weight:800;font-size:13px;text-align:center;text-decoration:none;margin-bottom:8px;font-family:\'Syne\',sans-serif';
   const btnStyleTool='display:inline-flex;align-items:center;justify-content:center;width:calc(50% - 4px);padding:10px 8px;border-radius:10px;font-weight:700;font-size:12px;text-align:center;text-decoration:none;margin-bottom:8px;font-family:\'Syne\',sans-serif;border:1px solid var(--border);background:rgba(255,255,255,0.06);color:var(--text)';
@@ -11881,33 +11789,12 @@ function renderVAOperatorMode(tab){
     return html;
   }
 
-  // ── v13.75.0 — AI Studio lifecycle fast-path (mirrors Farsi/English) ──
-  if(typeof _aiStudioHasLifecycle==='function' && _aiStudioHasLifecycle(current)){
-    const _lcStage=(typeof _aiStudioGetStage==='function')?_aiStudioGetStage(current.id):'generate';
-    const _lcLabels={generate:'Generate',review:'Review',build:'Build',approve:'Approve',publish:'Publish',done:'Done'};
-    const _lcColors={generate:'#c9a84c',review:'#3b82f6',build:'#8b5cf6',approve:'#f59e0b',publish:'#22c55e',done:'#22c55e'};
-    const _lcCol=_lcColors[_lcStage]||'#c9a84c';
-    instruction='<span style="font-size:10px;font-weight:800;color:'+_lcCol+';font-family:\'JetBrains Mono\',monospace;letter-spacing:1.5px;padding:3px 8px;background:'+_lcCol+'18;border-radius:5px">'+(_lcLabels[_lcStage]||_lcStage).toUpperCase()+' STAGE</span><br><br>AI Studio lifecycle active — click to continue the automated pipeline.';
-    buttons+='<button onclick="openExec(\''+current.id+'\')" style="'+btnStyleGold+'">🤖 Open Lifecycle → '+(_lcLabels[_lcStage]||_lcStage)+'</button>';
-    html+='<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">'+instruction+'</div>';
-    html+=buttons;
-    html+='</div></div>';
-    html+='</div>';
-    return html;
-  }
-
   if(stage==='assigned'){
     if(isSRV){
       instruction='Click Generate Package → pick the mood → Generate → Save to Task.';
       buttons+='<button onclick="vaLaunchFactory(\''+engine+'\')" style="'+btnStyleGold+'">⚡ Generate Package — Start Here</button>';
     } else if(isNextWave){
       instruction='Click Generate Package → pick Finance, AI/Tech, or Motivation → Generate → Save to Task.';
-      buttons+='<button onclick="vaLaunchFactory(\''+engine+'\')" style="'+btnStyleGold+'">⚡ Generate Package — Start Here</button>';
-    } else if(isAIStudio){
-      const isLongTask=(current.contentFormat==='long'||current.contentType==='Long Script');
-      instruction=isLongTask
-        ? 'Click Generate Package → pick category → Generate → Save to Task. (Long-form 8-min script)'
-        : 'Click Generate Package → pick category → Generate → Save to Task.';
       buttons+='<button onclick="vaLaunchFactory(\''+engine+'\')" style="'+btnStyleGold+'">⚡ Generate Package — Start Here</button>';
     } else {
       instruction='Click Generate Package → Generate → Save to Task.';
@@ -12032,18 +11919,6 @@ function renderVAOperatorMode(tab){
         buttons+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"><a href="https://www.heygen.com" target="_blank" style="'+btnStyleTool+'">🎬 HeyGen</a></div>';
         buttons+='<button onclick="vaAdvanceTask(\''+current.id+'\',\'review\',null)" style="width:100%;padding:14px;background:#22c55e;border:none;border-radius:10px;color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:8px">✓ MP4 Downloaded — Continue to Review</button>';
       }
-    } else if(isAIStudio){
-      var sub=current.subStage||'heygen';
-      if(sub==='heygen'){
-        instruction=vaBack.replace('%s','assigned').replace("'%t'",'null')+'<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:8px">Step 2A — Build Kelly Video in HeyGen</div><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>1 — Copy Kelly Script</b><br><span style="color:var(--dim);font-size:12px">Tap Copy Kelly Script below — spoken lines only</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>2 — Open HeyGen</b><br><span style="color:var(--dim);font-size:12px">Select Kelly avatar → dark cinematic navy background → Kelly on screen full 30 seconds</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>3 — Paste → Generate → Download</b><br><span style="color:var(--dim);font-size:12px">Click Script to Video → paste script there → select Kelly avatar → Generate → Download MP4</span></span></label>';
-        if(pkg){
-          if(pkg.script||pkg.kellyScript) buttons+='<button id="btn-kelly-script" onclick="vaCopyField(\'script\',\'btn-kelly-script\')" style="'+btnStyle2+'">📋 Copy Kelly Script</button>';
-        } else {
-          buttons+='<div style="padding:10px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.3);border-radius:8px;color:#f87171;font-size:13px;margin-bottom:8px;">⚠️ No package found — go back and generate one first.</div>';
-        }
-        buttons+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"><a href="https://www.heygen.com" target="_blank" style="'+btnStyleTool+'">🎬 HeyGen</a></div>';
-        buttons+='<button onclick="vaAdvanceTask(\''+current.id+'\',\'review\',null)" style="width:100%;padding:14px;background:#22c55e;border:none;border-radius:10px;color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:8px">✓ MP4 Downloaded — Continue to Review</button>';
-      }
     } else {
       instruction='Use the generated package to create the asset. Open the right tool, paste the content, and generate.';
       buttons+='<a href="https://www.heygen.com" target="_blank" style="'+btnStyle2+'">🎬 Open HeyGen</a>';
@@ -12055,8 +11930,6 @@ function renderVAOperatorMode(tab){
       instruction=reviewBack+'<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:8px">SRV — Review checklist:</div><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>1 — Long Song</b><br><span style="color:var(--dim);font-size:12px">Listen fully → vocals clear → no cutoff → correct mood → sounds good</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>2 — Short Clip</b><br><span style="color:var(--dim);font-size:12px">Watch fully → lyrics readable on screen → timing correct → no black bars → 30 sec max</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>3 — Files Ready</b><br><span style="color:var(--dim);font-size:12px">Long MP4 saved to Desktop → Short MP4 saved to Desktop → both named correctly</span></span></label>';
     } else if(isNextWave){
       instruction=reviewBack+'<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:8px">NextWave — Review checklist:</div><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>1 — Watch Full Video</b><br><span style="color:var(--dim);font-size:12px">Colin look matches topic → Finance=suit, AI=turtleneck, Motivation=casual</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>2 — Check Overlays</b><br><span style="color:var(--dim);font-size:12px">Text centered on screen → timing fits 30 seconds → no text cut off</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>3 — Disclaimer</b><br><span style="color:var(--dim);font-size:12px">Finance topic → confirm disclaimer visible at end of video</span></span></label>';
-    } else if(isAIStudio){
-      instruction=reviewBack+'<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:8px">AI Studio — Review checklist:</div><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>1 — Watch Full Video</b><br><span style="color:var(--dim);font-size:12px">Kelly on screen entire 30 seconds → background dark navy → no cutaway</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>2 — Check Overlays</b><br><span style="color:var(--dim);font-size:12px">Text overlays centered → content accurate → nothing cut off</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>3 — Disclaimer</b><br><span style="color:var(--dim);font-size:12px">Health or medical topic → confirm disclaimer added to description</span></span></label>';
     } else {
       instruction=reviewBack+'Review the generated asset. Watch it fully. Check quality. If good, mark ready to upload.';
     }
@@ -12071,8 +11944,7 @@ function renderVAOperatorMode(tab){
     // YouTube API can't fully automate) and when no auto-upload has fired yet.
     if(pkg && pkg.uploadStatus === 'uploading' && !isSRV){
       // v13.54.2 — upload in progress. Show yellow card instead of manual checklist.
-      const _engineDest = (pkg.engine === 'AI Studio' || pkg.engine === 'AI Creation Studio') ? 'AICreation-tool'
-                        : (pkg.engine === 'NextWave' || pkg.engine === 'NextWave Systems') ? 'NextWaveSys'
+      const _engineDest = (pkg.engine === 'NextWave' || pkg.engine === 'NextWave Systems') ? 'NextWaveSys'
                         : (pkg.engine || 'destination channel');
       const _started = pkg.uploadStartedAt ? new Date(pkg.uploadStartedAt).toLocaleTimeString() : '—';
       instruction = uploadBack
@@ -12124,8 +11996,6 @@ function renderVAOperatorMode(tab){
       instruction=uploadBack+'<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:8px">SRV — Upload checklist:</div><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>1 — YouTube Long</b><br><span style="color:var(--dim);font-size:12px">YouTube Studio → New video → upload Long MP4 → paste Title → paste Caption → paste Hashtags → Language: Persian/Farsi → Category: Music → ✅ AI-generated content → Set Public</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>2 — YouTube Short</b><br><span style="color:var(--dim);font-size:12px">YouTube Studio → New video → upload Short MP4 → paste Short Title → paste Caption → Set Public</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>3 — TikTok + Instagram</b><br><span style="color:var(--dim);font-size:12px">Upload Short MP4 to TikTok → upload Short MP4 to Instagram Reels → paste caption on both</span></span></label>';
     } else if(isNextWave){
       instruction=uploadBack+'<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:8px">NextWave — Upload checklist:</div><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>1 — YouTube</b><br><span style="color:var(--dim);font-size:12px">YouTube Studio → New video → upload MP4 → paste Title → paste Caption → paste Hashtags → Category: Education → ✅ AI-generated content → Finance topic: add disclaimer → Set Public</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>2 — TikTok</b><br><span style="color:var(--dim);font-size:12px">TikTok Studio → upload MP4 → paste TikTok caption → Set Public</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>3 — Instagram</b><br><span style="color:var(--dim);font-size:12px">Instagram → New Reel → upload MP4 → paste caption → Set Public</span></span></label>';
-    } else if(isAIStudio){
-      instruction=uploadBack+'<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:8px">AI Studio — Upload checklist:</div><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>1 — YouTube</b><br><span style="color:var(--dim);font-size:12px">YouTube Studio → New video → upload MP4 → paste Title → paste Caption → paste Hashtags → Category: Science &amp; Technology → ✅ AI-generated content → Health topic: add disclaimer → Set Public</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>2 — TikTok</b><br><span style="color:var(--dim);font-size:12px">TikTok Studio → upload MP4 → paste TikTok caption → Set Public</span></span></label><label style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;cursor:pointer"><input type="checkbox" style="margin-top:2px;accent-color:var(--gold)"><span><b>3 — Instagram</b><br><span style="color:var(--dim);font-size:12px">Instagram → New Reel → upload MP4 → paste caption → Set Public</span></span></label>';
     } else {
       instruction=uploadBack+'Copy the content below and upload to all platforms. Tick every box before marking done.';
     }
@@ -12161,7 +12031,7 @@ function renderVAOperatorMode(tab){
   // Advance button
   const nextStage={creating:'review',generated:'review',generating:'review',review:'uploading',uploading:'done'};
   const nextLabel={assigned:'▶ Start Asset Creation',creating:'✓ Asset Complete — Continue',generated:'✓ Asset Complete — Continue',generating:'✓ Asset Complete — Continue',review:'✓ Looks Good — Continue to Upload',uploading:'✓ Uploaded — Mark Done'};
-  if(nextStage[stage] && !((stage==='generating'||stage==='generated') && (isSRV||isNextWave||isAIStudio))){
+  if(nextStage[stage] && !((stage==='generating'||stage==='generated') && (isSRV||isNextWave))){
     html+='<button onclick="vaAdvanceTask(\''+current.id+'\',\''+nextStage[stage]+'\')" style="width:100%;padding:14px;background:#22c55e;border:none;border-radius:10px;color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:8px">'+(nextLabel[stage]||'Next →')+'</button>';
   }
   html+='</div>';
@@ -12172,7 +12042,7 @@ function renderVAOperatorMode(tab){
     html+='<div style="font-size:10px;color:var(--dim);font-family:\'JetBrains Mono\',monospace;margin-bottom:10px">UP NEXT</div>';
     otherPending.slice(1,4).forEach(function(t){
       html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">';
-      const engEmoji={'SRV Farsi':'🌹','SRV English':'🎵','NextWave':'⚡','AI Studio':'🤖'};
+      const engEmoji={'SRV Farsi':'🌹','SRV English':'🎵'};
   html+='<span style="font-size:16px">'+(engEmoji[t.engine]||'⚙️')+'</span>';
       html+='<div style="flex:1"><div style="font-size:12px;font-weight:600">'+(t.name||t.title||t.task||'Task')+'</div>';
       html+='<div style="font-size:10px;color:var(--dim);margin-top:2px">'+(t.engine||'')+'</div></div>';
@@ -12187,7 +12057,7 @@ function renderVAOperatorMode(tab){
 }
 
 function vaLaunchFactory(engine){
-  const engineMap={'SRV Farsi':'srv_farsi','SRV English':'srv_english','NextWave':'nextwave','AI Studio':'ai_studio'};
+  const engineMap={'SRV Farsi':'srv_farsi','SRV English':'srv_english'};
   const engineId=engineMap[engine]||null;
   const pending=D.tasks.filter(function(t){return t.status!=='done'&&t.status!=='uploaded';});
   const currentTask=(vaFocusTaskId?pending.find(function(t){return String(t.id)===String(vaFocusTaskId);}):null)||pending[0]||null;
@@ -12196,7 +12066,7 @@ function vaLaunchFactory(engine){
 }
 
 function openFactoryForEngine(engineId){
-  const engineNameMap={srv_farsi:'SRV Farsi',srv_english:'SRV English',nextwave:'NextWave',ai_studio:'AI Studio'};
+  const engineNameMap={srv_farsi:'SRV Farsi',srv_english:'SRV English'};
   const engineName=engineNameMap[engineId]||null;
   const matchingTask=D.tasks.find(function(t){
     return (t.engine===engineName||t.channel===engineName)&&t.status!=='done'&&t.status!=='uploaded';
@@ -12207,7 +12077,7 @@ function openFactoryForEngine(engineId){
 
 function engineIdForTask(task){
   if(!task)return null;
-  const map={'SRV Farsi':'srv_farsi','SRV English':'srv_english','NextWave':'nextwave','AI Studio':'ai_studio'};
+  const map={'SRV Farsi':'srv_farsi','SRV English':'srv_english'};
   return map[task.engine]||map[task.channel]||null;
 }
 
@@ -12245,7 +12115,7 @@ function vaAdvanceTask(id, newStatus, subStage){
     } else if(pkg && pkg.submagicProjectId){
       // v13.69.461 — persistence gap: pkg exists with submagicProjectId but videoUrl lost on reload
       // Auto-resolve download URL from Submagic API instead of forcing operator to paste it
-      const _recoverEngine = (pkg.engine) || (task && task.engine) || 'AI Studio';
+      const _recoverEngine = (pkg.engine) || (task && task.engine) || '';
       console.log('[v13.69.461] videoUrl missing — auto-resolving from Submagic projectId:', pkg.submagicProjectId);
       try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined') renderTab(currentTab); }catch(_){}
       fetch('/api/ops?action=submagic_get_project&project_id=' + encodeURIComponent(pkg.submagicProjectId))
@@ -12272,7 +12142,7 @@ function vaAdvanceTask(id, newStatus, subStage){
         });
     } else if(task){
       // No pkg or no submagicProjectId — manual prompt
-      const engine = (pkg && pkg.engine) || task.engine || 'AI Studio';
+      const engine = (pkg && pkg.engine) || task.engine || '';
       _vaUploadManualPrompt(id, engine, task);
     }
   }
@@ -12659,49 +12529,6 @@ function vaStartFarsiProductionTask(){
   else document.getElementById('mainContent').innerHTML=renderVAOperatorMode('tasks');
   window.scrollTo(0,0);
 }
-// v13.75.0 — one-click AI Studio production task from rotation (no manual picking)
-function vaStartAIStudioProductionTask(){
-  const aiEngine=(Array.isArray(ENGINES_CONFIG)?ENGINES_CONFIG:[]).find(e=>e.id==='ai_studio');
-  if(!aiEngine){alert('AI Studio engine not found');return;}
-  // Advance rotation and get next mode (auto-rotate, no consecutive repeats)
-  const mode=(typeof _aiStudioNextMode==='function')?_aiStudioNextMode():'AI Tools & Productivity';
-  // Long(Friday) → Short(Saturday) → Short(Sunday) cycle
-  const contentFormat=(typeof _aiStudioNextFormat==='function')?_aiStudioNextFormat():'short';
-  const isLong=(contentFormat==='long');
-  const publishDate=(typeof _aiStudioNextPublishDate==='function')?_aiStudioNextPublishDate(isLong):new Date().toISOString().slice(0,10);
-  if(!Array.isArray(D.tasks))D.tasks=[];
-  const nextId=D.tasks.reduce(function(m,t){return Math.max(m,Number(t&&t.id)||0);},0)+1;
-  const task={
-    id:nextId,
-    name:'AI Studio — '+mode+' · '+(isLong?'Long':'Short'),
-    engine:'AI Studio',
-    mood:mode,
-    mode:mode,
-    platform:'YouTube',
-    contentType:isLong?'Long':'Short',
-    contentFormat:contentFormat,
-    isLong:isLong,
-    status:'assigned',
-    subStage:null,
-    isoDate:new Date().toISOString().slice(0,10), // v15.7.0 — production date (today Mon-Thu)
-    publishAt:publishDate+'T09:00:00',
-    day:'',
-    channel:'',
-    autoCreated:true,
-    reviewStatus:'acknowledged',
-    assignmentReason:'[production] ai_studio rotation '+mode+' '+contentFormat+' publish:'+publishDate,
-    createdAt:Date.now(),
-  };
-  if(D.srvLifecycleStages) delete D.srvLifecycleStages[String(nextId)];
-  if(D.srvFarsiLifecycleStages) delete D.srvFarsiLifecycleStages[String(nextId)];
-  if(D.aiStudioLifecycleStages) delete D.aiStudioLifecycleStages[String(nextId)];
-  D.tasks.push(task);
-  saveData();
-  if(typeof vaFocusTaskId!=='undefined') vaFocusTaskId=nextId;
-  if(typeof renderTab==='function') renderTab('tasks');
-  else document.getElementById('mainContent').innerHTML=renderVAOperatorMode('tasks');
-  window.scrollTo(0,0);
-}
 function vaResetWeek(){
   D.tasks=D.tasks.map(function(t){return Object.assign({},t,{status:'assigned',subStage:null});});
   try{
@@ -12799,9 +12626,6 @@ function _getEngineDisclaimer(pkg){
   const isNextWave=(pkg.engineId==='nextwave'||pkg.engine==='NextWave');
   const isFinance=(pkg.topic==='Finance'||pkg.mood==='Finance');
   if(isNextWave&&isFinance) return '⚠️ Educational content only. Not financial advice.';
-  // AI Studio — educational disclaimer covers psychology + health-adjacent topics.
-  const isAIStudio=(pkg.engineId==='ai_studio'||pkg.engine==='AI Studio');
-  if(isAIStudio) return '⚠️ Educational content. Not medical, psychological, or professional advice.';
   return '';
 }
 function _buildPlatformBlock(pkg,opts){
@@ -13624,7 +13448,6 @@ async function autoStartYoutubeUpload(pkg){
   // Engine-aware YouTube category. AI Studio = Science & Tech (28), NextWave = Education (27),
   // SRV (music) = Music (10) — though SRV doesn't auto-upload, keep defensive default.
   const ENGINE_TO_CATEGORY = {
-    'AI Studio': '28', 'AI Creation Studio': '28',
     'NextWave': '27', 'NextWave Systems': '27',
     'SRV Farsi': '10', 'SRV English': '10',
   };
@@ -14310,7 +14133,7 @@ function nextNDaysSchedule(n){
     const mShort=d.toLocaleString('en-US',{month:'short'});
     const iso=_isoOfDay(d);
     const tasks=Array.isArray(D.tasks)?D.tasks.filter(t=>{
-      if(!t)return false;
+      if(!t||_isRetiredBusiness(t.engine))return false;   // retired businesses are not scheduled or listed
       if(_AUTO_ASSIGN_TERMINAL.has(String(t.status||'').toLowerCase()))return false;
       if(t.isoDate)return String(t.isoDate)===iso;
       return String(t.day||'').trim()===dayName;
@@ -15175,8 +14998,6 @@ async function openExec(taskId){
   if(_srvEnglishHasLifecycle(t))return;
   // SRV Farsi lifecycle tasks don't use the legacy exec init flow
   if(typeof _srvFarsiHasLifecycle==='function'&&_srvFarsiHasLifecycle(t))return;
-  // AI Studio lifecycle tasks don't use the legacy exec init flow (v13.75.0)
-  if(typeof _aiStudioHasLifecycle==='function'&&_aiStudioHasLifecycle(t))return;
   // NextWave lifecycle tasks don't use the legacy exec init flow (v13.94.0)
   if(typeof _nextWaveHasLifecycle==='function'&&_nextWaveHasLifecycle(t))return;
   const existingPkg=D.packages.find(p=>p.taskId===taskId&&!p.checklist?.posted);
@@ -15188,7 +15009,7 @@ async function openExec(taskId){
     const sr=await fetch('/api/ops?action=get_suno_execution',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({local_key:pkgId})}).catch(()=>null);
     if(sr&&sr.ok){const sd=await sr.json();console.log('[WEEKLY SUNO LOAD]',JSON.stringify(sd.suno));if(sd.suno){execState.sunoData=sd.suno;prefillSunoFields(sd.suno);}}
   }
-  const _isHeyGen=(t.engine==='NextWave'||t.engine==='NextWave Systems'||t.engine==='AI Studio'||t.engine==='AI Creation Studio'||(t.engine&&(t.engine.toLowerCase().includes('nextwave')||t.engine.toLowerCase().includes('ai studio')||t.engine.toLowerCase().includes('ai creation'))));
+  const _isHeyGen=(t.engine==='NextWave'||t.engine==='NextWave Systems'||(t.engine&&(t.engine.toLowerCase().includes('nextwave'))));
   if(_isHeyGen){
     execState.heygenLocalKey=pkgId||null;
     if(pkgId){
@@ -15254,25 +15075,7 @@ function renderExecMode(taskId){
       <button class="exec-close" onclick="closeExec()" style="margin-top:14px">← Back to Tasks</button>
     </div>`;
   }
-  // v13.75.0 — AI Studio lifecycle fast-path (mirrors Farsi/English)
-  if(typeof _aiStudioHasLifecycle==='function' && _aiStudioHasLifecycle(t)){
-    return `<div style="padding:0 0 20px 0">
-      <div class="exec-banner">
-        <div class="exec-banner-label">🤖 AI STUDIO — LIFECYCLE</div>
-        <div class="exec-banner-title">${t.name}</div>
-        <div class="exec-fields">
-          <div class="exec-field"><div class="exec-field-label">ENGINE</div><div class="exec-field-val">AI Studio</div></div>
-          <div class="exec-field"><div class="exec-field-label">MODE</div><div class="exec-field-val">${t.mode||t.mood||'—'}</div></div>
-          <div class="exec-field"><div class="exec-field-label">TYPE</div><div class="exec-field-val">${t.contentType||'—'}</div></div>
-          <div class="exec-field"><div class="exec-field-label">DAY</div><div class="exec-field-val">${t.day||'—'}</div></div>
-          <div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>
-        </div>
-      </div>
-      ${renderAIStudioLifecycleCard(t)}
-      <button class="exec-close" onclick="closeExec()" style="margin-top:14px">← Back to Tasks</button>
-    </div>`;
-  }
-  // v13.94.0 — NextWave lifecycle fast-path (mirrors AI Studio)
+  // v13.94.0 — NextWave lifecycle fast-path
   if(typeof _nextWaveHasLifecycle==='function' && _nextWaveHasLifecycle(t)){
     return `<div style="padding:0 0 20px 0">
       <div class="exec-banner">
@@ -15292,7 +15095,7 @@ function renderExecMode(taskId){
   }
   const existingPkg=D.packages.find(p=>String(p.taskId)===String(taskId)&&!p.checklist?.posted);
   const _isSRV=(t.engine==='SRV Farsi'||t.engine==='SRV English'||(t.engine&&t.engine.toLowerCase().includes('srv')));
-  const _isHeyGen=(t.engine==='NextWave'||t.engine==='NextWave Systems'||t.engine==='AI Studio'||t.engine==='AI Creation Studio'||(t.engine&&(t.engine.toLowerCase().includes('nextwave')||t.engine.toLowerCase().includes('ai studio')||t.engine.toLowerCase().includes('ai creation'))));
+  const _isHeyGen=(t.engine==='NextWave'||t.engine==='NextWave Systems'||(t.engine&&(t.engine.toLowerCase().includes('nextwave'))));
   execState=execState||{};execState.taskId='dtask_'+taskId;execState.data={task:t};execState.sunoStatus=execState.sunoStatus||'not_started';execState.heygenStatus=execState.heygenStatus||'not_started';
   var _sunoBlock='';
   if(_isSRV){
@@ -21479,334 +21282,6 @@ function _renderShortPlatformPublishPanel(pkg,taskId,pkgId,publishFnYT,publishFn
   return html;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// AI STUDIO LIFECYCLE — v13.75.0 (2026-07-10)
-// Generate→Review→Build→Approve→Publish→Done (same as SRV)
-// Schedule: Friday=Long · Saturday=Short · Sunday=Short
-// Auto mood rotation: 9-item cycle, no consecutive repeats
-// Background music: Web Audio API ambient oscillators (royalty-free)
-// Logo: "AI CREATION STUDIO" text watermark on every canvas frame
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ── 9-mode rotation (no consecutive repeats) ─────────────────────────────────
-const AI_STUDIO_ROTATION_MODES=[
-  'AI Tools & Productivity',   // 1
-  'Psychology & Self Growth',  // 2
-  'Surprising Facts & News',   // 3
-  'AI Tools & Productivity',   // 4
-  'Surprising Facts & News',   // 5
-  'Psychology & Self Growth',  // 6
-  'AI Tools & Productivity',   // 7
-  'Psychology & Self Growth',  // 8
-  'Surprising Facts & News',   // 9
-];
-function _aiStudioNextMode(){
-  if(typeof D.aiStudioRotationIdx!=='number')D.aiStudioRotationIdx=0;
-  const mode=AI_STUDIO_ROTATION_MODES[D.aiStudioRotationIdx%9];
-  D.aiStudioRotationIdx=(D.aiStudioRotationIdx+1)%9;
-  if(typeof saveAppState==='function')saveAppState();
-  return mode;
-}
-function _aiStudioPeekNextMode(){
-  if(typeof D.aiStudioRotationIdx!=='number')D.aiStudioRotationIdx=0;
-  return AI_STUDIO_ROTATION_MODES[D.aiStudioRotationIdx%9];
-}
-
-// ── Format cycle: Long(Fri) · Short(Sat) · Short(Sun) ────────────────────────
-// D.aiStudioTaskSeq % 3: 0=Long, 1=Short(Sat), 2=Short(Sun)
-function _aiStudioNextFormat(){
-  if(typeof D.aiStudioTaskSeq!=='number')D.aiStudioTaskSeq=0;
-  const seq=D.aiStudioTaskSeq%3;
-  D.aiStudioTaskSeq=(D.aiStudioTaskSeq+1);
-  if(typeof saveAppState==='function')saveAppState();
-  return seq===0?'long':'short';
-}
-function _aiStudioPeekFormat(){
-  if(typeof D.aiStudioTaskSeq!=='number')D.aiStudioTaskSeq=0;
-  return (D.aiStudioTaskSeq%3===0)?'long':'short';
-}
-
-// ── Publish calendar: Long=next Friday, Short=next Sat then Sun, cycling ─────
-function _aiStudioNextPublishDate(isLong){
-  const now=new Date();
-  const todayDow=now.getDay(); // 0=Sun,1=Mon,...,5=Fri,6=Sat
-  function _nextDow(targetDow){
-    let diff=targetDow-todayDow;
-    if(diff<=0)diff+=7;
-    const d=new Date(now);d.setDate(now.getDate()+diff);
-    return d.toISOString().slice(0,10);
-  }
-  if(isLong) return _nextDow(5); // Friday
-  // Short: alternating Sat/Sun based on D.aiStudioTaskSeq
-  // seq%3===1 → Sat(6), seq%3===2 → Sun(0)
-  const seq=typeof D.aiStudioTaskSeq==='number'?D.aiStudioTaskSeq:0;
-  const prevSeq=(seq-1+99)%99; // what was consumed before this call
-  if(prevSeq%3===1) return _nextDow(6); // Sat
-  return _nextDow(0);                   // Sun
-}
-function _aiStudioResetPublishCalendar(){
-  D.aiStudioTaskSeq=0;
-  D.aiStudioLastScheduledMs=0; // v15.7.0 — also reset anchor
-  (D.tasks||[]).forEach(function(t){
-    if(t&&t.engine==='AI Studio'&&t.status!=='done'){
-      delete t.publishAt; delete t.publishDay; delete t.publishLabel; delete t.scheduledPublishLabel;
-    }
-  });
-  if(typeof saveAppState==='function')saveAppState();
-  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
-  const _d=_weeklyPublishDates();
-  alert('AI Studio calendar reset ✓\nNext 3 tasks will publish:\n• Long → Fri '+_d.friDisplay+'\n• Short → Sat '+_d.satDisplay+'\n• Short → Sun '+_d.sunDisplay);
-}
-
-// ── Engine helpers ────────────────────────────────────────────────────────────
-function _aiStudioEngineConfig(){
-  if(!Array.isArray(ENGINES_CONFIG))return null;
-  return ENGINES_CONFIG.find(e=>e.id==='ai_studio')||null;
-}
-function _aiStudioHasLifecycle(task){
-  if(!task||task.engine!=='AI Studio')return false;
-  const cfg=_aiStudioEngineConfig();
-  return !!(cfg&&cfg.lifecycle);
-}
-function _aiStudioGetStage(taskId){
-  // v13.75.8 — in-memory first, then pkg.lifecycleStage as Supabase-persistent fallback
-  const _mem = D.aiStudioLifecycleStages && D.aiStudioLifecycleStages[String(taskId)];
-  if(_mem) return _mem;
-  const _pkg=(D.packages||[]).find(function(p){return String(p.taskId||'')===String(taskId);});
-  const _pkgStage=_pkg&&_pkg.lifecycleStage;
-  // Also warm the in-memory map so subsequent reads are fast
-  if(_pkgStage){
-    if(!D.aiStudioLifecycleStages||typeof D.aiStudioLifecycleStages!=='object')D.aiStudioLifecycleStages={};
-    D.aiStudioLifecycleStages[String(taskId)]=_pkgStage;
-  }
-  return _pkgStage||'generate';
-}
-function _aiStudioSetStage(taskId,stage){
-  if(!D.aiStudioLifecycleStages||typeof D.aiStudioLifecycleStages!=='object')D.aiStudioLifecycleStages={};
-  D.aiStudioLifecycleStages[String(taskId)]=stage;
-  // v13.75.8 — also persist stage on the package so it survives a hard refresh via Supabase
-  const _pkg=(D.packages||[]).find(function(p){return String(p.taskId||'')===String(taskId);});
-  if(_pkg){
-    _pkg.lifecycleStage=stage;
-    if(typeof savePackageToSupabase==='function')savePackageToSupabase(_pkg).catch(function(){});
-  }
-  if(stage==='done'){
-    const _t=(D.tasks||[]).find(function(t){return String(t.taskId||t.id||'')===String(taskId);});
-    if(_t&&_t.status!=='done'){_t.status='done';_t.updatedAt=new Date().toISOString();}
-  }
-  if(typeof saveAppState==='function')saveAppState();
-}
-function _aiStudioPkgForTask(task){
-  if(!task)return null;
-  return (D.packages||[]).find(p=>String(p.taskId||'')===String(task.taskId||task.id||''))||null;
-}
-
-// ── Lifecycle card renderer (6 stages) ───────────────────────────────────────
-function renderAIStudioLifecycleCard(task){
-  const pkg=_aiStudioPkgForTask(task);
-  const stage=_aiStudioGetStage(task.taskId||task.id);
-  const taskId=String(task.taskId||task.id||'');
-  const pkgId=pkg?String(pkg.id||''):'';
-  const stageCol=SRV_STAGE_COLORS[stage]||'#c9a84c';
-  const isLongTask=!!(task.isLong||task.contentFormat==='long');
-  const btnGreen='width:100%;padding:12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);border-radius:10px;color:#22c55e;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:10px';
-  const btnGold='width:100%;padding:12px;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.4);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:\'Syne\',sans-serif;margin-top:10px';
-  const btnRed='width:100%;padding:9px;background:transparent;border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:11px;font-weight:700;cursor:pointer;font-family:\'JetBrains Mono\',monospace;margin-top:8px';
-
-  let body='';
-
-  // ── GENERATE ──────────────────────────────────────────────────────────────
-  if(stage==='generate'){
-    const nextMode=_aiStudioPeekNextMode();
-    body+=`<div style="font-size:13px;color:var(--dim);margin-bottom:16px;line-height:1.7">
-      <strong style="color:#fff">Mode:</strong> ${escHTML(nextMode)}<br>
-      <strong style="color:#fff">Format:</strong> ${isLongTask?'Long (7–9 min)':'Short (60–90 sec)'}<br>
-      <span style="font-size:11px;color:var(--dim)">Auto-generating package via AI… No manual input needed.</span>
-    </div>`;
-    body+=`<button style="${btnGold}" onclick="_aiStudioGeneratePackage('${taskId}')">🤖 Auto-Generate Package</button>`;
-  }
-
-  // ── REVIEW ────────────────────────────────────────────────────────────────
-  else if(stage==='review'){
-    if(pkg){
-      const fields=[
-        {label:'Title',val:pkg.title},
-        {label:'Hook',val:pkg.hook},
-        {label:'Script',val:pkg.script||pkg.lyrics,long:true},
-        {label:'YouTube Caption',val:pkg.captionYT||pkg.captionYouTube},
-        {label:'Hashtags',val:pkg.hashtags},
-      ];
-      fields.forEach(function(f){
-        if(!f.val)return;
-        body+=`<div style="margin-bottom:12px">
-          <div style="font-size:9px;color:var(--dim);letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px">${f.label}</div>
-          <div style="font-size:${f.long?'11px':'13px'};color:#fff;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 10px;max-height:${f.long?'140px':'60px'};overflow-y:auto;white-space:pre-wrap;cursor:pointer" onclick="navigator.clipboard.writeText(${JSON.stringify(f.val||'')})">${escHTML(f.val||'')}</div>
-        </div>`;
-      });
-      body+=`<button style="${btnGreen}" onclick="_aiStudioSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve Script → Build</button>`;
-      body+=`<button style="${btnRed}" onclick="if(confirm('Discard package and regenerate?')){_aiStudioSetStage('${taskId}','generate');if(typeof renderTab==='function')renderTab(currentTab)}">↺ Discard & Regenerate</button>`;
-    } else {
-      body+=`<div style="color:var(--dim);font-size:12px;margin-bottom:12px">Package not found — try generating again.</div>`;
-      body+=`<button style="${btnGold}" onclick="_aiStudioSetStage('${taskId}','generate');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Generate</button>`;
-    }
-  }
-
-  // ── BUILD — original pkg.renderStatus state machine ──────────────────────
-  else if(stage==='build'){
-    const renderStatus=pkg?pkg.renderStatus:'';
-    if(!renderStatus||renderStatus==='ai_studio_building'||!pkg){
-      // Not yet started
-      body+=`<div style="font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.7">HeyGen will render your video automatically. MMM polls every 45 sec.<br>Submagic captions apply automatically after render.</div>`;
-      body+=`<button style="${btnGreen}" onclick="(async function(){const p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(!p){alert('Package not found');return;}window._vaPkg=p;const r=await autoStartHeygenRender(p);if(r&&r.ok){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');}else{alert('HeyGen submit failed: '+(r&&(r.detail||r.reason)||'unknown'));}})()">⚡ Start Build (HeyGen → Submagic)</button>`;
-    } else if(renderStatus==='rendering'){
-      const _jobShort=escHTML(String(pkg.heygenJobId||'').slice(0,16));
-      const _started=pkg.renderStartedAt?new Date(pkg.renderStartedAt).toLocaleTimeString():'—';
-      body+=`<div style="padding:20px;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.35);border-radius:12px;text-align:center;margin-bottom:12px">
-        <div style="font-size:32px;margin-bottom:12px">🟡</div>
-        <div style="font-size:16px;font-weight:800;color:#fbbf24;margin-bottom:8px">Rendering at HeyGen…</div>
-        <div style="font-size:11px;color:var(--dim);line-height:1.6;font-family:'JetBrains Mono',monospace">job: ${_jobShort}…<br>started: ${escHTML(_started)}<br>typical render time: 5–15 minutes</div>
-        <div style="font-size:11px;color:var(--text);margin-top:12px;line-height:1.5">MMM polls every 45 sec — auto-advances when ready.</div>
-      </div>`;
-      body+=`<button style="${btnGold}" onclick="_pollHeygenRenders().then(function(){if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks')})">↻ Check render status now</button>`;
-    } else if(renderStatus==='post_processing'){
-      body+=`<div style="padding:20px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.40);border-radius:12px;text-align:center;margin-bottom:12px">
-        <div style="font-size:32px;margin-bottom:12px">✨</div>
-        <div style="font-size:16px;font-weight:800;color:#a855f7;margin-bottom:8px">Sending to Submagic…</div>
-        <div style="font-size:11px;color:var(--dim);line-height:1.6;font-family:'JetBrains Mono',monospace">Submitting video for captions · zooms · b-rolls<br>Auto-updates when ready.</div>
-      </div>`;
-    } else if(renderStatus==='rendered'&&pkg&&pkg.videoUrl){
-      const _hasSubmagicError=!!(pkg&&pkg.submagicError);
-      body+=`<div style="padding:20px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.35);border-radius:12px;text-align:center;margin-bottom:12px">
-        <div style="font-size:32px;margin-bottom:12px">🟢</div>
-        <div style="font-size:16px;font-weight:800;color:#22c55e;margin-bottom:8px">Raw HeyGen render complete</div>
-        ${_hasSubmagicError?`<div style="font-size:10px;color:#f59e0b;margin-bottom:8px;padding:6px;background:rgba(251,191,36,0.08);border-radius:6px">Submagic skipped: ${escHTML(String(pkg.submagicError).slice(0,120))}</div>`:''}
-        <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace">duration: ${escHTML(String(pkg.renderDurationSec||'—'))}s</div>
-        <a href="${escHTML(pkg.videoUrl)}" target="_blank" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#22c55e;color:#000;border-radius:8px;text-decoration:none;font-weight:700;font-family:'Syne',sans-serif">▶ Open Raw MP4</a>
-      </div>`;
-      body+=`<button style="${btnGold.replace('rgba(201,168,76,0.12)','rgba(34,197,94,0.15)').replace('rgba(201,168,76,0.4)','rgba(34,197,94,0.5)').replace('#c9a84c','#22c55e')};font-size:14px;font-weight:800;padding:14px 20px" onclick="_aiStudioSendToSubmagic('${pkgId}','${taskId}')">✨ Send to Submagic → Add Captions</button>`;
-    } else if(renderStatus==='enhancing'){
-      const _proj=escHTML(String(pkg&&pkg.submagicProjectId||'').slice(0,16));
-      const _started=pkg&&pkg.submagicStartedAt?new Date(pkg.submagicStartedAt).toLocaleTimeString():'—';
-      body+=`<div style="padding:20px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.40);border-radius:12px;text-align:center;margin-bottom:12px">
-        <div style="font-size:32px;margin-bottom:12px">✨</div>
-        <div style="font-size:16px;font-weight:800;color:#a855f7;margin-bottom:8px">Submagic enhancing…</div>
-        <div style="font-size:11px;color:var(--dim);line-height:1.6;font-family:'JetBrains Mono',monospace">project: ${_proj}…<br>started: ${escHTML(_started)}<br>adding: captions · zooms · b-rolls<br>typical: 2–5 minutes</div>
-        <div style="font-size:11px;color:var(--text);margin-top:12px;line-height:1.5">MMM polls every 30 sec — auto-advances when ready.</div>
-      </div>`;
-      body+=`<button style="${btnGold}" onclick="_pollSubmagicProjects().then(function(){if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks')})">↻ Check enhancement status now</button>`;
-    } else if(renderStatus==='enhanced'&&pkg&&pkg.videoUrl){
-      body+=`<div style="padding:20px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.50);border-radius:12px;text-align:center;margin-bottom:12px">
-        <div style="font-size:32px;margin-bottom:12px">🎬</div>
-        <div style="font-size:16px;font-weight:800;color:#22c55e;margin-bottom:8px">Publishable MP4 ready</div>
-        <div style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-bottom:8px">captions · zooms · b-rolls applied</div>
-        <a href="${escHTML(pkg.videoUrl)}" target="_blank" style="display:inline-block;margin-top:8px;padding:10px 20px;background:#22c55e;color:#000;border-radius:8px;text-decoration:none;font-weight:700;font-family:'Syne',sans-serif">▶ Open Publishable MP4</a>
-        ${pkg.heygenRawUrl?`<br><a href="${escHTML(pkg.heygenRawUrl)}" target="_blank" style="display:inline-block;margin-top:8px;padding:6px 14px;background:none;border:1px solid var(--border);color:var(--dim);border-radius:6px;text-decoration:none;font-size:10px;font-family:'JetBrains Mono',monospace">A/B compare raw HeyGen MP4</a>`:''}
-      </div>`;
-      body+=`<button style="${btnGreen}" onclick="_aiStudioSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">✅ Build Complete — Advance to Approve</button>`;
-    } else if(renderStatus==='enhance_failed'){
-      const _err=escHTML(String(pkg&&pkg.submagicError||'unknown').slice(0,250));
-      body+=`<div style="padding:20px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.40);border-radius:12px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">⚠️</span><span style="font-size:14px;font-weight:800;color:#f59e0b">Submagic enhancement failed</span></div>
-        <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_err}</div>
-        <div style="font-size:11px;color:var(--dim);margin-top:10px;line-height:1.5">Raw HeyGen MP4 still available. Retry or proceed without enhancement.</div>
-        ${pkg&&pkg.heygenRawUrl?`<a href="${escHTML(pkg.heygenRawUrl)}" target="_blank" style="display:inline-block;margin-top:8px;padding:8px 14px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.30);color:#22c55e;border-radius:6px;text-decoration:none;font-size:11px">▶ Open Raw MP4</a>`:''}
-      </div>`;
-      body+=`<button style="${btnGold}" onclick="(function(){var p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(p){p.submagicError=null;window._vaPkg=p;autoStartSubmagic(p).then(function(){if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');})}})()">↻ Retry Submagic</button>`;
-      body+=`<button style="${btnGreen}" onclick="_aiStudioSetStage('${taskId}','approve');if(typeof renderTab==='function')renderTab(currentTab)">→ Continue with Raw MP4 — Advance to Approve</button>`;
-    } else if(renderStatus==='failed'){
-      const _errRaw2=pkg&&pkg.renderError||'unknown';
-      const _err=escHTML((typeof _errRaw2==='object'?(_errRaw2.message||_errRaw2.code||JSON.stringify(_errRaw2)):String(_errRaw2)).slice(0,250));
-      const _avatarId=escHTML(String((pkg&&pkg.avatar&&pkg.avatar.providerAvatarId)||'unknown').slice(0,16));
-      const _voiceId=escHTML(String((pkg&&pkg.avatar&&pkg.avatar.providerVoiceId)||'unknown').slice(0,16));
-      body+=`<div style="padding:20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);border-radius:12px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="font-size:24px">🔴</span><span style="font-size:14px;font-weight:800;color:#ef4444">HeyGen render failed</span></div>
-        <div style="font-size:11px;color:var(--text);font-family:'JetBrains Mono',monospace;line-height:1.5;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word">${_err}</div>
-        <div style="font-size:10px;color:var(--dim);margin-top:8px;line-height:1.6;font-family:'JetBrains Mono',monospace">avatar_id: ${_avatarId}…<br>voice_id: ${_voiceId}…<br><span style="color:#f59e0b">If "not found" persists → the avatar look may be inaccessible. Use 🧪 Test Render to confirm.</span></div>
-      </div>`;
-      body+=`<button style="${btnGold}" onclick="(function(){var p=(D.packages||[]).find(function(q){return String(q.id||'')===String('${pkgId}');});if(p){p.renderStatus=null;p.renderError=null;p.heygenJobId=null;window._vaPkg=p;autoStartHeygenRender(p).then(function(){if(typeof saveAppState==='function')saveAppState();if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');});}})()">↻ Retry Build</button>`;
-      // v13.76.0 — 5-second test render (watermarked, free) to verify avatar/voice IDs work
-      body+=`<button style="${btnGold.replace('rgba(201,168,76,0.12)','rgba(168,85,247,0.12)').replace('rgba(201,168,76,0.4)','rgba(168,85,247,0.4)').replace('#c9a84c','#a855f7')}" onclick="(async function(){var p=(D.packages||[]).find(function(q){return String(q.id||'')==='${pkgId}';});if(!p||!p.avatar||!p.script){alert('Package missing');return;}const r=await fetch('/api/ops?action=heygen_start_render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({avatar_id:p.avatar.providerAvatarId,voice_id:p.avatar.providerVoiceId,script:p.script.slice(0,200)+' — TEST',background:{type:'color',value:'#0a1628'},dimension:{width:1080,height:1920},scale:p.avatar.providerCharacterScale||1.0,test:true})});const d=await r.json();if(d.ok&&d.videoId){alert('🟢 Test render submitted! video_id: '+d.videoId+'\\n\\nAvatar + voice IDs are VALID. The production render failure is not an avatar issue — check script length or HeyGen quota.');}else{alert('🔴 Test render FAILED:\\n'+JSON.stringify(d.raw||d,null,2)+'\\n\\nAvatar or voice ID is INVALID on this account.');}})()">🧪 Test Render (5s watermark — diagnose avatar)</button>`;
-    }
-    body+=`<button style="${btnRed}" onclick="_aiStudioSetStage('${taskId}','review');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Review</button>`;
-  }
-
-  // ── APPROVE ───────────────────────────────────────────────────────────────
-  else if(stage==='approve'){
-    const videoUrl=pkg&&(pkg.submagicOutputUrl||pkg.videoUrl||pkg.heygenVideoUrl||pkg._heygenRawUrl);
-    // v13.91.0 — Duration gate: show warning if outside 35-45s target
-    const _durSec=pkg&&typeof pkg.submagicDurationSec==='number'?pkg.submagicDurationSec:null;
-    const _isLongTask=!!(task&&(task.isLong||task.contentFormat==='long'));
-    if(!_isLongTask&&_durSec!==null){
-      const _inRange=_durSec>=35&&_durSec<=45;
-      body+=_inRange
-        ?`<div style="padding:8px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);border-radius:8px;font-size:11px;color:#22c55e;margin-bottom:12px">✓ Duration: ${_durSec.toFixed(1)}s — within 35–45s target</div>`
-        :`<div style="padding:10px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.40);border-radius:8px;font-size:11px;color:#f87171;margin-bottom:12px">⚠️ <strong>Duration out of range: ${_durSec.toFixed(1)}s</strong> (target 35–45s). Script word count may have exceeded 82-word ceiling. Rebuild to regenerate with a tighter script.</div>`;
-    }
-    if(videoUrl){
-      body+=`<div style="margin-bottom:14px">
-        <video src="${escHTML(videoUrl)}" controls style="width:100%;border-radius:10px;max-height:300px;background:#000"></video>
-      </div>`;
-      body+=`<button style="${btnGreen}" onclick="_aiStudioSetStage('${taskId}','publish');if(typeof renderTab==='function')renderTab(currentTab)">✅ Approve & Publish to YouTube</button>`;
-    } else {
-      body+=`<div style="color:#ef4444;font-size:12px;margin-bottom:14px;padding:10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:8px">⚠ No video URL found — go back to Build stage to complete rendering first.</div>`;
-      body+=`<button style="${btnRed}" onclick="_aiStudioSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Build</button>`;
-    }
-    if(videoUrl)body+=`<button style="${btnRed}" onclick="_aiStudioSetStage('${taskId}','build');if(typeof renderTab==='function')renderTab(currentTab)">← Back to Build</button>`;
-  }
-
-  // ── PUBLISH ───────────────────────────────────────────────────────────────
-  else if(stage==='publish'){
-    const _isLongPublish=!!(task&&(task.isLong||task.contentFormat==='long'));
-    if(_isLongPublish){
-      // v15.20.0 — Long videos remain YouTube-only, exact pre-existing auto-publish flow, untouched.
-      body+=`<div id="ai-publish-status-${taskId}" style="font-size:12px;color:var(--dim);margin-bottom:14px">Publishing to YouTube…</div>`;
-      setTimeout(function(){ if(typeof _aiStudioRunPublish==='function') _aiStudioRunPublish(pkgId,taskId); },500);
-    } else {
-      // v15.20.0 — Shorts: independent per-platform controls (Engineering Task 1c0e3090)
-      body+=`<div style="font-size:11px;color:var(--dim);margin-bottom:12px">Publish this Short to each platform independently. A failure on one does not block another.</div>`;
-      body+=_renderShortPlatformPublishPanel(pkg,taskId,pkgId,'_aiStudioPublishYouTube','_aiStudioPublishTikTok');
-    }
-  }
-
-  // ── DONE ─────────────────────────────────────────────────────────────────
-  else if(stage==='done'){
-    const ytUrl=pkg&&(pkg.youtubeWatchUrl||pkg._ytWatchUrl);
-    const _isLongDone=!!(task&&(task.isLong||task.contentFormat==='long'));
-    body+=`<div style="font-size:13px;color:#22c55e;font-weight:800;margin-bottom:14px">✅ DONE — Published to YouTube</div>`;
-    if(ytUrl){
-      body+=`<a href="${escHTML(ytUrl)}" target="_blank" style="display:block;padding:12px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.3);border-radius:10px;color:#22c55e;font-weight:700;text-align:center;text-decoration:none;font-family:'Syne',sans-serif">▶ Open on YouTube</a>`;
-    }
-    // v15.21.0 — CEO Decision (2026-07-28): TikTok/Instagram production frozen. Manual-publish
-    // display only — no buttons, no auto-fire. Metadata still generated for copy/paste.
-    if(!_isLongDone&&pkg){
-      const ttState=pkg.tiktokPublishState||'ready';
-      body+=`<div style="margin-top:12px;padding:12px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;opacity:0.8">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ TikTok — Manual Publish</span><span style="font-size:9px;font-weight:800;padding:2px 8px;border-radius:12px;background:#6b728022;color:#9ca3af;border:1px solid #6b728044;letter-spacing:0.5px">⏸ PRODUCTION FROZEN</span>
-        </div>
-        ${_ttCaptionBox(pkg)}
-        ${ttState==='published'
-          ?`<div style="text-align:center;padding:9px;color:#22c55e;font-size:11px;font-weight:700;background:rgba(34,197,94,0.08);border-radius:8px;line-height:1.4">✓ Previously confirmed delivery<br><span style="font-weight:500;color:#9ca3af;font-size:10px">Open the TikTok app → tap the inbox notification to review &amp; post.</span></div>`
-          :`<div style="text-align:center;padding:9px;color:#9ca3af;font-size:11px;font-weight:500;line-height:1.4">Production publishing is frozen. Copy the caption above and post manually in the TikTok app.</div>`}
-      </div>`;
-      body+=`<div style="margin-top:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06);border-radius:10px;opacity:0.6">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:12px;font-weight:700;color:var(--text)">⏸ Instagram — Manual Publish</span><span style="font-size:9px;font-weight:800;padding:2px 8px;border-radius:12px;background:#6b728022;color:#9ca3af;border:1px solid #6b728044;letter-spacing:0.5px">⏸ PRODUCTION FROZEN</span>
-        </div>
-        <div style="font-size:10px;color:var(--dim);margin-top:6px">Connection reserved for future work.</div>
-      </div>`;
-    }
-  }
-
-  return `<div class="card" style="margin-top:4px;border-color:${stageCol}30">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="card-title" style="margin-bottom:0;color:var(--text)">🤖 AI Creation Studio</div>
-      <span style="font-size:10px;font-weight:800;color:${stageCol};background:${stageCol}15;padding:3px 8px;border-radius:5px;letter-spacing:1px;font-family:'JetBrains Mono',monospace">${SRV_STAGE_LABELS[stage]||stage.toUpperCase()}</span>
-    </div>
-    ${_srvLifecycleProgressBar(stage)}
-    ${body}
-  </div>`;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // v13.94.0 — NEXTWAVE LIFECYCLE (Phase 4 — Stabilization Roadmap)
@@ -22881,208 +22356,10 @@ function _mmmOpPoll(key){
   return JSON.stringify({status:op.status, label:op.label, attempt:op.attempt, elapsed:Date.now()-op.started, result:op.result, error:op.error});
 }
 
-// Non-blocking wrapper for _aiStudioGeneratePackage — safe to call from CDP
-// Returns the op key immediately; poll with _mmmOpPoll(key).
-function _aiStudioGeneratePackageTracked(taskId){
-  const key = 'aiGen_'+taskId;
-  _mmmOpStart(key, 'AI Studio generate pkg taskId='+taskId);
-  Promise.resolve()
-    .then(() => _aiStudioGeneratePackage(taskId))
-    .then(() => _mmmOpDone(key, 'package_created'))
-    .catch(e => _mmmOpError(key, e));
-  return key; // synchronous return — CDP call completes instantly
-}
-
-// ── _aiStudioGeneratePackage: auto-generate using existing generatePackage ───
-async function _aiStudioGeneratePackage(taskId){
-  const genBtn=document.querySelector(`button[onclick="_aiStudioGeneratePackage('${taskId}')"]`);
-  if(genBtn){genBtn.disabled=true;genBtn.textContent='⏳ Generating…';genBtn.style.opacity='0.7';}
-  try{
-    const numericId=Number(taskId);
-    const _tid=isNaN(numericId)?taskId:numericId;
-    const _callTime=Date.now();
-    await generatePackage(_tid);
-    const _pkg=(D.packages||[]).find(function(p){
-      return (String(p.taskId)===String(_tid)||String(p.taskId)===String(taskId))
-        && new Date(p.generatedAt||0).getTime()>=_callTime-15000;
-    });
-    if(!_pkg){
-      if(genBtn){genBtn.disabled=false;genBtn.textContent='🤖 Auto-Generate Package';genBtn.style.opacity='1';}
-      alert('Package generation timed out — try again.');
-      return;
-    }
-    if(typeof savePackageToSupabase==='function')await savePackageToSupabase(_pkg).catch(()=>{});
-    _aiStudioSetStage(taskId,'review');
-    if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
-  }catch(e){
-    if(genBtn){genBtn.disabled=false;genBtn.textContent='🤖 Auto-Generate Package';genBtn.style.opacity='1';}
-    console.error('[_aiStudioGeneratePackage] error:',e);
-    alert('Generation failed: '+e.message);
-  }
-}
-
-// ── v13.77.0 _aiStudioPostProcess: canvas logo + background music mix ───────
-// Returns {blob, skip} — skip=true means capture failed, send raw to Submagic.
-// v13.77.0: video loaded via /api/ops?action=heygen_video_proxy so browser canvas
-// sees same-origin response (no CORS taint). Music upgraded from 4-sine drones to
-// full chord-progression ambient pad (Am→Gm→Fm→Gm cycling).
-async function _aiStudioPostProcess(heygenVideoUrl, isLong, statusCb){
-  try{
-    // v13.78.7 FIX: Create + resume AudioContext HERE — before ANY await — while user gesture is still in the synchronous call stack.
-    // Chrome's autoplay policy marks a gesture "consumed" after the first async break (await).
-    // Moving this block before the video metadata await ensures AudioContext is already running
-    // by the time we need it, regardless of how long the video load takes.
-    const audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-    try{ await audioCtx.resume(); }catch(_){}
-    if(audioCtx.state!=='running'){
-      audioCtx.close().catch(function(){});
-      console.warn('[_aiStudioPostProcess] AudioContext suspended (no user gesture) — falling back to raw URL');
-      return {skip:true,reason:'audio_ctx_suspended'};
-    }
-    console.log('[_aiStudioPostProcess] AudioContext running — proceeding with canvas capture');
-    const W=isLong?1920:1080;
-    const H=isLong?1080:1920;
-    // v13.77.0 — route through CORS proxy so canvas doesn't get tainted by HeyGen CDN
-    const proxyUrl='/api/ops?action=heygen_video_proxy&url='+encodeURIComponent(heygenVideoUrl);
-    const videoEl=document.createElement('video');
-    videoEl.src=proxyUrl;
-    videoEl.crossOrigin='anonymous';
-    videoEl.muted=true;
-    videoEl.playsInline=true;
-    await new Promise(function(resolve,reject){
-      videoEl.onloadedmetadata=resolve;
-      videoEl.onerror=function(e){reject(new Error('video_load_failed'));};
-      setTimeout(function(){reject(new Error('video_load_timeout'));},20000);
-    });
-    console.log('[_aiStudioPostProcess] video metadata loaded — duration:',videoEl.duration,'s');
-    const canvas=document.createElement('canvas');
-    canvas.width=W;canvas.height=H;
-    const ctx=canvas.getContext('2d');
-    // Web Audio: video voice + chord-progression ambient pad (audioCtx already running)
-    const vidSrc=audioCtx.createMediaElementSource(videoEl);
-    const masterGain=audioCtx.createGain();masterGain.gain.value=1.0;
-    vidSrc.connect(masterGain);
-    // v13.77.0 — Chord-progression ambient pad: Am→Gm→Fm→Gm (2-bar cycle, 80 BPM)
-    // Sounds like a real corporate/AI background music track under the voice
-    const _chordFreqs=[
-      [220,261.63,329.63],   // Am: A3 C4 E4
-      [196,233.08,293.66],   // Gm: G3 Bb3 D4
-      [174.61,220,261.63],   // Fm: F3 A3 C4
-      [196,233.08,293.66],   // Gm: G3 Bb3 D4
-    ];
-    const videoDur=videoEl.duration||90;
-    const chordDur=videoDur/_chordFreqs.length;
-    // v13.83.0: raised from 0.13→0.45 — Submagic normalizes audio and suppresses sub-0.2 background tracks.
-    // 0.45 keeps music clearly audible under voice without overpowering it.
-    const padGain=audioCtx.createGain();padGain.gain.value=0.45;
-    padGain.connect(masterGain);
-    _chordFreqs.forEach(function(chord,ci){
-      chord.forEach(function(freq){
-        const osc=audioCtx.createOscillator();
-        const og=audioCtx.createGain();
-        osc.type='triangle'; // warmer than sine, less buzzy than square
-        osc.frequency.value=freq;
-        // Gentle envelope per chord: fade in 0.4s, sustain, fade out 0.4s
-        const startT=audioCtx.currentTime+ci*chordDur;
-        const endT=startT+chordDur;
-        og.gain.setValueAtTime(0,startT);
-        og.gain.linearRampToValueAtTime(0.5,startT+0.4);
-        og.gain.setValueAtTime(0.5,Math.max(startT+0.4,endT-0.4));
-        og.gain.linearRampToValueAtTime(0,endT);
-        osc.connect(og);og.connect(padGain);
-        osc.start(startT);osc.stop(endT+0.1);
-      });
-    });
-    const dest=audioCtx.createMediaStreamDestination();
-    masterGain.connect(dest);
-    const canvasStream=canvas.captureStream(30);
-    const outStream=new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...dest.stream.getAudioTracks(),
-    ]);
-    // v13.79.0 FIX: explicitly include opus audio codec so MediaRecorder captures the Web Audio
-    // output. Without opus, some Chrome builds drop the audio track even when the stream has
-    // audio tracks from AudioContext.createMediaStreamDestination().
-    const _mrMime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-      ?'video/webm;codecs=vp9,opus'
-      :MediaRecorder.isTypeSupported('video/webm')?'video/webm':'';
-    const _mrOpts=_mrMime?{mimeType:_mrMime,videoBitsPerSecond:1_000_000}:{videoBitsPerSecond:1_000_000};
-    const rec=new MediaRecorder(outStream,_mrOpts);
-    const chunks=[];
-    rec.ondataavailable=function(e){if(e.data.size>0)chunks.push(e.data);};
-    // Logo draw: v13.80.0 — 44px text with dark banner background, visible on any video/B-roll content
-    function drawAIFrame(){
-      ctx.drawImage(videoEl,0,0,W,H);
-      const bH=isLong?88:74; // banner height px
-      const fSize=isLong?52:44; // font size px — large enough to read when letterboxed
-      // Top banner — dark translucent strip
-      ctx.fillStyle='rgba(0,0,0,0.62)';
-      ctx.fillRect(0,0,W,bH);
-      // Bottom banner
-      ctx.fillRect(0,H-bH,W,bH);
-      // Logo text
-      ctx.font=`bold ${fSize}px Arial,Helvetica,sans-serif`;
-      ctx.fillStyle='rgba(34,197,94,1.0)';
-      ctx.textAlign='center';
-      ctx.fillText('AI CREATION STUDIO',W/2,bH-16);
-      ctx.fillText('AI CREATION STUDIO',W/2,H-20);
-    }
-    const _frameInterval=setInterval(drawAIFrame,33);
-    // audioCtx already running (resumed at top of function before first await)
-    rec.start();
-    await videoEl.play().catch(function(e){throw new Error('play_blocked: '+e.message);}); // v13.78.5 FIX: await play() so rejection is caught and surfaces via outer catch → {skip:true}
-    const blob=await new Promise(function(resolve){
-      videoEl.onended=function(){
-        clearInterval(_frameInterval);
-        rec.stop();
-        setTimeout(function(){resolve(new Blob(chunks,{type:'video/webm'}));},500);
-      };
-      setTimeout(function(){
-        clearInterval(_frameInterval);
-        if(rec.state==='recording')rec.stop();
-        setTimeout(function(){resolve(new Blob(chunks,{type:'video/webm'}));},500);
-      },isLong?185000:95000); // safety ceiling
-    });
-    audioCtx.close().catch(function(){});
-    return {blob,skip:false};
-  }catch(e){
-    console.warn('[_aiStudioPostProcess] capture error — skipping post-process:',e.message);
-    return {skip:true};
-  }
-}
-
-// ── (v13.78.7) uploadVideoToSupabase: upload canvas WebM to Supabase Storage ─
-// Uploads a Blob to the srv-assets bucket and returns the public URL.
-// Used by _aiStudioSendToSubmagic to give Submagic a network-accessible URL
-// (local blob:// URLs are not reachable by Submagic's API servers).
-async function uploadVideoToSupabase(blob, filename){
-  try{
-    const path='ai_studio/'+(filename||('processed_'+Date.now()+'.webm'));
-    const url=SUPABASE_URL+'/storage/v1/object/srv-assets/'+path;
-    const res=await fetch(url,{
-      method:'POST',
-      headers:{
-        'Authorization':'Bearer '+SUPABASE_KEY,
-        'apikey':SUPABASE_KEY,
-        'Content-Type':blob.type||'video/webm'
-      },
-      body:blob
-    });
-    if(!res.ok){
-      const errText=await res.text().catch(function(){return 'unknown';});
-      console.warn('[uploadVideoToSupabase] Upload failed:',res.status,errText);
-      return null;
-    }
-    const publicUrl=SUPABASE_URL+'/storage/v1/object/public/srv-assets/'+path;
-    console.log('[uploadVideoToSupabase] Upload OK:',publicUrl);
-    return publicUrl;
-  }catch(e){
-    console.warn('[uploadVideoToSupabase] Error:',e.message);
-    return null;
-  }
-}
 
 // ── (v13.84.0) _aiStudioSendToSubmagic: raw HeyGen URL → Submagic directly ─────
+// CEO-017: KEPT on purpose although AI Creation Studio is retired — the HeyGen render poller routes every
+// package that carries pkg.lifecycleStage (NextWave lifecycle packages included) through this function.
 // v13.84.0 CEO fix: canvas post-process removed — was breaking avatar+voice (black video, ambient-only).
 // Both Short and Long now use raw HeyGen MP4 → Submagic captions. No canvas, no separate music step.
 async function _aiStudioSendToSubmagic(pkgId,taskId){
@@ -23097,178 +22374,9 @@ async function _aiStudioSendToSubmagic(pkgId,taskId){
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
 }
 
-// ── _aiStudioRunPublish: YouTube upload ──────────────────────────────────────
-async function _aiStudioRunPublish(pkgId,taskId){
-  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
-  if(!pkg){alert('Package not found');return;}
-  const statusEl=document.getElementById('ai-publish-status-'+taskId);
-  const videoUrl=pkg.submagicOutputUrl||pkg.videoUrl||pkg._heygenRawUrl||pkg.heygenVideoUrl;
-  if(!videoUrl){if(statusEl)statusEl.textContent='No video URL — go back to Build.';return;}
-  const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
-  const _publishAt=task&&task.publishAt||null;
-  const isLongTask=!!(task&&(task.isLong||task.contentFormat==='long'));
-  try{
-    if(statusEl)statusEl.textContent='Uploading to YouTube…';
-    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        videoUrl,
-        engine:'AI Studio',
-        title:pkg.title||'AI Creation Studio',
-        description:pkg.captionYT||pkg.captionYouTube||pkg.description||'',
-        tags:(pkg.hashtags||'').split(/[\s,#]+/).filter(Boolean),
-        categoryId:'22', // People & Blogs
-        privacyStatus:'private',
-        madeForKids:false,
-        publishAt:_publishAt,
-      }),
-    });
-    const d=await r.json().catch(()=>({}));
-    if(d.youtubeVideoId||d.videoId||d.ok){ // v15.20.5 — server field is youtubeVideoId, not videoId
-      const _ytId=d.youtubeVideoId||d.videoId||d.id;
-      pkg.youtubeVideoId=_ytId;
-      pkg.youtubeWatchUrl=d.watchUrl||(_ytId?('https://www.youtube.com/watch?v='+_ytId):'');
-      pkg.youtubeStudioUrl=d.studioUrl||(_ytId?('https://studio.youtube.com/video/'+_ytId):'');
-      // v15.19.1 — bugfix: pkg.taskId was never guaranteed to be set at this point, which
-      // silently broke _aiStudioGetStage/_aiStudioPkgForTask's taskId-match lookup and left
-      // lifecycleStage (and therefore task.status) stuck un-persisted after a real, successful
-      // publish (root cause of a task showing ASSIGNED forever while its package was DONE).
-      if(!pkg.taskId) pkg.taskId=taskId;
-      // v15.21.0 — CEO Decision (2026-07-28): removed the auto-fired TikTok draft chain that
-      // used to run here after every Long-format YouTube upload (it was already a no-op in
-      // practice, since this function is only invoked for Long tasks and the chain itself
-      // checked !isLongTask — but removed outright now so TikTok logic can never be coupled
-      // to the YouTube publish path again, per "Do not allow TikTok or Instagram logic to
-      // affect YouTube in any way." TikTok publishing is frozen server-side regardless
-      // (see tiktokPublishDraft's production_frozen guard).
-      // v15.19.1 — bugfix: set task.status='done' directly and unconditionally right here
-      // (mirroring the SRV Farsi publish flow, which already does this) instead of relying
-      // solely on _aiStudioSetStage's own independent taskId lookup as the only path — belt
-      // and suspenders so a lookup miss in one path can't leave the task stuck again.
-      if(task&&task.status!=='done'){ task.status='done'; task.updatedAt=new Date().toISOString(); }
-      // v15.19.1 — retry the package save once on failure (was previously a silent
-      // fire-and-forget-then-swallow with no visibility at all when it failed).
-      if(typeof savePackageToSupabase==='function'){
-        let _saved=await savePackageToSupabase(pkg).catch(()=>false);
-        if(!_saved){
-          console.warn('[v15.19.1] savePackageToSupabase failed once for',pkg.id,'— retrying');
-          _saved=await savePackageToSupabase(pkg).catch(()=>false);
-          if(!_saved) console.error('[v15.19.1] savePackageToSupabase failed twice for',pkg.id,'— pkg.lifecycleStage/youtubeVideoId may not persist to Supabase this cycle.');
-        }
-      }
-      // v15.19.1 — await + log, so a failure here is visible instead of silently vanishing.
-      if(typeof saveAppState==='function') await saveAppState().catch(e=>console.error('[v15.19.1] saveAppState failed after AI Studio publish:',e&&e.message));
-      _aiStudioSetStage(taskId,'done');
-      if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
-    } else {
-      const detail=d.error||d.message||d.detail||'unknown';
-      if(statusEl){
-        statusEl.style.color='#ef4444';
-        statusEl.innerHTML='Upload failed: '+detail
-          +'<br><br><button onclick="_aiStudioRunPublish(\''+pkgId+'\',\''+taskId+'\')" '
-          +'style="padding:10px 18px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:8px;color:#f59e0b;font-weight:700;font-size:12px;cursor:pointer;font-family:\'Syne\',sans-serif">↻ Retry Upload</button>';
-      }
-    }
-  }catch(e){
-    if(statusEl){
-      statusEl.style.color='#ef4444';
-      statusEl.innerHTML='Publish error: '+e.message
-        +'<br><br><button onclick="_aiStudioRunPublish(\''+pkgId+'\',\''+taskId+'\')" '
-        +'style="padding:10px 18px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:8px;color:#f59e0b;font-weight:700;font-size:12px;cursor:pointer;font-family:\'Syne\',sans-serif">↻ Retry Upload</button>';
-    }
-  }
-}
-
-// v15.20.0 — Independent per-platform publish actions for AI Studio Shorts
-// (Engineering Task 1c0e3090-9b6c-4586-906c-160e127d4f30). These replace the combined
-// auto-fire in _aiStudioRunPublish for Short-format tasks only; _aiStudioRunPublish itself
-// is untouched and remains the Long-only auto-publish path.
-async function _aiStudioPublishYouTube(pkgId,taskId){
-  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
-  if(!pkg){alert('Package not found');return;}
-  const videoUrl=pkg.submagicOutputUrl||pkg.videoUrl||pkg._heygenRawUrl||pkg.heygenVideoUrl;
-  if(!videoUrl){alert('No video URL — go back to Build.');return;}
-  const task=(D.tasks||[]).find(t=>String(t.taskId||t.id||'')===String(taskId));
-  const _publishAt=task&&task.publishAt||null;
-  pkg.youtubePublishState='publishing'; pkg.youtubePublishError=null;
-  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
-  try{
-    const r=await _publishFetch('/api/ops?action=youtube_upload_video',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        videoUrl,engine:'AI Studio',title:pkg.title||'AI Creation Studio',
-        description:pkg.captionYT||pkg.captionYouTube||pkg.description||'',
-        tags:(pkg.hashtags||'').split(/[\s,#]+/).filter(Boolean),
-        categoryId:'22',privacyStatus:'private',madeForKids:false,publishAt:_publishAt,
-      }),
-    });
-    const d=await r.json().catch(()=>({}));
-    if(d.youtubeVideoId||d.videoId||d.ok){ // v15.20.5 — server field is youtubeVideoId, not videoId
-      const _ytId=d.youtubeVideoId||d.videoId||d.id;
-      pkg.youtubeVideoId=_ytId;
-      pkg.youtubeWatchUrl=d.watchUrl||(_ytId?('https://www.youtube.com/watch?v='+_ytId):'');
-      pkg.youtubeStudioUrl=d.studioUrl||(_ytId?('https://studio.youtube.com/video/'+_ytId):'');
-      pkg.youtubePublishState='published';
-      if(!pkg.taskId) pkg.taskId=taskId;
-      if(task&&task.status!=='done'){ task.status='done'; task.updatedAt=new Date().toISOString(); }
-      if(typeof savePackageToSupabase==='function'){
-        let _saved=await savePackageToSupabase(pkg).catch(()=>false);
-        if(!_saved){ _saved=await savePackageToSupabase(pkg).catch(()=>false); if(!_saved) console.error('[v15.20.0] savePackageToSupabase failed twice for',pkg.id); }
-      }
-      if(typeof saveAppState==='function') await saveAppState().catch(e=>console.error('[v15.20.0] saveAppState failed after YouTube publish:',e&&e.message));
-      _aiStudioSetStage(taskId,'done');
-    } else {
-      pkg.youtubePublishState='failed';
-      pkg.youtubePublishError=d.error||d.message||d.detail||'unknown';
-      if(typeof savePackageToSupabase==='function') savePackageToSupabase(pkg).catch(()=>{});
-    }
-  }catch(e){
-    pkg.youtubePublishState='failed'; pkg.youtubePublishError=e.message;
-    if(typeof savePackageToSupabase==='function') savePackageToSupabase(pkg).catch(()=>{});
-  }
-  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
-}
-async function _aiStudioPublishTikTok(pkgId,taskId){
-  const pkg=(D.packages||[]).find(p=>String(p.id||'')===String(pkgId));
-  if(!pkg){alert('Package not found');return;}
-  const videoUrl=pkg.submagicOutputUrl||pkg.videoUrl||pkg._heygenRawUrl||pkg.heygenVideoUrl;
-  if(!videoUrl){alert('No video URL — go back to Build.');return;}
-  // v15.20.6 — metadata parity: send the real, already-generated English TikTok caption
-  // (pkg.captionTikTok) for audit logging. See _ttCaptionBox comment for why this can't be
-  // attached to the TikTok draft itself via API — no caption field exists on this endpoint.
-  const _ttCaption=pkg.captionTikTok||pkg.captionYT||pkg.title||'AI Creation Studio';
-  pkg.tiktokPublishState='publishing'; pkg.tiktokPublishError=null;
-  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
-  try{
-    const r=await _publishFetch('/api/ops?action=tiktok_publish_draft',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({engine:'AI Studio',videoUrl,title:pkg.title||'AI Creation Studio',caption:_ttCaption,hashtags:pkg.hashtags||''}),
-    });
-    const d=await r.json().catch(()=>({}));
-    // v15.20.7 — refresh-token-dead case: backend returns authRequired:true + a precise
-    // reauthorizeUrl scoped to this engine only. Distinct from a generic 'failed' state so
-    // the UI shows a reauthorize button instead of a retry button that would just fail again.
-    if(d&&d.authRequired){
-      pkg.tiktokPublishState='auth_required'; pkg.tiktokPublishError=d.message||'TikTok reauthorization required';
-      pkg.tiktokReauthorizeUrl=d.reauthorizeUrl||'';
-    } else if(d&&d.ok&&!d.skipped){
-      pkg.tiktokPublishState='published'; pkg.tiktokPublishId=d.publish_id; pkg.tiktokPublishError=null;
-    } else if(d&&d.ok&&d.skipped){
-      pkg.tiktokPublishState='failed'; pkg.tiktokPublishError='Skipped: '+d.reason;
-    } else {
-      pkg.tiktokPublishState='failed'; pkg.tiktokPublishError=(d&&d.error)||'unknown';
-    }
-    pkg.tiktokDraftStatus=pkg.tiktokPublishState; // keep legacy field in sync for continuity
-  }catch(e){
-    pkg.tiktokPublishState='failed'; pkg.tiktokPublishError=e.message;
-  }
-  if(typeof savePackageToSupabase==='function') savePackageToSupabase(pkg).catch(()=>{});
-  if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// END AI STUDIO LIFECYCLE
+// END (AI Creation Studio lifecycle retired — CEO-017; shared helper above kept)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function srvMoodColors(mood){
@@ -25621,7 +24729,7 @@ async function loadAndShowPackages(){
   }
   const el=document.getElementById('pkgList'),title=document.getElementById('pkgCardTitle');
   if(!el)return;
-  const pkgs=[...D.packages].reverse();
+  const pkgs=[...D.packages].filter(p=>!_isRetiredBusiness(p.engine)&&!_isRetiredBusiness(p.engineId)).reverse();   // retired businesses' packages stay in the database and the archives, not in the active list
   let filterEngine=window.pkgFilterEngine||'';
   let filterMood=window.pkgFilterMood||'';
   let filterStatus=window.pkgFilterStatus||'';
@@ -25648,8 +24756,6 @@ async function loadAndShowPackages(){
     +'<option value="">All Engines</option>'
     +'<option value="SRV Farsi"'+(filterEngine==='SRV Farsi'?' selected':'')+'>SRV Farsi</option>'
     +'<option value="SRV English"'+(filterEngine==='SRV English'?' selected':'')+'>SRV English</option>'
-    +'<option value="NextWave"'+(filterEngine==='NextWave'?' selected':'')+'>NextWave</option>'
-    +'<option value="AI Studio"'+(filterEngine==='AI Studio'?' selected':'')+'>AI Studio</option>'
     +'</select>'
     +'<select onchange="window.pkgFilterMood=this.value;loadAndShowPackages()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:12px;font-family:\'Syne\',sans-serif">'
     +'<option value="">All Moods</option>'
@@ -27570,10 +26676,8 @@ function renderConstitution(){
   // SRV engines remain active assets but receive only maintenance effort (MONITOR).
   const ENGINE_STATUS_BASELINE = [
     {icon: '📈', name: 'Investment Engine',  status: 'LIVE · AUTOPILOT', tone: 'green', star: true},
-    {icon: '🤖', name: 'AI Creation Studio', status: 'PRIMARY FOCUS',    tone: 'gold',  star: true},
-    {icon: '⚡', name: 'NextWave Systems',   status: 'GROWTH FOCUS',     tone: 'gold'},
-    {icon: '🌹', name: 'SRV Farsi',          status: 'MONITOR',          tone: 'blue'},
-    {icon: '🎵', name: 'SRV English',        status: 'MONITOR',          tone: 'blue'},
+    {icon: '🌹', name: 'SRV Farsi',          status: 'ACTIVE · CORE',    tone: 'green', star: true},
+    {icon: '🎵', name: 'SRV English',        status: 'ACTIVE · CORE',    tone: 'green', star: true},
   ];
   const ENGINE_STATUS = ENGINE_STATUS_BASELINE.map(e => {
     const paused = (typeof _isEnginePaused === 'function') ? _isEnginePaused(e.name) : false;
@@ -27802,7 +26906,6 @@ const EXECUTION_WORKFLOWS={
 'SRV Farsi':{tools:['Claude (MMM Factory)','Suno','CapCut','Canva','YouTube Studio'],steps:['Open MMM Factory — type NEXT → Engine 1 → select mode','Copy full package output from Claude','Paste Suno Prompt into Suno → generate long song → download MP3','Paste Short Suno Prompt → generate short → download MP3','Open CapCut → import MP3 → add lyrics overlay','Export short video 9:16','Open Canva → apply cover template → export thumbnail','Upload long MP3 to YouTube with title + description + thumbnail','Upload short to YouTube Shorts + TikTok + Instagram','Paste catalog note into MMM-SYSTEM-MASTER','Submit assets for admin review'],checklist:[{id:'pkg',label:'Package generated'},{id:'mp3_long',label:'Long MP3 downloaded'},{id:'mp3_short',label:'Short MP3 downloaded'},{id:'short_video',label:'Short video exported'},{id:'thumbnail',label:'Thumbnail exported'},{id:'yt_long',label:'Long song on YouTube'},{id:'shorts_posted',label:'Short on YT+TT+IG'},{id:'catalog',label:'Catalog note updated'}],approval_required:true},
 'SRV English':{tools:['Claude (MMM Factory)','Suno','CapCut','Canva','YouTube Studio'],steps:['Open MMM Factory — type NEXT → Engine 2 → select mode','Copy full package output from Claude','Paste Suno Prompt into Suno → generate long song → download MP3','Paste Short Suno Prompt → generate short → download MP3','Open CapCut → import MP3 → add lyrics overlay','Export short video 9:16','Open Canva → apply cover template → export thumbnail','Upload long MP3 to YouTube','Upload short to YouTube Shorts + TikTok + Instagram','Submit assets for admin review'],checklist:[{id:'pkg',label:'Package generated'},{id:'mp3_long',label:'Long MP3 downloaded'},{id:'mp3_short',label:'Short MP3 downloaded'},{id:'short_video',label:'Short video exported'},{id:'thumbnail',label:'Thumbnail exported'},{id:'yt_long',label:'Long song on YouTube'},{id:'shorts_posted',label:'Short on YT+TT+IG'}],approval_required:true},
 'NextWave':{tools:['Claude (MMM Factory)','HeyGen','YouTube Studio','TikTok','Instagram'],steps:['Open MMM Factory — type NEXT → Engine 3','Copy Colin script from output','Open HeyGen → paste script → Colin avatar (Finance=suit / AI=turtleneck / Motivation=casual)','Generate → preview → download MP4','Upload to YouTube Shorts + title + hashtags','Post to TikTok with TikTok caption','Post to Instagram Reels','Tick AI-generated content on YouTube'],checklist:[{id:'pkg',label:'Package generated'},{id:'script_ready',label:'Colin script ready'},{id:'mp4_ready',label:'HeyGen MP4 downloaded'},{id:'yt_posted',label:'YouTube Shorts posted'},{id:'tt_posted',label:'TikTok posted'},{id:'ig_posted',label:'Instagram posted'}],approval_required:false},
-'AI Studio':{tools:['Claude (MMM Factory)','HeyGen','YouTube Studio','TikTok','Instagram'],steps:['Open MMM Factory — type NEXT → Engine 4','Copy Kelly script from output','Open HeyGen → paste script → Kelly avatar','Set background: dark cinematic navy or charcoal','Generate → preview → confirm 30 sec → download MP4','Upload to YouTube Shorts + captions','Post to TikTok + Instagram','Tick AI-generated content on YouTube'],checklist:[{id:'pkg',label:'Package generated'},{id:'script_ready',label:'Kelly script ready'},{id:'mp4_ready',label:'HeyGen MP4 downloaded (30s)'},{id:'bg_dark',label:'Dark background confirmed'},{id:'yt_posted',label:'YouTube Shorts posted'},{id:'tt_posted',label:'TikTok posted'},{id:'ig_posted',label:'Instagram posted'}],approval_required:false}
 };
 EXECUTION_WORKFLOWS['SRV — Silk Road Voices']=EXECUTION_WORKFLOWS['SRV Farsi'];
 EXECUTION_WORKFLOWS['SRV Studio English']=EXECUTION_WORKFLOWS['SRV English'];
@@ -28312,8 +27415,7 @@ function getActiveChannelIds(){
   return [
     'UCCUa5BLzGh2eRBoqqWBCK_g',
     window.YT_CHANNEL_SRV_ENGLISH||'',
-    window.YT_CHANNEL_NEXTWAVE||'',
-    window.YT_CHANNEL_AI_STUDIO||''
+    window.YT_CHANNEL_NEXTWAVE||''
   ].filter(function(id){return id.length>0;});
 }
 
@@ -28540,7 +27642,7 @@ function selectMode(mode,el){
 function goStep3(){
   if(!fMode)return;
   const sel=document.getElementById('taskAttachSelect');
-  const engineTaskMap={'srv_farsi':'SRV Farsi','srv_english':'SRV English','nextwave':'NextWave','ai_studio':'AI Studio'};
+  const engineTaskMap={'srv_farsi':'SRV Farsi','srv_english':'SRV English'};
   const currentEngineName=fEngine?engineTaskMap[fEngine.id]||null:null;
   sel.innerHTML='<option value="">— No task, generate standalone —</option>'+
     D.tasks.filter(q=>!currentEngineName||q.engine===currentEngineName||q.channel===currentEngineName).map(q=>`<option value="${q.id}" ${String(fTaskId)===String(q.id)?'selected':''}>${q.day} — ${q.channel}: ${q.name}</option>`).join('');
@@ -29094,16 +28196,6 @@ function renderContinuity(){
   html+='</select>';
   html+='<div style="font-size:9px;color:var(--dim);margin-top:6px;font-family:\'JetBrains Mono\',monospace">'+(R.nextwave.updatedAt?'Updated: '+R.nextwave.updatedAt:'Never updated')+'</div>';
   html+='</div>';
-  html+='<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:14px">';
-  html+='<div style="font-size:10px;color:var(--gold);font-family:\'JetBrains Mono\',monospace;margin-bottom:8px">AI STUDIO CATEGORY</div>';
-  html+='<div style="font-size:11px;color:var(--dim);margin-bottom:4px">Last posted: <span style="color:var(--text);font-weight:700">'+(R.aiStudio.last||'Not set')+'</span></div>';
-  html+='<div style="font-size:11px;color:var(--dim);margin-bottom:10px">Next up: <span style="color:#22c55e;font-weight:700">'+(R.aiStudio.next||'Not set')+'</span></div>';
-  html+='<select onchange="updateRotation(\'aiStudio\',\'next\',this.value)" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px;color:var(--text);font-size:11px;font-family:\'Syne\',sans-serif">';
-  html+='<option value="">Update next category</option>';
-  html+=['A — AI Tools','B — Psychology','C — Facts & News'].map(function(t){return '<option value="'+t+'"'+(R.aiStudio.next===t?' selected':'')+'>'+t+'</option>';}).join('');
-  html+='</select>';
-  html+='<div style="font-size:9px;color:var(--dim);margin-top:6px;font-family:\'JetBrains Mono\',monospace">'+(R.aiStudio.updatedAt?'Updated: '+R.aiStudio.updatedAt:'Never updated')+'</div>';
-  html+='</div>';
   html+='</div>';
   html+='</div>';
 
@@ -29253,7 +28345,7 @@ function renderContinuity(){
   html+='<div class="card-title">✅ MASTER UPLOAD CHECKLIST</div>';
   html+='<div style="font-size:11px;color:var(--dim);margin-bottom:14px">Complete every item before marking a task as uploaded. Select engine to filter.</div>';
   html+='<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">';
-  html+=['All','SRV Farsi','SRV English','NextWave','AI Studio'].map(function(e){return '<button onclick="filterChecklist(\''+e+'\')" id="chk-btn-'+e.replace(/ /g,'-')+'" style="font-size:10px;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--dim);font-family:\'Syne\',sans-serif;cursor:pointer">'+e+'</button>';}).join('');
+  html+=['All','SRV Farsi','SRV English'].map(function(e){return '<button onclick="filterChecklist(\''+e+'\')" id="chk-btn-'+e.replace(/ /g,'-')+'" style="font-size:10px;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--dim);font-family:\'Syne\',sans-serif;cursor:pointer">'+e+'</button>';}).join('');
   html+='</div>';
   html+='<div id="checklistItems">';
   var allChecks=[
@@ -29272,10 +28364,6 @@ function renderContinuity(){
     {engine:'NextWave',item:'Finance disclaimer in description — Finance topics only'},
     {engine:'NextWave',item:'Colin look matches topic — suit/turtleneck/casual'},
     {engine:'NextWave',item:'Posted Wednesday Finance, Friday AI/Tech, Sunday Motivation'},
-    {engine:'AI Studio',item:'Category set to Science and Technology on YouTube'},
-    {engine:'AI Studio',item:'Health disclaimer in description — medical topics only'},
-    {engine:'AI Studio',item:'Kelly visible full 30 seconds — confirmed in preview'},
-    {engine:'AI Studio',item:'Freshness flag checked — content not older than 14 days'},
   ];
   allChecks.forEach(function(c,i){
     html+='<div class="checklist-row" data-engine="'+c.engine+'" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">';
@@ -29759,7 +28847,6 @@ function renderEngineeringBrain(){
       `);
       body=`<div style="font-size:11px;color:var(--dim);margin-bottom:14px;line-height:1.5">Permanent registry of every engine × platform connection. TikTok draft-upload publishing is now live in production for AI Studio and SRV Farsi Shorts (draft-only — no Direct Post). Instagram publishing is not yet activated.</div>
         <div style="font-size:10px;font-weight:800;color:#c9a84c;letter-spacing:1px;margin-bottom:8px">PRIORITY ENGINES</div>
-        ${engineCard('AI Studio')}
         ${engineCard('NextWave')}
         <div style="font-size:10px;font-weight:800;color:rgba(255,255,255,0.4);letter-spacing:1px;margin:16px 0 8px">REGISTRY VISIBILITY</div>
         ${engineCard('SRV Farsi')}
@@ -30048,7 +29135,7 @@ function renderEngineeringBrain(){
         <div style="display:flex;gap:6px;align-items:center">
           <select id="ll-engine" style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:11px;flex:1">
             <option value="">Engine (optional)</option>
-            ${['mmm_os','Finance','SRV Farsi','SRV English','AI Studio','NextWave'].map(e=>`<option value="${e}">${e}</option>`).join('')}
+            ${['mmm_os','Finance','SRV Farsi','SRV English'].map(e=>`<option value="${e}">${e}</option>`).join('')}
           </select>
           <button onclick="_ebSaveLesson()" style="padding:5px 16px;border-radius:6px;border:none;background:#22c55e;color:#000;font-size:11px;font-weight:700;cursor:pointer">Save</button>
           <button onclick="window._lShowAdd=false;renderTab('system')" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--dim);font-size:11px;cursor:pointer">Cancel</button>
