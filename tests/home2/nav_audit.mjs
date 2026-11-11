@@ -44,7 +44,7 @@ try {
   // ---- 2 Home: every card, row and button goes to the right place, and Home is one click away from everywhere
   const homeTargets = async () => { await clickSel(p, '#h2Side button[data-h2="home"]'); return p.evaluate(() => [...document.querySelectorAll('#mainContent [data-h2]')].map((e, i) => ({ i, id: e.getAttribute('data-h2'), label: (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) }))); };
   const targets = await homeTargets();
-  check('Home offers links only to destinations that exist (no dead or double-labelled links)', targets.length >= 14 && targets.every((t) => /^(finance|analytics|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics))$/.test(t.id)), targets.map((t) => t.id).join(','));
+  check('Home offers links only to destinations that exist (no dead or double-labelled links)', targets.length >= 14 && targets.every((t) => /^(finance|analytics|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics|avatars))$/.test(t.id)), targets.map((t) => t.id).join(','));
   for (const t of targets) {
     await clickSel(p, '#h2Side button[data-h2="home"]');
     await p.evaluate((i) => document.querySelectorAll('#mainContent [data-h2]')[i].click(), t.i); await W(p, 700);
@@ -60,8 +60,8 @@ try {
   for (const [biz, other] of [[FARSI, ENG], [ENG, FARSI]]) {
     await clickSel(p, `#h2Side button[data-h2="biz:${biz}"]`);
     let hd = await header(p);
-    check(`${biz} workspace: tabs Overview / Production / Packages / Analytics, Overview selected`, hd && JSON.stringify(hd.tabs) === JSON.stringify(['Overview', 'Production', 'Packages', 'Analytics']) && hd.on === 'Overview');
-    for (const [tab, label] of [['overview', 'Overview'], ['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics']]) {
+    check(`${biz} workspace: tabs Overview / Production / Packages / Analytics / Avatars, Overview selected`, hd && JSON.stringify(hd.tabs) === JSON.stringify(['Overview', 'Production', 'Packages', 'Analytics', 'Avatars']) && hd.on === 'Overview');
+    for (const [tab, label] of [['overview', 'Overview'], ['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics'], ['avatars', 'Avatars']]) {
       await clickSel(p, `#h2Ws button[data-h2="ws:${biz}:${tab}"]`);
       hd = await header(p); const h = await hl(p);
       check(`${biz} › ${label}: tab and sidebar both highlight correctly`, hd && hd.on === label && h === 'biz:' + biz && hd.crumb.includes(biz), `tab=${hd && hd.on} side=${h}`);
@@ -76,7 +76,7 @@ try {
   }
   // overview cards inside a workspace lead to that business's own tabs
   await clickSel(p, `#h2Side button[data-h2="biz:${FARSI}"]`);
-  for (const [dest, label] of [['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics']]) {
+  for (const [dest, label] of [['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics'], ['avatars', 'Avatars']]) {
     await clickSel(p, `#h2Side button[data-h2="biz:${FARSI}"]`); await clickSel(p, `#mainContent .h2-card.lnk[data-h2="ws:${FARSI}:${dest}"]`);
     const hd = await header(p); check(`${FARSI} Overview card "${label}" opens the ${label} tab`, hd && hd.on === label);
   }
@@ -116,7 +116,7 @@ try {
     check(`mobile: "${id}" opens without horizontal overflow`, (await text(mp)).length > 40 && !(await hOverflow(mp)), `overflow=${await hOverflow(mp)}`);
   }
   await clickSel(mp, `#h2Side button[data-h2="biz:${FARSI}"]`);
-  for (const tab of ['production', 'packages', 'analytics']) { await clickSel(mp, `#h2Ws button[data-h2="ws:${FARSI}:${tab}"]`); check(`mobile: ${FARSI} › ${tab} tab opens and fits`, (await header(mp)) && !(await hOverflow(mp))); }
+  for (const tab of ['production', 'packages', 'analytics', 'avatars']) { await clickSel(mp, `#h2Ws button[data-h2="ws:${FARSI}:${tab}"]`); check(`mobile: ${FARSI} › ${tab} tab opens and fits`, (await header(mp)) && !(await hOverflow(mp))); }
   check('mobile: no page errors', mob.pageErrors.length === 0, mob.pageErrors.join(' | '));
   await mp.close();
 
