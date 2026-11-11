@@ -18,6 +18,7 @@ import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validati
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
+import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
@@ -11117,6 +11118,102 @@ async function ceoReviewQueueList(req, res) {
 
 const SMM_FONT_PATH = join(process.cwd(), 'api', 'assets', 'smm-font.ttf');
 
+
+// ── SRV avatar library (CEO order 2026-11-11) ─────────────────────────────────────────────────────────────────────────────
+// One registry document per business in app_settings (srv_avatar_library_srv_farsi / _srv_english). Authorized CEO and VA sessions only (never Family, never unsigned).
+// Pure rules live in lib/srvAvatarLibrary.mjs. Files go to srv-assets/avatars/<business>/ and are NEVER deleted: "remove" is a reversible retirement.
+// Strictly a signed-in CEO or VA (never the log-only 'unsigned' pass of the publishing gate, never Family): the session is verified here, in every handler.
+async function _srvAvActor(req) { const w = await _publisherFromRequest(req); return w && (w.role === 'ceo' || w.role === 'operator') ? w.role : null; }
+async function _srvAvRead(business) {
+  const rows = await sbGet(`app_settings?key=eq.${srvAvKey(business)}&select=value&limit=1`);
+  return srvAvNormalize(rows && rows[0] && rows[0].value, business);
+}
+async function _srvAvWrite(business, reg) {
+  const key = srvAvKey(business);
+  const body = { key, value: JSON.stringify(reg), updated_at: new Date().toISOString() };
+  const existing = await sbGetSafe(`app_settings?key=eq.${key}&select=key&limit=1`);
+  if (existing.length) await sbPatch('app_settings', `key=eq.${key}`, body); else await sbInsert('app_settings', body);
+}
+// Best-effort "is this avatar id used by any package or task" (substring match on the stored package JSON and on the shared state; a false positive only makes a replace refuse).
+async function _srvAvInUse(id) {
+  const q = encodeURIComponent('*' + id + '*');
+  const [p, st] = await Promise.all([
+    sbGetSafe(`packages?full_package=like.${q}&select=package_id&limit=1`),
+    sbGetSafe(`app_settings?key=eq.mmm_finance_v118&value=like.${q}&select=key&limit=1`),
+  ]);
+  return (p || []).length > 0 || (st || []).length > 0;
+}
+function _srvAvDataUrl(s, max) {
+  const m = /^data:image\/(jpeg|png);base64,([A-Za-z0-9+/=]+)$/.exec(typeof s === 'string' ? s : '');
+  if (!m) return null;
+  if (m[2].length > Math.ceil(max * 4 / 3) + 8) return 'too_large';
+  return Buffer.from(m[2], 'base64');
+}
+async function srvAvatarLibraryGet(req, res) {
+  if (!(await _srvAvActor(req))) return res.status(401).json({ ok: false, error: 'session_required' });
+  try {
+    const [f, e] = await Promise.all([_srvAvRead('srv_farsi'), _srvAvRead('srv_english')]);
+    return res.status(200).json({ ok: true, libraries: { srv_farsi: f, srv_english: e }, builtins: SRVAV_BUILTINS, limits: SRVAV_LIMITS });
+  } catch (err) { return res.status(502).json({ ok: false, error: 'library_unavailable' }); }
+}
+async function srvAvatarUpload(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const role = await _srvAvActor(req); if (!role) return res.status(401).json({ ok: false, error: 'session_required' });
+  const b = (req.body && typeof req.body === 'object') ? req.body : {};
+  const business = String(b.business || '');
+  if (!SRVAV_BUSINESSES[business]) return res.status(400).json({ ok: false, error: 'unknown_business' });
+  const image = _srvAvDataUrl(b.image, SRVAV_LIMITS.maxImageBytes), thumb = _srvAvDataUrl(b.thumb, SRVAV_LIMITS.maxThumbBytes);
+  if (image === 'too_large') return res.status(413).json({ ok: false, error: 'image_too_large' });
+  if (thumb === 'too_large') return res.status(413).json({ ok: false, error: 'thumb_too_large' });
+  if (!image) return res.status(400).json({ ok: false, error: 'image_type_not_allowed', detail: 'only JPEG or PNG images are accepted' });
+  try {
+    const reg = await _srvAvRead(business);
+    const v = srvAvValidate({ business, artist: b.artist, label: b.label, focus: b.focus, image, thumb }, reg);
+    if (!v.ok) return res.status(400).json({ ok: false, error: v.error, detail: v.detail });
+    const sha256 = createHash('sha256').update(image).digest('hex');
+    const replaceId = b.replaceId ? String(b.replaceId) : null;
+    const dup = reg.items.find((x) => x.status !== 'removed' && x.file && x.file.sha256 === sha256 && x.id !== replaceId);
+    if (dup) return res.status(409).json({ ok: false, error: 'duplicate_image', detail: 'already in the library as ' + dup.id });
+    let old = null;
+    if (replaceId) {
+      old = reg.items.find((x) => x.id === replaceId);
+      if (!old) return res.status(404).json({ ok: false, error: 'avatar_not_found' });
+      if (old.artist !== v.value.artist) return res.status(400).json({ ok: false, error: 'artist_cannot_change' });
+      if (await _srvAvInUse(replaceId)) return res.status(409).json({ ok: false, error: 'avatar_in_use', detail: 'packages or tasks use this image — add a new avatar instead and remove this one from the library' });
+    }
+    const now = Date.now(), at = new Date(now).toISOString();
+    const id = old ? old.id : srvAvNewId(business, now);
+    const ext = v.value.type === 'png' ? 'png' : 'jpg';
+    const base = `avatars/${business}/${id}-${now.toString(36)}`;
+    const paths = { src: `${base}.${ext}`, thumb: `${base}-thumb.jpg` };
+    const urls = {
+      src: await sbStorageUpload(paths.src, image, v.value.type === 'png' ? 'image/png' : 'image/jpeg'),
+      thumb: await sbStorageUpload(paths.thumb, thumb, 'image/jpeg'),
+    };
+    const item = srvAvMakeItem({ id, business, value: v.value, sha256, bytes: image.length, paths, urls, by: role, at });
+    if (old) { item.createdBy = old.createdBy; item.createdAt = old.createdAt; item.replacedBy = role; item.replacedAt = at; item.status = old.status; }
+    const fresh = await _srvAvRead(business);              // re-read just before the write (another upload may have landed)
+    fresh.items = fresh.items.filter((x) => x.id !== id).concat([item]); fresh.rev = (fresh.rev || 0) + 1;
+    await _srvAvWrite(business, fresh);
+    return res.status(200).json({ ok: true, item, rev: fresh.rev });
+  } catch (err) { console.error('[srvAvatarUpload]', err.message); return res.status(502).json({ ok: false, error: 'upload_failed' }); }
+}
+async function srvAvatarUpdate(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
+  const role = await _srvAvActor(req); if (!role) return res.status(401).json({ ok: false, error: 'session_required' });
+  const b = (req.body && typeof req.body === 'object') ? req.body : {};
+  const business = String(b.business || '');
+  if (!SRVAV_BUSINESSES[business]) return res.status(400).json({ ok: false, error: 'unknown_business' });
+  try {
+    const reg = await _srvAvRead(business);
+    const r = srvAvApply(reg, { id: String(b.id || ''), op: String(b.op || ''), label: b.label, focus: b.focus }, { by: role, at: new Date().toISOString(), builtinsByArtist: SRVAV_BUILTINS[business] });
+    if (!r.ok) return res.status(r.error === 'avatar_not_found' ? 404 : 400).json({ ok: false, error: r.error, detail: r.detail });
+    await _srvAvWrite(business, r.registry);
+    const inUse = b.op === 'remove' ? await _srvAvInUse(String(b.id)).catch(() => null) : null;
+    return res.status(200).json({ ok: true, registry: r.registry, inUse });
+  } catch (err) { console.error('[srvAvatarUpdate]', err.message); return res.status(502).json({ ok: false, error: 'update_failed' }); }
+}
+
 // ── Storage helper (new — no server-side upload helper existed to reuse) ──────────────
 async function sbStorageUpload(path, buffer, contentType) {
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/srv-assets/${path}`, {
@@ -21167,6 +21264,9 @@ export default async function handler(req, res) {
     if (action === 'srv_english_regen_caption')  return await srvEnglishRegenCaption(req, res); // SRV Studio V2 (flag-gated client)
     if (action === 'srv_studio_v2_pilot_upload') return await srvStudioV2PilotUpload(req, res); // SRV Studio V2 pilot (server-enforced, off unless authorized)
     if (action === 'srv_farsi_playlists') return await srvFarsiPlaylists(req, res); // SRV Farsi read-only playlist check
+    if (action === 'srv_avatar_library_get')     return await srvAvatarLibraryGet(req, res);   // CEO order 2026-11-11 — SRV avatar library (CEO/VA session)
+    if (action === 'srv_avatar_upload')          return await srvAvatarUpload(req, res);
+    if (action === 'srv_avatar_update')          return await srvAvatarUpdate(req, res);
     if (action === 'srv_studio_v2_mix')          return await srvStudioV2Mix(req, res); // SRV-STUDIO-V2-033 Monthly Mix (VA/CEO session; off unless configured)
     if (action === 'srv_studio_v2_playlist_sync') return await srvStudioV2PlaylistSync(req, res); // SRV-STUDIO-V2-030 playlist check/add + VA-step eligibility (VA/CEO session)
     if (action === 'srv_studio_v2_va_upload')    return await srvStudioV2VaUpload(req, res);    // SRV-STUDIO-V2-023 VA allowance (VA/CEO session; off unless authorized)

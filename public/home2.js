@@ -3,7 +3,7 @@
  * Loaded for every session but acts ONLY for the Admin; Family and VA never see it (this file then only passes every call through).
  * One authoritative destination per function:
  *   Home ................ the two businesses + finance and analytics summaries (every card/row links to its destination)
- *   SRV Farsi / SRV English .. ONE workspace per business with four tabs: Overview, Production (tasks), Packages, Analytics —
+ *   SRV Farsi / SRV English .. ONE workspace per business with five tabs: Overview, Production (tasks), Packages, Analytics, Avatars —
  *                         each tab is the app's existing screen, scoped to that business only
  *   Analytics ........... the cross-business analytics screen        Finance ........ the existing Finance screen
  *   Brain / Engineering / Integrations / Access-Settings ... the existing screens, shown on their own (no department-dashboard filler, no chip row that duplicates the sidebar)
@@ -25,7 +25,8 @@
     ['home', 'Home'], ['biz:SRV Farsi', 'SRV Farsi'], ['biz:SRV English', 'SRV English'],
     ['analytics', 'Analytics'], ['finance', 'Finance'], ['engineering', 'Engineering'], ['integrations', 'Integrations'], ['settings', 'Access / Settings']
   ];
-  var TABS = [['overview', 'Overview'], ['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics']];
+  var TABS = [['overview', 'Overview'], ['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics'], ['avatars', 'Avatars']];
+  var AVKEY = { 'SRV Farsi': 'srv_farsi', 'SRV English': 'srv_english' };
   var S = { cur: 'home', biz: null, lastBiz: null, data: null, at: 0, loading: false };
 
   function $(id) { return document.getElementById(id); }
@@ -111,6 +112,12 @@
     try { if (tab === 'packages') viewingPackageId = null; } catch (e) { /* ignore */ }
     paintSide();
     if (tab === 'overview') { paintMain(wsHeader(engine, tab) + overviewPage(engine)); load(function () { if (S.biz === engine && S.wsTab === 'overview' && active()) paintMain(wsHeader(engine, tab) + overviewPage(engine)); }); return; }
+    if (tab === 'avatars') {   // avatar library manager (avatar-library.js): add / upload / replace / remove, per business
+      window._analyticsScope = '';
+      paintMain(wsHeader(engine, tab) + '<div class="h2-wrap"><div id="h2AvBody"></div></div>');
+      if (window.AvatarLibrary) window.AvatarLibrary.mount($('h2AvBody'), AVKEY[engine]); else $('h2AvBody').innerHTML = '<div class="h2-empty">The avatar library is not available.</div>';
+      return;
+    }
     var legacyTab = tab === 'production' ? 'tasks' : tab;
     window.renderTab(legacyTab);
   }
@@ -245,7 +252,8 @@
       '<div class="h2-grid" style="grid-template-columns:minmax(0,1fr)">' +
       lnk('Production', f.t.length ? f.t.length + ' open task' + (f.t.length > 1 ? 's' : '') + ' · next: ' + f.next : 'No open tasks', 'ws:' + n + ':production') +
       lnk('Packages', 'Package history for ' + esc(n) + ' only', 'ws:' + n + ':packages') +
-      lnk('Analytics', esc(n) + ' channel only · ' + f.views + ' views', 'ws:' + n + ':analytics') + '</div></div></div>';
+      lnk('Analytics', esc(n) + ' channel only · ' + f.views + ' views', 'ws:' + n + ':analytics') +
+      lnk('Avatars', 'Add, upload, replace or remove ' + esc(n) + ' avatar photos', 'ws:' + n + ':avatars') + '</div></div></div>';
   }
 
   /* ------------------------------------------------------------ router hook */
