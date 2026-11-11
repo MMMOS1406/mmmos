@@ -455,7 +455,6 @@ canvas.mini-chart{width:100%!important;height:100px!important;display:block}
     <div class="topbar-right">
       <span class="saved-badge" id="savedBadge" style="display:none">✓ saved</span>
       <span class="v-badge">v16.51.0</span>
-      <button class="notif-bell" onclick="goToBrain()" title="MMM Brain — Company Constitution, Knowledge, Decisions, SOPs" style="font-size:16px">🧠</button>
       <button class="notif-bell" id="notifBell" onclick="toggleNotifPanel(event)" style="display:none">🔔<span class="notif-count" id="notifCount" style="display:none">0</span></button>
       <span id="userLabel" style="font-size:11px;color:var(--dim)"></span>
       <button class="logout-btn" onclick="logout()">logout</button>
@@ -806,7 +805,6 @@ const ENGINES_SUBTABS=[
 const SYSTEM_SUBTABS=[
   {id:"settings",label:"Settings"},
   {id:"integrations",label:"Integrations"},
-  {id:"constitution",label:"Constitution"},
   {id:"factory",label:"Factory"},
   {id:"continuity",label:"Continuity"},
   {id:"engineering",label:"Engineering"},  // v13.78.0
@@ -1612,6 +1610,13 @@ const _ENGINE_CH={
   'SRV English':'SRV Studio English','SRV Studio English':'SRV Studio English',
   'NextWave':'NextWave Systems','NextWave Systems':'NextWave Systems',
 };
+// CEO order 2026-11-11 (business analytics isolation): the Analytics screen can be scoped to ONE business (window._analyticsScope = 'SRV Farsi' | 'SRV English',
+// set by the business workspace; empty = the cross-business Analytics screen). Scoping is applied where the data is turned into rows — YouTube channel cards,
+// the detailed per-engine table and the TikTok accounts — so another business's channel or account is never rendered, not merely hidden.
+function _analyticsScopeEngine(){ return (typeof window!=='undefined'&&window._analyticsScope)||''; }
+function _analyticsChannelInScope(name){ const sc=_analyticsScopeEngine(); return !sc||_ENGINE_CH[sc]===name; }
+function _analyticsEngineInScope(engine,channelTitle){ const sc=_analyticsScopeEngine(); if(!sc)return true; return engine===sc||(!engine&&_ENGINE_CH[sc]===channelTitle); }
+function _analyticsScopeLabel(){ const sc=_analyticsScopeEngine(); return sc?(' — '+sc.toUpperCase()+' ONLY'):' — EACH BUSINESS SHOWN SEPARATELY'; }
 
 function computeContentHealth(){
   const channels=D.channels||[];
@@ -3742,8 +3747,9 @@ async function ttSync(openId){
 // independently via ttSync(), a failed account does not block the others, and the
 // existing merge-by-openId fix above means one account's sync never clobbers another's
 // cached data.
-async function ttSyncAll(){
-  const accounts=D.integrations.tiktok.accounts;
+async function ttSyncAll(engineOnly){
+  // engineOnly: inside a business workspace the button syncs only that business's TikTok account(s)
+  const accounts=(D.integrations.tiktok.accounts||[]).filter(function(a){return !engineOnly||a.engine===engineOnly;});
   if(!accounts||!accounts.length)return;
   D.integrations.tiktok.syncStatus='syncing';
   if(currentTab==='integrations')renderTab('integrations');
@@ -4353,7 +4359,6 @@ function renderTab(tab){
     content:renderEngineAnalytics, // back-compat alias for old deep links (Content renamed → Analytics)
     packages:renderPackagesPage,
     integrations:renderIntegrations,
-    constitution:renderConstitution,
     factory:renderFactory,
     continuity:renderContinuity,
     settings:renderSettings,
@@ -4405,14 +4410,7 @@ function setSystemSub(sub){
   const c=document.getElementById('mainContent');
   if(c){ c.innerHTML = renderSystemShell(); attachEditors(); }
 }
-// v16.12.0 — persistent Brain access point (Rev3 Section 8: reachable from any screen).
-// For Phase 3 this routes to Technology → Engineering, where Brain content already lives
-// (Constitution/knowledge/decisions via renderEngineeringBrain) — a dedicated CEO-facing
-// Brain surface is Phase 6, not this phase.
-function goToBrain(){
-  renderTab('system');
-  setSystemSub('engineering');
-}
+// (the persistent top-bar Brain button and goToBrain() were retired 2026-11-11 by CEO order; Engineering is reached from the sidebar)
 // v13.69.46 — Sub-nav rendered as a chip row at the top of each consolidated tab.
 function _renderSubNav(items, activeId, handler){
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;padding:8px 0;border-bottom:1px solid var(--border)">`
@@ -4456,7 +4454,6 @@ function renderSystemShell(){
     const cur = currentSystemSub;
     if(cur==='settings' && typeof renderSettings==='function') body = renderSettings();
     else if(cur==='integrations' && typeof renderIntegrations==='function') body = renderIntegrations();
-    else if(cur==='constitution' && typeof renderConstitution==='function') body = renderConstitution();
     else if(cur==='factory' && typeof renderFactory==='function') body = renderFactory();
     else if(cur==='continuity' && typeof renderContinuity==='function') body = renderContinuity();
     else if(cur==='engineering') body = renderEngineeringBrain();
@@ -8115,11 +8112,6 @@ function _renderHomeLegacy(){
 // ── SETTINGS ──
 function renderSettings(){
   const S=D.settings||{};
-  const plat=S.uploadPlatforms||{youtube:true,tiktok:true,instagram:true};
-  const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const btnStyle=(on)=>on
-    ?'padding:8px 16px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.4);border-radius:8px;color:#c9a84c;font-size:12px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif'
-    :'padding:8px 16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#4a5568;font-size:12px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif';
   const inputStyle='width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13px;font-family:\'Syne\',sans-serif;outline:none';
   return `
   <div class="card-title" style="font-size:11px;font-weight:700;color:#c9a84c;letter-spacing:2px;margin-bottom:16px;font-family:'JetBrains Mono',monospace">⚙️ SETTINGS</div>
@@ -8180,45 +8172,7 @@ function renderSettings(){
     </div>`).join('')}
     <div style="font-size:11px;color:#4a5568;margin-top:10px;font-family:'JetBrains Mono',monospace">PIN is used to login to MMM OS</div>
   </div>
-
-  <div class="card">
-    <div class="card-title">UPLOAD DEFAULTS</div>
-    <div style="margin-bottom:14px">
-      <div style="font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">DEFAULT PLATFORMS</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button onclick="settingsTogglePlatform('youtube')" style="${btnStyle(plat.youtube)}">▶ YouTube${plat.youtube?' ON':' OFF'}</button>
-        <button onclick="settingsTogglePlatform('tiktok')" style="${btnStyle(plat.tiktok)}">TikTok${plat.tiktok?' ON':' OFF'}</button>
-        <button onclick="settingsTogglePlatform('instagram')" style="${btnStyle(plat.instagram)}">Instagram${plat.instagram?' ON':' OFF'}</button>
-      </div>
-    </div>
-    <div>
-      <div style="font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:8px;font-family:'JetBrains Mono',monospace">DEFAULT UPLOAD DAY</div>
-      <select id="stg-upload-day" onchange="settingsSaveUploadDay()" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:9px 12px;color:var(--text);font-size:13px;font-family:'Syne',sans-serif;outline:none;-webkit-appearance:none">
-        ${days.map(d=>`<option value="${d}" ${(S.uploadDay||'Monday')===d?'selected':''}>${d}</option>`).join('')}
-      </select>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">SYSTEM</div>
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-      <div style="font-size:13px;font-weight:600;color:var(--dim)">MMM OS Version</div>
-      <div style="font-size:13px;font-weight:700;color:#c9a84c;font-family:'JetBrains Mono',monospace">v13.62.9</div>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-      <div style="font-size:13px;font-weight:600;color:var(--dim)">Last Updated</div>
-      <div style="font-size:13px;font-weight:700;color:var(--dim);font-family:'JetBrains Mono',monospace">June 2026</div>
-    </div>
-    <div id="stg-reset-confirm" style="display:none;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);border-radius:10px;padding:14px;margin-top:12px">
-      <div style="font-size:13px;font-weight:700;color:#ef4444;margin-bottom:6px">Reset all data?</div>
-      <div style="font-size:11px;color:var(--dim);margin-bottom:12px">This will clear all saved data and reload. This cannot be undone.</div>
-      <div style="display:flex;gap:8px">
-        <button onclick="settingsResetConfirm()" style="padding:8px 16px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);border-radius:8px;color:#ef4444;font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Yes, Reset Everything</button>
-        <button onclick="settingsResetCancel()" style="padding:8px 16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--dim);font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Cancel</button>
-      </div>
-    </div>
-    <button onclick="settingsShowReset()" style="margin-top:14px;width:100%;padding:11px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:10px;color:#ef4444;font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif">Reset All Data</button>
-  </div>`;
+  `;
 }
 function settingsSaveProfile(){
   const name=(document.getElementById('stg-name')?.value||'').trim();
@@ -8268,29 +8222,6 @@ async function settingsSavePIN(userId){
   if(f)f.style.display='none';
   const b=document.getElementById('stg-pin-saved-'+userId);
   if(b){b.style.display='inline';setTimeout(()=>b.style.display='none',2000);}
-}
-function settingsTogglePlatform(platform){
-  if(!D.settings.uploadPlatforms)D.settings.uploadPlatforms={youtube:true,tiktok:true,instagram:true};
-  D.settings.uploadPlatforms[platform]=!D.settings.uploadPlatforms[platform];
-  saveData();
-  document.getElementById('mainContent').innerHTML=renderSettings();
-}
-function settingsSaveUploadDay(){
-  const day=document.getElementById('stg-upload-day')?.value;
-  if(day)D.settings.uploadDay=day;
-  saveData();
-}
-function settingsShowReset(){
-  const c=document.getElementById('stg-reset-confirm');
-  if(c)c.style.display='block';
-}
-function settingsResetConfirm(){
-  try{localStorage.clear();}catch(e){}
-  location.reload();
-}
-function settingsResetCancel(){
-  const c=document.getElementById('stg-reset-confirm');
-  if(c)c.style.display='none';
 }
 
 // ── GRAPH (fixed range logic) ──
@@ -9743,7 +9674,7 @@ function renderEngineAnalytics(){
   const ytSync=D.integrations.youtube.syncStatus;
   _ensureYouTubeAnalyticsLoaded();
   return `
-    <div style="font-size:10px;font-weight:700;color:#ef4444;letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:10px">▶️ YOUTUBE ANALYTICS</div>
+    <div style="font-size:10px;font-weight:700;color:#ef4444;letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:10px">▶️ YOUTUBE ANALYTICS${_analyticsScopeLabel()}</div>
     ${ytConnected
       ?`<div class="card" style="border-color:rgba(239,68,68,0.2);margin-bottom:12px;padding:12px 14px">
           <div style="display:flex;align-items:center;justify-content:space-between">
@@ -9767,7 +9698,7 @@ function renderEngineAnalytics(){
           </div>
         </div>`
     }
-    <div style="margin-bottom:12px">${D.channels.filter(ch=>!_isRetiredBusiness(ch.name)&&!_isRetiredBusiness(ch.engine)&&!_isRetiredBusiness(ch.id)).map(ch=>{
+    <div style="margin-bottom:12px">${D.channels.filter(ch=>!_isRetiredBusiness(ch.name)&&!_isRetiredBusiness(ch.engine)&&!_isRetiredBusiness(ch.id)&&_analyticsChannelInScope(ch.name)).map(ch=>{
       const isExpanded=expandedChannels.has(ch.id);
       const hasVideos=ch.ytConnected&&ch.recentVideos&&ch.recentVideos.length>0;
       const intel=calculateIntelligence(ch);
@@ -10243,10 +10174,10 @@ function _renderYouTubeAnalyticsDetail(){
     h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">Loading analytics…</div>';
   }else if(a&&a.error){
     h+='<div style="font-size:11px;color:#ef4444;padding:8px 0">Error: '+escHTML(a.error)+'</div>';
-  }else if(a&&a.perEngine&&a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle);}).length){
+  }else if(a&&a.perEngine&&a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle)&&_analyticsEngineInScope(e.engine,e.channelTitle);}).length){
     h+='<table style="width:100%;border-collapse:collapse;font-size:11px;font-family:\'JetBrains Mono\',monospace">';
     h+='<tr style="color:var(--dim);border-bottom:1px solid rgba(255,255,255,0.08)"><th style="text-align:left;padding:4px 6px;font-weight:700">Engine</th><th style="text-align:right;padding:4px 6px;font-weight:700">Views</th><th style="text-align:right;padding:4px 6px;font-weight:700">Watch hrs</th><th style="text-align:right;padding:4px 6px;font-weight:700">Ret%</th><th style="text-align:right;padding:4px 6px;font-weight:700">Subs+</th><th style="text-align:right;padding:4px 6px;font-weight:700">Vids</th><th style="text-align:right;padding:4px 6px;font-weight:700">Synced</th></tr>';
-    a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle);}).forEach(function(e){
+    a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle)&&_analyticsEngineInScope(e.engine,e.channelTitle);}).forEach(function(e){
       const ret=e.avgRetentionPct!=null?(e.avgRetentionPct.toFixed(1)+'%'):'—';
       const retCol=e.avgRetentionPct!=null?(e.avgRetentionPct>=40?'#22c55e':e.avgRetentionPct>=25?'#c9a84c':'#ef4444'):'var(--dim)';
       const syncedLbl=e.lastSync?timeAgo(new Date(e.lastSync).getTime()):'never';
@@ -10277,16 +10208,19 @@ function _renderYouTubeAnalyticsDetail(){
 // via ttCheckStatus() — zero new API calls here). Every field is either a real value
 // from TikTok's API or explicitly labeled "Unavailable from API" — no guessed metrics.
 function _renderTikTokAnalyticsDetail(){
-  const accounts=(D.integrations&&D.integrations.tiktok&&D.integrations.tiktok.accounts)||[];
+  // CEO order 2026-11-11: inside a business workspace only that business's TikTok account(s) are shown (accounts carry the business they were connected for,
+  // `engine`, from tiktok_connections.mmm_engine); in the cross-business screen every account is labelled with its business ("Unassigned" if it has none).
+  const _scope=_analyticsScopeEngine();
+  const accounts=((D.integrations&&D.integrations.tiktok&&D.integrations.tiktok.accounts)||[]).filter(function(a){return !_scope||a.engine===_scope;}).filter(function(a){return !_isRetiredBusiness(a.engine);});
   const connected=D.integrations&&D.integrations.tiktok&&D.integrations.tiktok.connected;
   const fmtN=n=>(n==null)?'—':n>=1000000?(n/1000000).toFixed(1)+'M':n>=1000?(n/1000).toFixed(1)+'K':n.toLocaleString();
   let h='<div style="margin-top:20px;padding:14px;background:rgba(232,121,249,0.04);border:1px solid rgba(232,121,249,0.15);border-radius:12px">';
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
-  h+='<div style="font-size:10px;font-weight:700;color:#e879f9;letter-spacing:1px;font-family:\'JetBrains Mono\',monospace">🎵 TIKTOK ANALYTICS</div>';
-  if(connected&&accounts.length)h+='<button onclick="ttSyncAll()" style="padding:4px 10px;background:rgba(232,121,249,0.10);border:1px solid rgba(232,121,249,0.30);border-radius:6px;color:#e879f9;font-size:10px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif">↻ Sync All</button>';
+  h+='<div style="font-size:10px;font-weight:700;color:#e879f9;letter-spacing:1px;font-family:\'JetBrains Mono\',monospace">🎵 TIKTOK ANALYTICS'+escHTML(_analyticsScopeLabel())+'</div>';
+  if(connected&&accounts.length)h+='<button onclick="ttSyncAll('+(_scope?JSON.stringify(_scope).replace(/"/g,'&quot;'):'')+')" style="padding:4px 10px;background:rgba(232,121,249,0.10);border:1px solid rgba(232,121,249,0.30);border-radius:6px;color:#e879f9;font-size:10px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif">↻ Sync All</button>';
   h+='</div>';
   if(!connected||!accounts.length){
-    h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">No TikTok accounts connected — connect via System → Integrations.</div>';
+    h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">'+(_scope?('No TikTok account is connected for '+escHTML(_scope)+'.'):'No TikTok accounts connected')+' — connect via Integrations.</div>';
     h+='</div>';
     return h;
   }
@@ -10312,6 +10246,7 @@ function _renderTikTokAnalyticsDetail(){
     h+='<div style="display:flex;align-items:center;gap:8px">';
     h+=a.avatarUrl?'<img src="'+a.avatarUrl+'" style="width:28px;height:28px;border-radius:50%;object-fit:cover" onerror="this.style.display=\'none\'">':'<div style="width:28px;height:28px;border-radius:50%;background:#e879f918;display:flex;align-items:center;justify-content:center;font-size:13px">🎵</div>';
     h+='<div style="font-size:13px;font-weight:700;color:#fff">'+escHTML(a.displayName||a.openId||'(unknown)')+'</div>';
+    if(!_scope)h+='<span style="font-size:9px;font-weight:800;letter-spacing:.5px;padding:2px 7px;border-radius:5px;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.35);color:#c9a84c">'+escHTML(a.engine||'Unassigned')+'</span>';
     h+='</div>';
     h+='<div style="display:flex;align-items:center;gap:6px">';
     h+='<div style="width:7px;height:7px;border-radius:50%;background:'+sl.color+'"></div>';
@@ -13179,203 +13114,13 @@ function _submagicSetOutput(html){
   const el=document.getElementById('submagic-test-output');
   if(el) el.innerHTML=html;
 }
-async function submagicTestApi(){
-  _submagicSetOutput('<span style="color:#a855f7">⏳ Calling Submagic /v1/languages…</span>');
-  try{
-    const r = await fetch('/api/ops?action=submagic_test');
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓ Submagic API key works':'✗ Failed')+' · HTTP '+d.status+'</div>';
-    if(d.error) html += '<div style="color:#ef4444;margin-bottom:6px">error: '+_heygenEsc(JSON.stringify(d.error))+'</div>';
-    if(d.languagesCount) html += '<div style="margin-bottom:6px">'+d.languagesCount+' languages supported</div>';
-    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:200px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    _submagicSetOutput(html);
-  }catch(e){
-    _submagicSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
-async function submagicListTemplatesUI(){
-  _submagicSetOutput('<span style="color:#a855f7">⏳ Fetching Submagic templates…</span>');
-  try{
-    const r = await fetch('/api/ops?action=submagic_list_templates');
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓':'✗')+' Templates · HTTP '+d.status+' · '+(d.rawCount||0)+' returned</div>';
-    if(Array.isArray(d.templates) && d.templates.length){
-      html += '<div style="background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;max-height:300px;overflow-y:auto">';
-      d.templates.forEach(function(t){
-        const name = t.name || t.templateName || t.id || '(unnamed)';
-        const id = t.id || t.templateId || name;
-        html += '<div style="font-size:11px;padding:4px;border-bottom:1px solid rgba(255,255,255,0.04)"><b style="color:#fff">'+_heygenEsc(name)+'</b> · <code style="color:#a855f7">'+_heygenEsc(id)+'</code></div>';
-      });
-      html += '</div>';
-    }
-    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:200px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    _submagicSetOutput(html);
-  }catch(e){
-    _submagicSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // v13.52.2 — Smart URL/ID resolver. Accepts:
 //   • direct .mp4 URL (used as-is)
 //   • HeyGen Studio URL (app.heygen.com/videos/X) → extract video_id → resolve via /v1/video_status.get
 //   • bare 32-char hex video_id → resolve via /v1/video_status.get
-async function _resolveHeygenSource(input){
-  const raw = String(input||'').trim();
-  if(!raw) return { ok:false, error:'empty_input' };
-  // Direct MP4 URL passthrough
-  if(/^https?:\/\//i.test(raw) && /\.(mp4|mov|webm)(\?|$)/i.test(raw)) return { ok:true, url: raw, source:'direct' };
-  // HeyGen Studio URL: extract video_id
-  let videoId = null;
-  const studioMatch = raw.match(/app\.heygen\.com\/videos?\/([a-f0-9]{32})/i);
-  if(studioMatch) videoId = studioMatch[1];
-  // Bare 32-char hex
-  if(!videoId && /^[a-f0-9]{32}$/i.test(raw)) videoId = raw;
-  if(videoId){
-    try{
-      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id=' + encodeURIComponent(videoId));
-      const d = await r.json();
-      if(d.videoUrl) return { ok:true, url: d.videoUrl, source:'resolved', videoId, status: d.status };
-      return { ok:false, error:'no_mp4_url_in_heygen_response', videoId, status: d.status||'?', raw: d };
-    }catch(e){
-      return { ok:false, error:'resolve_network_error', detail: e.message };
-    }
-  }
-  // Fallback: any http(s) URL — let Submagic try it
-  if(/^https?:\/\//i.test(raw)) return { ok:true, url: raw, source:'unknown_passthrough' };
-  return { ok:false, error:'unrecognized_input' };
-}
 // v13.52.1 — Enhance a HeyGen MP4 URL pasted manually. Bypasses any D.packages introspection.
-async function submagicEnhanceManualUrl(){
-  const el = document.getElementById('submagic-manual-url');
-  const raw = (el && el.value || '').trim();
-  if(!raw){
-    _submagicSetOutput('<div style="color:#ef4444">Paste a HeyGen MP4 URL, Studio URL, or video_id into the input box first.</div>');
-    return;
-  }
-  _submagicSetOutput('<span style="color:#a855f7">⏳ Resolving source URL…</span>');
-  const resolved = await _resolveHeygenSource(raw);
-  if(!resolved.ok){
-    let msg = '<div style="color:#ef4444;font-weight:700">✗ Could not resolve to an MP4 URL</div>';
-    msg += '<div style="color:var(--dim);font-size:11px;margin-top:6px">reason: '+_heygenEsc(resolved.error||'unknown')+'</div>';
-    if(resolved.videoId) msg += '<div style="font-size:10px;color:var(--dim);margin-top:4px">video_id: '+_heygenEsc(resolved.videoId)+'</div>';
-    if(resolved.raw) msg += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:200px">'+_heygenEsc(JSON.stringify(resolved.raw, null, 2))+'</pre></details>';
-    _submagicSetOutput(msg);
-    return;
-  }
-  const url = resolved.url;
-  _submagicSetOutput('<span style="color:#a855f7">⏳ Submitting to Submagic (template=Hormozi 2, magicZooms=true, magicBrolls=true · 60%)…</span><br><div style="font-size:10px;color:var(--dim);margin-top:6px;font-family:\'JetBrains Mono\',monospace;word-break:break-all">resolved ('+resolved.source+'): '+_heygenEsc(url)+'</div>');
-  try{
-    const r = await fetch('/api/ops?action=submagic_create_project', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        title: 'MMM Manual Enhance · ' + new Date().toISOString().slice(0,16),
-        language: 'en',
-        videoUrl: url,
-        templateName: 'Hormozi 2',
-        magicZooms: true,
-        magicBrolls: true,
-        magicBrollsPercentage: 80, // v13.53.0 — Sprint 2 directive: 60-70% visuals/B-roll
-      }),
-    });
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓ Submagic project created':'✗ Failed')+' · HTTP '+d.status+'</div>';
-    if(d.projectId){
-      html += '<div style="margin-bottom:6px">projectId: <code style="color:#a855f7">'+_heygenEsc(d.projectId)+'</code></div>';
-      html += '<div style="margin-top:8px;font-size:11px;color:#22c55e;line-height:1.5">✓ Project submitted. Click <b>Check Status</b> below in ~2–5 min to fetch the publishable MP4 URL.</div>';
-      html += '<button onclick="submagicCheckManualStatus(\''+_heygenEsc(d.projectId)+'\')" style="margin-top:8px;padding:8px 14px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);border-radius:6px;color:#22c55e;font-size:11px;font-weight:700;font-family:\'Syne\',sans-serif;cursor:pointer">↻ Check Status</button>';
-    }
-    if(d.error || !d.ok){
-      const apiMsg = (d.raw && (d.raw.error || d.raw.message)) || d.error || 'unknown';
-      html += '<div style="color:#ef4444;margin-top:6px">error: '+_heygenEsc(typeof apiMsg === 'string' ? apiMsg : JSON.stringify(apiMsg))+'</div>';
-    }
-    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:200px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    _submagicSetOutput(html);
-  }catch(e){
-    _submagicSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
-async function submagicCheckManualStatus(projectId){
-  _submagicSetOutput('<span style="color:#a855f7">⏳ Checking status for '+_heygenEsc(projectId)+'…</span>');
-  try{
-    const r = await fetch('/api/ops?action=submagic_get_project&project_id=' + encodeURIComponent(projectId));
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓':'✗')+' projectId: '+_heygenEsc(projectId)+'</div>';
-    html += '<div style="margin-bottom:6px">status: <code style="color:#a855f7">'+_heygenEsc(d.status||'?')+'</code></div>';
-    if(d.downloadUrl){
-      html += '<a href="'+d.downloadUrl+'" target="_blank" style="display:inline-block;margin-top:8px;padding:10px 20px;background:#22c55e;color:#000;border-radius:8px;text-decoration:none;font-weight:700;font-family:\'Syne\',sans-serif">▶ Open Publishable MP4</a>';
-    } else {
-      html += '<div style="color:var(--dim);font-size:11px;margin-top:6px">Still processing — wait 30–60 sec and click Check Status again.</div>';
-      html += '<button onclick="submagicCheckManualStatus(\''+_heygenEsc(projectId)+'\')" style="margin-top:8px;padding:8px 14px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);border-radius:6px;color:#22c55e;font-size:11px;font-weight:700;font-family:\'Syne\',sans-serif;cursor:pointer">↻ Check Status Again</button>';
-    }
-    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:200px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    _submagicSetOutput(html);
-  }catch(e){
-    _submagicSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // Run Submagic enhancement on the most recent Sophia HeyGen MP4 to validate Sprint 1.
 // Operator clicks once → MP4 returns → operator watches → decides go/no-go on Sprint 2.
-async function submagicTestEnhanceLatest(){
-  // v13.52.1 — much looser finder. Look in D.packages AND D.tasks for anything with a videoUrl.
-  let candidates = [];
-  if(Array.isArray(D.packages)){
-    candidates = candidates.concat(D.packages.filter(function(p){ return p && (p.heygenRawUrl || p.videoUrl); }));
-  }
-  if(Array.isArray(D.tasks)){
-    // Some tasks may have videoUrl directly set during older HeyGen flows
-    candidates = candidates.concat(D.tasks.filter(function(t){ return t && (t.videoUrl || t.heygenJobId); }).map(function(t){
-      return { id: t.id, host: t.host, channel: t.channel, videoUrl: t.videoUrl, heygenRawUrl: t.videoUrl, renderCompletedAt: t.updatedAt, _fromTask: true };
-    }));
-  }
-  if(!candidates.length){
-    _submagicSetOutput('<div style="color:#ef4444">No HeyGen-rendered videos found in D.packages OR D.tasks. Use the manual URL input above — paste the HeyGen MP4 URL from your HeyGen Studio Videos tab (or from the previous "Open MP4" button).</div>');
-    return;
-  }
-  // Sort by renderCompletedAt desc, take latest
-  candidates.sort(function(a,b){
-    const aT = a.renderCompletedAt || a.submagicCompletedAt || a.generatedAt || '';
-    const bT = b.renderCompletedAt || b.submagicCompletedAt || b.generatedAt || '';
-    return bT.localeCompare(aT);
-  });
-  const pkg = candidates[0];
-  const sourceUrl = pkg.heygenRawUrl || pkg.videoUrl;
-  _submagicSetOutput('<span style="color:#a855f7">⏳ Submitting '+(pkg.host||'video')+' render to Submagic with template=Hormozi 2, magicZooms=true, magicBrolls=true (60%)…</span><br><div style="font-size:10px;color:var(--dim);margin-top:6px;font-family:\'JetBrains Mono\',monospace;word-break:break-all">source: '+_heygenEsc(sourceUrl)+'</div>');
-  try{
-    const r = await fetch('/api/ops?action=submagic_create_project', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        title: 'MMM Sprint 1 Test · ' + (pkg.host || 'video'),
-        language: 'en',
-        videoUrl: sourceUrl,
-        templateName: 'Hormozi 2',
-        magicZooms: true,
-        magicBrolls: true,
-        magicBrollsPercentage: 80, // v13.53.0 — Sprint 2 directive: 60-70% visuals/B-roll
-      }),
-    });
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓ Submagic project created':'✗ Failed')+' · HTTP '+d.status+'</div>';
-    if(d.projectId){
-      html += '<div style="margin-bottom:6px">projectId: <code style="color:#a855f7">'+_heygenEsc(d.projectId)+'</code></div>';
-      // Bind to pkg so the existing poller picks it up
-      pkg.submagicProjectId = d.projectId;
-      pkg.renderStatus = 'enhancing';
-      pkg.submagicStartedAt = new Date().toISOString();
-      pkg.submagicError = null;
-      try{ if(typeof saveAppState === 'function') saveAppState(); }catch(_){}
-      html += '<div style="margin-top:8px;font-size:11px;color:#22c55e;line-height:1.5">✓ Bound to package <code>'+_heygenEsc(pkg.id||'?')+'</code>. The existing Submagic poller will track this automatically.<br>Typical wait: 2–5 minutes. Then check the task in the Tasks tab — the new Publishable MP4 will be there.</div>';
-    }
-    if(d.error || (!d.ok)){
-      const apiMsg = d.raw && (d.raw.error || d.raw.message) || d.error || 'unknown';
-      html += '<div style="color:#ef4444;margin-top:6px">error: '+_heygenEsc(typeof apiMsg === 'string' ? apiMsg : JSON.stringify(apiMsg))+'</div>';
-    }
-    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:200px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    _submagicSetOutput(html);
-  }catch(e){
-    _submagicSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // ── end Submagic UI helpers ──
 // ── end Submagic chain ──
 
@@ -13575,357 +13320,25 @@ function _heygenSetOutput(html){
   if(el) el.innerHTML=html;
 }
 function _heygenEsc(s){return String(s||'').replace(/[<>&]/g,function(c){return c==='<'?'&lt;':c==='>'?'&gt;':'&amp;';});}
-async function heygenTestApi(){
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Calling HeyGen /v1/user/remaining_quota.get…</span>');
-  try{
-    const r=await fetch('/api/ops?action=heygen_test');
-    const d=await r.json();
-    if(d.ok){
-      const qd=d.quotaResponse&&d.quotaResponse.data||{};
-      _heygenSetOutput(
-        '<div style="color:#22c55e;font-weight:700;margin-bottom:6px">✓ HeyGen API key works · plan tier active</div>'
-        +'<div>remaining_quota: '+_heygenEsc(JSON.stringify(qd))+'</div>'
-      );
-    } else {
-      _heygenSetOutput('<div style="color:#ef4444;font-weight:700;margin-bottom:6px">✗ Test failed · HTTP '+d.status+'</div>'
-        +'<div>'+_heygenEsc(JSON.stringify(d).slice(0,500))+'</div>');
-    }
-  }catch(e){_heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');}
-}
-async function heygenDiscoverAvatars(){
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Listing avatars from HeyGen…</span>');
-  try{
-    const r=await fetch('/api/ops?action=heygen_list_avatars');
-    const d=await r.json();
-    if(!d.ok){
-      _heygenSetOutput('<div style="color:#ef4444">✗ Failed · HTTP '+d.status+'</div>');
-      return;
-    }
-    const avs=d.avatars||[];
-    const tps=d.talkingPhotos||[];
-    let html='<div style="color:#22c55e;font-weight:700;margin-bottom:8px">✓ Found '+avs.length+' avatar(s) + '+tps.length+' talking photo(s)</div>';
-    html+='<div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;background:rgba(0,0,0,0.2)">';
-    if(avs.length){
-      html+='<div style="font-size:9px;color:var(--gold);font-weight:700;margin-bottom:4px">AVATARS</div>';
-      avs.forEach(function(a){
-        const name=_heygenEsc(a.avatar_name||a.name||'(unnamed)');
-        const id=_heygenEsc(a.avatar_id||a.id||'(no id)');
-        const look=_heygenEsc(a.preview_image_url||'');
-        html+='<div style="padding:4px 0;border-bottom:1px dashed rgba(255,255,255,0.05)"><strong>'+name+'</strong> · <code style="color:#3b82f6;font-size:10px">'+id+'</code></div>';
-      });
-    }
-    if(tps.length){
-      html+='<div style="font-size:9px;color:var(--gold);font-weight:700;margin:8px 0 4px">TALKING PHOTOS</div>';
-      tps.forEach(function(t){
-        const name=_heygenEsc(t.talking_photo_name||t.name||'(unnamed)');
-        const id=_heygenEsc(t.talking_photo_id||t.id||'(no id)');
-        html+='<div style="padding:4px 0;border-bottom:1px dashed rgba(255,255,255,0.05)"><strong>'+name+'</strong> · <code style="color:#3b82f6;font-size:10px">'+id+'</code></div>';
-      });
-    }
-    if(!avs.length&&!tps.length){
-      html+='<div style="color:var(--dim);padding:8px">No avatars found. If you expected some, check your HeyGen account permissions.</div>';
-    }
-    html+='</div><div style="margin-top:8px;font-size:10px;color:var(--dim)">Paste any IDs you want to use as Paul/Sophia looks in chat — I will wire them into PROVIDER_ASSETS.</div>';
-    _heygenSetOutput(html);
-  }catch(e){_heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');}
-}
-async function heygenDiscoverVoices(){
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Listing voices from HeyGen…</span>');
-  try{
-    const r=await fetch('/api/ops?action=heygen_list_voices');
-    const d=await r.json();
-    if(!d.ok){
-      _heygenSetOutput('<div style="color:#ef4444">✗ Failed · HTTP '+d.status+'</div>');
-      return;
-    }
-    const voices=d.voices||[];
-    let html='<div style="color:#22c55e;font-weight:700;margin-bottom:8px">✓ Found '+voices.length+' voice(s)</div>';
-    html+='<div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;background:rgba(0,0,0,0.2)">';
-    if(voices.length){
-      voices.slice(0,80).forEach(function(v){
-        const name=_heygenEsc(v.name||v.voice_name||'(unnamed)');
-        const id=_heygenEsc(v.voice_id||v.id||'(no id)');
-        const gender=_heygenEsc(v.gender||'');
-        const lang=_heygenEsc(v.language||v.locale||'');
-        html+='<div style="padding:4px 0;border-bottom:1px dashed rgba(255,255,255,0.05)"><strong>'+name+'</strong> '
-          +(gender?'<span style="color:var(--dim);font-size:10px">· '+gender+'</span> ':'')
-          +(lang?'<span style="color:var(--dim);font-size:10px">· '+lang+'</span> ':'')
-          +'· <code style="color:#3b82f6;font-size:10px">'+id+'</code></div>';
-      });
-      if(voices.length>80) html+='<div style="color:var(--dim);padding:6px 0;font-size:10px">(showing first 80 of '+voices.length+' — narrow by gender/language in HeyGen Studio for the full list)</div>';
-    } else {
-      html+='<div style="color:var(--dim);padding:8px">No voices returned. Check API plan tier.</div>';
-    }
-    html+='</div><div style="margin-top:8px;font-size:10px;color:var(--dim)">Find the voices you use for Paul + Sophia. Paste IDs in chat.</div>';
-    _heygenSetOutput(html);
-  }catch(e){_heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');}
-}
 // v13.62.9 (Sprint P1) — Paul framing 4-scale comparison harness. Fires 4 parallel
 // HeyGen renders using the same Paul avatar (Business sofa front close) + same voice
 // + same short test script + same background, but each at a different character.scale
 // value. After all 4 complete (5-15 min each, parallel ≈ ~15 min total), Mansoor opens
 // each MP4 visually and picks the winner. No guess-based tuning — math-derived scales
 // (2.0 current, 2.4 mid, 2.67 height-fill, 2.8 over-fill) plus visual eyeball.
-async function heygenPaulFramingTest(){
-  const SCALES = [2.0, 2.4, 2.67, 2.8];
-  // Same script, same avatar, same voice, same background across all 4 renders.
-  const AVATAR_ID = 'Raul_Sitting_businesssofa_front_close';  // Paul Business slot
-  const VOICE_ID  = '791b008968c34a1797a50ba517c9e2dd';        // Paul canonical voice (v13.57.2)
-  const SCRIPT    = "Most people think great content needs a big budget. The actual difference between channels that grow and channels that stall is consistency — same person, same message, same time every week. That is the entire game.";
-  const BG        = { type:'color', value:'#1a1a24' };          // Paul stone_marble
-  _heygenSetOutput('<div style="color:#fbbf24;font-weight:700;margin-bottom:8px">⏳ Submitting 4 parallel Paul renders (scales: '+SCALES.join(', ')+')…</div>');
-  const submitOne = async (scale) => {
-    try{
-      const r = await fetch('/api/ops?action=heygen_start_render', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          avatar_id: AVATAR_ID,
-          voice_id: VOICE_ID,
-          script: SCRIPT,
-          background: BG,
-          dimension: { width:1080, height:1920 },
-          scale: scale,
-          test: false,
-        }),
-      });
-      const d = await r.json();
-      return { scale, ok: !!(d.ok && d.videoId), videoId: d.videoId||null, error: d.error||null, status: d.status };
-    }catch(e){ return { scale, ok:false, error:e.message, status:0 }; }
-  };
-  // Fire all 4 in parallel
-  const results = await Promise.all(SCALES.map(submitOne));
-  // Build the initial state UI
-  let html = '<div style="color:#22c55e;font-weight:700;margin-bottom:10px">✓ 4 renders submitted — polling every 30 sec for completion (~5-15 min each)</div>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
-  for(const r of results){
-    const colorBorder = r.ok ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)';
-    html += '<div data-framing-card="scale_'+r.scale+'" style="padding:10px;border:1px solid '+colorBorder+';border-radius:8px;background:rgba(0,0,0,0.2)">'
-         + '<div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">scale = '+r.scale+'</div>';
-    if(r.ok){
-      html += '<div style="font-size:10px;color:var(--dim);margin-bottom:4px">jobId: <code style="color:#3b82f6">'+_heygenEsc(r.videoId)+'</code></div>'
-            + '<div data-framing-status="'+r.videoId+'" style="font-size:11px;color:#fbbf24">⏳ rendering…</div>'
-            + '<div data-framing-mp4="'+r.videoId+'" style="margin-top:6px"></div>';
-    } else {
-      html += '<div style="color:#ef4444;font-size:11px">✗ submit failed: '+_heygenEsc(r.error||'unknown')+' (HTTP '+r.status+')</div>';
-    }
-    html += '</div>';
-  }
-  html += '</div>';
-  html += '<div style="font-size:10px;color:var(--dim);margin-top:8px">Visual comparison criteria: (1) head fully visible, (2) upper torso visible, (3) hands visible if natural, (4) zero or minimal black bars, (5) presenter fills vertical canvas. After all 4 finish, open each MP4 side-by-side and send the winning scale value to Claude.</div>';
-  _heygenSetOutput(html);
-  // Poll loop
-  const allJobs = results.filter(r=>r.ok).map(r=>r.videoId);
-  if(!allJobs.length){ console.warn('[v13.62.9] no jobs submitted — nothing to poll'); return; }
-  const remaining = new Set(allJobs);
-  const POLL_INTERVAL = 30000;
-  const pollOne = async (videoId) => {
-    try{
-      const r = await _publishFetch('/api/ops?action=heygen_render_status&video_id='+encodeURIComponent(videoId));
-      const d = await r.json();
-      if(d.ok && d.data && (d.data.status === 'completed' || d.data.video_url)){
-        const url = d.data.video_url || d.data.video_url_caption || '';
-        if(url){
-          const statusEl = document.querySelector('[data-framing-status="'+videoId+'"]');
-          if(statusEl){ statusEl.style.color = '#22c55e'; statusEl.textContent = '✓ render complete'; }
-          const mp4El = document.querySelector('[data-framing-mp4="'+videoId+'"]');
-          if(mp4El){
-            mp4El.innerHTML = '<a href="'+url+'" target="_blank" style="display:inline-block;padding:6px 10px;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);border-radius:6px;color:#22c55e;font-size:11px;font-weight:700;text-decoration:none">▶ Open MP4</a>';
-          }
-          remaining.delete(videoId);
-          if(remaining.size === 0){
-            console.log('[v13.62.9] all 4 framing renders complete');
-          }
-        }
-      } else if(d.data && d.data.status === 'failed'){
-        const statusEl = document.querySelector('[data-framing-status="'+videoId+'"]');
-        if(statusEl){ statusEl.style.color = '#ef4444'; statusEl.textContent = '✗ render failed'; }
-        remaining.delete(videoId);
-      }
-    }catch(e){ console.warn('[v13.62.9] poll error for '+videoId+': '+e.message); }
-  };
-  const pollTick = async () => {
-    if(remaining.size === 0) return;
-    for(const vid of Array.from(remaining)) await pollOne(vid);
-    if(remaining.size > 0) setTimeout(pollTick, POLL_INTERVAL);
-  };
-  setTimeout(pollTick, 10000); // first poll 10 sec after submit
-}
 // v13.51.3 — diagnostic test render. Submits a tiny 1-sentence script to HeyGen
 // using Raul's avatar+voice. Verifies the render API path works independently of
 // any Factory flow. Output goes to the heygen-test-output panel.
-async function heygenTestRender(){
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Submitting test render to HeyGen (Raul · short test script)…</span>');
-  try{
-    const r = await fetch('/api/ops?action=heygen_start_render', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        avatar_id: 'Raul_expressive_2024112501',
-        voice_id: '88bb9ee1c81b466eb2a08fdde86d3619',
-        script: 'This is a test render from MMM. Five seconds. Confirming connectivity.',
-        background: { type:'color', value:'#0a1628' },
-        dimension: { width: 1080, height: 1920 },
-        test: false,
-      }),
-    });
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓ Render submitted':'✗ Render failed')+' · HTTP '+d.status+'</div>';
-    if(d.videoId) html += '<div style="margin-bottom:6px">jobId: <code style="color:#3b82f6">'+_heygenEsc(d.videoId)+'</code></div>';
-    if(d.error) html += '<div style="color:#ef4444;margin-bottom:6px">error: '+_heygenEsc(d.error)+'</div>';
-    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:200px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    if(d.ok && d.videoId){
-      html += '<div style="margin-top:10px;font-size:10px;color:var(--dim)">Render will take 5-15 min. You can check status with: <code>/api/ops?action=heygen_render_status&video_id='+_heygenEsc(d.videoId)+'</code></div>';
-    }
-    _heygenSetOutput(html);
-  }catch(e){
-    _heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // v13.53.0 — Paul/Raul look discovery. Earlier discovery showed Paul has 20 looks in
 // HeyGen Studio but PROVIDER_ASSETS only uses one (Raul_expressive_2024112501). This
 // button fetches /v2/avatars and filters for slugs starting with "Raul_" — gives
 // Mansoor the full list so we can populate diverse looks per topic.
-async function heygenResolvePaulLooks(){
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Fetching all HeyGen avatars to find Raul variants…</span>');
-  try{
-    const r = await fetch('/api/ops?action=heygen_list_avatars');
-    const d = await r.json();
-    if(!d.ok){ _heygenSetOutput('<div style="color:#ef4444">✗ Failed · HTTP '+d.status+'</div>'); return; }
-    const all = d.avatars || [];
-    const raulLooks = all.filter(function(a){
-      const aid = String(a.avatar_id || a.id || '');
-      const aname = String(a.avatar_name || a.name || '');
-      return /^raul_/i.test(aid) || /^raul[\s_]/i.test(aname);
-    });
-    let html = '<div style="color:#22c55e;font-weight:700;margin-bottom:8px">✓ Found '+raulLooks.length+' Raul looks (of '+all.length+' total avatars)</div>';
-    if(raulLooks.length){
-      html += '<div style="background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;max-height:400px;overflow-y:auto">';
-      raulLooks.forEach(function(L){
-        const id = L.avatar_id || L.id || '?';
-        const name = L.avatar_name || L.name || '(unnamed)';
-        html += '<div style="display:flex;flex-direction:column;gap:2px;padding:6px;margin-bottom:4px;border:1px solid rgba(255,255,255,0.06);border-radius:4px">'
-              + '<div style="font-size:11px;font-weight:700;color:#fff">'+_heygenEsc(name)+'</div>'
-              + '<div style="font-size:10px;color:#22c55e;font-family:\'JetBrains Mono\',monospace;word-break:break-all">'+_heygenEsc(id)+'</div>'
-              + '</div>';
-      });
-      html += '</div>';
-      html += '<div style="font-size:11px;color:var(--dim);margin-top:10px;line-height:1.5">v13.62.9 — current NextWave rotation slots (per PROVIDER_ASSETS.paul + CHANNEL_AVATAR_MAP):<br>• <b>Business</b> + <b>Suit</b> (rotated on Finance topic)<br>• <b>Turtleneck</b> + <b>Business Casual</b> (rotated on AI / Tech topic)<br>• <b>Casual</b> (used on Motivation topic)<br>Use the discovered look IDs above to swap any slot.</div>';
-    } else {
-      html += '<div style="color:#f59e0b;margin-top:8px">No Raul-prefixed avatars found. Paul might be in a different naming scheme.</div>';
-    }
-    _heygenSetOutput(html);
-  }catch(e){
-    _heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // v13.51.8 — Voice resolver. HeyGen Studio displays category labels (e.g. "UGC_Female_1")
 // but the API needs real voice_id UUIDs. Fetch all voices and filter for likely Sophia
 // candidates (female + English + matching name patterns).
-async function heygenResolveSophiaVoice(){
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Fetching all voices to find Sophia\'s real voice_id…</span>');
-  try{
-    const r = await fetch('/api/ops?action=heygen_list_voices');
-    const d = await r.json();
-    if(!d.ok){ _heygenSetOutput('<div style="color:#ef4444">✗ Failed · HTTP '+d.status+'</div>'); return; }
-    const voices = d.voices || [];
-    // Match priorities (case-insensitive substring match across name + voice_id + tags)
-    const norm = function(s){ return String(s||'').toLowerCase(); };
-    const matchAny = function(v, terms){
-      const blob = norm(JSON.stringify(v));
-      return terms.some(function(t){ return blob.indexOf(norm(t)) !== -1; });
-    };
-    const ugcMatches = voices.filter(function(v){ return matchAny(v, ['ugc']); });
-    const femaleEnglish = voices.filter(function(v){
-      const g = norm(v.gender);
-      const lang = norm(v.language || v.locale);
-      const sup = norm(v.support_locale || JSON.stringify(v.support_locales || []));
-      return g === 'female' && (lang.indexOf('en') !== -1 || sup.indexOf('en') !== -1);
-    });
-    let html = '<div style="color:#22c55e;font-weight:700;margin-bottom:8px">✓ '+voices.length+' total voices · '+ugcMatches.length+' UGC matches · '+femaleEnglish.length+' female English candidates</div>';
-    const renderRow = function(v){
-      const id = v.voice_id || v.id || '';
-      const name = v.name || v.voice_name || '(unnamed)';
-      const gender = v.gender || '';
-      const lang = v.language || v.locale || '';
-      const support = Array.isArray(v.support_locale) ? v.support_locale.join(',') : (v.support_locale || '');
-      return '<div style="display:flex;flex-direction:column;gap:2px;padding:6px;margin-bottom:4px;border:1px solid rgba(255,255,255,0.06);border-radius:4px">'
-           + '<div style="font-size:11px;font-weight:700;color:#fff">'+_heygenEsc(name)+' <span style="color:var(--dim);font-weight:400;font-size:10px">· '+_heygenEsc(gender)+' · '+_heygenEsc(lang||support)+'</span></div>'
-           + '<div style="font-size:10px;color:#22c55e;font-family:\'JetBrains Mono\',monospace;word-break:break-all">'+_heygenEsc(id)+'</div>'
-           + '</div>';
-    };
-    if(ugcMatches.length){
-      html += '<div style="margin-top:8px;font-size:11px;color:#fbbf24;font-weight:700">UGC MATCHES (highest priority — these are HeyGen UGC-style voices):</div>';
-      html += '<div style="background:rgba(0,0,0,0.3);padding:6px;border-radius:6px;max-height:200px;overflow-y:auto">'+ ugcMatches.slice(0,20).map(renderRow).join('') +'</div>';
-    }
-    if(femaleEnglish.length){
-      html += '<div style="margin-top:10px;font-size:11px;color:#3b82f6;font-weight:700">FEMALE ENGLISH (top 12 — pick a natural-sounding option for Sophia):</div>';
-      html += '<div style="background:rgba(0,0,0,0.3);padding:6px;border-radius:6px;max-height:300px;overflow-y:auto">'+ femaleEnglish.slice(0,12).map(renderRow).join('') +'</div>';
-    }
-    if(!ugcMatches.length && !femaleEnglish.length){
-      html += '<div style="color:#f59e0b;margin-top:8px">No obvious matches. Click Discover Voices to browse all 2329 voices.</div>';
-    }
-    html += '<div style="margin-top:10px;font-size:10px;color:var(--dim)">Send me the voice_id you want me to assign to Sophia and I\'ll patch PROVIDER_ASSETS.</div>';
-    _heygenSetOutput(html);
-  }catch(e){
-    _heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // v13.51.6 — Resolve the look_id INSIDE Sophia's avatar group. HeyGen Studio doesn't
 // expose look-level IDs in its UI, so we hit the API and show what's actually there.
-async function heygenResolveSophia(){
-  const groupId = '50cc8524aa404a479242ffb73ab56cb6';
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Fetching Sophia\'s looks via /v2/avatar_group/'+groupId+'/avatars …</span>');
-  try{
-    const r = await fetch('/api/ops?action=heygen_group_looks&group_id=' + encodeURIComponent(groupId));
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓':'✗')+' HeyGen group lookup · HTTP '+d.status+' · '+(d.rawCount||0)+' looks</div>';
-    if(d.error) html += '<div style="color:#ef4444;margin-bottom:6px">error: '+_heygenEsc(d.error)+'</div>';
-    if(Array.isArray(d.looks) && d.looks.length){
-      html += '<div style="margin-top:8px;font-size:11px;color:var(--dim);margin-bottom:6px">Each row is a Sophia look. The <b>avatar_id</b> column is what we need to paste into PROVIDER_ASSETS:</div>';
-      html += '<div style="background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;max-height:300px;overflow-y:auto">';
-      d.looks.forEach(function(L){
-        // Probe likely id fields without assuming which one HeyGen returns
-        const id = L.avatar_id || L.id || L.look_id || L.avatarId || JSON.stringify(L).slice(0,80);
-        const name = L.avatar_name || L.name || L.look_name || L.title || '(unnamed)';
-        html += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px;margin-bottom:6px;border:1px solid rgba(255,255,255,0.06);border-radius:4px">'
-              + '<div style="font-size:11px;font-weight:700;color:#fff">'+_heygenEsc(name)+'</div>'
-              + '<div style="font-size:10px;color:#22c55e;font-family:\'JetBrains Mono\',monospace;word-break:break-all">'+_heygenEsc(id)+'</div>'
-              + '</div>';
-      });
-      html += '</div>';
-    } else {
-      html += '<div style="color:#f59e0b;margin-top:6px;font-size:11px">No looks returned. The full API response is below — share with operator to debug:</div>';
-    }
-    html += '<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:300px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    _heygenSetOutput(html);
-  }catch(e){
-    _heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // v13.51.6 — List ALL avatar groups in the workspace. Backup if Resolve Sophia returns nothing.
-async function heygenListGroups(){
-  _heygenSetOutput('<span style="color:#fbbf24">⏳ Listing avatar groups via /v2/avatar_group.list …</span>');
-  try{
-    const r = await fetch('/api/ops?action=heygen_list_avatar_groups');
-    const d = await r.json();
-    let html = '<div style="color:'+(d.ok?'#22c55e':'#ef4444')+';font-weight:700;margin-bottom:6px">'+(d.ok?'✓':'✗')+' Avatar groups · HTTP '+d.status+' · '+(d.rawCount||0)+' groups</div>';
-    if(d.error) html += '<div style="color:#ef4444;margin-bottom:6px">error: '+_heygenEsc(d.error)+'</div>';
-    if(Array.isArray(d.groups) && d.groups.length){
-      html += '<div style="background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;max-height:300px;overflow-y:auto">';
-      d.groups.forEach(function(G){
-        const id = G.group_id || G.id || JSON.stringify(G).slice(0,40);
-        const name = G.name || G.group_name || '(unnamed)';
-        html += '<div style="font-size:10px;padding:4px;border-bottom:1px solid rgba(255,255,255,0.04)"><b style="color:#fff">'+_heygenEsc(name)+'</b> · <span style="color:#22c55e;font-family:monospace">'+_heygenEsc(id)+'</span></div>';
-      });
-      html += '</div>';
-    }
-    html += '<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--dim);font-size:10px">Full response</summary><pre style="font-size:9px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;margin-top:6px;overflow-x:auto;max-height:300px">'+_heygenEsc(JSON.stringify(d, null, 2))+'</pre></details>';
-    _heygenSetOutput(html);
-  }catch(e){
-    _heygenSetOutput('<div style="color:#ef4444">Network error: '+_heygenEsc(e.message)+'</div>');
-  }
-}
 // ── end HeyGen helpers ──
 // v13.50.4 — Title gets a standalone copy button. Pastes cleanly into YouTube/IG
 // Title field with no manual splitting required.
@@ -20671,11 +20084,11 @@ function _srvFarsiLongArtist(p,lt){
   const a=String((p&&p.artist)||'').toLowerCase(); if(/^(female|male|duet)$/.test(a))return a;
   return lt?_srvFarsiAvatarArtist(lt):'';
 }
-function _srvFarsiShortSources(task){
+function _srvFarsiShortSources(task,ignoreArtist){
   const forTest=_srvFarsiIsTestTask(task);
   // the VA's explicit Artist choice on this Short filters the list; Auto (the rotation value) shows every artist
   const _cur=_srvFarsiVaCurrentArtistFormat(task), _auto=_srvFarsiVaAutoArtistFormat(task);
-  const artistFilter=(_cur.artist&&_auto.artist&&_cur.artist!==_auto.artist)?_cur.artist.toLowerCase():'';
+  const artistFilter=(!ignoreArtist&&_cur.artist&&_auto.artist&&_cur.artist!==_auto.artist)?_cur.artist.toLowerCase():'';
   return (D.packages||[]).filter(function(p){
     if(!p||p.engine!=='SRV Farsi'||_srvFarsiIsShortFromLong(p))return false;
     if(String(p.srvTaskUid||'').startsWith('set-aside:'))return false;
@@ -20781,9 +20194,54 @@ function _srvFarsiProbeLongDuration(p,taskId){
   a.onloadedmetadata=function(){ if(isFinite(a.duration)&&a.duration>0)done(); else { a.ondurationchange=function(){if(isFinite(a.duration)&&a.duration>0){a.ondurationchange=null;done();}}; try{a.currentTime=1e101;}catch(_){} } };
   a.onerror=function(){ _srvFarsiLongDurCache[p.id]=0.001; // unreadable media: treated as not a usable source
     if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId)); };
+  // A probe that never answers must not leave "Checking the published Longs…" on screen for ever: after 25 s the file counts as unreadable (and is reported as such).
+  setTimeout(function(){ if(!_srvFarsiLongDuration(p)&&!_srvFarsiLongDurCache[p.id]){ _srvFarsiLongDurCache[p.id]=0.001; try{a.removeAttribute('src');a.load();}catch(_){} if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId)); } },25000);
   a.src=p._srvLongVideoUrl;
 }
+// CEO order 2026-11-11 (false "no published Long"): the app keeps only the newest 200 packages (both businesses) in memory, so an older published
+// full-length Long silently dropped out of the Short source list as new packages were made. Published SRV Farsi Longs are read straight from the
+// database once (and again after 10 minutes) and merged into D.packages when missing. Read-only; nothing is written.
+let _srvFarsiSrcLoadedAt=0, _srvFarsiSrcLoading=false;
+async function _srvFarsiEnsureSourceLongs(taskId){
+  if(_srvFarsiSrcLoading||Date.now()-_srvFarsiSrcLoadedAt<10*60*1000)return;
+  _srvFarsiSrcLoading=true;
+  try{
+    const res=await fetch(`${SUPABASE_URL}/rest/v1/packages?engine=eq.${encodeURIComponent('SRV Farsi')}&youtube_video_id=not.is.null&order=generated_at.desc&limit=60&select=package_id,full_package`,{
+      signal:AbortSignal.timeout(15000),headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+    if(!res.ok)return;
+    const rows=await res.json(); if(!Array.isArray(rows))return;
+    if(!Array.isArray(D.packages))D.packages=[];
+    const have=new Set(D.packages.map(function(p){return String(p&&p.id);}));
+    let added=0;
+    rows.forEach(function(r){ try{ const pkg=JSON.parse(r.full_package); if(r.package_id)pkg.id=pkg.id||r.package_id; if(pkg&&pkg.id&&!have.has(String(pkg.id))){D.packages.push(pkg);have.add(String(pkg.id));added++;} }catch(e){} });
+    _srvFarsiSrcLoadedAt=Date.now();
+    if(added&&typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  }catch(e){ console.warn('[SRV Farsi] source Long load failed (non-fatal):',e&&e.message); }
+  finally{ _srvFarsiSrcLoading=false; }
+}
+// Why the Short source list is empty — never "no Long" when the real reason is the artist choice, length or an unreadable file.
+function _srvFarsiNoSourceHtml(task,taskId,checking){
+  const T=escHTML(String(taskId));
+  if(checking)return `<div style="font-size:12px;color:var(--dim);line-height:1.6">Checking the published Longs (${checking})…</div>`;
+  const all=_srvFarsiShortSources(task,true);   // every published SRV Farsi Long, whatever artist the operator chose
+  const usable=all.filter(function(x){return x.songSec>=SRV_FARSI_SHORT_SOURCE_MIN_SEC;});
+  const cur=_srvFarsiVaCurrentArtistFormat(task), auto=_srvFarsiVaAutoArtistFormat(task);
+  const filtered=!!(cur.artist&&auto.artist&&cur.artist!==auto.artist);
+  const box=function(msg,btn){return `<div style="font-size:12px;color:#f59e0b;line-height:1.6">${msg}${btn||''}</div>`;};
+  if(usable.length&&filtered){
+    const by={}; usable.forEach(function(x){const a=_srvFarsiLongArtist(x.pkg,x.task)||'unknown'; by[a]=(by[a]||0)+1;});
+    const list=Object.keys(by).map(function(a){return a.charAt(0).toUpperCase()+a.slice(1)+' ('+by[a]+')';}).join(', ');
+    return box(`No published full-length <b>${escHTML(cur.artist)}</b> Long yet. A Short is cut from a Long by the same artist, and the published full-length Longs are: ${escHTML(list)}.`,
+      `<div style="margin-top:8px"><button type="button" onclick="_srvFarsiVaSetArtistFormat('${T}','artist','Auto')" style="padding:7px 12px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:8px;color:#c9a84c;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit">Show all artists (Auto)</button></div>`);
+  }
+  if(all.length){
+    const short=all.filter(function(x){return x.songSec&&x.songSec<SRV_FARSI_SHORT_SOURCE_MIN_SEC;}).length, unread=all.filter(function(x){return x.songSec&&x.songSec<1;}).length;
+    return box(`${all.length} published SRV Farsi Long${all.length>1?'s':''} found, but none is full-length (at least ${Math.round(SRV_FARSI_SHORT_SOURCE_MIN_SEC/60)} minutes): ${short} too short${unread?`, ${unread} whose video could not be read`:''}. A Short is cut from a full-length Long that is already on YouTube.`);
+  }
+  return box(`No published full-length SRV Farsi Long yet (at least ${Math.round(SRV_FARSI_SHORT_SOURCE_MIN_SEC/60)} minutes). A Short is cut from a Long that is already on YouTube.`);
+}
 function _srvFarsiShortFromLongHtml(task,taskId){
+  _srvFarsiEnsureSourceLongs(taskId);
   const all=_srvFarsiShortSources(task);
   all.forEach(function(x){ if(!x.songSec)_srvFarsiProbeLongDuration(x.pkg,taskId); }); // read each Long's real length
   const _checking=all.filter(function(x){return !x.songSec;}).length;
@@ -20802,7 +20260,7 @@ function _srvFarsiShortFromLongHtml(task,taskId){
   const _onHook=!!(hook&&hook.status==='done'&&!sel.manual&&sel.startSec===hook.startSec&&sel.durationSec===SRV_FARSI_SHORT_DEFAULT_SEC);
   const _mode=_onHook?'suggested':'manual';
   const T=escHTML(String(taskId));
-  if(!src.length)return _checking?`<div style="font-size:12px;color:var(--dim);line-height:1.6">Checking the published Longs (${_checking})…</div>`:`<div style="font-size:12px;color:#f59e0b;line-height:1.6">No published full-length SRV Farsi Long yet (at least ${Math.round(SRV_FARSI_SHORT_SOURCE_MIN_SEC/60)} minutes). A Short is cut from a Long that is already on YouTube.</div>`;
+  if(!src.length)return _srvFarsiNoSourceHtml(task,taskId,_checking);
   const opts=src.map(function(x){const p=x.pkg;const tn=x.task?('task #'+escHTML(String(x.task.id))):(p.taskId?'task #'+escHTML(String(p.taskId)):'');
     return `<option value="${escHTML(String(p.id))}" ${String(p.id)===String(sel.longPkgId)?'selected':''}>${escHTML(p.title)} · ${tn} · ${x.songSec?_srvFarsiFmtSec(x.songSec):'—'} · ${x.isTest?'[TEST] private on YouTube':'on YouTube'}</option>`;}).join('');
   const editable=!!(cur&&cur.songSec&&c.startSec!=null);
@@ -26346,7 +25804,6 @@ function renderIntegrations(){
       {id:'tiktok',name:'TikTok',icon:'🎵',color:'#e879f9',connected:D.integrations.tiktok.connected,lastSync:D.integrations.tiktok.lastSync,health:D.integrations.tiktok.syncStatus==='error'?'error':D.integrations.tiktok.connected?'ok':null,desc:D.integrations.tiktok.connected?`${D.integrations.tiktok.accounts.length} account(s) connected`:'Shorts, analytics, trends — ready to connect',isTikTok:true},
       {id:'instagram',name:'Instagram',icon:'📸',color:'#f59e0b',connected:D.integrations.instagram.connected,lastSync:D.integrations.instagram.lastSync,health:D.integrations.instagram.syncStatus==='error'?'error':D.integrations.instagram.connected?'ok':null,desc:D.integrations.instagram.connected?`${D.integrations.instagram.accounts.length} account(s) connected`:'Reels, stories, analytics — ready to connect',isInstagram:true},
       {id:'suno',name:'Suno',icon:'🎙️',color:'#c9a84c',connected:true,lastSync:'2026-05-23',health:'ok',desc:'AI music generation — active'},
-      {id:'heygen',name:'HeyGen',icon:'🎬',color:'#3b82f6',connected:true,lastSync:'2026-05-23',health:'ok',desc:'AI avatar videos — active'},
       {id:'canva',name:'Canva',icon:'🎨',color:'#8b5cf6',connected:true,lastSync:'2026-05-23',health:'ok',desc:'Thumbnails and covers — active'},
       {id:'runway',name:'Runway',icon:'🎥',color:'#22c55e',connected:false,lastSync:null,health:null,desc:'AI video generation'},
       {id:'elevenlabs',name:'ElevenLabs',icon:'🔊',color:'#f97316',connected:false,lastSync:null,health:null,desc:'AI voice synthesis'},
@@ -26580,44 +26037,7 @@ function renderIntegrations(){
           <div id="tt-diag-content">${panelInner}</div>
         </div>`;
       }
-      // v13.51.0 — HeyGen API panel (admin-only). Test connectivity + discover avatars/voices.
-      if(item.id==='heygen'){
-        return card+`<div class="card" style="padding:14px;margin-bottom:10px;margin-top:-8px;border-color:rgba(59,130,246,0.18)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px">HEYGEN API · v13.51.0</div>
-            <div style="font-size:9px;color:var(--dim);font-family:'JetBrains Mono',monospace">key: ${'`'}HEYGEN_API_KEY${'`'} env</div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <button onclick="heygenTestApi()" style="padding:6px 12px;background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.35);border-radius:8px;color:#3b82f6;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">🔑 Test API Key</button>
-            <button onclick="heygenDiscoverAvatars()" style="padding:6px 12px;background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.35);border-radius:8px;color:#3b82f6;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">👤 Discover Avatars</button>
-            <button onclick="heygenDiscoverVoices()" style="padding:6px 12px;background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.35);border-radius:8px;color:#3b82f6;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">🎙️ Discover Voices</button>
-            <button onclick="heygenTestRender()" style="padding:6px 12px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">🎬 Test Render (5s)</button>
-            <button onclick="heygenResolveSophia()" style="padding:6px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#f59e0b;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">🔍 Resolve Sophia Look</button>
-            <button onclick="heygenListGroups()" style="padding:6px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#f59e0b;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">📋 List Avatar Groups</button>
-            <button onclick="heygenResolveSophiaVoice()" style="padding:6px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#f59e0b;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">🎙️ Resolve Sophia Voice</button>
-            <button onclick="heygenResolvePaulLooks()" style="padding:6px 12px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#f59e0b;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">🔍 Find All Paul/Raul Looks</button>
-            <button onclick="heygenPaulFramingTest()" style="padding:6px 12px;background:rgba(168,85,247,0.12);border:1px solid rgba(168,85,247,0.40);border-radius:8px;color:#a855f7;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer" title="Triggers 4 parallel Paul renders at scales 2.0/2.4/2.67/2.8. Compare visually to pick the winning production scale.">📐 Paul Framing Test (4 scales)</button>
-          </div>
-          <div id="heygen-test-output" style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;line-height:1.5;padding:8px 0;min-height:20px">Click any button above to verify connectivity + discover your HeyGen assets.</div>
-        </div>
-        <div class="card" style="padding:14px;margin-bottom:10px;margin-top:-8px;border-color:rgba(168,85,247,0.30)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-            <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px">SUBMAGIC API · v13.52.0 · P2A</div>
-            <div style="font-size:9px;color:var(--dim);font-family:'JetBrains Mono',monospace">key: ${'`'}SUBMAGIC_API_KEY${'`'} env</div>
-          </div>
-          <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.5">Captions + B-roll + zooms in one API call. Auto-fires after HeyGen render completes. Validation gate: confirm output quality before Sprint 2 spending.</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <button onclick="submagicTestApi()" style="padding:6px 12px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.35);border-radius:8px;color:#a855f7;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">🔑 Test API Key</button>
-            <button onclick="submagicListTemplatesUI()" style="padding:6px 12px;background:rgba(168,85,247,0.10);border:1px solid rgba(168,85,247,0.35);border-radius:8px;color:#a855f7;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">📋 List Templates</button>
-            <button onclick="submagicTestEnhanceLatest()" style="padding:6px 12px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);border-radius:8px;color:#22c55e;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer">✨ Auto-find latest Sophia render</button>
-          </div>
-          <div style="display:flex;gap:6px;align-items:stretch;margin-bottom:10px;padding:8px;background:rgba(168,85,247,0.04);border:1px dashed rgba(168,85,247,0.20);border-radius:8px">
-            <input id="submagic-manual-url" placeholder="…or paste a HeyGen MP4 URL here to enhance manually" style="flex:1;background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:#fff;font-size:11px;font-family:'JetBrains Mono',monospace">
-            <button onclick="submagicEnhanceManualUrl()" style="padding:6px 12px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);border-radius:6px;color:#22c55e;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer;white-space:nowrap">✨ Enhance URL</button>
-          </div>
-          <div id="submagic-test-output" style="font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;line-height:1.5;padding:8px 0;min-height:20px">Click any button to validate the Submagic integration. The Test Enhance button submits your most recent HeyGen MP4 to Submagic so you can verify quality before Sprint 2.</div>
-        </div>`;
-      }
+      // (HeyGen and Submagic integration panels retired 2026-11-11 by CEO order: both subscriptions cancelled, no retained business uses them)
       if(item.isInstagram&&item.connected){
         const diag=D.integrations.instagram.diagnostics;
         const panelInner=diag.loaded?buildInstagramDiagnosticsInner():'<div style="color:var(--dim);font-size:11px;padding:8px 0">Loading diagnostics…</div>';
@@ -26688,174 +26108,7 @@ async function _publishAuthSetMode(mode){
   _publishAuthRefresh();
 }
 
-// ── CONSTITUTION ──
-function renderConstitution(){
-  // ─────────────────────────────────────────────────────────────────────────
-  // v13.47 — Constitution rebuilt as live ROADMAP OS dashboard.
-  // Replaces the v11.x static philosophy wall. Robinhood UX laws applied:
-  // one big number per zone, color = signal not decoration, pills not
-  // paragraphs, hierarchical progressive detail, mobile-friendly stack.
-  // Strategic constants live in this function (edit + redeploy to change).
-  // ─────────────────────────────────────────────────────────────────────────
-  // v13.69.46 — Constitution roadmap refresh (Mansoor's directive 2026-06-17). Visual structure unchanged; status data refreshed.
-  const MISSION = 'Build a calm wealth-generation machine for the Mansoor family through automation, simplicity, and scalable income engines.';
-  const PHASE_LINE = 'Phase 10 · Growth & Validation · Current';
-  const SYSTEM_STATUS = [
-    {label: 'Finance LIVE',             tone: 'green'},
-    {label: 'Engine System LIVE',       tone: 'green'},
-    {label: 'YouTube Sync LIVE',        tone: 'green'},
-    {label: 'Automation Active',        tone: 'green'},
-    {label: 'Simplification Complete',  tone: 'green'},
-  ];
-  const ACTIVE_PRIORITIES = [
-    'Engine Growth',
-    'Monetization Validation',
-    'Reduce Operator Workload',
-  ];
-  // v13.69.46 — Engine status reflects current strategic posture per MMMOS directive.
-  // Investment Engine added as a first-class engine (locked PRODUCTION READY in v13.67.5).
-  // SRV engines remain active assets but receive only maintenance effort (MONITOR).
-  const ENGINE_STATUS_BASELINE = [
-    {icon: '📈', name: 'Investment Engine',  status: 'LIVE · AUTOPILOT', tone: 'green', star: true},
-    {icon: '🌹', name: 'SRV Farsi',          status: 'ACTIVE · CORE',    tone: 'green', star: true},
-    {icon: '🎵', name: 'SRV English',        status: 'ACTIVE · CORE',    tone: 'green', star: true},
-  ];
-  const ENGINE_STATUS = ENGINE_STATUS_BASELINE.map(e => {
-    const paused = (typeof _isEnginePaused === 'function') ? _isEnginePaused(e.name) : false;
-    return paused ? {icon: e.icon, name: e.name, status: 'MAINTENANCE', tone: 'yellow'} : e;
-  });
-  // v13.69.46 — Roadmap reflects current state: Phase 1–9 complete (history preserved); Phase 10 current; Phase 11 next; Phase 12 future.
-  const ROADMAP_TIMELINE = [
-    {state: 'done',    label: 'Foundation & Plumbing',   tag: 'Phase 1–7'},
-    {state: 'done',    label: 'Automation Layer',        tag: 'Phase 8'},
-    {state: 'done',    label: 'Operator Console',        tag: 'Phase 9'},
-    {state: 'current', label: 'Growth & Validation',     tag: 'Phase 10'},
-    {state: 'future',  label: 'Monetization',            tag: 'Phase 11'},
-    {state: 'future',  label: 'Scale & Optimization',    tag: 'Phase 12'},
-  ];
-  // v13.69.46 — Principles preserved + 6 new operating laws added per directive.
-  const OPERATOR_PRINCIPLES = [
-    'fewer clicks',
-    'fewer decisions',
-    'automation first',
-    'simplicity over complexity',
-    'consistency over perfection',
-    'scalable over artistic obsession',
-    'one source of truth',
-    'no duplicate systems',
-    'simplify before building',
-    'automate before expanding',
-    'validate before scaling',
-    'focus before diversification',
-  ];
-  const VISION = `"Open MMM OS like an investment app.
-Review signals. Approve actions.
-Let systems run."`;
-  const TONE = {
-    green: {bg:'rgba(34,197,94,0.10)',  border:'rgba(34,197,94,0.35)',  text:'#22c55e', dot:'#22c55e'},
-    amber: {bg:'rgba(245,158,11,0.10)', border:'rgba(245,158,11,0.35)', text:'#fbbf24', dot:'#fbbf24'},
-    gold:  {bg:'rgba(201,168,76,0.15)', border:'rgba(201,168,76,0.45)', text:'#c9a84c', dot:'#c9a84c'},
-    red:   {bg:'rgba(239,68,68,0.10)',  border:'rgba(239,68,68,0.35)',  text:'#ef4444', dot:'#ef4444'},
-    blue:  {bg:'rgba(59,130,246,0.10)', border:'rgba(59,130,246,0.35)', text:'#3b82f6', dot:'#3b82f6'},
-    gray:  {bg:'rgba(107,114,128,0.10)',border:'rgba(107,114,128,0.35)',text:'#9ca3af', dot:'#6b7280'},
-  };
-  // ── Section 1 — MISSION (hero) ──
-  const heroHtml = `
-    <div style="text-align:center;padding:40px 20px 28px 20px">
-      <div style="font-size:22px;font-weight:800;font-family:Syne,sans-serif;color:var(--text);letter-spacing:-0.5px;line-height:1.4;margin-bottom:14px">${_cmdEscapeHtml(MISSION)}</div>
-      <div style="font-size:11px;font-weight:700;letter-spacing:2px;color:#c9a84c;font-family:'JetBrains Mono',monospace">${_cmdEscapeHtml(PHASE_LINE)}</div>
-    </div>`;
-  // ── Section 2 — SYSTEM STATUS chips ──
-  const statusChips = SYSTEM_STATUS.map(s => {
-    const t = TONE[s.tone] || TONE.green;
-    return `<div style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:${t.bg};border:1px solid ${t.border};font-size:10px;font-weight:700;color:${t.text};font-family:'JetBrains Mono',monospace;letter-spacing:0.5px"><span style="width:6px;height:6px;border-radius:50%;background:${t.dot};display:inline-block"></span>${_cmdEscapeHtml(s.label)}</div>`;
-  }).join('');
-  const statusHtml = `
-    <div style="padding:24px 20px;border-top:1px solid rgba(255,255,255,0.05)">
-      <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:var(--dim);margin-bottom:12px;font-family:'JetBrains Mono',monospace">SYSTEM STATUS</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">${statusChips}</div>
-    </div>`;
-  // ── Section 3 — ACTIVE PRIORITIES (top 3 tiles, hard limit) ──
-  const priorityTiles = ACTIVE_PRIORITIES.slice(0,3).map((p, i) => `
-    <div style="flex:1;min-width:140px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:18px 14px">
-      <div style="font-size:32px;font-weight:800;color:#c9a84c;font-family:Syne,sans-serif;line-height:1;margin-bottom:8px">${i + 1}</div>
-      <div style="font-size:13px;font-weight:600;color:var(--text);line-height:1.4">${_cmdEscapeHtml(p)}</div>
-    </div>`).join('');
-  const priorityHtml = `
-    <div style="padding:24px 20px;border-top:1px solid rgba(255,255,255,0.05)">
-      <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:var(--dim);margin-bottom:12px;font-family:'JetBrains Mono',monospace">ACTIVE PRIORITIES</div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">${priorityTiles}</div>
-    </div>`;
-  // ── Section 4 — ENGINE STATUS rows ──
-  const engineRows = ENGINE_STATUS.map(e => {
-    const t = TONE[e.tone] || TONE.gray;
-    const star = e.star ? '<span style="margin-left:6px;color:#c9a84c">★</span>' : '';
-    return `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.04)">
-        <div style="display:flex;align-items:center;gap:12px">
-          <span style="font-size:18px">${e.icon}</span>
-          <span style="font-size:14px;font-weight:600;color:var(--text)">${_cmdEscapeHtml(e.name)}</span>
-        </div>
-        <div style="display:inline-flex;align-items:center;padding:5px 11px;border-radius:999px;background:${t.bg};border:1px solid ${t.border};font-size:10px;font-weight:800;color:${t.text};font-family:'JetBrains Mono',monospace;letter-spacing:1px">${_cmdEscapeHtml(e.status)}${star}</div>
-      </div>`;
-  }).join('');
-  const engineHtml = `
-    <div style="padding:24px 0 8px 0;border-top:1px solid rgba(255,255,255,0.05)">
-      <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:var(--dim);margin:0 20px 12px 20px;font-family:'JetBrains Mono',monospace">ENGINE STATUS</div>
-      ${engineRows}
-    </div>`;
-  // ── Section 5 — ROADMAP TIMELINE (vertical visual) ──
-  const timelineRows = ROADMAP_TIMELINE.map(p => {
-    let marker, labelColor, tagColor, bgGlow = '';
-    if (p.state === 'done') {
-      marker = '<span style="color:#22c55e;font-size:14px;font-weight:800">✓</span>';
-      labelColor = 'var(--text)';
-      tagColor = 'var(--dim)';
-    } else if (p.state === 'current') {
-      marker = '<span style="color:#c9a84c;font-size:14px;font-weight:800">→</span>';
-      labelColor = '#c9a84c';
-      tagColor = '#c9a84c';
-      bgGlow = 'background:rgba(201,168,76,0.06);border:1px solid rgba(201,168,76,0.30);border-radius:8px;';
-    } else {
-      marker = '<span style="color:#4a5568;font-size:14px;font-weight:800">○</span>';
-      labelColor = '#6b7280';
-      tagColor = '#4a5568';
-    }
-    const currentTag = p.state === 'current' ? ' <span style="margin-left:8px;font-size:9px;color:#c9a84c;font-weight:800;letter-spacing:1px">← CURRENT</span>' : '';
-    return `
-      <div style="display:flex;align-items:center;gap:14px;padding:10px 12px;margin:4px 0;${bgGlow}">
-        <span style="width:18px;display:inline-block;text-align:center;flex-shrink:0">${marker}</span>
-        <span style="flex:1;font-size:13px;font-weight:600;color:${labelColor};min-width:0">${_cmdEscapeHtml(p.label)}${currentTag}</span>
-        <span style="font-size:10px;color:${tagColor};font-family:'JetBrains Mono',monospace;letter-spacing:0.5px;flex-shrink:0">${_cmdEscapeHtml(p.tag)}</span>
-      </div>`;
-  }).join('');
-  const timelineHtml = `
-    <div style="padding:24px 20px;border-top:1px solid rgba(255,255,255,0.05)">
-      <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:var(--dim);margin-bottom:14px;font-family:'JetBrains Mono',monospace">ROADMAP</div>
-      ${timelineRows}
-    </div>`;
-  // ── Section 6 — OPERATOR PRINCIPLES ──
-  const principleRows = OPERATOR_PRINCIPLES.map(p =>
-    `<div style="padding:5px 0;font-size:13px;color:#c9a84c;font-family:'JetBrains Mono',monospace;letter-spacing:0.3px">·  ${_cmdEscapeHtml(p)}</div>`
-  ).join('');
-  const principlesHtml = `
-    <div style="padding:24px 20px;border-top:1px solid rgba(255,255,255,0.05)">
-      <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:var(--dim);margin-bottom:12px;font-family:'JetBrains Mono',monospace">OPERATOR PRINCIPLES</div>
-      ${principleRows}
-    </div>`;
-  // ── Section 7 — LONG-TERM VISION (closing line) ──
-  const visionHtml = `
-    <div style="padding:40px 24px 36px 24px;border-top:1px solid rgba(255,255,255,0.05);text-align:center">
-      <div style="font-size:14px;font-style:italic;color:var(--dim);line-height:1.7;white-space:pre-line;letter-spacing:0.3px">${_cmdEscapeHtml(VISION)}</div>
-    </div>`;
-  // ── Footer — last updated tag ──
-  const footerHtml = `
-    <div style="padding:16px;text-align:center;border-top:1px solid rgba(255,255,255,0.05);font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace">v13.47 · ROADMAP OS</div>`;
-  return `<div class="card" style="padding:0;overflow:hidden;max-width:780px;margin:0 auto">
-    ${heroHtml}${statusHtml}${priorityHtml}${engineHtml}${timelineHtml}${principlesHtml}${visionHtml}${footerHtml}
-  </div>`;
-}
-
+// ── (CONSTITUTION / Brain screen retired 2026-11-11 by CEO order: static roadmap dashboard, no data of its own; Engineering keeps its own Constitution tab) ──
 // ── EDITORS — income/expense changes trigger snapshot + Supabase sync ──
 function attachEditors(){
   document.querySelectorAll('.editable').forEach(inp=>{

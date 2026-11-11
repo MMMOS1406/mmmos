@@ -33,8 +33,8 @@ try {
 
   // ---- 1 sidebar: every item opens its own section, highlights itself, shows no filler or retired content
   const side = await p.evaluate(() => [...document.querySelectorAll('#h2Side button')].map((b) => ({ id: b.getAttribute('data-h2'), label: b.innerText })));
-  check('sidebar has exactly the nine sections in order', JSON.stringify(side.map((s) => s.label)) === JSON.stringify(['Home', 'SRV Farsi', 'SRV English', 'Analytics', 'Finance', 'Brain', 'Engineering', 'Integrations', 'Access / Settings']), side.map((s) => s.label).join(' | '));
-  const expect = { home: /Your two businesses/i, 'biz:SRV Farsi': /SRV Farsi/, 'biz:SRV English': /SRV English/, analytics: /YOUTUBE ANALYTICS/i, finance: /Income|Expenses|Debt/i, brain: /./, engineering: /Engineering|Brain/i, integrations: /YouTube|Integration/i, settings: /Profile|PIN|Settings/i };
+  check('sidebar has exactly the eight sections in order (Brain retired)', JSON.stringify(side.map((s) => s.label)) === JSON.stringify(['Home', 'SRV Farsi', 'SRV English', 'Analytics', 'Finance', 'Engineering', 'Integrations', 'Access / Settings']), side.map((s) => s.label).join(' | '));
+  const expect = { home: /Your two businesses/i, 'biz:SRV Farsi': /SRV Farsi/, 'biz:SRV English': /SRV English/, analytics: /YOUTUBE ANALYTICS/i, finance: /Income|Expenses|Debt/i, engineering: /Engineering|Brain/i, integrations: /YouTube|Integration/i, settings: /Profile|PIN|Settings/i };
   for (const s of side) {
     await clickSel(p, `#h2Side button[data-h2="${s.id}"]`); const t = await text(p), h = await hl(p);
     check(`sidebar "${s.label}" opens its section and highlights itself`, h === s.id && expect[s.id].test(t) && t.length > 40, `highlight=${h}`);
@@ -92,7 +92,7 @@ try {
   await clickSel(p, '#h2Side button[data-h2="analytics"]');
   check('Analytics (sidebar) shows both businesses and no business header', (await header(p)) === null && /Silk Road/i.test(await text(p)) && /Studio English/i.test(await text(p)));
   // legacy deep calls land in the right place
-  for (const [call, want] of [["renderTab('tasks')", 'biz:' + ENG], ["renderTab('packages')", 'biz:' + ENG], ["renderTab('constitution')", 'brain'], ["renderTab('settings')", 'settings'], ["renderTab('integrations')", 'integrations'], ["renderTab('finance')", 'finance'], ["renderTab('engines')", 'analytics']]) {
+  for (const [call, want] of [["renderTab('tasks')", 'biz:' + ENG], ["renderTab('packages')", 'biz:' + ENG], ["renderTab('constitution')", 'home'], ["renderTab('settings')", 'settings'], ["renderTab('integrations')", 'integrations'], ["renderTab('finance')", 'finance'], ["renderTab('engines')", 'analytics']]) {
     await clickSel(p, `#h2Side button[data-h2="biz:${ENG}"]`);   // establishes the last-used business
     await p.evaluate((c) => { (0, eval)(c); }, call); await W(p, 700);
     check(`router call ${call} lands on ${want}`, (await hl(p)) === want, `highlight=${await hl(p)}`);
@@ -111,7 +111,7 @@ try {
 
   // ---- 6 mobile: sections and workspace tabs stay usable
   const mob = await session('admin', { width: 375, height: 812 }); const mp = mob.page;
-  for (const id of ['home', `biz:${FARSI}`, `biz:${ENG}`, 'analytics', 'finance', 'brain', 'engineering', 'integrations', 'settings']) {
+  for (const id of ['home', `biz:${FARSI}`, `biz:${ENG}`, 'analytics', 'finance', 'engineering', 'integrations', 'settings']) {
     await clickSel(mp, `#h2Side button[data-h2="${id}"]`);
     check(`mobile: "${id}" opens without horizontal overflow`, (await text(mp)).length > 40 && !(await hOverflow(mp)), `overflow=${await hOverflow(mp)}`);
   }

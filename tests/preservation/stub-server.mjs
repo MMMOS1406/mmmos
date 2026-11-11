@@ -39,7 +39,8 @@ function pgFilter(rows, params) {
   }
   const o = params.get('order');
   if (o) { const [col, dir] = o.split('.'); out.sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (dir === 'desc' ? -1 : 1)); }
-  const l = Number(params.get('limit')); if (l > 0) out = out.slice(0, l);
+  const off = Math.max(0, Number(params.get('offset')) || 0), l = Number(params.get('limit'));   // offset: the app's package pager (pagedPackages) reads page by page
+  if (off > 0 || l > 0) out = out.slice(off, l > 0 ? off + l : undefined);
   return out;
 }
 
