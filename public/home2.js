@@ -23,7 +23,7 @@
   var CH = { 'SRV Farsi': /SRV Farsi|Silk Road/i, 'SRV English': /SRV English|Studio English/i };   // how each business is named on the analytics screen
   var SIDE = [
     ['home', 'Home'], ['biz:SRV Farsi', 'SRV Farsi'], ['biz:SRV English', 'SRV English'],
-    ['analytics', 'Analytics'], ['finance', 'Finance'], ['brain', 'Brain'], ['engineering', 'Engineering'], ['integrations', 'Integrations'], ['settings', 'Access / Settings']
+    ['analytics', 'Analytics'], ['finance', 'Finance'], ['engineering', 'Engineering'], ['integrations', 'Integrations'], ['settings', 'Access / Settings']
   ];
   var TABS = [['overview', 'Overview'], ['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics']];
   var S = { cur: 'home', biz: null, lastBiz: null, data: null, at: 0, loading: false };
@@ -88,12 +88,11 @@
   function paintMain(html) { var c = $('mainContent'); if (c) c.innerHTML = html; }
 
   /* which sidebar item owns each router tab / system sub-tab (so the highlight always matches what is on screen) */
-  function sysOwner(sub) { return { settings: 'settings', integrations: 'integrations', constitution: 'brain', engineering: 'engineering', brain_validation: 'engineering' }[sub] || 'engineering'; }
+  function sysOwner(sub) { return { settings: 'settings', integrations: 'integrations', engineering: 'engineering', brain_validation: 'engineering' }[sub] || 'engineering'; }
   function curFor(tab) {
     if (S.biz && (tab === 'tasks' || tab === 'packages' || tab === 'analytics')) return 'biz:' + S.biz;
     if (tab === 'analytics' || tab === 'content' || tab === 'engines') return 'analytics';
     if (tab === 'finance' || tab === 'integrations' || tab === 'settings') return tab;
-    if (tab === 'constitution') return 'brain';
     if (tab === 'system') return sysOwner(typeof currentSystemSub !== 'undefined' ? currentSystemSub : 'engineering');
     return null;
   }
@@ -115,14 +114,8 @@
     var legacyTab = tab === 'production' ? 'tasks' : tab;
     window.renderTab(legacyTab);
   }
-  /* scoping of the existing screens to ONE business (the screens themselves are unchanged; only the other business is hidden) */
-  function scopeAnalytics(engine) {
-    var c = $('mainContent'); if (!c) return;
-    var own = CH[engine], others = BIZ.filter(function (b) { return b[0] !== engine; }).map(function (b) { return CH[b[0]]; });
-    var cards = [].slice.call(c.querySelectorAll('.ch-card'));
-    if (cards.some(function (x) { return own.test(x.innerText); })) cards.forEach(function (x) { if (!own.test(x.innerText)) x.style.display = 'none'; });
-    [].slice.call(c.querySelectorAll('table tr')).forEach(function (tr) { var t = tr.innerText || ''; if (others.some(function (rx) { return rx.test(t); }) && !own.test(t)) tr.style.display = 'none'; });
-  }
+  /* scoping of the existing screens to ONE business. Analytics is scoped where its rows are built (window._analyticsScope, see renderEngineAnalytics);
+     Packages through its own engine filter; Production (tasks) by hiding the other business's panel. */
   function scopeTasks(engine) {
     var c = $('mainContent'); if (!c) return;
     var other = BIZ.filter(function (b) { return b[0] !== engine; }).map(function (b) { return b[0].toUpperCase(); });
@@ -156,7 +149,7 @@
     S.biz = null; try { window.pkgFilterEngine = ''; } catch (e) { /* ignore */ }
     if (id === 'analytics') { window.renderTab('analytics'); return; }
     if (id === 'finance') { window.renderTab('finance'); return; }
-    var sub = { brain: 'constitution', engineering: 'engineering', integrations: 'integrations', settings: 'settings' }[id];
+    var sub = { engineering: 'engineering', integrations: 'integrations', settings: 'settings' }[id];
     if (sub) { window.renderTab('system'); window.setSystemSub(sub); return; }
     window.renderTab(id);
   }
@@ -256,7 +249,7 @@
   }
 
   /* ------------------------------------------------------------ router hook */
-  var KNOWN = ['home', 'finance', 'tasks', 'engines', 'marketing', 'human_resources', 'legal_compliance', 'system', 'analytics', 'content', 'packages', 'integrations', 'constitution', 'factory', 'continuity', 'settings'];
+  var KNOWN = ['home', 'finance', 'tasks', 'engines', 'marketing', 'human_resources', 'legal_compliance', 'system', 'analytics', 'content', 'packages', 'integrations', 'factory', 'continuity', 'settings'];
   window.renderTab = function (tab) {
     if (active() && KNOWN.indexOf(tab) < 0) tab = 'home';
     if (!active()) { var r0 = _renderTab.apply(this, arguments); if (!authorized()) scrub(); return r0; }
@@ -269,11 +262,12 @@
     if ((tab === 'tasks' || tab === 'packages') && !S.biz) { return openWs(S.lastBiz || BIZ[0][0], tab === 'tasks' ? 'production' : 'packages'); }
     if (tab === 'engines') { tab = 'analytics'; S.biz = null; }   // the Operations overview repeated Home; its Analytics/Packages tabs now live in Analytics and the business workspaces
     if (tab !== 'tasks' && tab !== 'packages' && tab !== 'analytics') S.biz = null;
+    window._analyticsScope = (S.biz && tab === 'analytics') ? S.biz : '';
     var r = _renderTab.apply(this, [tab].concat([].slice.call(arguments, 1)));
     if (S.biz && (tab === 'tasks' || tab === 'packages' || tab === 'analytics')) {
       var c = $('mainContent');
       if (c) { c.insertAdjacentHTML('afterbegin', wsHeader(S.biz, tab === 'tasks' ? 'production' : tab)); S.wsTab = tab === 'tasks' ? 'production' : tab; }
-      if (tab === 'analytics') scopeAnalytics(S.biz); else if (tab === 'tasks') scopeTasks(S.biz); else scopePackages();
+      if (tab === 'tasks') scopeTasks(S.biz); else if (tab === 'packages') scopePackages();
     }
     var cur = curFor(tab); S.cur = cur; style(); paintSide();
     return r;
@@ -293,7 +287,6 @@
     try {
       if (cur === 'settings' && typeof renderSettings === 'function') body = renderSettings();
       else if (cur === 'integrations' && typeof renderIntegrations === 'function') body = renderIntegrations();
-      else if (cur === 'constitution' && typeof renderConstitution === 'function') body = renderConstitution();
       else if (cur === 'factory' && typeof renderFactory === 'function') body = renderFactory();
       else if (cur === 'continuity' && typeof renderContinuity === 'function') body = renderContinuity();
       else if (cur === 'engineering' && typeof renderEngineeringBrain === 'function') body = renderEngineeringBrain();
