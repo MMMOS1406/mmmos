@@ -216,7 +216,7 @@ const RETIREMENT_FILES = ['api/generate.js', 'api/reports/weekly.js', 'api/tikto
 const isRetirementFile = (f) => RETIREMENT_FILES.includes(f) || f.startsWith('tests/ceo017/') || f.startsWith('tests/ceo017a/') || f.startsWith('migrations/017b_') || f.startsWith('lib/pinHash') || f.startsWith('lib/dataProxy');
 // CEO-017C/D: files the authentication Release 1 and 2 are allowed to change. The OAuth callback and .pause-deploy stay strictly untouched by it (checked below).
 const RELEASE_FILES = ['api/ops.js', 'public/index.html', 'lib/pinHash.mjs', 'index.html', 'public/index_staging.html', 'tests/srv/test_srv_farsi_creative_v2.mjs', 'test_youtube_oauth_reliability.mjs'];
-const isReleaseFile = (f) => RELEASE_FILES.includes(f) || f.startsWith('tests/ceo017a/') || f.startsWith('tests/preservation/') || f.startsWith('tests/ceo017f/') || f === 'lib/dataProxy.mjs' || f === 'public/home2.js' || f.startsWith('tests/home2/') || f.startsWith('tools/home2/') || f === 'lib/channelSyncControl.mjs' || f === 'api/youtube/autosync.js' || f.startsWith('tests/portfolio/') || f.startsWith('tools/portfolio/');  // CEO-017F stage 1 (data proxy); MMMOS homepage v2 (isolated branch) // CEO-017D: Release 2 also adjusts the test harness' sign-in
+const isReleaseFile = (f) => RELEASE_FILES.includes(f) || f.startsWith('tests/ceo017a/') || f.startsWith('tests/preservation/') || f.startsWith('tests/ceo017f/') || f === 'lib/dataProxy.mjs' || f === 'public/home2.js' || f === 'public/avatar-library.js' || f === 'lib/srvAvatarLibrary.mjs' || f.startsWith('tests/avatars/') || f.startsWith('tests/platform/') || f.startsWith('tests/home2/') || f.startsWith('tools/home2/') || f === 'lib/channelSyncControl.mjs' || f === 'api/youtube/autosync.js' || f.startsWith('tests/portfolio/') || f.startsWith('tools/portfolio/');  // CEO-017F stage 1 (data proxy); MMMOS homepage v2 (isolated branch) // CEO-017D: Release 2 also adjusts the test harness' sign-in
 console.log('\n[3] Cross-business / no-regression evidence (structural — diff scope + untouched-function checks)');
 
 await t('youtubeAnalyticsPull and youtubeSyncPerformance (existing YouTube analytics paths) are completely untouched by this patch', () => {
@@ -235,8 +235,10 @@ await t('youtubeUploadVideo (existing YouTube upload path) is byte-for-byte unch
   const baseOps = execFileSync('git', ['show', 'origin/main:api/ops.js'], { maxBuffer: 1 << 28 }).toString();
   const baseStart = baseOps.indexOf('async function youtubeUploadVideo');
   const baseEnd = baseOps.indexOf('\nasync function setYtThumbnail', baseStart);
-  const baseBody = baseOps.slice(baseStart, baseEnd);
-  assert.equal(uploadBody, baseBody, 'youtubeUploadVideo must be byte-identical to origin/main — this patch only touches youtubeVideoStatus');
+  // CEO order 2026-11-11 retired HeyGen and Submagic as publishing sources: the only intended difference is the wording of the source-guard comment and its error hint.
+  const retiredWording = (x) => x.replace("this project's srv-assets storage, HeyGen or a Submagic project.", "this project's srv-assets storage.").replace("(srv-assets), HeyGen or a Submagic project.'", "(srv-assets).'");
+  const baseBody = retiredWording(baseOps.slice(baseStart, baseEnd));
+  assert.equal(retiredWording(uploadBody), baseBody, 'youtubeUploadVideo must be byte-identical to origin/main apart from the retired-provider wording — this patch only touches youtubeVideoStatus');
 });
 
 await t('SMM has no YouTube channel mapping before or after this patch — confirms the four-channel map (and this patch) never touches a 5th business', () => {

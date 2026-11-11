@@ -15,13 +15,13 @@ const src = readFileSync(join(root, 'api', 'ops.js'), 'utf8');
 const html = readFileSync(join(root, 'public', 'index.html'), 'utf8');
 const groups = {
   'operator approvals': ['approve', 'reject'],
-  'production pipeline and assets': ['heygen_render_status', 'save_heygen_execution', 'save_suno_execution', 'delete_asset'],
+  'production pipeline and assets': ['save_suno_execution', 'delete_asset'],
   'NextWave V2 generation and memory': ['generate_package', 'nextwave_v2_generate_scene_package', 'nextwave_v2_generate_visual_plan', 'delete_memory_item'],
   'SMM video generation': ['sm_video_production_generate'],
 };
 const all = Object.values(groups).flat();
 const set = (src.match(/const SESSION_GATED_ACTIONS = new Set\(\[([\s\S]*?)\]\);/) || [])[1] || '';
-ok('exactly the 11 priority actions are in the session gate (SRV group deferred to the SRV workstream)', all.every(a => set.includes(`'${a}'`)) && (set.match(/^\s*'[a-z0-9_]+',/gm) || []).length === 11);
+ok('exactly the 9 priority actions (11 before the HeyGen actions were retired 2026-11-11) are in the session gate (SRV group deferred to the SRV workstream)', all.every(a => set.includes(`'${a}'`)) && (set.match(/^\s*'[a-z0-9_]+',/gm) || []).length === 9);
 const snap = () => JSON.stringify(Object.fromEntries(Object.entries(db).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])));
 const before = snap();
 for (const [g, acts] of Object.entries(groups)) {
@@ -35,14 +35,14 @@ for (const [g, acts] of Object.entries(groups)) {
 ok('anonymous calls changed nothing in any table', snap() === before, snap());
 let forged = 0;
 for (const a of all) { const r = await call(a, { ceo_session_token: 'forged.token', operator_session_token: 'forged' }); if (r.status === 401) forged++; }
-ok(`forged CEO and VA tokens are refused for all 11 (${forged}/11)`, forged === 11);
+ok(`forged CEO and VA tokens are refused for all 9 (${forged}/9)`, forged === 9);
 let passed = 0; const stuck = [];
 for (const a of all) {
   const r = await call(a, { ceo_session_token: CEO, approval_id: '00000000-0000-4000-8000-000000000000', video_id: 'v' });
   if (!(r.status === 401 && r.body.error === 'session_required')) passed++; else stuck.push(a);
 }
-ok(`a CEO session passes the gate for all 11 (${passed}/11; handler errors after the gate are expected with test input)`, passed === 11, stuck.join(' '));
-// A VA (operator) session — obtained through the real VA sign-in — keeps access to all 11.
+ok(`a CEO session passes the gate for all 9 (${passed}/9; handler errors after the gate are expected with test input)`, passed === 9, stuck.join(' '));
+// A VA (operator) session — obtained through the real VA sign-in — keeps access to all 9.
 const login = await call('operator_login', { pin: 'va-test-pin' });
 const VA = login.body && login.body.operator_session_token;
 ok('the real VA sign-in issues an operator session', login.status === 200 && typeof VA === 'string' && VA.length > 20, JSON.stringify(login.body).slice(0, 120));
@@ -51,7 +51,7 @@ for (const a of all) {
   const r = await call(a, { operator_session_token: VA, approval_id: '00000000-0000-4000-8000-000000000000', video_id: 'v' });
   if (!(r.status === 401 && r.body.error === 'session_required')) vaPassed++; else vaStuck.push(a);
 }
-ok(`a VA session passes the gate for all 11 (${vaPassed}/11)`, vaPassed === 11, vaStuck.join(' '));
+ok(`a VA session passes the gate for all 9 (${vaPassed}/9)`, vaPassed === 9, vaStuck.join(' '));
 const bad = await call('operator_login', { pin: 'wrong-pin' });
 ok('a wrong VA PIN is refused and issues no session', bad.status === 401 && !(bad.body && bad.body.operator_session_token));
 // The publishing gate itself is unchanged: same action list and same gate code as main.
@@ -64,7 +64,7 @@ if (mainSrc) {
 }
 // The app sends the session at every call site of these actions.
 const plain = all.filter(a => new RegExp(`(?<![A-Za-z_])fetch\\(\\s*'/api/ops\\?action=${a}(?=[&'])`).test(html));
-ok('no plain fetch() remains for any of the 11 actions in the app', plain.length === 0, plain.join(','));
+ok('no plain fetch() remains for any of the 9 actions in the app', plain.length === 0, plain.join(','));
 const sessionCalls = all.map(a => (html.match(new RegExp(`_publishFetch\\(\\s*'/api/ops\\?action=${a}(?=[&'])`, 'g')) || []).length + (html.match(new RegExp(`_ceoAuthedFetch\\(\\s*'/api/ops\\?action=${a}(?=[&'])`, 'g')) || []).length);
 ok('every action has at least one session-sending call site', sessionCalls.every(n => n >= 1), JSON.stringify(Object.fromEntries(all.map((a, i) => [a, sessionCalls[i]]))));
 ok('the gate reuses the publishing gate (same enforce/observe mode, CEO or VA session)', /SESSION_GATED_ACTIONS\.has\(action\)\) \{\s*const gate = await _publishGate\(req, action\);/.test(src));
