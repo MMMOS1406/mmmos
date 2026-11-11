@@ -262,8 +262,6 @@ const SESSION_GATED_ACTIONS = new Set([
   'nextwave_v2_generate_scene_package', // NextWave V2 generation and memory
   'nextwave_v2_generate_visual_plan', // NextWave V2 generation and memory
   'delete_memory_item', // NextWave V2 generation and memory
-  'heygen_render_status', // production pipeline and assets
-  'save_heygen_execution', // production pipeline and assets
   'save_suno_execution', // production pipeline and assets
   'delete_asset', // production pipeline and assets
   'approve', // operator approvals
@@ -545,30 +543,21 @@ async function publishAuthSetMode(req, res) {
   } catch (e) { return res.status(502).json({ ok: false, error: 'auth_config_write_failed' }); }
 }
 
-// Publishing sources: only this project's srv-assets public objects, HeyGen's CDN, or a Submagic project
-// (resolved through the Submagic API with our key). Everything else — other buckets, signed paths, other
+// Publishing sources: only this project's srv-assets public objects. Everything else — other buckets, signed paths, other
 // hosts, http:, credentials or ports in the URL — is refused before any token is refreshed or byte fetched.
+// (CEO order 2026-11-11: the HeyGen CDN and Submagic project sources were retired together with both subscriptions.)
 const PUBLISH_SRV_ASSETS_PREFIX = `${SUPABASE_URL}/storage/v1/object/public/srv-assets/`;
-const PUBLISH_HEYGEN_HOSTS = ['files.heygen.ai', 'files2.heygen.ai', 'resource.heygen.ai', 'resource2.heygen.ai', 'assets.heygen.ai'];
 function _publishSourceKind(raw, kind) {
   if (typeof raw !== 'string' || !raw.trim()) return null;
   const s = raw.trim();
-  if (kind === 'video' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return 'submagic';
   let u;
   try { u = new URL(s); } catch { return null; }
   if (u.protocol !== 'https:' || u.username || u.password || u.port) return null;
   if (u.href.startsWith(PUBLISH_SRV_ASSETS_PREFIX) && !/\.\.|%2e|%2f|%5c/i.test(u.pathname)) return 'srv-assets';
-  if (PUBLISH_HEYGEN_HOSTS.includes(u.hostname)) return 'heygen';
-  if (kind === 'video' && u.hostname === 'app.submagic.co' && u.pathname.startsWith('/api/file/download')) return 'submagic';
   return null;
 }
-function _isSubmagicHost(raw) {
-  try { const h = new URL(raw).hostname; return h === 'submagic.co' || h.endsWith('.submagic.co'); } catch { return false; }
-}
-// Fetches a publishing source. A URL that Submagic's own API returned is trusted as-is; anything else is
-// fetched without blindly following redirects — every hop must itself be an allowed source.
+// Fetches a publishing source without blindly following redirects — every hop must itself be an allowed source.
 async function _publishFetchSource(url, headers, trusted, kind) {
-  if (trusted) return fetch(url, { headers, redirect: 'follow' });
   let current = url;
   for (let hop = 0; hop < 4; hop++) {
     const r = await fetch(current, { headers, redirect: 'manual' });
@@ -3621,50 +3610,7 @@ async function saveSunoExecution(req, res) {
 
 // ── HeyGen Execution Bridge ───────────────────────────────────────────────────
 
-async function getHeygenExecution(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { task_id, local_key } = req.body || {};
-  if (!task_id && !local_key) return res.status(400).json({ error: 'task_id or local_key required' });
-  let data = [];
-  if (local_key) data = await sbGet(`heygen_executions?local_key=eq.${encodeURIComponent(local_key)}&limit=1`).catch(() => []);
-  if ((!data || !data[0]) && task_id) data = await sbGet(`heygen_executions?task_id=eq.${task_id}&limit=1`).catch(() => []);
-  return res.status(200).json({ heygen: data?.[0] || null });
-}
 
-async function saveHeygenExecution(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { task_id, local_key, package_id, engine, script, visual_instructions,
-          heygen_video_url, mp4_url, version_notes, status } = req.body || {};
-  if (!task_id && !local_key) return res.status(400).json({ error: 'task_id or local_key required' });
-  const useLocalKey = !!local_key;
-  const lookup = useLocalKey
-    ? `local_key=eq.${encodeURIComponent(local_key)}`
-    : `task_id=eq.${task_id}`;
-  console.log('[save_heygen_execution] lookup:', lookup, 'status:', status);
-  let existing = [];
-  try { existing = await sbGet(`heygen_executions?${lookup}&limit=1`); } catch(e) { console.error('[save_heygen_execution] sbGet error:', e.message); }
-  const payload = { package_id, engine, script, visual_instructions,
-                    heygen_video_url, mp4_url, version_notes, status,
-                    updated_at: new Date().toISOString() };
-  if (useLocalKey) payload.local_key = local_key;
-  if (task_id) payload.task_id = task_id;
-  let result;
-  try {
-    if (existing?.[0]) {
-      console.log('[save_heygen_execution] PATCH existing row');
-      result = await sbPatch('heygen_executions', lookup, payload);
-    } else {
-      console.log('[save_heygen_execution] INSERT new row');
-      payload.created_at = new Date().toISOString();
-      if (!payload.task_id) payload.task_id = null;
-      result = await sbInsert('heygen_executions', payload);
-    }
-  } catch(e) {
-    console.error('[save_heygen_execution] write error:', e.message);
-    return res.status(500).json({ error: 'heygen_write_failed', message: e.message });
-  }
-  return res.status(200).json({ success: true, heygen: result });
-}
 
 // ── Asset Return Pipeline ─────────────────────────────────────────────────────
 
@@ -8195,18 +8141,7 @@ async function plaidPull(req, res) {
   });
 }
 
-// ── HeyGen handlers (merged here to stay under Vercel Hobby 12-function limit) ─
-// v13.51.0 — P1 HeyGen API integration. Read-only test + asset discovery +
-// async render submission + status polling. Key from Vercel env HEYGEN_API_KEY.
-// Server-side only — key never reaches the browser.
-
-const HEYGEN_API_KEY = process.env.HEYGEN_API_KEY || '';
-const HEYGEN_BASE = 'https://api.heygen.com';
-
-// v13.52.0 — P2A Submagic API integration. Takes HeyGen output, returns publishable
-// MP4 with captions + B-rolls + zooms. Key from Vercel env SUBMAGIC_API_KEY.
-const SUBMAGIC_API_KEY = process.env.SUBMAGIC_API_KEY || '';
-const SUBMAGIC_BASE = 'https://api.submagic.co';
+// (HeyGen and Submagic API handlers retired 2026-11-11 by CEO order — both subscriptions cancelled, no retained business uses them; keys are no longer read.)
 
 // v16.65.0 — SMM V1 Phase 4: Quality Production Pipeline. ElevenLabs is the preferred V1
 // narration provider (natural commercial voice, no on-screen avatar required). RUNWAY_API_KEY
@@ -8217,534 +8152,22 @@ const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8i
 const ELEVENLABS_BASE = 'https://api.elevenlabs.io';
 const RUNWAY_API_KEY = process.env.RUNWAY_API_KEY || '';
 
-async function _heygenFetch(path, opts) {
-  opts = opts || {};
-  const headers = Object.assign({ 'X-Api-Key': HEYGEN_API_KEY }, opts.headers || {});
-  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const url = HEYGEN_BASE + path;
-  try {
-    const r = await fetch(url, {
-      method: opts.method || 'GET',
-      headers,
-      body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined,
-    });
-    const text = await r.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch(_) { data = { raw: text }; }
-    return { ok: r.ok, status: r.status, data };
-  } catch (e) {
-    return { ok: false, status: 0, data: null, error: e.message };
-  }
-}
 
-async function heygenTest(req, res) {
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured', message: 'HEYGEN_API_KEY env var is missing. Add it in Vercel.' });
-  // Try the quota endpoint — small payload, verifies auth + plan tier in one call.
-  const r = await _heygenFetch('/v1/user/remaining_quota.get');
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    keyConfigured: true,
-    quotaResponse: r.data,
-    error: r.error || null,
-  });
-}
 
-async function heygenListAvatars(req, res) {
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
-  const r = await _heygenFetch('/v2/avatars');
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    avatars: (r.data && r.data.data && r.data.data.avatars) || (r.data && r.data.avatars) || [],
-    talkingPhotos: (r.data && r.data.data && r.data.data.talking_photos) || [],
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
-// Live Validation Defect #5 — read-only recovery tool. Neither
-// heygenStartRender's caller nor _nwv2PollHeygenJobToCompletion's own
-// timeout path ever persisted the submitted video_id anywhere durable, so
-// a poll timeout on a job HeyGen actually accepted left MMMOS with no
-// record of it at all. This lists recent jobs directly from HeyGen (no
-// generation, no spend) so an already-submitted job can be found and its
-// real status/output checked instead of assuming failure and submitting a
-// duplicate paid generation.
-async function heygenListVideos(req, res) {
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
-  const limit = (req.query && req.query.limit) || 20;
-  const r = await _heygenFetch('/v1/video.list?limit=' + encodeURIComponent(limit));
-  const videos = (r.data && r.data.data && r.data.data.videos) || (r.data && r.data.videos) || [];
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    videos,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
-async function heygenListVoices(req, res) {
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
-  const r = await _heygenFetch('/v2/voices');
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    voices: (r.data && r.data.data && r.data.data.voices) || (r.data && r.data.voices) || [],
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
-async function heygenStartRender(req, res) {
-  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { avatar_id, voice_id, script, audio_url, background, dimension, test, scale } = body;
-  // Bounded HeyGen implementation (CEO Decision — NextWave V2 authoritative
-  // ElevenLabs narration) — audio-driven mode. HeyGen's own Create Video V2
-  // "voice" object supports type:'audio' + audio_url as an alternative to
-  // type:'text' + input_text + voice_id (script and audio are mutually
-  // exclusive per HeyGen's documented schema); passing a pre-synthesized
-  // ElevenLabs slice here means HeyGen only lip-syncs to audio it's given,
-  // never independently narrates. Text-mode callers (existing legacy path,
-  // untouched) are unaffected — this only activates when audio_url is present.
-  let voiceBlock;
-  if (audio_url) {
-    voiceBlock = { type: 'audio', audio_url };
-  } else {
-    if (!voice_id || !script) {
-      return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id','voice_id','script (or audio_url for audio-driven mode)'], got: Object.keys(body) });
-    }
-    voiceBlock = { type: 'text', input_text: script, voice_id };
-  }
-  if (!avatar_id) {
-    return res.status(400).json({ ok: false, error: 'missing_fields', need: ['avatar_id'], got: Object.keys(body) });
-  }
-  // Build background block per HeyGen v2 spec. Three valid types: color, image, video.
-  // Default to a dark color if no background passed.
-  let backgroundBlock = { type: 'color', value: '#0a1628' };
-  if (background && background.type) {
-    backgroundBlock = background;
-  } else if (background && typeof background === 'string' && background.startsWith('#')) {
-    backgroundBlock = { type: 'color', value: background };
-  }
-  // v13.51.5 — revert v13.51.4 talking_photo detection. HeyGen API error "avatar look
-  // not found, look_id: X" proved IDs are AVATAR LOOK IDs regardless of format (slug
-  // like "Raul_expressive_2024112501" OR UUID like "50cc8524aa404a479242ffb73ab56cb6").
-  // Always use character.type='avatar' + avatar_id. The 32-char hex IDs are custom
-  // avatar look IDs, not talking_photo IDs.
-  // v13.57.2/.4 — per-host character.scale. Paul/Raul (landscape stock avatars) need
-  // scale=2.0 to crop landscape into portrait Shorts framing. Sophia (AI-generated
-  // portrait-native Photo Avatars) needs scale=1.0 to keep natural head/shoulders
-  // composition — scale=2.0 over-zooms into face-only / cropped forehead (audited
-  // 2026-06-15). Caller passes scale; default 2.0 preserves Paul behavior if missing.
-  const characterScale = (typeof scale === 'number' && scale > 0) ? scale : 2.0;
-  // v13.75.6 — video_inputs item. background_audio goes at videoBody TOP LEVEL per HeyGen v2 spec.
-  const videoInput = {
-    character: { type: 'avatar', avatar_id: avatar_id, avatar_style: 'normal', scale: characterScale },
-    voice: voiceBlock,
-    background: backgroundBlock,
-  };
-  const videoBody = {
-    video_inputs: [videoInput],
-    dimension: dimension || { width: 1080, height: 1920 }, // portrait by default for shorts
-    test: test === true,
-  };
-  // v13.75.7 — background_audio removed: HeyGen v2 API rejects this field (render fails silently).
-  // Music will be applied via Submagic post-processing instead.
-  const r = await _heygenFetch('/v2/video/generate', { method: 'POST', body: videoBody });
-  // HeyGen response shape: { data: { video_id: "..." }, error: null } on success
-  const videoId = (r.data && r.data.data && r.data.data.video_id) || null;
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    videoId,
-    submittedAt: new Date().toISOString(),
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
-// v13.51.6 — fetch all looks inside a single avatar group. Lets MMM resolve
-// the proper look_id when operator only has the parent groupId from HeyGen
-// Studio (which doesn't surface per-look IDs in its UI).
-async function heygenGroupLooks(req, res) {
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
-  const groupId = (req.query && req.query.group_id) || (req.body && req.body.group_id);
-  if (!groupId) return res.status(400).json({ ok: false, error: 'missing_group_id' });
-  // Try the v2 group avatars endpoint first.
-  const r = await _heygenFetch('/v2/avatar_group/' + encodeURIComponent(groupId) + '/avatars');
-  // Normalize across possible response shapes — HeyGen has shifted this several times.
-  let looks = [];
-  if (r.data) {
-    const d = r.data.data || r.data;
-    looks = d.avatar_list || d.avatars || d.looks || d.items || [];
-  }
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    groupId,
-    looks,
-    rawCount: Array.isArray(looks) ? looks.length : 0,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
-// v13.51.6 — list ALL avatar groups in the workspace. Useful when operator
-// can't find a specific avatar by ID — they can grep this list visually.
-async function heygenListAvatarGroups(req, res) {
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
-  const r = await _heygenFetch('/v2/avatar_group.list');
-  let groups = [];
-  if (r.data) {
-    const d = r.data.data || r.data;
-    groups = d.avatar_group_list || d.groups || d.items || [];
-  }
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    groups,
-    rawCount: Array.isArray(groups) ? groups.length : 0,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
-// ── v13.77.0 HeyGen Video Proxy — CORS bridge so browser canvas can capture HeyGen CDN videos ──
-// HeyGen CDN (files2.heygen.ai) serves no Access-Control-Allow-Origin header, so canvas becomes
-// tainted and logo/music post-processing fails. This proxy fetches the video server-side and
-// returns it with CORS headers + Range passthrough so the browser video element can seek normally.
-async function heygenVideoProxy(req, res) {
-  const videoUrl = (req.query && req.query.url) || '';
-  if (!videoUrl) return res.status(400).json({ error: 'missing_url' });
 
-  // Security: only allow known HeyGen CDN domains
-  const ALLOWED_HEYGEN_HOSTS = [
-    'files.heygen.ai',
-    'files2.heygen.ai',
-    'resource.heygen.ai',
-    'resource2.heygen.ai',
-    'assets.heygen.ai',
-  ];
-  let parsedHost;
-  try { parsedHost = new URL(videoUrl).hostname; } catch (_) { return res.status(400).json({ error: 'invalid_url' }); }
-  const hostAllowed = ALLOWED_HEYGEN_HOSTS.some(h => parsedHost === h || parsedHost.endsWith('.' + h));
-  if (!hostAllowed) return res.status(403).json({ error: 'host_not_allowed', host: parsedHost });
 
-  const upstreamHeaders = {};
-  if (req.headers && req.headers['range']) upstreamHeaders['Range'] = req.headers['range'];
 
-  let srcRes;
-  try {
-    srcRes = await fetch(videoUrl, { headers: upstreamHeaders });
-  } catch (e) {
-    return res.status(502).json({ error: 'upstream_fetch_failed', detail: e.message });
-  }
 
-  // Forward status + CORS + content headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Range');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-  const ct = srcRes.headers.get('content-type') || 'video/mp4';
-  res.setHeader('Content-Type', ct);
-  res.setHeader('Accept-Ranges', 'bytes');
-  const cl = srcRes.headers.get('content-length');
-  if (cl) res.setHeader('Content-Length', cl);
-  const cr = srcRes.headers.get('content-range');
-  if (cr) res.setHeader('Content-Range', cr);
-  res.status(srcRes.status);
 
-  // Pipe body
-  const { Readable } = await import('stream'); // ESM-safe: package.json has "type":"module"
-  const readable = Readable.fromWeb ? Readable.fromWeb(srcRes.body) : srcRes.body;
-  readable.pipe(res);
-}
 
-// ── v13.52.0 P2A Submagic handlers ────────────────────────────────────────
-async function _submagicFetch(path, opts) {
-  opts = opts || {};
-  const headers = Object.assign({ 'x-api-key': SUBMAGIC_API_KEY }, opts.headers || {});
-  if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const url = SUBMAGIC_BASE + path;
-  try {
-    const r = await fetch(url, {
-      method: opts.method || 'GET',
-      headers,
-      body: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : undefined,
-    });
-    const text = await r.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch(_) { data = { raw: text }; }
-    return { ok: r.ok, status: r.status, data };
-  } catch (e) {
-    return { ok: false, status: 0, data: null, error: e.message };
-  }
-}
 
-async function submagicTest(req, res) {
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured', message: 'SUBMAGIC_API_KEY env var missing. Add it in Vercel.' });
-  // Use /v1/languages as a cheap auth-verifying probe (rate-limited at 1000/hr).
-  const r = await _submagicFetch('/v1/languages');
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    keyConfigured: true,
-    languagesCount: (r.data && Array.isArray(r.data.languages)) ? r.data.languages.length : 0,
-    sample: (r.data && Array.isArray(r.data.languages)) ? r.data.languages.slice(0, 5) : null,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
-async function submagicCreateProject(req, res) {
-  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { videoUrl, title, language, templateName, magicZooms, magicBrolls, magicBrollsPercentage, dictionary, webhookUrl, music, items } = body;
-  if (!videoUrl) return res.status(400).json({ ok: false, error: 'missing_video_url' });
-  // v13.52.0 — defaults dialed for short-form publishable output. Hormozi 2 is the
-  // viral burn-in caption style. magicBrolls + magicZooms = the P2A requirements.
-  // v13.85.1 — music param forwarded when provided (userMediaId from Submagic media library)
-  const projectBody = {
-    title: title || ('MMM ' + new Date().toISOString()),
-    language: language || 'en',
-    videoUrl,
-    templateName: templateName || 'Hormozi 2',
-    magicZooms: magicZooms !== false, // default ON
-    magicBrolls: magicBrolls !== false, // default ON
-    magicBrollsPercentage: typeof magicBrollsPercentage === 'number' ? magicBrollsPercentage : 60,
-  };
-  if (dictionary && Array.isArray(dictionary)) projectBody.dictionary = dictionary;
-  if (webhookUrl) projectBody.webhookUrl = webhookUrl;
-  // NextWave V2 hybrid architecture — targeted ai-broll/user-media insertions at
-  // Brain-planned timestamps, passed straight through to Submagic's own documented
-  // `items` field (proven working in the Two-Tool Architecture Validation phase).
-  // Only forwarded when the caller actually supplies a non-empty array — every
-  // existing caller that omits this keeps working exactly as before.
-  if (Array.isArray(items) && items.length) projectBody.items = items;
-  // v13.85.1 — background music: { userMediaId, volume, fade }
-  if (music && music.userMediaId) projectBody.music = { userMediaId: music.userMediaId, volume: music.volume || 20, fade: music.fade !== false, startFromTime: music.startFromTime || 0 };
-  const r = await _submagicFetch('/v1/projects', { method: 'POST', body: projectBody });
-  // Response shape: { id, status, ... }
-  const projectId = (r.data && (r.data.id || (r.data.project && r.data.project.id))) || null;
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    projectId,
-    submittedAt: new Date().toISOString(),
-    sentBody: projectBody,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
-
-async function submagicGetProject(req, res) {
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  const projectId = (req.query && req.query.project_id) || (req.body && req.body.project_id);
-  if (!projectId) return res.status(400).json({ ok: false, error: 'missing_project_id' });
-  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(projectId));
-  // Response shape varies; common fields: status, downloadUrl, videoUrl, exportUrl
-  const d = (r.data && (r.data.project || r.data)) || {};
-  const status = d.status || d.state || null;
-  const downloadUrl = d.downloadUrl || d.videoUrl || d.exportUrl || d.outputUrl || null;
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    httpStatus: r.status,
-    projectId,
-    status,
-    downloadUrl,
-    duration: d.duration || null,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
-
-async function submagicListTemplates(req, res) {
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  // /v1/templates per docs convention
-  const r = await _submagicFetch('/v1/templates');
-  let templates = [];
-  if (r.data) {
-    templates = r.data.templates || r.data.data || [];
-  }
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    templates,
-    rawCount: Array.isArray(templates) ? templates.length : 0,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
-async function submagicCreateMedia(req, res) {
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { url } = body;
-  if (!url) return res.status(400).json({ ok: false, error: 'missing_url' });
-  const r = await _submagicFetch('/v1/user-media', { method: 'POST', body: { url } });
-  const userMediaId = (r.data && r.data.userMediaId) || null;
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    userMediaId,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
-// Two-Tool Architecture Validation — Submagic's purpose-built direct-file
-// upload endpoint (POST /v1/user-media/upload, multipart/form-data),
-// distinct from the URL-based /v1/user-media above (which this file's own
-// history notes was only ever exercised for audio). Fetches the given URL
-// server-side and re-uploads the bytes as multipart form data — the exact
-// same "fetch external asset, re-host via multipart" shape already proven
-// elsewhere in this file for Ideogram asset banking, not a new pattern.
-async function submagicUploadMediaFromUrl(req, res) {
-  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { url, filename } = body;
-  if (!url) return res.status(400).json({ ok: false, error: 'missing_url' });
-  try {
-    const srcRes = await fetch(url);
-    if (!srcRes.ok) return res.status(502).json({ ok: false, error: `source_fetch_failed_${srcRes.status}` });
-    const buf = Buffer.from(await srcRes.arrayBuffer());
-    const contentType = srcRes.headers.get('content-type') || 'application/octet-stream';
-    const form = new FormData();
-    form.append('file', new Blob([buf], { type: contentType }), filename || 'asset.png');
-    const upRes = await fetch(SUBMAGIC_BASE + '/v1/user-media/upload', {
-      method: 'POST',
-      headers: { 'x-api-key': SUBMAGIC_API_KEY },
-      body: form,
-    });
-    const text = await upRes.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch (_) { data = { raw: text }; }
-    return res.status(upRes.ok ? 200 : (upRes.status || 502)).json({
-      ok: upRes.ok, status: upRes.status, userMediaId: (data && data.userMediaId) || null, raw: data,
-    });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-}
-async function submagicListMedia(req, res) {
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  const type  = (req.query && req.query.type)  || 'AUDIO'; // VIDEO | AUDIO | IMAGE
-  const limit = (req.query && req.query.limit) || '50';
-  const r = await _submagicFetch('/v1/user-media?type=' + encodeURIComponent(type) + '&limit=' + encodeURIComponent(limit));
-  const items = (r.data && Array.isArray(r.data.items)) ? r.data.items : [];
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    status: r.status,
-    count: items.length,
-    items,
-    hasMore: (r.data && r.data.hasMore) || false,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
-
-// ── Two-Tool Architecture Validation — Submagic custom-media/AI-broll
-// insertion. Purely additive: exposes Submagic's own documented `items`
-// (PUT /v1/projects/:id) and export (POST /v1/projects/:id/export)
-// endpoints through the same _submagicFetch/CEO-gating pattern every other
-// Submagic action here already uses. Does not change submagicCreateProject
-// or any existing behavior — this is capability validation, not a renderer.
-// CEO-gated: writes to a real project and can trigger a real re-export.
-async function submagicUpdateProject(req, res) {
-  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  if (req.method !== 'POST' && req.method !== 'PUT') return res.status(405).json({ ok: false, error: 'post_or_put_only' });
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { project_id, items } = body;
-  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
-  if (!Array.isArray(items) || !items.length) return res.status(400).json({ ok: false, error: 'missing_items_array' });
-  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id), { method: 'PUT', body: { items } });
-  return res.status(r.ok ? 200 : (r.status || 502)).json({ ok: r.ok, status: r.status, raw: r.data, error: r.error || null });
-}
-async function submagicExportProject(req, res) {
-  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'post_only' });
-  const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const { project_id } = body;
-  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
-  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id) + '/export', { method: 'POST', body: {} });
-  return res.status(r.ok ? 200 : (r.status || 502)).json({ ok: r.ok, status: r.status, raw: r.data, error: r.error || null });
-}
-
-// v13.86.1 — EVL video verification helpers
-// submagicProbeVideo: server-side HEAD + partial fetch to verify video is accessible
-// and extract basic metadata (content-type, content-length, byte sniff for valid MP4)
-async function submagicProbeVideo(req, res) {
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  const project_id = (req.query && req.query.project_id) || (req.body && req.body.project_id);
-  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
-  // 1. Get project to retrieve download URL
-  const pr = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id));
-  if (!pr.ok || !pr.data) return res.status(502).json({ ok: false, error: 'project_fetch_failed', detail: pr.error });
-  const d = pr.data.project || pr.data;
-  const downloadUrl = d.downloadUrl || d.videoUrl || d.exportUrl || d.outputUrl || d.directUrl || null;
-  if (!downloadUrl) return res.status(404).json({ ok: false, error: 'no_download_url', status: d.status });
-  // 2. HEAD request to verify URL is live
-  let headOk = false; let contentType = null; let contentLength = null; let headStatus = null;
-  try {
-    const hr = await fetch(downloadUrl, { method: 'HEAD' });
-    headStatus = hr.status;
-    headOk = hr.ok;
-    contentType = hr.headers.get('content-type') || null;
-    contentLength = hr.headers.get('content-length') || null;
-  } catch(e) { headOk = false; }
-  // 3. Fetch first 12 bytes to check MP4 magic bytes (ftyp box)
-  let isMp4 = false; let firstBytes = null;
-  try {
-    const br = await fetch(downloadUrl, { headers: { Range: 'bytes=0-11' } });
-    if (br.ok) {
-      const buf = await br.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      firstBytes = Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join(' ');
-      // MP4/MOV: bytes 4-7 = 'ftyp' (66 74 79 70)
-      isMp4 = bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70;
-    }
-  } catch(e) {}
-  return res.status(200).json({
-    ok: true,
-    project_id,
-    projectStatus: d.status || null,
-    duration: (d.videoMetaData && d.videoMetaData.duration) || null,
-    wordCount: (Array.isArray(d.words) ? d.words.length : null),
-    disableCaptions: d.disableCaptions || false,
-    downloadUrlAccessible: headOk,
-    headStatus,
-    contentType,
-    contentLengthBytes: contentLength ? parseInt(contentLength) : null,
-    isMp4,
-    firstBytes,
-    redirectUrl: downloadUrl,  // returned so caller can redirect browser to it
-  });
-}
-
-// submagicVideoRedirect: 302 redirect to the Submagic download URL
-// allows browser to navigate directly to the video for native playback + screenshot
-async function submagicVideoRedirect(req, res) {
-  if (!SUBMAGIC_API_KEY) return res.status(500).json({ ok: false, error: 'submagic_not_configured' });
-  const project_id = (req.query && req.query.project_id) || (req.body && req.body.project_id);
-  if (!project_id) return res.status(400).json({ ok: false, error: 'missing_project_id' });
-  const pr = await _submagicFetch('/v1/projects/' + encodeURIComponent(project_id));
-  if (!pr.ok || !pr.data) return res.status(502).json({ ok: false, error: 'project_fetch_failed' });
-  const d = pr.data.project || pr.data;
-  const downloadUrl = d.downloadUrl || d.videoUrl || d.exportUrl || d.outputUrl || d.directUrl || null;
-  if (!downloadUrl) return res.status(404).json({ ok: false, error: 'no_download_url' });
-  res.setHeader('Cache-Control', 'no-store');
-  return res.redirect(302, downloadUrl);
-}
 // ── end Submagic handlers ──
 
 // ── v13.54.0 P5 / Sprint 3 YouTube upload handlers ────────────────────────
@@ -8822,62 +8245,13 @@ async function _getYoutubeConnectionByTitle(title, opts) {
   }
 }
 
-// v13.55.1 — Resolve Submagic SPA download URLs to real CDN URLs via /v1/projects/{id}.
-// v13.55.2 — Also accept a bare Submagic project_id (UUID) as the input — same resolve path.
-async function _resolveSubmagicUrl(urlOrId) {
-  if (!urlOrId) return urlOrId;
-  const input = String(urlOrId).trim();
-  // Path A: bare UUID looks like a Submagic project_id — resolve directly
-  const bareUuidMatch = input.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-  if (bareUuidMatch) {
-    return await _resolveSubmagicProjectId(bareUuidMatch[1]);
-  }
-  // Path B: Submagic SPA download URL — extract project_id from path param
-  if (/app\.submagic\.co\/api\/file\/download/i.test(input)) {
-    const pathMatch = input.match(/[?&]path=([^&]+)/);
-    if (!pathMatch) throw new Error('submagic_url_missing_path_param');
-    const pathDecoded = decodeURIComponent(pathMatch[1]);
-    const idsMatch = pathDecoded.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-    if (!idsMatch) throw new Error('submagic_url_no_project_id_in_path: ' + pathDecoded.slice(0, 150));
-    return await _resolveSubmagicProjectId(idsMatch[2]);
-  }
-  // Path C: any other URL — passthrough (might be HeyGen CDN, direct MP4, etc.)
-  return input;
-}
 
-async function _resolveSubmagicProjectId(projectId) {
-  if (!SUBMAGIC_API_KEY) {
-    throw new Error('cannot_resolve_submagic_project: SUBMAGIC_API_KEY not configured');
-  }
-  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(projectId));
-  if (!r.ok) {
-    throw new Error('submagic_resolve_failed: HTTP ' + r.status + ' for project ' + projectId + ' · raw: ' + JSON.stringify(r.data || {}).slice(0, 200));
-  }
-  const d = (r.data && (r.data.project || r.data)) || {};
-  const resolvedUrl = d.downloadUrl || d.videoUrl || d.exportUrl || d.outputUrl || null;
-  if (!resolvedUrl) {
-    throw new Error('submagic_no_downloadUrl_in_response: status=' + (d.status||'?') + ' projectId=' + projectId);
-  }
-  console.log('[v13.55.2] resolved Submagic project → CDN URL · projectId:', projectId, '· host:', new URL(resolvedUrl).host);
-  return resolvedUrl;
-}
 
 // YouTube upload via resumable protocol.
-// v13.55.0 — Validates source content-type + adds Submagic auth header when needed.
-// v13.55.1 — Auto-resolves Submagic SPA download URLs to real API/CDN URLs.
+// v13.55.0 — Validates source content-type. (Submagic URL resolution and auth header retired 2026-11-11.)
 async function _youtubeResumableUpload(accessToken, videoUrl, metadata) {
-  // 0. If the source is a Submagic SPA URL, resolve to the real CDN URL via API
-  const _inputUrl = String(videoUrl || '').trim();
-  videoUrl = await _resolveSubmagicUrl(videoUrl);
-  const _fromSubmagicApi = videoUrl !== _inputUrl; // the URL came back from Submagic's own API
-  // 1. Fetch the source MP4. Keep x-api-key fallback for resolved URLs that still happen to be on
-  // Submagic's domain (api.submagic.co etc). SRV-STUDIO-V2-017: the key goes ONLY to a real
-  // submagic.co host (it used to go to any URL merely containing "submagic.co").
-  const srcHeaders = {};
-  if (_isSubmagicHost(videoUrl) && SUBMAGIC_API_KEY) {
-    srcHeaders['x-api-key'] = SUBMAGIC_API_KEY;
-  }
-  const srcRes = await _publishFetchSource(videoUrl, srcHeaders, _fromSubmagicApi, 'video');
+  // 1. Fetch the source MP4 from this project's srv-assets storage (the only allowed publishing source; no provider keys are ever sent).
+  const srcRes = await _publishFetchSource(videoUrl, {}, false, 'video');
   if (!srcRes.ok) {
     // Upstream bodies are logged server-side only, never returned to the caller (SRV-STUDIO-V2-017).
     let bodyPreview = '';
@@ -9095,10 +8469,10 @@ async function youtubeUploadVideo(req, res) {
                              // today, so this changes nothing unless a caller explicitly opts in.
   } = body;
   if (!videoUrl) return res.status(400).json({ ok: false, error: 'missing_video_url' });
-  // SRV-STUDIO-V2-017 — the source must be this project's srv-assets storage, HeyGen or a Submagic project.
+  // SRV-STUDIO-V2-017 — the source must be this project's srv-assets storage.
   // Checked before any token refresh or byte fetch.
   if (!_publishSourceKind(videoUrl, 'video')) {
-    return res.status(400).json({ ok: false, error: 'source_not_allowed', hint: 'Videos can only be published from MMMOS storage (srv-assets), HeyGen or a Submagic project.' });
+    return res.status(400).json({ ok: false, error: 'source_not_allowed', hint: 'Videos can only be published from MMMOS storage (srv-assets).' });
   }
 
   // v13.54.6 — channelHandle param kept for backward compatibility but now treated as title.
@@ -9258,7 +8632,7 @@ async function setYtThumbnail(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const { videoId, engine, thumbUrl } = body;
   if (!videoId || !thumbUrl) return res.status(400).json({ ok: false, error: 'missing_params' });
-  // SRV-STUDIO-V2-017 — the image must come from MMMOS storage (srv-assets) or HeyGen's CDN.
+  // SRV-STUDIO-V2-017 — the image must come from MMMOS storage (srv-assets).
   if (!_publishSourceKind(thumbUrl, 'image')) return res.status(400).json({ ok: false, error: 'source_not_allowed' });
   try {
     // SRV-STUDIO-V2-017 — routing is exact: an engine name maps through YT_ENGINE_TO_TITLE ('SRV Farsi' →
@@ -10083,28 +9457,6 @@ async function analyticsFoundationReport(req, res) {
 
 // ── end YouTube upload handlers ──
 
-async function heygenRenderStatus(req, res) {
-  if (!HEYGEN_API_KEY) return res.status(500).json({ ok: false, error: 'heygen_not_configured' });
-  const videoId = (req.query && req.query.video_id) || (req.body && req.body.video_id);
-  if (!videoId) return res.status(400).json({ ok: false, error: 'missing_video_id' });
-  const r = await _heygenFetch('/v1/video_status.get?video_id=' + encodeURIComponent(videoId));
-  // HeyGen response shape: { data: { status: "processing|completed|failed", video_url: "...", ... } }
-  const status = (r.data && r.data.data && r.data.data.status) || null;
-  const videoUrl = (r.data && r.data.data && r.data.data.video_url) || null;
-  const thumbUrl = (r.data && r.data.data && r.data.data.thumbnail_url) || null;
-  const duration = (r.data && r.data.data && r.data.data.duration) || null;
-  return res.status(r.ok ? 200 : (r.status || 502)).json({
-    ok: r.ok,
-    httpStatus: r.status,
-    videoId,
-    status,
-    videoUrl,
-    thumbnailUrl: thumbUrl,
-    durationSec: duration,
-    raw: r.data,
-    error: r.error || null,
-  });
-}
 
 // v13.69.21 — extend Vercel function timeout to 60s (Hobby plan max)
 // Default is 25s which kills long-form generation (1100-1200 word scripts)
@@ -12413,30 +11765,7 @@ const SMM_PRESENTER = {
   dimension: { width: 1080, height: 1920 },
 };
 
-// ── HeyGen — called via the existing, unmodified low-level _heygenFetch() helper (true reuse,
-// same pattern as the Submagic internal wrappers below). Never calls/edits heygenStartRender or
-// heygenRenderStatus themselves — those remain exactly as AI Studio/NextWave use them. ─────────
-async function smHeygenStartRenderInternal(script) {
-  const videoBody = {
-    video_inputs: [{
-      character: { type: 'avatar', avatar_id: SMM_PRESENTER.avatarId, avatar_style: 'normal', scale: SMM_PRESENTER.scale },
-      voice: { type: 'text', input_text: script, voice_id: SMM_PRESENTER.voiceId },
-      background: SMM_PRESENTER.background,
-    }],
-    dimension: SMM_PRESENTER.dimension,
-    test: false,
-  };
-  const r = await _heygenFetch('/v2/video/generate', { method: 'POST', body: videoBody });
-  const videoId = (r.data && r.data.data && r.data.data.video_id) || null;
-  return { ok: r.ok, videoId, raw: r.data, error: r.error || null };
-}
 
-async function smHeygenRenderStatusInternal(videoId) {
-  const r = await _heygenFetch('/v1/video_status.get?video_id=' + encodeURIComponent(videoId));
-  const status = (r.data && r.data.data && r.data.data.status) || null;
-  const videoUrl = (r.data && r.data.data && r.data.data.video_url) || null;
-  return { ok: r.ok, status, videoUrl, raw: r.data, error: r.error || null };
-}
 
 // ── SMM Brand Composer — v16.35.0 Milestone 5A Owner-Ready Creative Revision ───────────────
 // Runs AFTER Submagic, exactly as before (HeyGen → Submagic → HERE → ready_for_review is
@@ -12988,28 +12317,7 @@ async function smAssembleRawVideo({ visualUrl, visualType, durationSec, hook, it
 // substitute imagery.
 const SMM_SUBMAGIC_CONFIG = { templateName: 'Hormozi 2', magicZooms: true, magicBrolls: false, magicBrollsPercentage: 0 };
 
-async function smSubmagicCreateProjectInternal(videoUrl, title) {
-  const projectBody = {
-    title: title || ('SMM ' + new Date().toISOString()),
-    language: 'en',
-    videoUrl,
-    templateName: SMM_SUBMAGIC_CONFIG.templateName,
-    magicZooms: SMM_SUBMAGIC_CONFIG.magicZooms,
-    magicBrolls: SMM_SUBMAGIC_CONFIG.magicBrolls,
-    magicBrollsPercentage: SMM_SUBMAGIC_CONFIG.magicBrollsPercentage,
-  };
-  const r = await _submagicFetch('/v1/projects', { method: 'POST', body: projectBody });
-  const projectId = (r.data && (r.data.id || (r.data.project && r.data.project.id))) || null;
-  return { ok: r.ok, projectId, raw: r.data, error: r.error || null };
-}
 
-async function smSubmagicGetProjectInternal(projectId) {
-  const r = await _submagicFetch('/v1/projects/' + encodeURIComponent(projectId));
-  const d = (r.data && (r.data.project || r.data)) || {};
-  const status = d.status || d.state || null;
-  const downloadUrl = d.downloadUrl || d.videoUrl || d.exportUrl || d.outputUrl || null;
-  return { ok: r.ok, status, downloadUrl, duration: d.duration || null, raw: r.data };
-}
 
 // ── Verified-offering lookup (same verified-fields-only source as Content Planning/Milestone 4) ──
 // v16.35.0 — Milestone 5A: also selects social_accounts (a top-level business_brain column,
@@ -13117,46 +12425,6 @@ async function smSynthesizeNarrationElevenLabs(text) {
   }
 }
 
-// Fallback ONLY, used when ElevenLabs is not connected. Reuses the exact proven HeyGen render
-// pipeline purely as a text-to-speech engine — HeyGen has no audio-only endpoint, so an avatar
-// video is still generated, but only its audio track is ever extracted; the video itself is
-// discarded and never appears anywhere in the final composite. Polls synchronously inside this
-// one call (bounded) so the rest of the pipeline can treat narration synthesis as a single
-// awaited step regardless of which provider actually produced it.
-async function smSynthesizeNarrationHeygenFallback(text) {
-  if (!HEYGEN_API_KEY) return { ok: false, error: 'no_narration_provider_configured (neither ELEVENLABS_API_KEY nor HEYGEN_API_KEY set)' };
-  const start = await smHeygenStartRenderInternal(text);
-  if (!start.ok || !start.videoId) return { ok: false, error: 'heygen_fallback_start_failed: ' + (start.error || JSON.stringify(start.raw || {}).slice(0, 200)) };
-
-  const deadline = Date.now() + 110000; // bounded — leaves headroom inside the 180s function budget
-  let videoUrl = null;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 4000));
-    const st = await smHeygenRenderStatusInternal(start.videoId);
-    if (st.status === 'completed' && st.videoUrl) { videoUrl = st.videoUrl; break; }
-    if (st.status === 'failed') return { ok: false, error: 'heygen_fallback_render_failed: ' + JSON.stringify(st.raw || {}).slice(0, 200) };
-  }
-  if (!videoUrl) return { ok: false, error: 'heygen_fallback_timed_out_waiting_for_render' };
-
-  const id = `narr-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
-  const vidPath = join(tmpdir(), `smm-narr-src-${id}.mp4`);
-  const audioPath = join(tmpdir(), `smm-narr-audio-${id}.m4a`);
-  try {
-    await smDownloadToFile(videoUrl, vidPath);
-    await smAssertValidMediaFile(vidPath, 'heygen fallback narration source');
-    await execFileAsync(ffmpegInstaller.path, [
-      '-y', '-i', vidPath, '-vn', '-c:a', 'aac', '-ar', '44100', '-ac', '2', audioPath,
-    ], { timeout: 30000, maxBuffer: 1024 * 1024 * 20 });
-    const buf = await readFile(audioPath);
-    if (!buf || buf.length < 512) return { ok: false, error: 'heygen_fallback_audio_extraction_empty' };
-    return { ok: true, buffer: buf, provider: 'heygen_audio_fallback' };
-  } catch (e) {
-    return { ok: false, error: `heygen_fallback_audio_extraction_failed: ${e.message}` };
-  } finally {
-    await unlink(vidPath).catch(() => {});
-    await unlink(audioPath).catch(() => {});
-  }
-}
 
 // Provider-independent adapter: ElevenLabs preferred, HeyGen-audio-only as the internal
 // fallback so Build never depends on an on-screen avatar. Throws only if BOTH fail — caller
@@ -21872,8 +21140,6 @@ export default async function handler(req, res) {
     if (action === 'operator_recommendations')   return await operatorRecommendations(req, res);
     if (action === 'get_suno_execution')         return await getSunoExecution(req, res);
     if (action === 'save_suno_execution')        return await saveSunoExecution(req, res);
-    if (action === 'get_heygen_execution')       return await getHeygenExecution(req, res);
-    if (action === 'save_heygen_execution')      return await saveHeygenExecution(req, res);
     if (action === 'get_task_assets')            return await getTaskAssets(req, res);
     if (action === 'save_task_asset')            return await saveTaskAsset(req, res);
     if (action === 'get_reliability_metrics')    return await getReliabilityMetrics(req, res);
@@ -21915,28 +21181,8 @@ export default async function handler(req, res) {
     if (action === 'plaid_remove_item')          return await plaidRemoveItem(req, res); // v13.65.1 — Finance Phase 3 hotfix
     if (action === 'srv_build_package')          return await srvBuildPackage(req, res); // v13.69.0 — SRV Automation Phase 1
     // v13.51.0 — P1 HeyGen integration
-    if (action === 'heygen_test')                return await heygenTest(req, res);
-    if (action === 'heygen_list_avatars')        return await heygenListAvatars(req, res);
-    if (action === 'heygen_list_voices')         return await heygenListVoices(req, res);
-    if (action === 'heygen_list_videos')         return await heygenListVideos(req, res); // Live Validation Defect #5 — read-only job recovery
-    if (action === 'heygen_start_render')        return await heygenStartRender(req, res);
-    if (action === 'heygen_render_status')       return await heygenRenderStatus(req, res);
-    if (action === 'heygen_group_looks')         return await heygenGroupLooks(req, res); // v13.51.6
-    if (action === 'heygen_list_avatar_groups')  return await heygenListAvatarGroups(req, res); // v13.51.6
-    if (action === 'heygen_video_proxy')         return await heygenVideoProxy(req, res);        // v13.77.0 CORS bridge
     // v13.52.0 — P2A Submagic integration
-    if (action === 'submagic_test')              return await submagicTest(req, res);
-    if (action === 'submagic_create_project')    return await submagicCreateProject(req, res);
-    if (action === 'submagic_get_project')       return await submagicGetProject(req, res);
-    if (action === 'submagic_list_templates')    return await submagicListTemplates(req, res);
-    if (action === 'submagic_create_media')      return await submagicCreateMedia(req, res);      // v13.85.1 upload audio from URL
-    if (action === 'submagic_list_media')        return await submagicListMedia(req, res);        // v13.85.0 probe
     // Two-Tool Architecture Validation — items-array custom-media/ai-broll insertion capability proof
-    if (action === 'submagic_update_project')    return await submagicUpdateProject(req, res);
-    if (action === 'submagic_export_project')    return await submagicExportProject(req, res);
-    if (action === 'submagic_upload_media_from_url') return await submagicUploadMediaFromUrl(req, res);
-    if (action === 'submagic_probe_video')       return await submagicProbeVideo(req, res);       // v13.86.1 EVL video verification
-    if (action === 'submagic_video_redirect')    return await submagicVideoRedirect(req, res);    // v13.86.1 EVL browser playback
     // v13.54.0 — P5 / Sprint 3 YouTube auto-upload
     if (action === 'youtube_upload_video')       return await youtubeUploadVideo(req, res);
     if (action === 'set_yt_thumbnail')           return await setYtThumbnail(req, res); // v13.69.8

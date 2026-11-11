@@ -216,20 +216,12 @@ for (const u of refused) {
 reset();
 r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: 'https://attacker.example/x?submagic.co' }) });
 ok('F-A fixed: a URL that merely contains "submagic.co" never receives the Submagic key (and is never fetched)', !calls.some((c) => c.url.startsWith('https://attacker.example')), calls.map((c) => c.url));
-reset();
-r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: 'https://files2.heygen.ai/v/clip.mp4', engine: 'NextWave' }) });
-ok('allowlist accepts HeyGen CDN (NextWave raw renders)', r.body.ok === true, r.body);
-ok('the Submagic key is NOT sent to HeyGen', !calls.some((c) => c.headers['x-api-key']));
-reset();
-r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: '11111111-2222-3333-4444-555555555555', engine: 'NextWave' }) });
-const cdn = calls.find((c) => c.url === 'https://cdn.submagic.co/out/final.mp4');
-ok('Submagic project id resolves through the Submagic API and uploads', r.body.ok === true && cdn, r.body);
-ok('the Submagic key goes to the real submagic.co CDN host', cdn && cdn.headers['x-api-key'] === 'sk-submagic-test');
-reset();
-r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: 'https://app.submagic.co/api/file/download?path=x/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/66666666-2222-3333-4444-555555555555/final.mp4', engine: 'NextWave' }) });
-const cf = calls.find((c) => c.url === 'https://d1234.cloudfront.net/out/final.mp4');
-ok('Submagic SPA download URL resolves and uploads', r.body.ok === true && cf, r.body);
-ok('F-A fixed: the Submagic key is NOT sent to a non-submagic host', cf && !cf.headers['x-api-key']);
+// CEO order 2026-11-11: HeyGen and Submagic are retired providers — their CDN hosts, project ids and download URLs are no longer publishing sources.
+for (const u of ['https://files2.heygen.ai/v/clip.mp4', '11111111-2222-3333-4444-555555555555', 'https://app.submagic.co/api/file/download?path=x/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/66666666-2222-3333-4444-555555555555/final.mp4']) {
+  reset();
+  r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: u, engine: 'SRV Farsi' }) });
+  ok(`retired provider source refused: ${u.slice(0, 48)}`, r.code === 400 && r.body.error === 'source_not_allowed' && outbound().length === 0 && !calls.some((c) => c.headers['x-api-key']), { code: r.code, body: r.body, out: outbound().map((c) => c.url) });
+}
 reset();
 r = await call('youtube_upload_video', { body: up({ ceo_session_token: CEO, videoUrl: SRV + 'pkg1/redirect-evil.mp4' }) });
 ok('a redirect from srv-assets to another host is refused, and the other host is never fetched', r.body.ok === false && !calls.some((c) => c.url.startsWith('https://evil.example')), r.body);
@@ -242,8 +234,9 @@ for (const u of ['https://evil.example/t.jpg', `${SB}/storage/v1/object/public/o
   r = await call('set_yt_thumbnail', { body: { ceo_session_token: CEO, videoId: 'V', engine: 'SRV Farsi', thumbUrl: u } });
   ok(`thumbnail allowlist refuses ${u}`, r.code === 400 && outbound().length === 0, r.body);
 }
-r = await call('set_yt_thumbnail', { body: { ceo_session_token: CEO, videoId: 'V', engine: 'NextWave', thumbUrl: 'https://files2.heygen.ai/t/thumb.jpg' } });
-ok('thumbnail from HeyGen (NextWave) is accepted', r.body.ok === true, r.body);
+reset();
+r = await call('set_yt_thumbnail', { body: { ceo_session_token: CEO, videoId: 'V', engine: 'SRV Farsi', thumbUrl: 'https://files2.heygen.ai/t/thumb.jpg' } });
+ok('thumbnail from the retired HeyGen CDN is refused', r.code === 400 && r.body.error === 'source_not_allowed' && outbound().length === 0, r.body);
 r = await call('set_yt_thumbnail', { body: { ceo_session_token: CEO, videoId: 'V', engine: 'SRV Farsi', thumbUrl: SRV + 'pkg1/big.jpg' } });
 ok('thumbnail over 2 MB is refused before it reaches YouTube', r.code === 400 && r.body.error === 'thumb_too_large', r.body);
 
