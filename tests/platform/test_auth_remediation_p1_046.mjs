@@ -59,7 +59,10 @@ let mainSrc = process.env.MAIN_OPS ? readFileSync(process.env.MAIN_OPS, 'utf8') 
 if (!mainSrc) { try { mainSrc = execSync('git show origin/main:api/ops.js', { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { console.log('NOTE main comparison skipped: origin/main not available'); } }
 const grab = (s, a, b) => s.slice(s.indexOf(a), s.indexOf(b, s.indexOf(a)));
 if (mainSrc) {
-  ok('publishing action list (PUBLISH_GATED_ACTIONS) is byte-identical to main', grab(src, 'const PUBLISH_GATED_ACTIONS', ']);') === grab(mainSrc, 'const PUBLISH_GATED_ACTIONS', ']);'));
+  // CEO order 2026-11-12 (Final Security Validation): the ONLY authorized change to the list is the addition of srv_farsi_mix (SRV Farsi Mix private upload). Everything else must stay byte-identical to main.
+  const AUTH_ADD = /^  'srv_farsi_mix',.*\n/m; const gatedNow = grab(src, 'const PUBLISH_GATED_ACTIONS', ']);');
+  ok('srv_farsi_mix is in the publishing action list exactly once (authorized addition)', (gatedNow.match(/'srv_farsi_mix'/g) || []).length === 1);
+  ok('publishing action list (PUBLISH_GATED_ACTIONS) is byte-identical to main apart from the authorized srv_farsi_mix line', gatedNow.replace(AUTH_ADD, '') === grab(mainSrc, 'const PUBLISH_GATED_ACTIONS', ']);'));
   ok('publishing gate code (_publisherFromRequest, _publishGate, operatorLogin) is byte-identical to main', grab(src, 'async function _publisherFromRequest', 'async function operatorCheckSession') === grab(mainSrc, 'async function _publisherFromRequest', 'async function operatorCheckSession'));
 }
 // The app sends the session at every call site of these actions.
