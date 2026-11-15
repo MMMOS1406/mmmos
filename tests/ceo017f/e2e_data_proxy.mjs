@@ -7,7 +7,7 @@ const [mainPub, brPub] = process.argv.slice(2, 4);
 // the build that ships AFTER the database lockdown: same code with the transition switch off
 import os from 'node:os'; import path from 'node:path';
 const lockedPub = fs.mkdtempSync(path.join(os.tmpdir(), 'locked-')); fs.cpSync(fs.realpathSync(brPub), lockedPub, { recursive: true });
-const lh = fs.readFileSync(path.join(lockedPub, 'index.html'), 'utf8'); if (!lh.includes('const MMM_DIRECT_FALLBACK=true;')) throw new Error('switch not found'); fs.writeFileSync(path.join(lockedPub, 'index.html'), lh.replace('const MMM_DIRECT_FALLBACK=true;', 'const MMM_DIRECT_FALLBACK=false;'));
+const lh = fs.readFileSync(path.join(lockedPub, 'index.html'), 'utf8'); if (!/const MMM_DIRECT_FALLBACK=(true|false);/.test(lh)) throw new Error('switch not found'); fs.writeFileSync(path.join(lockedPub, 'index.html'), lh.replace(/const MMM_DIRECT_FALLBACK=(true|false);/, 'const MMM_DIRECT_FALLBACK=false;'));   // the build that ships after the lockdown
 const R = []; const check = (n, ok, d = '') => { R.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); };
 async function run(pub, role, routes) {
   const stub = await startStub({ publicDir: fs.realpathSync(pub) }); const browser = await launch();

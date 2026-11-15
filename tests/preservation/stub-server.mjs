@@ -75,6 +75,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
 
   async function handleSupabase(req, res, u, pre) {   // pre: {json} when the call arrives through the db_proxy action (CEO-017B)
     const rest = u.pathname.replace(/^\/__sb/, '');
+    if (fixture.lockdown) { const lk = fixture.lockdown.sb(req, res, u, pre, { send }); if (lk) return lk; }   // CEO-017F: opt-in lockdown simulation (tests/preservation/lockdown-layer.mjs)
     if (req.method === 'GET' || req.method === 'HEAD') {
       const m = rest.match(/^\/rest\/v1\/([a-z0-9_]+)/);
       if (!m) { record(req, { kind: 'sb-read', note: 'non-rest' }); return send(res, 200, []); }
@@ -108,6 +109,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
     if (u.pathname === '/api/ops') {
       if (action === 'db_proxy') {   // CEO-017B — replay the proxied REST call against the same fixture store; remember it came through the proxy
         proxied.push({ method: json.method, path: String(json.path).split('?')[0], roles: ['ceo_session_token', 'operator_session_token', 'family_session_token'].filter((k) => json[k]) });
+        if (fixture.lockdown) { const d = fixture.lockdown.proxy(json); if (d) return send(res, d.status, d.body); }   // CEO-017F: the real proxy policy decides
         const u2 = new URL('/__sb/rest/v1/' + json.path, 'http://x');
         let pj = null; try { pj = json.body ? JSON.parse(json.body) : null; } catch { pj = null; }
         return await handleSupabase({ method: json.method || 'GET', headers: {}, url: u2.pathname + u2.search, __via: 'proxy' }, res, u2, { json: pj });
@@ -139,7 +141,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
   const server = http.createServer(async (req, res) => {
     try {
       const u = new URL(req.url, 'http://x');
-      if (u.pathname === '/__stub/log') return send(res, 200, { log, unknown: [...unknown], statics, proxied });
+      if (u.pathname === '/__stub/log') return send(res, 200, { log, unknown: [...unknown], statics, proxied, lockdown: fixture.lockdown ? fixture.lockdown.report() : null });
       if (u.pathname === '/__stub/reset') { proxied.length = 0; log.length = 0; unknown.clear(); statics.length = 0; store.settings = { ...fixture.settings }; return send(res, 200, { ok: true }); }
       if (u.pathname === '/__stub/state') return send(res, 200, { value: store.settings[u.searchParams.get('key') || 'mmm_finance_v118'] || null });
       if (u.pathname.startsWith('/__sb/')) return await handleSupabase(req, res, u);
