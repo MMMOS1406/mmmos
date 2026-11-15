@@ -4088,9 +4088,11 @@ async function _activateUser(user){
   document.getElementById('appScreen').classList.add('show');
   document.getElementById('userLabel').textContent=currentUser.emoji+' '+(currentUser.name||'').split(' ')[0];
   await loadAppState();
-  Promise.all([ytCheckStatus(), ttCheckStatus(), igCheckStatus()]).then(()=>{
+  const _statusChecks=Promise.all([ytCheckStatus(), ttCheckStatus(), igCheckStatus()]);
+  _statusChecks.then(()=>{
     renderTab(currentTab||'home');
   });
+  _statusChecks.then(()=>{_srvfMixDeepLink();},()=>{_srvfMixDeepLink();}); // SRV Farsi Mix validation: ?srvfMix=1&srvfMixOpen=<Mix key> opens that Mix directly (runs after the render above; no-op otherwise)
   renderNav();
   renderTab(currentUser.id==='va'?'tasks':'home');
   if(currentUser.id==='admin'||currentUser.role==='Admin'){
@@ -14510,7 +14512,12 @@ function renderExecMode(taskId){
     // _srvFarsiSplitMood used by renderSRVFarsiLifecycleCard, so this stays consistent
     // everywhere. t.name/t.mood/rotation storage is untouched; display only.
     const _fMood=t.mode||t.mood||'';
-    const {artist:_fArtist,moodLabel:_fMoodLabel}=_srvFarsiSplitMood(_fMood);
+    let {artist:_fArtist,moodLabel:_fMoodLabel}=_srvFarsiSplitMood(_fMood);
+    if(t.isMix&&_srvfMixOn()){ // a Mix shows ITS category and mood (chosen in the Mix builder), not the rotation's Artist/Mood
+      const _mx=(_srvFarsiPkgForTask(t)||{}).farsiMix, _cap=function(x){return String(x||'').charAt(0).toUpperCase()+String(x||'').slice(1);};
+      _fArtist=_mx?(_mx.category==='all'?'All Artists':_cap(_mx.category)):'Chosen in the Mix builder';
+      _fMoodLabel=_mx?('Love '+_cap(_mx.mood)):'Chosen in the Mix builder';
+    }
     const _fFormat=t.contentType||(t.contentFormat==='long'?'Long':t.contentFormat==='short'?'Short':'—');
     return `<div style="padding:0 0 20px 0">
       <div class="exec-banner">
@@ -19042,8 +19049,12 @@ function renderSRVFarsiLifecycleCard(task){
 
   let stageContent='';
 
+  // ── SRV FARSI MIX (CEO order 2026-11-12) — flag OFF by default; own lifecycle module, Long/Short branches below untouched ──
+  if(task.isMix&&_srvfMixOn()){
+    stageContent=_srvfMixStageHtml(task,stage,pkg);
+  }
   // ── GENERATE ────────────────────────────────────────────────────────────────
-  if(stage==='generate'){
+  else if(stage==='generate'){
     // VA may change Artist and Long/Short for this task before generating (see _srvFarsiVaSetArtistFormat).
     // "Auto" = the rotation-assigned value for this task (selected whenever the task is on it).
     const _fAuto=_srvFarsiVaAutoArtistFormat(task);
@@ -19053,7 +19064,7 @@ function renderSRVFarsiLifecycleCard(task){
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
         <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Artist:${_fSel('artist',_fArtist,['Male','Female','Duet'])}${!task.isLong?' <span style="font-size:10px">— filters the Long list (Auto = all artists)</span>':''}</div>
         <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Mood: <strong style="color:var(--text)">${!task.isLong?'from the chosen Long':escHTML(_fMoodLabel)}</strong></div>
-        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format:${_fSel('format',_fFormat,['Short','Long'])}</div>
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">Format:${_fSel('format',_fFormat,_srvfMixOn()?['Short','Long','Mix']:['Short','Long'])}</div>
         ${!task.isLong?_srvFarsiShortFromLongHtml(task,taskId):`
         <div style="font-size:11px;color:var(--dim);margin-bottom:14px">Claude will generate the Persian song package: title, lyrics, Suno prompt, captions, and hashtags.</div>
         <button onclick="vaFarsiGeneratePackage('${taskId}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">
@@ -20047,7 +20058,7 @@ async function _srvFarsiGenerateWithGuard(taskId,statusCb){
 // "Auto" = the value the rotation assigned to this task, kept in task.vaOriginal on first override.
 function _srvFarsiVaCurrentArtistFormat(task){
   const {artist}=_srvFarsiSplitMood(task.mode||task.mood||'');
-  return {artist,format:(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short'};
+  return {artist,format:task.isMix?'Mix':(task.contentType==='Long'||task.contentFormat==='long')?'Long':'Short'};
 }
 function _srvFarsiVaAutoArtistFormat(task){
   return task.vaOriginal||_srvFarsiVaCurrentArtistFormat(task);
@@ -20607,6 +20618,216 @@ function _srvFarsiPlaylistResultHtml(pkg){
   return `<div style="margin-top:8px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:10px;text-align:left;line-height:1.7">`+
     r.map(function(x){return (x.ok?'✓ ':'✗ ')+escHTML(x.playlistName||x.title||'Playlists')+(x.ok?'':' — '+escHTML(why[x.error]||x.error||'not added'));}).join('<br>')+`</div>`;
 }
+// ═══ SRV Farsi Mix (CEO order 2026-11-12) — PREVIEW ONLY. Default OFF: production never shows it until a release is approved. ═══
+// Pure decision (tested): the Mix is visible only (1) on a local development host with ?srvfMix=1 (or localStorage srvfMix=1), or (2) on an isolated VALIDATION deployment — a Vercel preview URL of this project,
+// protected by Vercel Authentication — with ?srvfMix=1. NEVER on the production aliases. (2) exists only for the CEO-authorized private YouTube test and is removed/replaced by the real flag at release.
+function _srvfMixFlagFor(hostname,search,stored,forced){
+  if(forced===true)return true;
+  const h=String(hostname||'').toLowerCase(), asked=new URLSearchParams(search||'').get('srvfMix')==='1';
+  if(h==='localhost'||h==='127.0.0.1'||h==='[::1]')return asked||stored==='1';
+  const PROD_ALIASES=['mmm-static.vercel.app','mmm-static-mmmos1406s-projects.vercel.app','mmm-static-git-main-mmmos1406s-projects.vercel.app'];
+  if(PROD_ALIASES.indexOf(h)>=0)return false;
+  return asked&&/^mmm-static-[a-z0-9]{6,12}-mmmos1406s-projects\.vercel\.app$/.test(h);
+}
+function _srvfMixOn(){
+  try{return _srvfMixFlagFor(location.hostname,location.search,localStorage.getItem('srvfMix'),window.__SRVF_MIX_FLAG__);}catch(e){}
+  return false;
+}
+// Direct link to ONE existing Mix (validation deployments only): ?srvfMix=1&srvfMixOpen=<Mix key, e.g. fmix_202611_…>. Opens that Mix's task card (its DONE screen once uploaded) after sign-in, refresh or session restore.
+// Strictly Mix-only: the flag must be on, the user must have Tasks access (Admin / VA — never Family), the key must match a saved SRV Farsi Mix package, and the task must be that package's own Mix task.
+// Anything else (flag off, other role, unknown key, another engine's task) does nothing at all. It only navigates; every action still goes through the server's CEO/VA session checks.
+async function _srvfMixDeepLink(){
+  try{
+    if(!_srvfMixOn()||!currentUser||(currentUser.access||[]).indexOf('tasks')<0)return;
+    const qs=new URLSearchParams(location.search); if(qs.get('srvfMixCatalog')==='1'){await _srvfMixCatalogPreview();return;}
+    const key=qs.get('srvfMixOpen'); if(!key)return;
+    if(!/^fmix_[A-Za-z0-9_]{6,40}$/.test(key)){_srvfMixDeepNotice('The Mix link is not valid.');return;}
+    const res=await fetch(`${SUPABASE_URL}/rest/v1/packages?engine=eq.SRV%20Farsi&content_type=eq.Mix&title=like.*${key}&select=package_id,full_package&order=generated_at.desc&limit=5`,{signal:AbortSignal.timeout(20000),headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+    if(!res.ok){_srvfMixDeepNotice('Could not look up the Mix (connection). Refresh to try again.');return;}
+    const rows=await res.json(); const pkgs=(Array.isArray(rows)?rows:[]).map(function(r){try{const p=JSON.parse(r.full_package);if(r.package_id)p.id=p.id||r.package_id;return p;}catch(e){return null;}}).filter(function(p){return p&&p.engine==='SRV Farsi'&&p.farsiMix&&p.farsiMix.key===key&&p.srvTaskUid;});
+    if(!pkgs.length){_srvfMixDeepNotice('No saved Mix with this key was found.');return;}
+    const pkg=pkgs[0]; const task=(D.tasks||[]).find(function(t){return t&&t.isMix&&t.engine==='SRV Farsi'&&_srvFarsiTaskUid(t)===pkg.srvTaskUid;});
+    if(!task){_srvfMixDeepNotice('The task for this Mix was not found.');return;}
+    D.packages=(D.packages||[]).filter(function(x){return !(x&&x.id===pkg.id);}).concat([pkg]);
+    currentTab='tasks'; await openExec(String(task.id));
+  }catch(e){try{console.error('[srvfMix deep link]',e.message);}catch(_){}}
+}
+// ?srvfMix=1&srvfMixCatalog=1 — the Mix song-selection interface on its own, READ-ONLY: the complete catalog, artist categories, selection, ordering, removal and preview all work, but Save / Proceed are disabled and nothing is written
+// (no task, package, ledger or YouTube change). For checking the catalog without touching the existing Mix. Same gates as the other link: flag on, Tasks access.
+async function _srvfMixCatalogPreview(){
+  try{
+    const old=document.getElementById('srvfMixCatalogOverlay');if(old)old.remove();
+    const ov=document.createElement('div');ov.id='srvfMixCatalogOverlay';ov.setAttribute('style','position:fixed;inset:0;z-index:99998;background:var(--bg,#0b0b10);overflow:auto;padding:16px');
+    ov.innerHTML='<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><b style="font-size:13px;color:#f59e0b">CATALOG PREVIEW — read-only: nothing is saved, nothing is uploaded</b><button type="button" id="srvfMixCatalogClose" style="margin-left:auto;padding:8px 12px;border-radius:8px;font-weight:700;cursor:pointer">Close</button></div><div id="srvfMixCatalogHost"></div>';
+    document.body.appendChild(ov);ov.querySelector('#srvfMixCatalogClose').onclick=function(){ov.remove();};
+    const el=ov.querySelector('#srvfMixCatalogHost');el.innerHTML='<div id="srvfCatLoad" style="font-size:12px;color:#f59e0b">Loading the complete catalog of published Long songs and checking each with YouTube (channel, visibility, length)…</div>';
+    await _srvfMixLoadModules();const ui=await import('/srv-farsi-mix/ui.mjs');const h=_srvfMixHost();
+    const cands=await h.candidates(function(n,rows){const d=el.querySelector('#srvfCatLoad');if(d)d.textContent='Loading the complete catalog… page '+n+' ('+rows+' packages so far)';});
+    el.innerHTML='';ui.mountMixBuilder(el,{candidates:cands,readOnly:true,reload:function(){h.reloadCatalog();_srvfMixCatalogPreview();},cover:function(c){return h.cover(c);},libraryCovers:h.libraryCovers(),month:h.month(),saved:null,draft:null});
+  }catch(e){const el=document.getElementById('srvfMixCatalogHost');if(el)el.innerHTML='<div style="color:#ef4444;font-size:12px">Could not open the catalog preview: '+escHTML(String((e&&e.message)||e))+'</div>';}
+}
+function _srvfMixAttachText(b,dur){const e=(b&&b.error)||'failed';const m={source_file_type_not_allowed:'Only MP3, WebM or MP4 files can be attached (the storage accepts these types only). Convert the original to MP3 and try again.',source_file_size_not_allowed:'The file must be between 100 KB and 80 MB.',source_duration_mismatch:'This audio is '+(dur?Math.round(dur*10)/10+' s':'a different length')+' but the YouTube video is '+(b&&b.youtubeSec?b.youtubeSec+' s':'a different length')+' — it is a different recording, so it was NOT linked.',source_url_not_allowed:'Only audio stored in MMMOS can be linked.',source_file_missing:'That file is not in MMMOS storage (or is empty).',already_in_mmmos:'This video already has an MMMOS package, so nothing needs linking.',artist_conflict:'The package already records this artist as '+(b&&b.recorded)+' — it cannot be changed here.',artist_confirmation_required:'Confirm the artist first.',artist_invalid:'Choose Female, Male or Duet.',not_public_on_youtube:'The YouTube video is not Public.',too_short:'The YouTube video is too short to be a song.',video_on_another_channel:'That video is on another channel.',video_not_found_on_channel:'That video was not found on the channel.',already_attached:'A different source is already linked to this song.',package_already_attached_elsewhere:'That package is already linked to another song.',package_linked_to_a_live_video:'That package already belongs to a live video.',package_not_usable:'That package cannot be used as a source.',source_file_type_not_allowed:'Use an mp3, m4a, wav, webm or mp4 file.',source_file_size_not_allowed:'The file must be between 100 KB and 80 MB.',source_upload_not_available:'Uploading is not available.'};return m[e]||('Not linked ('+e+').');}
+function _srvfMixDeepNotice(msg){try{const old=document.getElementById('srvfMixDeepNotice');if(old)old.remove();const d=document.createElement('div');d.id='srvfMixDeepNotice';d.setAttribute('style','position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:99999;max-width:92vw;padding:10px 14px;border:1px solid rgba(245,158,11,.6);border-radius:10px;background:#1c1608;color:#f59e0b;font-size:12px;font-weight:700;cursor:pointer');d.title='Click to close';d.textContent=msg;d.addEventListener('click',function(){d.remove();});document.body.appendChild(d);}catch(e){}}
+let _srvfMixCat=null,_srvfMixCatalogNoted=false,_srvfMixChk=null,_srvfMixMod=null,_srvfMixModP=null,_srvfMixLib=null,_srvfMixPkgCache=[],_srvfMixPkgAt=0;
+function _srvfMixLoadModules(){
+  if(!_srvfMixModP)_srvfMixModP=Promise.all([import('/srv-farsi-mix/lifecycle.mjs'),import('/srv-farsi-mix/lib/srvFarsiMix.mjs')]).then(function(m){_srvfMixMod=m[0];_srvfMixLib=m[1];return m;});
+  return _srvfMixModP;
+}
+// The COMPLETE published SRV Farsi Long inventory (CEO correction 2026-11-12): read from the database in cursor pages (newest first, 100 per page) until it is exhausted — never the newest-200 window and never
+// de-duplicated by title (two Longs may share a title; every package is identified by its own id). The in-memory list is merged in by id only.
+// The complete list of published SRV Farsi Longs, read page by page (100 per page, newest first, cursor on generated_at). It NEVER truncates silently: if any page fails, or the page cap is hit, the result is marked
+// incomplete (`complete:false`, `error`) and the builder says so in red; a previous COMPLETE load (kept for 10 minutes) is reused instead of a half-read one.
+let _srvfMixPkgState={complete:true,error:'',pages:0};
+async function _srvfMixPackages(force,onProgress){
+  if(force||Date.now()-_srvfMixPkgAt>10*60*1000){
+    try{
+      const got=[],seen=new Set();let cursor='',done=false;
+      for(let page=0;page<80;page++){
+        const q=`packages?engine=eq.${encodeURIComponent('SRV Farsi')}&full_package=like.${encodeURIComponent('*_srvLongVideoUrl*')}&order=generated_at.desc&limit=100&select=package_id,generated_at,full_package`+(cursor?`&generated_at=lte.${encodeURIComponent(cursor)}`:'');
+        const res=await fetch(`${SUPABASE_URL}/rest/v1/${q}`,{signal:AbortSignal.timeout(30000),headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+        if(!res.ok)throw new Error('page '+(page+1)+': HTTP '+res.status);
+        const rows=await res.json(); if(!Array.isArray(rows))throw new Error('page '+(page+1)+': unexpected response');
+        let fresh=0;
+        rows.forEach(function(r){const key=String(r.package_id||'');if(!key||seen.has(key))return;seen.add(key);fresh++;try{const p=JSON.parse(r.full_package);p.id=p.id||key;if(p&&p.id)got.push(p);}catch(e){}});
+        if(typeof onProgress==='function'){try{onProgress(page+1,got.length);}catch(e){}}
+        if(rows.length<100||!fresh){done=true;break;} // the last page, or a page of nothing new
+        cursor=rows[rows.length-1].generated_at; if(!cursor){done=true;break;}
+      }
+      if(!done)throw new Error('more than 80 pages of packages — stopped before the end');
+      _srvfMixPkgCache=got;_srvfMixPkgAt=Date.now();_srvfMixPkgState={complete:true,error:'',pages:0};
+    }catch(e){console.warn('[SRV Farsi Mix] song inventory load failed:',e&&e.message);
+      _srvfMixPkgState={complete:_srvfMixPkgAt>0&&_srvfMixPkgCache.length>0,error:String((e&&e.message)||e).slice(0,120),pages:0}; // an earlier COMPLETE read is still complete; otherwise the page list is only a partial view
+    }
+  }
+  const have=new Set((D.packages||[]).map(function(p){return String(p&&p.id);}));
+  return (D.packages||[]).concat(_srvfMixPkgCache.filter(function(p){return !have.has(String(p.id));}));
+}
+// Source media must be reachable (HEAD, else a 1-byte range): a Long whose audio cannot be read is never offered. Results are kept for the session.
+const _srvfMixProbeCache={};
+async function _srvfMixProbe(urls){
+  const todo=urls.filter(function(u){return u&&!(u in _srvfMixProbeCache);}); let i=0;
+  async function one(u){
+    try{let r=await fetch(u,{method:'HEAD',signal:AbortSignal.timeout(12000)});if(!r.ok&&r.status!==405&&r.status!==403)throw new Error('HTTP '+r.status);
+      if(!r.ok){r=await fetch(u,{headers:{Range:'bytes=0-0'},signal:AbortSignal.timeout(12000)});if(!(r.ok||r.status===206))throw new Error('HTTP '+r.status);}
+      _srvfMixProbeCache[u]=true;}catch(e){_srvfMixProbeCache[u]=false;}
+  }
+  await Promise.all(Array.from({length:6},async function(){while(i<todo.length){await one(todo[i++]);}}));
+  return urls.filter(function(u){return u&&_srvfMixProbeCache[u]===false;});
+}
+function _srvfMixEntryCover(e){return e?{id:e.id,src:e.src,thumb:e.thumb||e.src,focus:{fx:e.fx,fy:e.fy,fw:e.fw},label:e.label||e.id}:{src:'',thumb:'',focus:null};}
+function _srvfMixHost(){
+  return {
+    esc:escHTML,
+    who:function(){try{return (currentUser&&currentUser.id)||'unknown';}catch(e){return 'unknown';}},
+    month:function(){return new Date().toISOString().slice(0,7);},
+    packages:function(){return (D.packages||[]).filter(function(p){return p&&p.engine==='SRV Farsi';});},
+    pkgFor:function(task){return _srvFarsiPkgForTask(task);},
+    // The page's package list can be missing the Mix (a fresh browser, or the 8 s package load cut short on a slow connection — the 2026-11-13 save failure).
+    // Before the Mix is ever created or edited, ask the database for THIS task's Mix package (exact task + engine + type + task uid) and put it back in the list,
+    // so a second package for the same Mix is never attempted. ok:false means the lookup itself failed (never "no package").
+    ensurePkg:async function(task){
+      let pkg=_srvFarsiPkgForTask(task);if(pkg)return {pkg:pkg,ok:true};
+      const uid=_srvFarsiTaskUid(task);if(!uid)return {pkg:null,ok:true};const tid=String(task.taskId||task.id);
+      try{
+        const res=await fetch(`${SUPABASE_URL}/rest/v1/packages?engine=eq.SRV%20Farsi&content_type=eq.Mix&task_id=eq.${encodeURIComponent(tid)}&select=package_id,full_package&order=generated_at.desc&limit=10`,{signal:AbortSignal.timeout(20000),headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+        if(!res.ok)return {pkg:null,ok:false};const rows=await res.json();if(!Array.isArray(rows))return {pkg:null,ok:false};
+        const found=rows.map(function(r){try{const p=JSON.parse(r.full_package);if(r.package_id)p.id=p.id||r.package_id;return p;}catch(e){return null;}}).filter(function(p){return p&&p.engine==='SRV Farsi'&&p.farsiMix&&p.srvTaskUid===uid;});
+        if(!found.length)return {pkg:null,ok:true};
+        found.sort(function(a,b){return String(b.generatedAt||'').localeCompare(String(a.generatedAt||''));});pkg=found[0];
+        D.packages=(D.packages||[]).filter(function(x){return !(x&&x.id===pkg.id);}).concat([pkg]);return {pkg:pkg,ok:true};
+      }catch(e){return {pkg:null,ok:false};}
+    },
+    setStage:function(id,stage){_srvFarsiSetStage(id,stage);},
+    rerender:function(id){if(typeof activeExec!=='undefined'&&String(activeExec)===String(id)&&typeof openExec==='function')openExec(String(id));else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');},
+    copy:function(t){try{navigator.clipboard.writeText(t);}catch(e){}},
+    // Eligible songs = published Farsi Longs whose audio is reachable AND whose YouTube video is acceptable RIGHT NOW (visibility asked of YouTube through the server, not guessed from our records) — so a song that is Private on
+    // YouTube is refused before a long build, not after it (2026-11-12 defect: "Didaar-e To" was offered although Private).
+    candidates:async function(onProgress){
+      const all=await _srvfMixPackages(false,onProgress);
+      // 1) THE AUTHORITY: the server discovers the whole channel through the official YouTube API (paginated uploads) and reconciles it with MMMOS by video id. Cached 60 s.
+      let cat=null;
+      try{ if(_srvfMixCat&&Date.now()-_srvfMixCat.at<60000)cat=_srvfMixCat.body; else { const r=await _srvfMixHost().api('catalog',{}); if(r.body&&r.body.ok&&Array.isArray(r.body.songs)){cat=r.body;_srvfMixCat={at:Date.now(),body:cat};} } }catch(e){}
+      let c0;
+      if(cat){
+        // package-side data (finglish, cover, audio source) re-derived with the same YouTube lengths and task-recorded artists the server used, then the server's verdict is applied on top
+        const ytDur={},taskArtists={};cat.songs.forEach(function(x){if(x.pkgId&&x.youtubeVideoId&&x.durationSource==='youtube'&&x.durationSec)ytDur[x.youtubeVideoId]=x.durationSec;});
+        const uidOf={};all.forEach(function(p){if(p&&p.id&&p.srvTaskUid)uidOf[String(p.id)]=p.srvTaskUid;});cat.songs.forEach(function(x){if(x.pkgId&&x.artistSource==='task'&&uidOf[x.pkgId])taskArtists[uidOf[x.pkgId]]=x.artist;});
+        c0=_srvfMixLib.srvfMixCandidates(all,{youtubeDurations:Object.keys(ytDur).length?ytDur:null,taskArtists:Object.keys(taskArtists).length?taskArtists:null});
+        const srv=new Map(cat.songs.filter(function(x){return x.pkgId;}).map(function(x){return [x.pkgId,x];}));
+        c0.forEach(function(c){const s=srv.get(c.pkgId);if(!s)return;if(!s.eligible&&c.reason!=='test'&&c.reason!=='set_aside'){c.eligible=false;c.reason=s.reason||c.reason;} else if(s.eligible&&!c.eligible&&c.reason==='unknown_duration'){c.eligible=true;c.reason=null;} c.inMmmos=true;if(s.unverified)c.unverified=true;});
+      } else {
+        // fallback (server discovery unavailable): ask YouTube about the MMMOS songs one by one — the catalog is then marked INCOMPLETE below
+        c0=_srvfMixLib.srvfMixCandidates(all);
+        const ask=c0.filter(function(c){return c.youtubeVideoId&&(c.eligible||c.reason==='unknown_duration'||c.reason==='too_short');}).map(function(c){return c.youtubeVideoId;});
+        const ids=Array.from(new Set(ask));let chk=null;
+        if(ids.length){ try{let merged=null,okAll=true;for(let i=0;i<ids.length&&okAll;i+=50){const r=await _srvfMixHost().api('source_check',{videoIds:ids.slice(i,i+50)});if(r.body&&r.body.ok&&r.body.statuses){if(!merged)merged={ok:true,acceptsPrivacy:r.body.acceptsPrivacy,relaxed:r.body.relaxed,statuses:{}};Object.assign(merged.statuses,r.body.statuses);}else okAll=false;}if(okAll&&merged)chk=merged;}catch(e){} }
+        const ytDur={};if(chk)Object.keys(chk.statuses).forEach(function(k){const st=chk.statuses[k];if(st&&st.durationSec)ytDur[k]=st.durationSec;});
+        if(Object.keys(ytDur).length)c0=_srvfMixLib.srvfMixCandidates(all,{youtubeDurations:ytDur});
+        if(chk){const acc=chk.acceptsPrivacy||['public'];c0.forEach(function(c){if(!c.eligible||!c.youtubeVideoId)return;const st=chk.statuses[c.youtubeVideoId];if(!st){c.eligible=false;c.reason='not_found_on_youtube';}else if(!st.onPinnedChannel){c.eligible=false;c.reason='other_channel';}else if(acc.indexOf(st.privacy)<0){c.eligible=false;c.reason='not_public_on_youtube';c.youtubePrivacy=st.privacy;}else c.youtubePrivacy=st.privacy;});}
+        c0.relaxed=!!(chk&&chk.relaxed);c0.verifiedOnly=!!chk;
+      }
+      // 2) the audio file must be readable (the page reads it to build the video)
+      const bad=await _srvfMixProbe(c0.filter(function(c){return c.eligible;}).map(function(c){return c.sourceUrl;}));
+      if(bad.length){const badSet=new Set(bad.map(String));c0.forEach(function(c){if(c.eligible&&badSet.has(String(c.sourceUrl))){c.eligible=false;c.reason='media_unreachable';}});}
+      // 3) published on YouTube but not in MMMOS: listed (never silently absent), never selectable
+      if(cat)cat.songs.filter(function(x){return !x.pkgId;}).forEach(function(x){c0.push({pkgId:'yt:'+x.youtubeVideoId,title:x.title,finglish:'',finglishAuto:false,artist:'',artistSource:'',mood:'',durationSec:x.durationSec||0,durationSource:'youtube',youtubeVideoId:x.youtubeVideoId,eligible:false,reason:x.reason,inMmmos:false,sourceUrl:null,cover:null,generatedAt:x.publishedAt||'',publishedAt:x.publishedAt||'',suggestions:x.suggestions||[]});});
+      // songs an operator (or the strict automatic rule) linked to original audio: real, selectable candidates — verified by the server, re-checked at upload
+      if(cat)cat.songs.filter(function(x){return x.attached&&x.pkgId;}).forEach(function(x){c0.push({pkgId:x.pkgId,taskUid:null,title:x.title,finglish:x.finglish||'',finglishAuto:x.finglishAuto!==false,artist:x.artist||'',artistSource:'attachment',mood:x.mood||'',durationSec:x.durationSec||0,durationSource:'youtube',youtubeVideoId:x.youtubeVideoId,privacy:'public',audioSource:'attached-file',sourceUrl:x.sourceUrl,cover:null,generatedAt:x.publishedAt||'',eligible:x.eligible===true,reason:x.reason||null,inMmmos:true,attached:true,attachedBy:x.attachedBy,attachedAt:x.attachedAt,attachKind:x.attachKind,attachedPackageId:x.packageId||null});});
+      c0.verified=(!!cat&&cat.complete===true)||(!cat&&!!c0.verifiedOnly);c0.relaxed=cat?!!cat.relaxed:!!c0.relaxed;
+      const srvIncomplete=!cat||cat.complete!==true;
+      c0.complete=!!_srvfMixPkgState.complete&&!srvIncomplete;
+      c0.loadError=!_srvfMixPkgState.complete?_srvfMixPkgState.error:(!cat?'YouTube channel discovery is unavailable (the server could not read the channel)':(cat.complete!==true?'YouTube channel discovery did not finish: '+((cat.discovery&&cat.discovery.error)||'incomplete'):''));
+      c0.catalog=cat?{discovery:cat.discovery,youtube:cat.youtube,mmmos:cat.mmmos,counts:cat.counts,exclusions:cat.exclusions,artistGaps:cat.artistGaps,complete:cat.complete===true}:null;
+      c0.summary=_srvfMixLib.srvfCatalogSummary(c0.filter(function(c){return c.inMmmos!==false;}));
+      if(!cat&&!_srvfMixCatalogNoted){_srvfMixCatalogNoted=true;}
+      return c0;
+    },
+    // Link original audio to a published YouTube song: measure the file's REAL decoded length here (the same decoder the builder uses), optionally upload a new original to MMMOS storage (signed URL, existing bucket), then let the server verify everything.
+    attachSource:async function(p){
+      try{
+        let buf; if(p.file){buf=await p.file.arrayBuffer();}else{const r=await fetch(p.sourceUrl,{signal:AbortSignal.timeout(180000)});if(!r.ok)return {ok:false,text:'The audio file could not be read ('+r.status+').'};buf=await r.arrayBuffer();}
+        const AC=window.OfflineAudioContext||window.webkitOfflineAudioContext;let dur=0;try{const ctx=new AC(2,44100,44100);const ab=await ctx.decodeAudioData(buf.slice(0));dur=ab.duration;}catch(e){return {ok:false,text:'This file could not be decoded as audio — it is not linked.'};}
+        let url=p.sourceUrl;
+        if(p.file){const u=await this.api('source_upload_url',{youtubeVideoId:p.youtubeVideoId,filename:p.file.name,size:p.file.size});if(!(u.body&&u.body.ok))return {ok:false,text:_srvfMixAttachText(u.body)};const put=await fetch(u.body.uploadUrl,{method:'PUT',headers:{'Content-Type':u.body.contentType||p.file.type||'application/octet-stream'},body:p.file});if(!put.ok)return {ok:false,text:'The upload to MMMOS storage failed ('+put.status+'). Nothing was linked.'};url=u.body.publicUrl;}
+        const r=await this.api('source_attach',{youtubeVideoId:p.youtubeVideoId,sourceUrl:url,packageId:p.packageId||null,measuredSec:dur,artist:p.artist,confirmArtist:!!p.confirmArtist});
+        if(r.body&&r.body.ok){_srvfMixCat=null;return {ok:true,measuredSec:dur};}
+        return {ok:false,text:_srvfMixAttachText(r.body,dur)};
+      }catch(e){return {ok:false,text:'Could not link the source: '+String((e&&e.message)||e).slice(0,120)};}
+    },
+    removeSource:async function(id){try{const r=await this.api('source_remove',{youtubeVideoId:id});if(r.body&&r.body.ok){_srvfMixCat=null;return {ok:true};}return {ok:false,text:_srvfMixAttachText(r.body)};}catch(e){return {ok:false,text:'Could not remove the link.'};}},
+    reloadCatalog:function(){_srvfMixPkgAt=0;_srvfMixPkgCache=[];_srvfMixChk=null;_srvfMixCat=null;_srvfMixCatalogNoted=false;},
+    api:async function(op,body){const r=await _publishFetch('/api/ops?action=srv_farsi_mix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({op:op},body||{}))});const d=await r.json().catch(function(){return {};});return {status:r.status,body:d};},
+    cover:function(c){const art=(c.cover&&c.cover.artist)||c.artist||'female';const e=(c.cover&&_srvFarsiAvatarById(art,c.cover.id))||_srvFarsiAvatarLibrary(art)[0]||null;return _srvfMixEntryCover(e);},
+    libraryCovers:function(){return ['female','male','duet'].flatMap(function(a){return _srvFarsiAvatarLibrary(a).map(_srvfMixEntryCover);});},
+    savePkg:async function(pkg){const ok=(typeof savePackageToSupabase==='function')?(await savePackageToSupabase(pkg))!==false:true;if(typeof saveAppState==='function')saveAppState();if(!ok)throw new Error('the database refused the package');return true;},
+    // The Mix package mirrors the Short-from-Long package: one row per Mix, a DB-only title so the (engine,title) uniqueness never collides; nothing else is written.
+    saveMix:async function(task,rec){
+      const look=await this.ensurePkg(task);if(!look.pkg&&!look.ok)throw new Error('could not check whether this Mix is already saved (connection) — nothing was changed, try again');
+      let pkg=look.pkg;
+      if(pkg){pkg.farsiMix=Object.assign({},pkg.farsiMix||{},rec,{build:(pkg.farsiMix&&pkg.farsiMix.build&&pkg.farsiMix.key===rec.key)?pkg.farsiMix.build:undefined,approved:(pkg.farsiMix&&pkg.farsiMix.approved&&pkg.farsiMix.key===rec.key&&pkg.farsiMix.approved.title===rec.title)?pkg.farsiMix.approved:undefined});pkg.title=rec.title;pkg.dbTitle=rec.title+' · Mix '+rec.key;await this.savePkg(pkg);return pkg;}
+      const uid=_srvFarsiTaskUid(task);
+      pkg={id:'pkg_'+Date.now(),taskId:task.id,engine:'SRV Farsi',contentType:'Mix',contentFormat:'mix',generatedAt:new Date().toISOString(),checklist:{},_pendingSync:false,performance_status:'generated',youtube_video_id:null,published_at:null,linked_channel:null,tools:[],
+        isTest:_srvFarsiIsTestTask(task),title:rec.title,titleFinglish:'',mood:(_srvfMixLib.srvfMood(rec.mood)||{}).label||'',artist:(_srvfMixLib.srvfCategory(rec.category)||{}).label||'',farsiMix:rec};
+      if(uid)pkg.srvTaskUid=uid;
+      pkg.dbTitle=rec.title+' · Mix '+rec.key;
+      D.packages=(D.packages||[]).concat([pkg]);if(typeof saveAppState==='function')saveAppState();
+      let ok=true,why='';try{ok=(await savePackageToSupabase(pkg))!==false;}catch(e){ok=false;why=String(e&&e.message||e);}
+      if(!ok){D.packages=D.packages.filter(function(p){return p!==pkg;});if(typeof saveAppState==='function')saveAppState();throw new Error('the database refused the package'+(why?' ('+why+')':''));}
+      return pkg;
+    }
+  };
+}
+function _srvfMixFormatSelectHtml(task){
+  const taskId=String(task.taskId||task.id||'');
+  return `<div style="font-size:12px;color:var(--dim);margin-bottom:10px">Format: <select onchange="_srvFarsiVaSetArtistFormat('${taskId}','format',this.value)" style="padding:4px 8px;background:rgba(0,0,0,0.3);border:1px solid rgba(201,168,76,0.35);border-radius:6px;color:var(--text);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">${['Auto','Short','Long','Mix'].map(function(o){return `<option value="${o}"${o==='Mix'?' selected':''}>${o}</option>`;}).join('')}</select> <span style="font-size:10px">— Auto returns this task to its scheduled Long/Short</span></div>`;
+}
+function _srvfMixStageHtml(task,stage,pkg){
+  const taskId=String(task.taskId||task.id||'');
+  if(!_srvfMixMod){_srvfMixLoadModules().then(function(){_srvfMixHost().rerender(taskId);}).catch(function(e){console.error('[SRV Farsi Mix] could not load',e);});return '<div style="font-size:11px;color:var(--dim)">Loading the Mix tools…</div>';}
+  const host=_srvfMixHost();
+  setTimeout(function(){const root=document.getElementById('srvfMixRoot-'+taskId);if(root)_srvfMixMod.afterRender(host,task,stage,root);},60);
+  return `<div id="srvfMixRoot-${taskId}">${stage==='generate'?_srvfMixFormatSelectHtml(task):''}${_srvfMixMod.stageHtml(host,task,stage,pkg)}</div>`;
+}
 function _srvFarsiVaSetArtistFormat(taskId,field,value){
   const task=_srvFarsiTaskById(taskId);
   if(!task||task.engine!=='SRV Farsi')return;
@@ -20620,7 +20841,7 @@ function _srvFarsiVaSetArtistFormat(taskId,field,value){
     if(field==='artist')artist=task.vaOriginal.artist;else format=task.vaOriginal.format;
   }
   else if(field==='artist'&&['Male','Female','Duet'].includes(value))artist=value;
-  else if(field==='format'&&['Long','Short'].includes(value))format=value;
+  else if(field==='format'&&(['Long','Short'].includes(value)||(value==='Mix'&&_srvfMixOn())))format=value;
   else return;
   if(artist===oldArtist&&format===oldFormat)return;
   if(!task.vaOriginal)task.vaOriginal={artist:oldArtist,format:oldFormat};
@@ -20628,12 +20849,13 @@ function _srvFarsiVaSetArtistFormat(taskId,field,value){
   const newMood=(artist?artist+' — ':'')+moodPart;
   task.mood=newMood;
   if(task.mode)task.mode=newMood;
-  const isLong=(format==='Long');
-  task.contentFormat=isLong?'long':'short';
-  task.contentType=isLong?'Long Script':'Short Video';
+  const isLong=(format==='Long'), isMix=(format==='Mix');
+  task.contentFormat=isMix?'mix':isLong?'long':'short';
+  task.contentType=isMix?'Mix':isLong?'Long Script':'Short Video';
   task.isLong=isLong;
+  if(isMix)task.isMix=true;else if(task.isMix)delete task.isMix; // SRV Farsi Mix (flag-gated): a Mix is neither a Long nor a Short
   const suffix=(String(task.name||'').match(/\s\([^)]*\)\s*$/)||[''])[0];
-  task.name='SRV Farsi — '+(isLong?'Long · '+newMood:newMood+' · Short')+suffix;
+  task.name='SRV Farsi — '+(isMix?'Mix · '+newMood:isLong?'Long · '+newMood:newMood+' · Short')+suffix;
   if(!Array.isArray(task.vaOverrides))task.vaOverrides=[];
   task.vaOverrides.push({field,from:field==='artist'?oldArtist:oldFormat,to:value,
     by:(typeof currentUser!=='undefined'&&currentUser&&currentUser.id)||'unknown',at:new Date().toISOString()});

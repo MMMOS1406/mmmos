@@ -14,9 +14,9 @@ import path from 'node:path';
 import { makeFixture } from './fixtures.mjs';
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css',
   '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.txt': 'text/plain', '.mp3': 'audio/mpeg',
+  '.ico': 'image/x-icon', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.txt': 'text/plain', '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
 };
 
 const READISH = /(^|_)(list|get|status|check|probe|state|matrix|health|config|poll|load|summary|metrics|detail|debug|verify|login|report|queue_status|rankings|recommendations|dashboard|foundation|learning|performance|memory|notifications|catalog)(_|$)/;
@@ -36,6 +36,8 @@ function pgFilter(rows, params) {
     if (['select', 'order', 'limit', 'offset', 'apikey'].includes(k)) continue;
     if (v.startsWith('eq.')) out = out.filter((r) => String(r[k]) === decodeURIComponent(v.slice(3)));
     else if (v === 'not.is.null') out = out.filter((r) => r[k] != null);
+    else if (/^(lt|lte|gt|gte)\./.test(v)) { const op = v.slice(0, v.indexOf('.')), x = decodeURIComponent(v.slice(op.length + 1)); out = out.filter((r) => { const a = String(r[k] == null ? '' : r[k]); return op === 'lt' ? a < x : op === 'lte' ? a <= x : op === 'gt' ? a > x : a >= x; }); }
+    else if (v.startsWith('like.')) { const rx = new RegExp(decodeURIComponent(v.slice(5)).split('*').map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')); out = out.filter((r) => rx.test(String(r[k] == null ? '' : r[k]))); }
   }
   const o = params.get('order');
   if (o) { const [col, dir] = o.split('.'); out.sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (dir === 'desc' ? -1 : 1)); }
@@ -96,6 +98,8 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
     }
     const t = rest.match(/^\/rest\/v1\/([a-z0-9_]+)/);
     record(req, { kind: 'sb-write', table: t && t[1] });
+    // opt-in (Farsi Mix tests): keep upserted rows so a page reload sees them, as the real database would
+    if (fixture.persistTableWrites && t && t[1] === 'packages' && json) { const rows = Array.isArray(json) ? json : [json]; const tab = store.tables.packages || (store.tables.packages = []); for (const r of rows) { const i = tab.findIndex((x) => x.package_id === r.package_id); if (i >= 0) tab[i] = { ...tab[i], ...r }; else tab.push(r); } }
     return send(res, 201, []);
   }
 
@@ -125,7 +129,7 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
           : send(res, 401, { ok: false, error: 'invalid_credentials' });
       }
       const canned = fixture.api[action];
-      if (canned !== undefined) return send(res, 200, typeof canned === 'function' ? canned(json, store) : canned);
+      if (canned !== undefined) { const v = typeof canned === 'function' ? await canned(json, store) : canned; if (v && typeof v === 'object' && v.__status) { const { __status, ...rest } = v; return send(res, __status, rest); } return send(res, 200, v); }   // a function may be async and may set __status (Farsi Mix upload tests)
       unknown.add(action || '(none)');
       return send(res, 200, { ok: true });
     }
@@ -146,7 +150,8 @@ export function startStub({ publicDir, port = 0, fixture = makeFixture(), quiet 
       if (u.pathname.startsWith('/api/')) return await handleApi(req, res, u);
       let p = decodeURIComponent(u.pathname);
       if (p === '/') p = '/index.html';
-      const file = path.join(publicDir, p);
+      let file = path.join(publicDir, p);
+      if (fixture.mediaDir && p.startsWith('/media/')) { file = path.join(fixture.mediaDir, p.slice(7)); if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) { record(req, { kind: 'static-404' }); return send(res, 404, 'not found', { 'Content-Type': 'text/plain' }); } statics.push(p); return send(res, 200, fs.readFileSync(file), { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' }); }   // opt-in: synthetic test songs for the Farsi Mix full-duration render
       if (!file.startsWith(publicDir) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { record(req, { kind: 'static-404' }); return send(res, 404, 'not found', { 'Content-Type': 'text/plain' }); }
       statics.push(p);
       let body = fs.readFileSync(file);
