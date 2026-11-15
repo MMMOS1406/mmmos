@@ -490,16 +490,32 @@ const MMM_DIRECT_FALLBACK=false;   // CEO-017F stage 3a: the page makes no direc
   // The package list is ~8 MB, more than one server response may carry (4.5 MB). Ask for it in pages (newest first, same order and
   // fields) and put it back together; if a page is still too large the page size is halved. Returns a normal Response, so callers are unchanged.
   async function pagedPackages(path,pick,signal,tk){
-    const m=/(^|[?&])limit=(\d+)/.exec(path); const total=m?parseInt(m[2],10):200; let size=Math.min(16,total); let offset=0; const all=[];
+    // CEO 2026-11-15: the pages were fetched one after another (13 round trips of ~0.9 s) and the caller's 8 s abort cut the load off after ~9 pages, so the
+    // app saw NO packages ("No SRV Studio Long has been built yet" and other empty lists). Pages are now requested with limited parallelism (4 in flight);
+    // order, fields, page size and the halve-on-413 rule are unchanged, and the result is assembled newest-first exactly as before.
+    const m=/(^|[?&])limit=(\d+)/.exec(path); const total=m?parseInt(m[2],10):200; const SIZE=Math.min(16,total), PAR=4;
     const strip=path.replace(/([?&])(limit|offset)=\d+&?/g,'$1').replace(/[?&]$/,'');
-    while(offset<total){
-      const take=Math.min(size,total-offset);
-      const r=await viaProxy('GET',strip+(strip.indexOf('?')<0?'?':'&')+'limit='+take+'&offset='+offset,pick,undefined,signal,tk);
-      if(r.status===413&&take>1){ size=Math.max(1,Math.floor(take/2)); continue; }
-      if(!r.ok)return r;
-      const rows=await r.json(); if(!Array.isArray(rows))return new Response(JSON.stringify(rows),{status:200,headers:{'content-type':'application/json'}});
-      all.push.apply(all,rows); offset+=take; if(rows.length<take)break; if(size<16)size=Math.min(16,size*2);
+    const url=function(take,offset){return strip+(strip.indexOf('?')<0?'?':'&')+'limit='+take+'&offset='+offset;};
+    async function page(offset,take){ // -> {rows} | {resp} (a failed response is returned to the caller unchanged)
+      const r=await viaProxy('GET',url(take,offset),pick,undefined,signal,tk);
+      if(r.status===413&&take>1){ const h=Math.max(1,Math.floor(take/2)); const a=await page(offset,h); if(a.resp)return a; const b=await page(offset+h,take-h); if(b.resp)return b; return {rows:a.rows.concat(b.rows)}; }
+      if(!r.ok)return {resp:r};
+      const rows=await r.json(); if(!Array.isArray(rows))return {resp:new Response(JSON.stringify(rows),{status:200,headers:{'content-type':'application/json'}})};
+      return {rows:rows};
     }
+    const offsets=[]; for(let o=0;o<total;o+=SIZE)offsets.push(o);
+    const out=new Array(offsets.length); let next=0, failed=null, ended=Infinity;
+    async function worker(){
+      while(!failed){
+        const k=next++; if(k>=offsets.length||k>ended)return;
+        const res=await page(offsets[k],Math.min(SIZE,total-offsets[k]));
+        if(res.resp){failed=res.resp;return;}
+        out[k]=res.rows; if(res.rows.length<Math.min(SIZE,total-offsets[k]))ended=Math.min(ended,k);
+      }
+    }
+    await Promise.all(Array.from({length:Math.min(PAR,offsets.length)},worker));
+    if(failed)return failed;
+    const all=[]; for(let k=0;k<offsets.length&&k<=ended;k++){ if(out[k])all.push.apply(all,out[k]); }
     return new Response(JSON.stringify(all),{status:200,headers:{'content-type':'application/json'}});
   }
   window.fetch=async function(input,init){
@@ -2497,7 +2513,7 @@ async function loadAppState(){
 async function fetchPackagesFromTable(){
   try{
     const res=await fetch(`${SUPABASE_URL}/rest/v1/packages?order=generated_at.desc&limit=200&select=package_id,full_package,tiktok_video_id,instagram_reel_id,cross_platform_status,upload_sync_status,engagement_score`,{
-      signal:AbortSignal.timeout(8000),
+      signal:AbortSignal.timeout(25000), // was 8000: the list is ~8 MB and reaches the page through the data proxy in several round trips (CEO 2026-11-15)
       headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}
     });
     if(!res.ok){
@@ -14498,7 +14514,7 @@ function renderExecMode(taskId){
           ${_srvStudioV2On()?_srvEnglishV2StatusField(t):`<div class="exec-field"><div class="exec-field-label">STATUS</div><div class="exec-field-val" style="color:${STATUS_COLORS[t.status]||'#c9a84c'}">${(t.status||'pending').toUpperCase()}</div></div>`}
         </div>
       </div>
-      ${renderSRVEnglishLifecycleCard(t)}
+      ${_srvEnglishArtistNote(t)}${renderSRVEnglishLifecycleCard(t)}
       <button class="exec-close" onclick="closeExec()" style="margin-top:14px">← Back to Tasks</button>
     </div>`;
   }
@@ -14925,6 +14941,13 @@ const SRV_STUDIO_V2_EDIT_FIELDS=[
 ];
 // SRV-STUDIO-V2-021 — the one place that decides a task's format. Review, caption, Build, metadata and Publish
 // all read it, so a Long can never be reviewed as a Short (or the reverse).
+// SRV English supports Female Emotional Deep House ONLY (CEO 2026-11-12). A record that names another artist is NEVER rewritten here — its card simply says so.
+function _srvEnglishArtistNote(task){
+  if(!task||task.engine!=='SRV English')return '';
+  const txt=String(task.mode||task.mood||'')+' '+String(task.name||'');
+  if(!/\b(male|duet)\b/i.test(txt.replace(/female/ig,'')))return '';
+  return '<div style="margin:0 0 10px;padding:9px 12px;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:11px;color:#fca5a5;line-height:1.5">⚠ <strong>Not a valid SRV English artist.</strong> This task is recorded with a Male/Duet artist, but SRV English produces Female Emotional Deep House only. The record is left unchanged; nothing should be produced from it.</div>';
+}
 function _srvEnglishV2TaskIsLong(task){
   return !!(task&&(task.isLong===true||task.contentType==='Long'||task.contentFormat==='long'));
 }
@@ -16635,11 +16658,18 @@ function _srvEnglishV2CanChooseFormat(task){
 }
 // Explicit, logged VA choice. LONG → SHORT marks the task a promotional Short; SHORT → LONG restores exactly what the
 // task was. A task that was created as a Short (retired by 026) is never converted.
+const _srvEnglishV2ShortBlocked={};
 function _srvEnglishV2ChooseFormat(taskId,fmt){
   const task=_srvEnglishTaskById(taskId);
   if(!task||!_srvEnglishV2CanChooseFormat(task))return false;
   const isLong=_srvEnglishV2TaskIsLong(task);
   if((fmt==='short')===!isLong)return true;
+  // CEO 2026-11-15: never turn a task into a Short when there is no built Long to cut it from (the Long list may still be loading — wait for it).
+  if(fmt==='short'&&!_srvEnglishV2PromoSources(task).length){
+    if(!_srvEnglishLongLoadedAt&&!_srvEnglishLongFailed){_srvEnglishV2EnsureLongSources(taskId);return false;}   // the Long list is still loading: try again in a moment
+    _srvEnglishV2ShortBlocked[taskId]=Date.now();_srvEnglishV2Show(taskId);return false;
+  }
+  delete _srvEnglishV2ShortBlocked[taskId];
   if(!Array.isArray(task.vaOverrides))task.vaOverrides=[];
   const at=new Date().toISOString();
   if(fmt==='short'){
@@ -16657,11 +16687,33 @@ function _srvEnglishV2ChooseFormat(taskId,fmt){
   _srvEnglishV2Show(taskId);
   return true;
 }
+// CEO 2026-11-15 (false "No SRV Studio Long has been built yet"). Two causes, both fixed: (1) the package list did not finish loading in time (see the
+// data-proxy shim) and (2) the app keeps only the newest 200 packages and drops a package whose title equals a newer one's (fetchPackagesFromTable); a
+// promotional Short carries the SAME title as the Long it was cut from, so a Long that already has a Short vanished from the in-memory list. The built
+// SRV English Longs are therefore also read straight from the database (read-only, at most once per 10 minutes) into a cache that ONLY this selector
+// uses; no shared list or loader behaviour changes for any other screen or business. The database filter selects only packages whose _srvLongVideoUrl is populated
+// (a promotional Short may carry the key empty), so the 60-row cap is not consumed by Shorts.
+let _srvEnglishLongCache=[], _srvEnglishLongLoadedAt=0, _srvEnglishLongLoading=false, _srvEnglishLongFailed=false;
+async function _srvEnglishV2EnsureLongSources(taskId){
+  if(_srvEnglishLongLoading||Date.now()-_srvEnglishLongLoadedAt<10*60*1000)return;
+  _srvEnglishLongLoading=true;
+  try{
+    const res=await fetch(`${SUPABASE_URL}/rest/v1/packages?engine=eq.${encodeURIComponent('SRV English')}&full_package=like.${encodeURIComponent('*"_srvLongVideoUrl":"http*')}&order=generated_at.desc&limit=60&select=package_id,full_package`,{
+      signal:AbortSignal.timeout(25000),headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Cache-Control':'no-cache'}});
+    if(!res.ok){_srvEnglishLongFailed=true;return;}
+    const rows=await res.json(); if(!Array.isArray(rows)){_srvEnglishLongFailed=true;return;}
+    const out=[], seenIds=new Set(); rows.forEach(function(r){ try{ const pkg=JSON.parse(r.full_package); if(r.package_id)pkg.id=pkg.id||r.package_id; if(pkg&&pkg.id&&!seenIds.has(String(pkg.id))){seenIds.add(String(pkg.id));out.push(pkg);} }catch(e){} });
+    _srvEnglishLongCache=out; _srvEnglishLongLoadedAt=Date.now(); _srvEnglishLongFailed=false;
+    if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
+  }catch(e){ _srvEnglishLongFailed=true; console.warn('[SRV English] source Long load failed (non-fatal):',e&&e.message); }
+  finally{ _srvEnglishLongLoading=false; }
+}
 // SRV Studio Longs a Short can be cut from: SRV English only (never another business), a built Long video, not itself
 // a Short, not this task. Uploaded Longs first, then newest.
 function _srvEnglishV2PromoSources(task){
   const uid=_srvEnglishTaskUid(task);
-  return (D.packages||[]).filter(function(p){
+  const _have=new Set((D.packages||[]).map(function(p){return String(p&&p.id);}));
+  return (D.packages||[]).concat(_srvEnglishLongCache.filter(function(p){return p&&!_have.has(String(p.id));})).filter(function(p){
     if(!p||p.engine!=='SRV English'||_srvEnglishV2IsPromoPkg(p))return false;
     if(uid&&p.srvTaskUid===uid)return false;
     if(!(p._srvAudioUrl||p._srvLongVideoUrl)||!String(p.title||'').trim())return false;
@@ -16683,9 +16735,10 @@ function _srvEnglishV2FormatSelectorHtml(task,taskId){
   const isLong=_srvEnglishV2TaskIsLong(task);
   const btn=function(fmt,label,sub,on){return `<button onclick="_srvEnglishV2ChooseFormat('${escHTML(taskId)}','${fmt}')" aria-pressed="${on}" style="flex:1;padding:10px;border-radius:9px;cursor:pointer;font-family:'Syne',sans-serif;text-align:left;background:${on?'rgba(201,168,76,0.16)':'transparent'};border:1px solid ${on?'rgba(201,168,76,0.6)':'rgba(255,255,255,0.12)'};color:${on?'#c9a84c':'var(--dim)'}"><div style="font-size:12px;font-weight:800">${label}</div><div style="font-size:10px;margin-top:2px;opacity:.85">${sub}</div></button>`;};
   return `<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">FORMAT</div>
-    <div id="srv2fmtsel_${escHTML(taskId)}" style="display:flex;gap:8px">${btn('long','LONG','New song · 1920×1080',isLong)}${btn('short','SHORT','25–35 s from an existing Long · 1080×1920',!isLong)}</div></div>`;
+    <div id="srv2fmtsel_${escHTML(taskId)}" style="display:flex;gap:8px">${btn('long','LONG','New song · 1920×1080',isLong)}${btn('short','SHORT','25–35 s from an existing Long · 1080×1920',!isLong)}</div>${_srvEnglishV2ShortBlocked[taskId]?'<div id="srv2short_blocked_'+escHTML(taskId)+'" style="margin-top:8px;font-size:11px;color:#fca5a5;line-height:1.5">⚠ This task was kept as a LONG: a Short can only be created from an existing, built SRV Studio Long, and none is available yet.</div>':''}</div>`;
 }
 function _srvEnglishV2PromoGenerateHtml(task,taskId){
+  _srvEnglishV2EnsureLongSources(taskId);
   const src=_srvEnglishV2PromoSources(task);
   const sel=_srvEnglishV2PromoSel[taskId]||(_srvEnglishV2PromoSel[taskId]={});
   if(!src.some(function(x){return String(x.pkg.id)===String(sel.longPkgId);}))sel.longPkgId=src[0]?String(src[0].pkg.id):null;
@@ -16696,7 +16749,7 @@ function _srvEnglishV2PromoGenerateHtml(task,taskId){
   sel.startSec=Math.max(0,Math.min(maxStart,Math.round(sel.startSec)));
   const T=escHTML(taskId);
   const opts=src.map(function(x){const p=x.pkg;const t=p.srvTaskUid?_srvEnglishTaskByUid(p.srvTaskUid):null;return `<option value="${escHTML(String(p.id))}" ${String(p.id)===String(sel.longPkgId)?'selected':''}>${escHTML(p.title)} · task #${escHTML(String((t&&t.id)||p.taskId||'?'))}${x.songSec?' · '+_srvEnglishV2FmtSec(x.songSec):''}${x.yt?' · on YouTube':' · built, not uploaded'}</option>`;}).join('');
-  const body=!src.length?`<div style="font-size:12px;color:#f59e0b;line-height:1.6">No SRV Studio Long has been built yet. A Short is cut from an existing Long — build a Long first, or switch this task back to LONG.</div>`:`
+  const body=!src.length?`<div style="font-size:12px;color:#f59e0b;line-height:1.6">${_srvEnglishLongLoading&&!_srvEnglishLongLoadedAt?'Checking the built SRV Studio Longs…':(_srvEnglishLongFailed&&!_srvEnglishLongLoadedAt?'The list of built SRV Studio Longs could not be loaded just now — reload the page and try again. (This is a loading problem, not proof that no Long exists.)':'No built SRV Studio Long was found'+(_srvEnglishLongLoadedAt?' (checked just now)':'')+'. A Short is cut from an existing Long — build a Long first, or switch this task back to LONG.')}</div>`:`
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">1 · LONG SONG (SRV STUDIO ONLY)</div>
         <select id="srv2promo_long_${T}" onchange="_srvEnglishV2PromoSet('${T}','longPkgId',this.value)" style="width:100%;padding:9px;background:rgba(255,255,255,0.04);border:1px solid rgba(201,168,76,0.30);border-radius:8px;color:var(--text);font-size:12px;margin-bottom:12px">${opts}</select>
         <div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">2 · SECTION (${SRV2_SHORT_MIN_SEC}–${SRV2_SHORT_MAX_SEC} S)</div>
@@ -22178,7 +22231,7 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 // The SRV Farsi video look (camera, text, snow, Long composition). Bumped only when that look changes; recorded on every
 // rendered video (pkg._srvLongRenderVersion / _srvShortRenderVersion) and checked at Approve, so a video drawn by an
 // older renderer is visible.
-const SRV_FARSI_RENDERER_VERSION='srvf-render-2026-10-27-l';
+const SRV_FARSI_RENDERER_VERSION='srvf-render-2026-11-15-m';
 // SRV Farsi camera (CEO 2026-10-27, "exact SRV English motion match"): an exact copy of the SRV English (SRV Studio V2)
 // camera in public/srv-studio-v2/srv2-render.mjs — SRV2_FRAMINGS, SRV2_LONG_TIMING, SRV2_MOTION, srv2Rng, srv2LongTimeline,
 // srv2Camera, srv2CameraRect, srv2ShotCameraRect, srv2CardCameraRect and the Long shot cross-dissolve. Copied (not
@@ -22227,6 +22280,26 @@ function _srvFarsiCamRect(srcW,srcH,W,H,base,s,cx,cy,mx,my,sRef){
   let x=cl(cx*srcW,w0/2,srcW-w0/2), y=cl(cy*srcH,h0/2,srcH-h0/2);
   x+=mx*Math.min(x-w0/2,srcW-w0/2-x); y+=my*Math.min(y-h0/2,srcH-h0/2-y);
   return {x:x-w/2,y:y-h/2,w:w,h:h,scale:k};
+}
+// CEO 2026-11-15 (Long avatar zoom): the camera may push in, but never so far that it crops the avatar. SAFE FRAME: the visible window may not
+// be smaller than, and must always contain, the subject region P (the head with its hair, plus the subject's side of the approved wide frame
+// down to SUBJ_BOTTOM; only the title side and the lower torso may leave the frame). If the window is too small it is widened (less zoom,
+// same centre); if it drifts it is shifted just enough. Pure, continuous in its inputs (no jumps), identical for every avatar.
+const SRV_FARSI_SAFE={titleSide:0.28,subjBottom:0.80,headHalfW:0.80,headUp:1.05,headDown:0.80,wideTop:0.02};
+function _srvFarsiSafeRegion(iw,ih,fx,fy,fw,wideRect,subjectRight){
+  const S=SRV_FARSI_SAFE, R=wideRect, fwPx=Math.max(0,fw||0)*iw;
+  const P={x0:subjectRight?Math.max(0,R.x+S.titleSide*R.w):Math.max(0,R.x), x1:subjectRight?Math.min(iw,R.x+R.w):Math.min(iw,R.x+(1-S.titleSide)*R.w), y0:Math.max(0,R.y+S.wideTop*R.h), y1:Math.min(ih,R.y+S.subjBottom*R.h)};
+  if(fwPx>0){ const h={x0:Math.max(0,fx*iw-S.headHalfW*fwPx),x1:Math.min(iw,fx*iw+S.headHalfW*fwPx),y0:Math.max(0,fy*ih-S.headUp*fwPx),y1:Math.min(ih,fy*ih+S.headDown*fwPx)};
+    P.x0=Math.min(P.x0,h.x0); P.x1=Math.max(P.x1,h.x1); P.y0=Math.min(P.y0,h.y0); P.y1=Math.max(P.y1,h.y1); }
+  return P;
+}
+function _srvFarsiSafeRect(r,P,iw,ih){
+  let w=r.w,h=r.h,x=r.x,y=r.y; const pw=P.x1-P.x0, ph=P.y1-P.y0;
+  let k=Math.max(pw>w?pw/w:1,ph>h?ph/h:1); k=Math.min(k,iw/w,ih/h);
+  if(k>1){ const cx=x+w/2, cy=y+h/2; w*=k; h*=k; x=cx-w/2; y=cy-h/2; }
+  x=Math.max(P.x1-w,Math.min(x,P.x0)); y=Math.max(P.y1-h,Math.min(y,P.y0));
+  x=Math.max(0,Math.min(x,iw-w)); y=Math.max(0,Math.min(y,ih-h));
+  return {x:x,y:y,w:w,h:h,scale:r.scale*r.w/w};
 }
 // Snow (CEO 2026-10-27): small flakes that enter above the frame and fall gently; slight horizontal drift only. Sized and
 // opaque enough to survive video encoding (crisp core), faded out near the face so they never cover it.
@@ -22588,13 +22661,22 @@ async function _srvRenderVideo(opts){
         // SRV English camera (srv2ShotCameraRect / srv2CardCameraRect + the Long cross-dissolve). Base framing = the
         // face-aware composition above: its centre plays the role of SRV English's image centre, its scale the cover fit.
         const C=SRV_FARSI_CAM, cam=o.cam.cam, bcx=(sx+sw/2)/iw, bcy=(sy+sh/2)/ih;
+        // Long only (keepFaceSide): the SAFE FRAME region of the approved wide composition (see SRV_FARSI_SAFE) — computed once per draw from the
+        // avatar's face box; the window of every shot below is kept around it so the avatar is never cropped by the zoom or the sway.
+        let safeP=null;
+        if(o.keepFaceSide){
+          const FW=C.framings.wide, fxW=fx-(aim.x-0.5)*(pw/(sc*FW.z*C.overscan))/iw;
+          const Rw=_srvFarsiCamRect(iw,ih,pw,ph,sc,FW.z*C.overscan,bcx+(fxW-bcx)*FW.pull,bcy+(fy+FW.dy-bcy)*FW.pull,0,0,FW.z*C.overscan);
+          safeP=_srvFarsiSafeRegion(iw,ih,fx,fy,fw,Rw,aim.x>0.5);
+        }
         const shotRect=function(sh){
           const F=C.framings[sh.framing]; const pp=Math.max(-0.1,Math.min(1.1,(o.cam.t-sh.start)/Math.max(1,sh.end-sh.start)));
           const zz=F.z*(1+C.push*_srvFarsiCamEase(pp))*C.overscan*cam.zoom;
           // Long (keepFaceSide): medium/close shots keep the face at its composed position on its own side instead of
           // re-centring it (SRV English re-centres because its title is brief; the SRV Farsi title stays on screen).
           const fxT=o.keepFaceSide?fx-(aim.x-0.5)*(pw/(sc*zz))/iw:fx;
-          return _srvFarsiCamRect(iw,ih,pw,ph,sc,zz,bcx+(fxT-bcx)*F.pull,bcy+(fy+F.dy-bcy)*F.pull,cam.mx,cam.my,F.z*C.overscan);
+          const rr=_srvFarsiCamRect(iw,ih,pw,ph,sc,zz,bcx+(fxT-bcx)*F.pull,bcy+(fy+F.dy-bcy)*F.pull,cam.mx,cam.my,F.z*C.overscan);
+          return safeP?_srvFarsiSafeRect(rr,safeP,iw,ih):rr;
         };
         let layers;
         if(o.cam.kind==='long'&&o.cam.shots&&o.cam.shots.length){

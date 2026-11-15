@@ -330,7 +330,10 @@ const mkD=()=>({tasks:[
   const names=[...main.matchAll(/\n(?:async )?function (_srvEnglish\w*|_nextWave\w*|_aiStudio\w*|_smm\w*|srvEnglish\w*|nextWave\w*|renderSRVEnglish\w*|renderNextWave\w*)\(/g)].map(m=>m[1]);
   const changed=names.filter(n=>fnOf(main,n)!==fnOf(h,n));
   // CEO-017B: AI Creation Studio's own functions may be REMOVED (never edited); everything else — and the shared _aiStudioSendToSubmagic helper the NextWave lifecycle uses — must stay byte-identical.
-  const retiredAi=changed.filter(n=>/^_aiStudio/.test(n)&&n!=='_aiStudioSendToSubmagic'&&fnOf(h,n)===null), others=changed.filter(n=>!retiredAi.includes(n));
+  // CEO order 2026-11-15 (Release 1, false "No SRV Studio Long has been built yet"): exactly these five SRV English Short source/format-selector functions are changed ON PURPOSE
+  // (new Long-source cache, SHORT refused without a built Long). Any other business function that differs still fails this check.
+  const CEO_ENGLISH_SHORT=new Set(['_srvEnglishV2ChooseFormat','_srvEnglishV2PromoSources','_srvEnglishV2FmtSec','_srvEnglishV2FormatSelectorHtml','_srvEnglishV2PromoGenerateHtml']);
+  const retiredAi=changed.filter(n=>/^_aiStudio/.test(n)&&n!=='_aiStudioSendToSubmagic'&&fnOf(h,n)===null), others=changed.filter(n=>!retiredAi.includes(n)&&!CEO_ENGLISH_SHORT.has(n));
   ok('other businesses: every SRV English / NextWave / SMM function (and the shared Submagic helper) byte-identical to main; AI Studio functions only removed ('+names.length+' checked, '+retiredAi.length+' retired)',names.length>50&&others.length===0&&fnOf(h,'_aiStudioSendToSubmagic')!==null,others.slice(0,5));
   ok('shared publish helpers untouched (_assignPublishSlot, _nextPublishSlotCandidates, _publishFetch)',['_assignPublishSlot','_nextPublishSlotCandidates','_publishFetch'].every(n=>fnOf(main,n)===fnOf(h,n))); }
 console.log(out.join('\n'));console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);
