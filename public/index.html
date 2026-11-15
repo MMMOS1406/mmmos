@@ -22178,7 +22178,7 @@ async function _srvChorusSync(audioFile, lineCount, shortDur){
 // The SRV Farsi video look (camera, text, snow, Long composition). Bumped only when that look changes; recorded on every
 // rendered video (pkg._srvLongRenderVersion / _srvShortRenderVersion) and checked at Approve, so a video drawn by an
 // older renderer is visible.
-const SRV_FARSI_RENDERER_VERSION='srvf-render-2026-10-27-l';
+const SRV_FARSI_RENDERER_VERSION='srvf-render-2026-11-15-m';
 // SRV Farsi camera (CEO 2026-10-27, "exact SRV English motion match"): an exact copy of the SRV English (SRV Studio V2)
 // camera in public/srv-studio-v2/srv2-render.mjs — SRV2_FRAMINGS, SRV2_LONG_TIMING, SRV2_MOTION, srv2Rng, srv2LongTimeline,
 // srv2Camera, srv2CameraRect, srv2ShotCameraRect, srv2CardCameraRect and the Long shot cross-dissolve. Copied (not
@@ -22227,6 +22227,26 @@ function _srvFarsiCamRect(srcW,srcH,W,H,base,s,cx,cy,mx,my,sRef){
   let x=cl(cx*srcW,w0/2,srcW-w0/2), y=cl(cy*srcH,h0/2,srcH-h0/2);
   x+=mx*Math.min(x-w0/2,srcW-w0/2-x); y+=my*Math.min(y-h0/2,srcH-h0/2-y);
   return {x:x-w/2,y:y-h/2,w:w,h:h,scale:k};
+}
+// CEO 2026-11-15 (Long avatar zoom): the camera may push in, but never so far that it crops the avatar. SAFE FRAME: the visible window may not
+// be smaller than, and must always contain, the subject region P (the head with its hair, plus the subject's side of the approved wide frame
+// down to SUBJ_BOTTOM; only the title side and the lower torso may leave the frame). If the window is too small it is widened (less zoom,
+// same centre); if it drifts it is shifted just enough. Pure, continuous in its inputs (no jumps), identical for every avatar.
+const SRV_FARSI_SAFE={titleSide:0.28,subjBottom:0.80,headHalfW:0.80,headUp:1.05,headDown:0.80,wideTop:0.02};
+function _srvFarsiSafeRegion(iw,ih,fx,fy,fw,wideRect,subjectRight){
+  const S=SRV_FARSI_SAFE, R=wideRect, fwPx=Math.max(0,fw||0)*iw;
+  const P={x0:subjectRight?Math.max(0,R.x+S.titleSide*R.w):Math.max(0,R.x), x1:subjectRight?Math.min(iw,R.x+R.w):Math.min(iw,R.x+(1-S.titleSide)*R.w), y0:Math.max(0,R.y+S.wideTop*R.h), y1:Math.min(ih,R.y+S.subjBottom*R.h)};
+  if(fwPx>0){ const h={x0:Math.max(0,fx*iw-S.headHalfW*fwPx),x1:Math.min(iw,fx*iw+S.headHalfW*fwPx),y0:Math.max(0,fy*ih-S.headUp*fwPx),y1:Math.min(ih,fy*ih+S.headDown*fwPx)};
+    P.x0=Math.min(P.x0,h.x0); P.x1=Math.max(P.x1,h.x1); P.y0=Math.min(P.y0,h.y0); P.y1=Math.max(P.y1,h.y1); }
+  return P;
+}
+function _srvFarsiSafeRect(r,P,iw,ih){
+  let w=r.w,h=r.h,x=r.x,y=r.y; const pw=P.x1-P.x0, ph=P.y1-P.y0;
+  let k=Math.max(pw>w?pw/w:1,ph>h?ph/h:1); k=Math.min(k,iw/w,ih/h);
+  if(k>1){ const cx=x+w/2, cy=y+h/2; w*=k; h*=k; x=cx-w/2; y=cy-h/2; }
+  x=Math.max(P.x1-w,Math.min(x,P.x0)); y=Math.max(P.y1-h,Math.min(y,P.y0));
+  x=Math.max(0,Math.min(x,iw-w)); y=Math.max(0,Math.min(y,ih-h));
+  return {x:x,y:y,w:w,h:h,scale:r.scale*r.w/w};
 }
 // Snow (CEO 2026-10-27): small flakes that enter above the frame and fall gently; slight horizontal drift only. Sized and
 // opaque enough to survive video encoding (crisp core), faded out near the face so they never cover it.
@@ -22588,13 +22608,22 @@ async function _srvRenderVideo(opts){
         // SRV English camera (srv2ShotCameraRect / srv2CardCameraRect + the Long cross-dissolve). Base framing = the
         // face-aware composition above: its centre plays the role of SRV English's image centre, its scale the cover fit.
         const C=SRV_FARSI_CAM, cam=o.cam.cam, bcx=(sx+sw/2)/iw, bcy=(sy+sh/2)/ih;
+        // Long only (keepFaceSide): the SAFE FRAME region of the approved wide composition (see SRV_FARSI_SAFE) — computed once per draw from the
+        // avatar's face box; the window of every shot below is kept around it so the avatar is never cropped by the zoom or the sway.
+        let safeP=null;
+        if(o.keepFaceSide){
+          const FW=C.framings.wide, fxW=fx-(aim.x-0.5)*(pw/(sc*FW.z*C.overscan))/iw;
+          const Rw=_srvFarsiCamRect(iw,ih,pw,ph,sc,FW.z*C.overscan,bcx+(fxW-bcx)*FW.pull,bcy+(fy+FW.dy-bcy)*FW.pull,0,0,FW.z*C.overscan);
+          safeP=_srvFarsiSafeRegion(iw,ih,fx,fy,fw,Rw,aim.x>0.5);
+        }
         const shotRect=function(sh){
           const F=C.framings[sh.framing]; const pp=Math.max(-0.1,Math.min(1.1,(o.cam.t-sh.start)/Math.max(1,sh.end-sh.start)));
           const zz=F.z*(1+C.push*_srvFarsiCamEase(pp))*C.overscan*cam.zoom;
           // Long (keepFaceSide): medium/close shots keep the face at its composed position on its own side instead of
           // re-centring it (SRV English re-centres because its title is brief; the SRV Farsi title stays on screen).
           const fxT=o.keepFaceSide?fx-(aim.x-0.5)*(pw/(sc*zz))/iw:fx;
-          return _srvFarsiCamRect(iw,ih,pw,ph,sc,zz,bcx+(fxT-bcx)*F.pull,bcy+(fy+F.dy-bcy)*F.pull,cam.mx,cam.my,F.z*C.overscan);
+          const rr=_srvFarsiCamRect(iw,ih,pw,ph,sc,zz,bcx+(fxT-bcx)*F.pull,bcy+(fy+F.dy-bcy)*F.pull,cam.mx,cam.my,F.z*C.overscan);
+          return safeP?_srvFarsiSafeRect(rr,safeP,iw,ih):rr;
         };
         let layers;
         if(o.cam.kind==='long'&&o.cam.shots&&o.cam.shots.length){
