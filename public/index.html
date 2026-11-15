@@ -16665,9 +16665,9 @@ function _srvEnglishV2ChooseFormat(taskId,fmt){
   const isLong=_srvEnglishV2TaskIsLong(task);
   if((fmt==='short')===!isLong)return true;
   // CEO 2026-11-15: never turn a task into a Short when there is no built Long to cut it from (the Long list may still be loading — wait for it).
-  if(fmt==='short'){
-    if(!_srvEnglishLongLoadedAt&&!_srvEnglishLongFailed){_srvEnglishV2EnsureLongSources(taskId);return false;}
-    if(!_srvEnglishV2PromoSources(task).length){_srvEnglishV2ShortBlocked[taskId]=Date.now();_srvEnglishV2Show(taskId);return false;}
+  if(fmt==='short'&&!_srvEnglishV2PromoSources(task).length){
+    if(!_srvEnglishLongLoadedAt&&!_srvEnglishLongFailed){_srvEnglishV2EnsureLongSources(taskId);return false;}   // the Long list is still loading: try again in a moment
+    _srvEnglishV2ShortBlocked[taskId]=Date.now();_srvEnglishV2Show(taskId);return false;
   }
   delete _srvEnglishV2ShortBlocked[taskId];
   if(!Array.isArray(task.vaOverrides))task.vaOverrides=[];
