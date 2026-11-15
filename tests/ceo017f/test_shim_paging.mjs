@@ -32,5 +32,8 @@ log = []; r = await F(REST + 'packages?package_id=eq.pkg_9000&select=title,full_
 log = []; r = await F(REST + 'app_settings?key=eq.mmm_finance_v118&select=value', { headers: { 'Cache-Control': 'no-cache' } }); check('a state read is one proxied call', log.length === 1 && log[0].method === 'GET');
 log = []; r = await F(REST + 'packages?on_conflict=package_id', { method: 'POST', headers: { Prefer: 'return=minimal,resolution=merge-duplicates' }, body: JSON.stringify({ package_id: 'p1', engine: 'SRV Farsi' }) }); check('a package write is one proxied POST, not paged', log.length === 1 && log[0].method === 'POST');
 // no session: transition switch keeps the old direct path
-sandbox.sessionStorage.getItem = () => null; log = []; r = await F(REST + 'app_settings?key=eq.srv_studio_v2_enabled&select=value', {}); check('no session + transition switch on: the read goes direct (unchanged pre-login behaviour)', (await r.text()) === 'DIRECT' && log.length === 0);
+sandbox.sessionStorage.getItem = () => null; log = []; r = await F(REST + 'app_settings?key=eq.srv_studio_v2_enabled&select=value', {});
+const switchOn = /const MMM_DIRECT_FALLBACK=true;/.test(code);
+if (switchOn) check('no session + transition switch ON: the read goes direct (unchanged pre-login behaviour)', (await r.text()) === 'DIRECT' && log.length === 0);
+else check('no session + switch OFF (locked build): the read goes through the proxy (which answers only the two public switches), never direct', (await r.text()) !== 'DIRECT' && log.length === 1 && log[0].method === 'GET');
 const failed = R.filter((x) => !x).length; console.log(`\n${R.length} checks, ${failed} failed`); process.exit(failed ? 1 : 0);

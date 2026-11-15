@@ -474,7 +474,7 @@ const SUPABASE_KEY='sb_publishable_ef6g4pLPYfDrXnTwGxSUuA_hAjrrF_i';
 // Transition switch: while MMM_DIRECT_FALLBACK is true, a call made with no session, an older server that does not know the action (404)
 // or a network failure still goes straight to the database as before. A refusal (401/403/413) is never retried directly. Before sign-in only the two
 // public on/off switches (SRV Studio V2, Mix Builder) can be read.
-const MMM_DIRECT_FALLBACK=true;
+const MMM_DIRECT_FALLBACK=false;   // CEO-017F stage 3a: the page makes no direct database calls; every data call goes through the authenticated proxy (only the two public on/off switches are read without a session, also through the proxy)
 (function(){
   const REST=SUPABASE_URL+'/rest/v1/'; const realFetch=window.fetch.bind(window);
   function tokens(){
