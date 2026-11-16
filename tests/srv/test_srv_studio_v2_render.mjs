@@ -130,12 +130,17 @@ else {
     const c = createCanvas(1280, 720); const ctx = c.getContext('2d');
     const info = R.srv2PaintThumbnail(ctx, prep, a, { title: 'Neon Nights' });
     worst = Math.max(worst, info.sourceScale); const buf = c.toBuffer('image/jpeg', 90); maxBytes = Math.max(maxBytes, buf.length);
-    sides = sides && info.layout === (a.focus.fx >= 0.5 ? 'title-left' : 'title-right');
+    sides = sides && info.layout === (a.focus.fx >= 0.5 ? 'face-right' : 'face-left') && info.titleText === null;
     res.push(neutral(ctx, 1280, 720));
   }
   ok('Thumbnail: all 20 avatars render 1280x720, JPEG under 2 MB', maxBytes > 0 && maxBytes < 2 * 1048576, (maxBytes / 1024).toFixed(0) + ' KB max');
   ok('Thumbnail: source is downscaled, never enlarged (scale ≤ 1)', worst <= 1, String(worst));
-  ok('Thumbnail: face-aware — the title goes on the side away from the face', sides);
+  ok('Thumbnail (CEO 2026-11-16): face-aware, NO song title — the face sits on its third and the layout reports no title text', sides);
+  { const a0 = A.SRV_STUDIO_V2_AVATARS[0]; const img0 = await loadImage(path.join(repo, 'public', a0.src)); const prep0 = R.srv2PrepareSource(img0, a0.crop);
+    const t1 = createCanvas(1280, 720), t2 = createCanvas(1280, 720); R.srv2PaintThumbnail(t1.getContext('2d'), prep0, a0, { title: 'Neon Nights' }); R.srv2PaintThumbnail(t2.getContext('2d'), prep0, a0, { title: 'A completely different song title' });
+    ok('Thumbnail: two different song titles produce byte-identical thumbnails (the title is never drawn)', Buffer.compare(t1.toBuffer('image/png'), t2.toBuffer('image/png')) === 0);
+    const t3 = createCanvas(1280, 720); R.srv2PaintThumbnail(t3.getContext('2d'), prep0, a0, { title: 'x', wordmark: false });
+    ok('Thumbnail: 1280x720 landscape (YouTube custom thumbnail size, 16:9) and the optional wordmark can be dropped', t1.width === 1280 && t1.height === 720 && t1.width / t1.height === 16 / 9 && Buffer.compare(t1.toBuffer('image/png'), t3.toBuffer('image/png')) !== 0); }
   ok('Thumbnail: black-and-white throughout (wordmark and title included)', res.every((r) => r === 0));
   // Long + Short frames
   const a6 = A.srv2AvatarById('srv2-fm-06'); const img6 = await loadImage(path.join(repo, 'public', a6.src)); const p6 = R.srv2PrepareSource(img6, a6.crop);

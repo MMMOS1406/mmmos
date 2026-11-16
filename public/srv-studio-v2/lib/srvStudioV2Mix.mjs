@@ -6,7 +6,10 @@
 import { srv2PlanRelease, srv2TzParts, srv2ZonedToUtc } from './srvStudioV2Schedule.mjs';
 
 export const SRV2_MIX_CONFIG = Object.freeze({
-  targetSec: 30 * 60, toleranceSec: 4 * 60, minTracks: 5, maxTracks: 8,
+  // CEO correction 2026-11-16: NO fixed Mix length and NO song-count ceiling. The CEO/VA chooses any valid selection of at least two songs; the runtime is whatever
+  // the chosen songs and 6 s transitions add up to. The only hard limits are physical: YouTube's 12-hour video limit and the storage file limit (checked from the
+  // selection with the bitrate plan). `suggestedSec` is ADVISORY only (the optional "fill about 30 minutes" helper), never a rule.
+  suggestedSec: 30 * 60, targetSec: 30 * 60, minTracks: 2, platformMaxSec: 12 * 3600,
   crossfadeSec: 6, introFadeSec: 2, outroFadeSec: 6,
   loudnessTargetLufs: -14, truePeakDb: -1,            // YouTube normalises to about -14 LUFS
   width: 1920, height: 1080, fps: 30, audioBitsPerSecond: 192_000,
@@ -49,6 +52,13 @@ export function srv2MixEligible(pkgs, publicVideoIds) {
   return out;
 }
 
+// ── catalog states (CEO correction 2026-11-16: every SRV Studio song in the catalog is SHOWN, never silently dropped; each one states why it can or cannot be mixed) ──
+// ready · source_unavailable (published, but its audio cannot be used) · private (private / unlisted / not public / not on the channel) · not_built (no finished Long yet)
+export const SRV2_MIX_STATE_LABEL = Object.freeze({ ready: 'Published — ready to use', source_unavailable: 'Published — source audio unavailable', private: 'Private or unpublished', not_built: 'Not built' });
+const SRV2_REASON_STATE = Object.freeze({ no_audio_source: 'source_unavailable', unknown_duration: 'source_unavailable', not_public: 'private', not_uploaded: 'private', not_found_on_youtube: 'private', other_channel: 'private', not_built: 'not_built', not_long: 'not_built' });
+export function srv2MixCatalogState(song) { if (!song) return null; if (song.eligible || !song.reason) return 'ready'; return SRV2_REASON_STATE[song.reason] || 'source_unavailable'; }
+export function srv2MixCatalogSummary(songs) { const out = { total: 0, ready: 0, source_unavailable: 0, private: 0, not_built: 0 }; for (const s of songs || []) { out.total++; out[srv2MixCatalogState(s)]++; } return out; }
+
 // ── timeline ──
 // Track i starts at sum(d_0..d_{i-1}) - i*crossfade; every join overlaps `crossfadeSec`. Chapter timestamps sit at
 // the MIDDLE of each crossfade (where the new song becomes the louder one), rounded down to whole seconds; the first
@@ -64,7 +74,8 @@ export function srv2MixTimeline(tracks, { crossfadeSec = SRV2_MIX_CONFIG.crossfa
     at = start + x.durationSec;
   });
   const totalSec = +at.toFixed(3);
-  return { items, totalSec, totalLabel: srv2Clock(Math.round(totalSec)), crossfadeSec, targetSec, deltaSec: +(totalSec - targetSec).toFixed(1), withinTarget: Math.abs(totalSec - targetSec) <= SRV2_MIX_CONFIG.toleranceSec };
+  // targetSec / deltaSec / withinTarget are ADVISORY (kept for the "about 30 minutes" helper and older callers); validation never uses them.
+  return { items, totalSec, totalLabel: srv2Clock(Math.round(totalSec)), crossfadeSec, targetSec, deltaSec: +(totalSec - targetSec).toFixed(1), withinTarget: Math.abs(totalSec - targetSec) <= 4 * 60 };
 }
 export function srv2Clock(sec) {
   const s = Math.max(0, Math.floor(sec)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
@@ -72,17 +83,17 @@ export function srv2Clock(sec) {
 }
 // Checks a timeline against the selection rules and YouTube's chapter rules.
 export function srv2MixValidate(tl, cfg = SRV2_MIX_CONFIG) {
-  const problems = [];
+  const problems = [], warnings = [];
   const n = tl.items.length;
   if (n < cfg.minTracks) problems.push(`at least ${cfg.minTracks} songs (now ${n})`);
-  if (n > cfg.maxTracks) problems.push(`at most ${cfg.maxTracks} songs (now ${n})`);
   const ids = tl.items.map((x) => x.pkgId);
   if (new Set(ids).size !== ids.length) problems.push('a song is in the mix twice');
-  if (!tl.withinTarget) problems.push(`length ${tl.totalLabel} is not within ${Math.round(cfg.toleranceSec / 60)} min of ${srv2Clock(cfg.targetSec)}`);
+  if (tl.totalSec > cfg.platformMaxSec) problems.push(`length ${tl.totalLabel} is above YouTube's ${srv2Clock(cfg.platformMaxSec)} limit for one video`);
+  else if (tl.totalSec > 0) { const plan = srv2MixBitratePlan(tl.totalSec, cfg); if (!plan.fitsLimit || plan.videoBitsPerSecond < 300_000) problems.push(`length ${tl.totalLabel} cannot fit the ${Math.round(cfg.maxFileBytes / 1048576)} MB upload limit at a usable quality — choose fewer songs`); }
   if (n && tl.items[0].chapterSec !== 0) problems.push('the first chapter must start at 0:00');
   for (let i = 1; i < n; i++) if (tl.items[i].chapterSec - tl.items[i - 1].chapterSec < cfg.minChapterSec) problems.push(`chapter ${i + 1} is shorter than ${cfg.minChapterSec} s`);
-  if (n && n < 3) problems.push('YouTube needs at least 3 chapters');
-  return { ok: !problems.length, problems };
+  if (n === 2) warnings.push('YouTube shows chapter markers only for videos with at least 3 timestamps — with two songs the tracklist is still listed in the description, but no chapter bar appears');
+  return { ok: !problems.length, problems, warnings };
 }
 
 // ── metadata ──

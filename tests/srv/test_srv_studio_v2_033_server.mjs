@@ -78,7 +78,10 @@ ok('the V2 flag off → every mix operation refused', (await MS.srv2RunMixOp({ .
   ok('audio source recorded: original MP3 when kept (029), else the Long soundtrack', s.pkg_mp3.audioSource === 'original-mp3' && s.pkg_a.audioSource === 'long-video-aac');
   ok('readiness: 9 eligible songs → ready', r.ready === true && r.readiness === 'ready' && r.eligibleCount === 9);
   const few = (await run(world({ pk: songs.slice(0, 5).map((s) => pkg(s)) }), { op: 'eligibility' })).json;
-  ok('readiness with only 5 songs (≈ 20 min): "Not ready — insufficient eligible music"', few.ready === false && few.readiness === 'Not ready — insufficient eligible music' && few.possibleSec < 1560, few.possibleSec);
+  ok('CEO correction 2026-11-16: 5 songs (≈ 20 min) are READY — no 30-minute rule; possibleSec is what the usable songs add up to', few.ready === true && few.readiness === 'ready' && few.possibleSec > 600 && few.possibleSec < 1560, few.possibleSec);
+  const one = (await run(world({ pk: songs.slice(0, 1).map((s) => pkg(s)) }), { op: 'eligibility' })).json;
+  ok('with a single usable song the Mix is not ready (at least two songs)', one.ready === false && /fewer than two/.test(one.readiness), one.readiness);
+  ok('every song in the catalog carries a state (ready / source audio unavailable / private or unpublished / not built) and counts are reported — none dropped', r.songs.every((x) => ['ready', 'source_unavailable', 'private', 'not_built'].includes(x.state) && x.stateLabel) && r.counts.total === r.songs.length && r.counts.ready === r.eligibleCount, JSON.stringify(r.counts));
   ok('eligibility refuses when the YouTube connection is not SRV Studio', (await run(world({ channel: 'UCCUa5BLzGh2eRBoqqWBCK_g' }), { op: 'eligibility' })).json.error === 'wrong_channel');
 }
 
@@ -97,7 +100,7 @@ ok('the V2 flag off → every mix operation refused', (await MS.srv2RunMixOp({ .
   const t4 = M.srv2MixTimeline(songs.slice(0, 4).map(([pkgId, title, youtubeVideoId, sec]) => ({ pkgId, title, youtubeVideoId, durationSec: sec - 3.5 })));
   const r4 = { ...rec, status: 'draft', mixId: M.srv2MixKey('2026-11', t4), title: M.srv2MixTitle('2026-11', t4), description: M.srv2MixDescription('2026-11', t4), totalSec: t4.totalSec, tracks: rec.tracks.slice(0, 4) };
   const d4 = await run(w, { op: 'save', mix: r4 });
-  ok('a self-consistent 4-song draft (waiting for more songs) is saved and marked not ready with the reasons', d4.status === 200 && d4.json.mix.ready === false && /at least 5 songs/.test(d4.json.mix.problems.join()) && /not within/.test(d4.json.mix.problems.join()), d4.json);
+  ok('a self-consistent 4-song Mix (about 15 minutes) is valid and saved READY — no minimum length, no minimum above two songs', d4.status === 200 && d4.json.mix.ready === true && !d4.json.mix.problems.length, d4.json);
   const listed = (await run(w, { op: 'list' })).json;
   ok('list restores the saved draft', !!listed.mixes[rec.mixId]);
 }
