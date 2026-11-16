@@ -26,6 +26,7 @@ import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPromp
 import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProductionUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
 import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
 import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer.mjs'; // SRV-STUDIO-V2-033 Monthly Mix (off unless app_settings.srv_studio_v2_mix is enabled)
+import { srvfRunMixOp, srvfVerifyAdapter } from '../lib/srvFarsiMixServer.mjs'; // SRV Farsi Mix (CEO order 2026-11-12): integrated private-first chunked YouTube upload; OFF unless app_settings.srv_farsi_mix enables it
 import * as NWFP from '../projects/nextwave-finance-pilot/lib/pilotState.mjs'; // 049 — NextWave Finance Pilot L1 state + L2 CEO status (pure logic in the pilot's own folder)
 import * as NWFP_PLAN from '../projects/nextwave-finance-pilot/lib/contentPlan.mjs'; // 051 — NextWave Finance Pilot L3 content planning (deterministic; no generation, no publishing)
 const execFileAsync = promisify(execFile);
@@ -252,6 +253,7 @@ const PUBLISH_GATED_ACTIONS = new Set([
   'srv_studio_v2_playlist_sync', // SRV-STUDIO-V2-030 (it also requires a VA/CEO session itself)
   'srv_studio_v2_mix', // SRV-STUDIO-V2-033 (it also requires a VA/CEO session itself)
   'srv_farsi_playlists', // SRV Farsi playlist check (uses the channel token, read-only)
+  'srv_farsi_mix', // SRV Farsi Mix private upload (CEO order 2026-11-12; it also requires a VA/CEO session itself and is OFF unless app_settings.srv_farsi_mix pins the channel)
 ]);
 // 046 — business actions that previously took no login now need the CEO or VA session (same gate,
 // same enforce/observe mode as publishing). Grouped by business; paid generation, deletion and approvals first.
@@ -5248,6 +5250,85 @@ async function srvStudioV2Mix(req, res) {
     return res.status(500).json({ ok: false, mix: true, error: 'mix_server_error', message: e.message });
   }
 }
+// SRV Farsi Mix VALIDATION credentials (CEO-authorized isolated test only): a dedicated temporary OAuth client + its own refresh token, held in Preview-only environment variables. They are honoured ONLY when the deployment
+// is a Vercel PREVIEW (VERCEL_ENV === 'preview') AND app_settings.srv_farsi_mix says credentialSource 'validation' with a short expiry; in production they are never read and the production client/connection are never touched here.
+function _srvfValidationCreds() {
+  if (process.env.VERCEL_ENV !== 'preview') return null;
+  const id = process.env.SRVF_MIX_OAUTH_CLIENT_ID, secret = process.env.SRVF_MIX_OAUTH_CLIENT_SECRET, rt = process.env.SRVF_MIX_OAUTH_REFRESH_TOKEN;
+  return id && secret && rt ? { id, secret, rt } : null;
+}
+async function _srvfValidationAccessToken() {
+  const c = _srvfValidationCreds(); if (!c) throw new Error('validation_credentials_unavailable');
+  const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: c.id, client_secret: c.secret, refresh_token: c.rt, grant_type: 'refresh_token' }).toString() });
+  const t = await r.text(); if (!r.ok) throw new Error('youtube_refresh_failed: ' + r.status + ' ' + t.replace(/[A-Za-z0-9_-]{32,}/g, '<redacted>').slice(0, 160));
+  return JSON.parse(t).access_token;
+}
+// SRV Farsi Mix — integrated, resumable, PRIVATE-first upload on the retained SRV Farsi channel (CEO order 2026-11-12; not released).
+// VA/CEO session (checked here, not by the generic gate lists); OFF unless app_settings.srv_farsi_mix is enabled (server/admin-only key). The browser sends the rendered video in
+// small chunks; this relays each to one YouTube resumable session — no file is stored by us. See lib/srvFarsiMixServer.mjs.
+async function srvFarsiMix(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, farsiMix: true, error: 'POST only' });
+  const who = await _publisherFromRequest(req);
+  if (!who || (who.role !== 'operator' && who.role !== 'ceo')) return res.status(401).json({ ok: false, farsiMix: true, error: 'publisher_session_required' });
+  try {
+    const lookupChannel = () => _getYoutubeConnectionByTitle(YT_ENGINE_TO_TITLE['SRV Farsi'], { exact: true });
+    const out = await srvfRunMixOp({
+      now: () => Date.now(), by: who.role,
+      getSetting: srvStudioV2PilotSetting, casSetting: srvStudioV2PilotCas,
+      lookupChannel,
+      validationAvailable: () => !!_srvfValidationCreds(),
+      ytFor: async (conn, source) => { const tk = source === 'validation' ? await _srvfValidationAccessToken() : (await _refreshYoutubeToken(conn.refresh_token)).accessToken; return Object.assign(srv2MixYouTubeAdapter(tk), srvfVerifyAdapter(tk)); },
+      getMixPackage: async (id) => { if (!/^[A-Za-z0-9_.-]{1,80}$/.test(id)) return null; const rows = await sbGet(`packages?package_id=eq.${encodeURIComponent(id)}&engine=eq.SRV%20Farsi&select=package_id,full_package&limit=1`); if (!rows || !rows[0]) return null; try { const p = JSON.parse(rows[0].full_package); p.id = p.id || rows[0].package_id; return p; } catch (_) { return null; } },
+      // The singer category recorded by the SRV Farsi TASK that produced a package (explicit rotation / operator record) — a read-only source for recovering an artist a legacy package never stored. Keyed like the page's task uid.
+      listTaskArtists: async () => {
+        const rows = await sbGet('app_settings?key=eq.mmm_finance_v118&select=value&limit=1'); const v = rows && rows[0] && rows[0].value; if (!v) return {};
+        let st; try { st = typeof v === 'string' ? JSON.parse(v) : v; } catch (_) { return {}; } const out = {};
+        for (const t of (st && st.tasks) || []) { if (!t || t.engine !== 'SRV Farsi') continue; const uid = t.srvUid || (Number(t.createdAt) && t.id != null ? 'srvf_' + Number(t.createdAt) + '_' + t.id : null); if (!uid) continue;
+          const ov = (t.vaOverrides || []).filter((o) => o && o.field === 'artist').slice(-1)[0]; const pick = (x) => { const m = /^(female|male|duet)\b/i.exec(String(x || '').trim()); return m ? m[1].toLowerCase() : ''; };
+          const a = (ov && pick(ov.to)) || pick(t.mood) || pick(t.mode); if (a) out[uid] = a; }
+        return out;
+      },
+      // Source attachment (isolated): the public srv-assets bucket is the ONLY place a linked audio file may live; files are checked with a HEAD, never copied, never downloaded from YouTube.
+      sourceBaseUrl: `${SUPABASE_URL}/storage/v1/object/public/srv-assets/`,
+      checkSource: async (url) => { const r = await fetch(url, { method: 'HEAD' }); return { ok: r.ok, size: Number(r.headers.get('content-length')) || 0, type: r.headers.get('content-type') || '' }; },
+      findStoredLong: async (pkgId) => {   // newest rendered Long video stored for a package (read-only storage listing of that package's own folder)
+        if (!/^pkg_[A-Za-z0-9_.-]{1,60}$/.test(pkgId)) return null;
+        const r = await fetch(`${SUPABASE_URL}/storage/v1/object/list/srv-assets`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY }, body: JSON.stringify({ prefix: pkgId + '/', limit: 100, sortBy: { column: 'created_at', order: 'desc' } }) });
+        if (!r.ok) return null; const items = await r.json(); const f = (Array.isArray(items) ? items : []).find((x) => /^long_.*\.(webm|mp4)$/i.test(String(x && x.name)));
+        return f ? { url: `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${pkgId}/${f.name}`, size: Number(f.metadata && f.metadata.size) || null } : null;
+      },
+      createSourceUpload: async (path) => {   // one-time signed upload URL for a NEW original file (existing bucket, no new service); the browser uploads straight to storage
+        if (!/^srv-farsi-sources\/[A-Za-z0-9_-]{11}\/[0-9]+_[A-Za-z0-9]+\.(mp3|webm|mp4)$/.test(path)) throw new Error('path_not_allowed');
+        const r = await fetch(`${SUPABASE_URL}/storage/v1/object/upload/sign/srv-assets/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY }, body: '{}' });
+        if (!r.ok) throw new Error('sign_failed_' + r.status); const j = await r.json(); const rel = String(j.url || ''); const uploadUrl = /^https?:/.test(rel) ? rel : `${SUPABASE_URL}/storage/v1${rel.startsWith('/') ? '' : '/'}${rel}`;
+        return { uploadUrl, publicUrl: `${SUPABASE_URL}/storage/v1/object/public/srv-assets/${path}` };
+      },
+      getSources: async () => { const row = await srvStudioV2PilotSetting('srv_farsi_mix_sources'); const t = row && row.text; if (!t) return { items: {} }; try { return JSON.parse(t); } catch (_) { return { items: {} }; } },
+      mixPlaylist: SRV_FARSI_MIX_PLAYLIST,
+      individualPlaylistIds: () => { const seen = {}; return Object.keys(SRV_FARSI_PLAYLISTS).map((k) => SRV_FARSI_PLAYLISTS[k].id).filter((id) => (seen[id] ? false : (seen[id] = true))); },   // the individual-song playlists a Mix must NOT be in
+      addToMixPlaylist: async (videoId, source) => {
+        let accessToken; if (source === 'validation') accessToken = await _srvfValidationAccessToken(); else { const conn = await lookupChannel(); if (!conn || !conn.refresh_token) throw new Error('no_connection'); accessToken = (await _refreshYoutubeToken(conn.refresh_token)).accessToken; }
+        const t = SRV_FARSI_MIX_PLAYLIST;
+        try { const item = await _ytAddVideoToPlaylist(videoId, t.id, accessToken); return [{ playlistId: t.id, playlistName: t.title, key: 'mix', ok: !!(item && item.id), playlistItemId: item && item.id || null }]; }
+        catch (e) { const msg = String(e && e.message || e); return [{ playlistId: t.id, playlistName: t.title, key: 'mix', ok: false, error: /insufficient|scope|403/i.test(msg) ? 'needs_playlist_permission' : 'playlist_add_failed', detail: msg.slice(0, 160) }]; }
+      },
+      listFarsiPackages: async () => {
+        const all = [];
+        for (let off = 0; off < 5000; off += 250) {
+          const rows = await sbGet(`packages?engine=eq.SRV%20Farsi&select=package_id,full_package&order=generated_at.desc&limit=250&offset=${off}`);
+          for (const r of rows || []) { try { const p = JSON.parse(r.full_package); if (r.package_id) p.id = p.id || r.package_id; all.push(p); } catch (_) {} }
+          if (!rows || rows.length < 250) break;
+        }
+        return all;
+      },
+      seal: _srvMixSeal, unseal: _srvMixUnseal,
+      newId: () => 'fx_' + Date.now().toString(36) + randomBytes(4).toString('hex'),
+    }, req.body || {});
+    return res.status(out.status).json(out.json);
+  } catch (e) {
+    return res.status(500).json({ ok: false, farsiMix: true, error: 'farsi_mix_server_error', message: e.message });
+  }
+}
 // SRV-STUDIO-V2-023 — runs the one CEO-authorized title correction (app_settings.srv_studio_v2_retitle_job, writable
 // only through the server/admin path). Metadata only; a job runs at most once (compare-and-set), see lib.
 async function srvStudioV2RetitleJob(req, res) {
@@ -8354,6 +8435,9 @@ const SRV_FARSI_PLAYLISTS = {
   emotional: { id: 'PL64rNOGmVdtLS9WmXx0B1FyRf3MldJbnF', title: 'Silk Road Voices | Emotional ❤️' },
   short:     { id: 'PL64rNOGmVdtIM7hfzvb6U9yNPZncyf7Bh', title: 'Silk Road Voices |Shorts' },
 };
+// SRV Farsi MIX playlist (PM decision 2026-11-14): a Mix goes ONLY to the dedicated "Silk Road Voices Mixes" playlist, by exact id (read from the channel's public Playlists page on 2026-11-14;
+// the server re-checks id AND title with the channel's own token before any change). Deliberately NOT part of SRV_FARSI_PLAYLISTS, so Long and Short routing is untouched.
+const SRV_FARSI_MIX_PLAYLIST = { id: 'PL64rNOGmVdtKqungN55qcnPEDNJwMRZN7', title: 'Silk Road Voices Mixes' };
 async function _srvFarsiListPlaylists(accessToken) {
   const all = []; let pageToken = '';
   for (let i = 0; i < 10; i++) {
@@ -21268,6 +21352,7 @@ export default async function handler(req, res) {
     if (action === 'srv_avatar_upload')          return await srvAvatarUpload(req, res);
     if (action === 'srv_avatar_update')          return await srvAvatarUpdate(req, res);
     if (action === 'srv_studio_v2_mix')          return await srvStudioV2Mix(req, res); // SRV-STUDIO-V2-033 Monthly Mix (VA/CEO session; off unless configured)
+    if (action === 'srv_farsi_mix')              return await srvFarsiMix(req, res);       // SRV Farsi Mix (VA/CEO session; off unless configured)
     if (action === 'srv_studio_v2_playlist_sync') return await srvStudioV2PlaylistSync(req, res); // SRV-STUDIO-V2-030 playlist check/add + VA-step eligibility (VA/CEO session)
     if (action === 'srv_studio_v2_va_upload')    return await srvStudioV2VaUpload(req, res);    // SRV-STUDIO-V2-023 VA allowance (VA/CEO session; off unless authorized)
     if (action === 'srv_studio_v2_production_upload') return await srvStudioV2ProductionUpload(req, res); // SRV-STUDIO-V2-028 normal VA production (VA/CEO session; private, Long only)
