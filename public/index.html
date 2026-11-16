@@ -12290,7 +12290,7 @@ function _srvFarsiCleanFarsiTitle(title){
   return stripped||t.trim();
 }
 // Long: "Silk Road Voices - [Finglish] | Persian Deep House | [Farsi]"
-// Short: "[Farsi] | Persian Love Song | SRV Farsi"
+// Short: "[Farsi] | Persian Love Song | Silk Road Voices"  (CEO correction 2026-11-16: customer-facing name is Silk Road Voices, never "SRV Farsi")
 function _srvFarsiYouTubeTitle(pkg,isLong){
   const farsi=_srvFarsiCleanFarsiTitle(pkg&&pkg.title)||'آهنگ جدید';
   const finglish=String((pkg&&pkg.titleFinglish)||'').trim();
@@ -12299,7 +12299,7 @@ function _srvFarsiYouTubeTitle(pkg,isLong){
       ? `Silk Road Voices - ${finglish} | Persian Deep House | ${farsi}`
       : `Silk Road Voices | Persian Deep House | ${farsi}`;
   }
-  return `${farsi} | Persian Love Song | SRV Farsi`;
+  return `${farsi} | Persian Love Song | Silk Road Voices`;
 }
 // Controlled hashtag set: 4 core + 2 mood-specific, matching the mood classification already
 // used by _srvFarsiPlaylistCategory (same substring rule, kept as its own copy here so visual/
@@ -19883,13 +19883,13 @@ async function _srvFarsiPublishTikTok(pkgId,taskId){
   // for audit logging. Never the [TEST]-prefixed YouTube title — TikTok's own upload/inbox
   // API has no caption field (confirmed via TikTok docs), so this can't be attached to the
   // draft itself, but it's logged and shown to the operator via _ttCaptionBox for copy-paste.
-  const _ttCaption=pkg.captionTikTok||pkg.captionYouTube||pkg.title||'SRV Farsi';
+  const _ttCaption=pkg.captionTikTok||pkg.captionYouTube||pkg.title||'Silk Road Voices';
   pkg.tiktokPublishState='publishing'; pkg.tiktokPublishError=null;
   if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');
   try{
     const r=await _publishFetch('/api/ops?action=tiktok_publish_draft',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({engine:'SRV Farsi',videoUrl:shortUrl,title:pkg.title||'SRV Farsi',caption:_ttCaption,hashtags:pkg.hashtags||''}),
+      body:JSON.stringify({engine:'SRV Farsi',videoUrl:shortUrl,title:pkg.title||'Silk Road Voices',caption:_ttCaption,hashtags:pkg.hashtags||''}),
     });
     const d=await r.json().catch(()=>({}));
     // v15.20.7 — refresh-token-dead case: backend returns authRequired:true + a precise
@@ -23243,12 +23243,7 @@ async function _srvRenderVideo(opts){
       ctx.save(); ctx.shadowColor='rgba(0,0,0,0.55)'; ctx.shadowBlur=Math.round(W*0.05); ctx.shadowOffsetY=Math.round(W*0.014);
       ctx.fillStyle='#140a07'; ctx.beginPath(); if(ctx.roundRect)ctx.roundRect(cX,cY,cW,cH,cR); else ctx.rect(cX,cY,cW,cH); ctx.fill(); ctx.restore();
       _drawFarsiPanel(cX,cY,cW,cH,zoom,cR,{aim:{x:0.5,y:0.37,face:0.30},panX:panX,panY:panY,sweep:sweep,fade:true,border:true,cam:_camOpt});
-      // card mark (top-left)
-      ctx.direction='ltr'; ctx.textAlign='left'; ctx.fillStyle='rgba(253,246,232,0.78)';
-      ctx.font=`600 ${Math.round(W*0.019)}px 'IBM Plex Mono', monospace`;
-      const _ms=W*0.00085;
-      _drawFarsiMusicMark(cX+Math.round(W*0.034),cY+Math.round(W*0.056)-6*_ms,_ms,'rgba(253,246,232,0.82)',false);
-      ctx.fillText('SRV FARSI',cX+Math.round(W*0.034)+Math.round(16*_ms)+Math.round(W*0.012),cY+Math.round(W*0.056));
+      // CEO correction 2026-11-16: the small "SRV FARSI" card mark (top-left of the portrait) is removed; the channel is shown once, as SILK ROAD VOICES in the header.
       // card text block (bottom of the card, over its dark fade): title / Latin title / genre
       const _cPad=Math.round(W*0.05);
       const _genreY=cY+cH-Math.round(W*0.046);
@@ -23289,15 +23284,10 @@ async function _srvRenderVideo(opts){
       ctx.save();
       ctx.globalAlpha=pFo; ctx.translate(0,(1-pFo)*H*0.03);
       ctx.direction='ltr'; ctx.textAlign='center'; ctx.fillStyle=cream;
-      ctx.font=`800 ${Math.round(W*0.030)}px 'Vazirmatn', sans-serif`;
-      try{ctx.letterSpacing=Math.round(W*0.008)+'px';}catch(_){}
-      const _brand='SRV FARSI', _bw=ctx.measureText(_brand).width, _fs=W*0.0012;
-      _drawFarsiMusicMark(W/2-_bw/2-Math.round(W*0.040),Math.round(H*0.812)-5*_fs,_fs,gold,false);
-      ctx.fillText(_brand,W/2+Math.round(W*0.012),Math.round(H*0.812));
-      try{ctx.letterSpacing='0px';}catch(_){}
+      // CEO correction 2026-11-16: the lower "SRV FARSI" brand line above the Persian subtitle is removed (header already names Silk Road Voices).
       ctx.direction='rtl'; ctx.fillStyle='rgba(253,246,232,0.88)';
       ctx.font=`500 ${Math.round(W*0.027)}px 'Vazirmatn', sans-serif`;
-      ctx.fillText('آهنگ‌های بیشتر در کانال ما',W/2,Math.round(H*0.838));
+      ctx.fillText('آهنگ‌های بیشتر در کانال ما',W/2,Math.round(H*0.800));   // CEO 2026-11-16: moved up (was 0.838) now that the brand line above it is gone — keeps it out of the Shorts bottom UI zone
       ctx.restore();
       ctx.direction='ltr'; ctx.textAlign='left';
     }
