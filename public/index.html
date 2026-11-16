@@ -4108,6 +4108,7 @@ async function _activateUser(user){
   _statusChecks.then(()=>{
     renderTab(currentTab||'home');
   });
+  _srvfMixServerSwitch(); // SRV Farsi Mix: ask the server once whether the Mix is switched on (CEO/VA only; no-op otherwise)
   _statusChecks.then(()=>{_srvfMixDeepLink();},()=>{_srvfMixDeepLink();}); // SRV Farsi Mix validation: ?srvfMix=1&srvfMixOpen=<Mix key> opens that Mix directly (runs after the render above; no-op otherwise)
   renderNav();
   renderTab(currentUser.id==='va'?'tasks':'home');
@@ -20673,7 +20674,7 @@ function _srvFarsiPlaylistResultHtml(pkg){
 }
 // ═══ SRV Farsi Mix (CEO order 2026-11-12) — PREVIEW ONLY. Default OFF: production never shows it until a release is approved. ═══
 // Pure decision (tested): the Mix is visible only (1) on a local development host with ?srvfMix=1 (or localStorage srvfMix=1), or (2) on an isolated VALIDATION deployment — a Vercel preview URL of this project,
-// protected by Vercel Authentication — with ?srvfMix=1. NEVER on the production aliases. (2) exists only for the CEO-authorized private YouTube test and is removed/replaced by the real flag at release.
+// protected by Vercel Authentication — with ?srvfMix=1. On the production aliases ONLY via the server switch below (_srvfMixServerSwitch sets the forced flag when the server says enabled); (2) exists for isolated validation.
 function _srvfMixFlagFor(hostname,search,stored,forced){
   if(forced===true)return true;
   const h=String(hostname||'').toLowerCase(), asked=new URLSearchParams(search||'').get('srvfMix')==='1';
@@ -20685,6 +20686,23 @@ function _srvfMixFlagFor(hostname,search,stored,forced){
 function _srvfMixOn(){
   try{return _srvfMixFlagFor(location.hostname,location.search,localStorage.getItem('srvfMix'),window.__SRVF_MIX_FLAG__);}catch(e){}
   return false;
+}
+// PRODUCTION SWITCH (CEO release 2026-11-16): the Mix is shown in Production ONLY when the SERVER says it is on. The switch is the admin-only setting app_settings.srv_farsi_mix (enabled + the pinned SRV Farsi
+// channel id); the page cannot read it. Once per CEO/VA sign-in the page asks the server's own status operation, which answers ok+enabled only for a CEO/VA session and only while that setting is enabled.
+// Family, signed-out visitors, a disabled or missing setting and any error leave the Mix hidden. The rest of the page is untouched (no flag => nothing changes).
+let _srvfMixProbeState='unprobed';
+async function _srvfMixServerSwitch(){
+  if(_srvfMixProbeState!=='unprobed')return;
+  try{
+    if(typeof currentUser==='undefined'||!currentUser||(currentUser.access||[]).indexOf('tasks')<0)return;   // Admin / VA only
+    _srvfMixProbeState='probing';
+    const r=await _publishFetch('/api/ops?action=srv_farsi_mix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'status'})});
+    const d=await r.json().catch(function(){return {};});
+    if(r.ok&&d&&d.ok===true&&d.enabled===true){
+      window.__SRVF_MIX_FLAG__=true; _srvfMixProbeState='on';
+      try{if(typeof activeExec!=='undefined'&&activeExec&&typeof openExec==='function'){const t=(D.tasks||[]).find(function(x){return String(x&&x.id)===String(activeExec);});if(t&&t.engine==='SRV Farsi')openExec(String(activeExec));}}catch(e){}   // already on a Farsi task card: show the new option
+    }else _srvfMixProbeState='off';
+  }catch(e){_srvfMixProbeState='off';}
 }
 // Direct link to ONE existing Mix (validation deployments only): ?srvfMix=1&srvfMixOpen=<Mix key, e.g. fmix_202611_…>. Opens that Mix's task card (its DONE screen once uploaded) after sign-in, refresh or session restore.
 // Strictly Mix-only: the flag must be on, the user must have Tasks access (Admin / VA — never Family), the key must match a saved SRV Farsi Mix package, and the task must be that package's own Mix task.
@@ -20826,6 +20844,8 @@ function _srvfMixHost(){
       if(cat)cat.songs.filter(function(x){return !x.pkgId;}).forEach(function(x){c0.push({pkgId:'yt:'+x.youtubeVideoId,title:x.title,finglish:'',finglishAuto:false,artist:'',artistSource:'',mood:'',durationSec:x.durationSec||0,durationSource:'youtube',youtubeVideoId:x.youtubeVideoId,eligible:false,reason:x.reason,inMmmos:false,sourceUrl:null,cover:null,generatedAt:x.publishedAt||'',publishedAt:x.publishedAt||'',suggestions:x.suggestions||[]});});
       // songs an operator (or the strict automatic rule) linked to original audio: real, selectable candidates — verified by the server, re-checked at upload
       if(cat)cat.songs.filter(function(x){return x.attached&&x.pkgId;}).forEach(function(x){c0.push({pkgId:x.pkgId,taskUid:null,title:x.title,finglish:x.finglish||'',finglishAuto:x.finglishAuto!==false,artist:x.artist||'',artistSource:'attachment',mood:x.mood||'',durationSec:x.durationSec||0,durationSource:'youtube',youtubeVideoId:x.youtubeVideoId,privacy:'public',audioSource:'attached-file',sourceUrl:x.sourceUrl,cover:null,generatedAt:x.publishedAt||'',eligible:x.eligible===true,reason:x.reason||null,inMmmos:true,attached:true,attachedBy:x.attachedBy,attachedAt:x.attachedAt,attachKind:x.attachKind,attachedPackageId:x.packageId||null});});
+      // CEO 2026-11-16: a song with NO recorded library cover shows ITS OWN originally published thumbnail (never another artist image). 12 of 16 older SRV Farsi Longs predate the cover library.
+      { const th={}; (all||[]).forEach(function(p){if(p&&p.id)th[String(p.id)]=p._srvThumbUrl||p._srvThumbDataUrl||'';}); c0.forEach(function(c){if(!(c.cover&&c.cover.id)&&th[c.pkgId])c.thumbSrc=th[c.pkgId];}); }
       c0.verified=(!!cat&&cat.complete===true)||(!cat&&!!c0.verifiedOnly);c0.relaxed=cat?!!cat.relaxed:!!c0.relaxed;
       const srvIncomplete=!cat||cat.complete!==true;
       c0.complete=!!_srvfMixPkgState.complete&&!srvIncomplete;
@@ -20850,7 +20870,9 @@ function _srvfMixHost(){
     removeSource:async function(id){try{const r=await this.api('source_remove',{youtubeVideoId:id});if(r.body&&r.body.ok){_srvfMixCat=null;return {ok:true};}return {ok:false,text:_srvfMixAttachText(r.body)};}catch(e){return {ok:false,text:'Could not remove the link.'};}},
     reloadCatalog:function(){_srvfMixPkgAt=0;_srvfMixPkgCache=[];_srvfMixChk=null;_srvfMixCat=null;_srvfMixCatalogNoted=false;},
     api:async function(op,body){const r=await _publishFetch('/api/ops?action=srv_farsi_mix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({op:op},body||{}))});const d=await r.json().catch(function(){return {};});return {status:r.status,body:d};},
-    cover:function(c){const art=(c.cover&&c.cover.artist)||c.artist||'female';const e=(c.cover&&_srvFarsiAvatarById(art,c.cover.id))||_srvFarsiAvatarLibrary(art)[0]||null;return _srvfMixEntryCover(e);},
+    cover:function(c){const art=(c.cover&&c.cover.artist)||c.artist||'female';const lib=(c.cover&&_srvFarsiAvatarById(art,c.cover.id))||null;
+      if(!lib&&c&&c.thumbSrc)return {src:c.thumbSrc,thumb:c.thumbSrc,focus:null,label:'Published thumbnail'};   // the song's own original thumbnail (center-cropped square by the scene)
+      return _srvfMixEntryCover(lib||_srvFarsiAvatarLibrary(art)[0]||null);},
     libraryCovers:function(){return ['female','male','duet'].flatMap(function(a){return _srvFarsiAvatarLibrary(a).map(_srvfMixEntryCover);});},
     savePkg:async function(pkg){const ok=(typeof savePackageToSupabase==='function')?(await savePackageToSupabase(pkg))!==false:true;if(typeof saveAppState==='function')saveAppState();if(!ok)throw new Error('the database refused the package');return true;},
     // The Mix package mirrors the Short-from-Long package: one row per Mix, a DB-only title so the (engine,title) uniqueness never collides; nothing else is written.
