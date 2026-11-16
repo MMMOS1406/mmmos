@@ -222,10 +222,10 @@ ok('picker shows visual thumbnails (no filenames) for the whole artist library',
   // ── Fix pass: Short text information ──
   ok('Short: channel header',/fillText\('SILK ROAD VOICES',W\/2/.test(short)&&/fillText\('PERSIAN LOVE SONGS',W\/2/.test(short));
   ok('Short: cover card carries Farsi title, Latin title and genre',/_srvFitFarsiTitle\(ctx,_rawTitle,cW-_cPad\*2/.test(short)&&/String\(titleFinglish\)\.toUpperCase\(\),W\/2,_finY/.test(short)&&/fillText\('PERSIAN LOVE SONG',W\/2,_genreY\)/.test(short));
-  ok('Short: brand + follow line',/const _brand='SRV FARSI'/.test(short)&&/آهنگ‌های بیشتر در کانال ما/.test(short));
+  ok('Short: follow line kept; NO "SRV FARSI" card mark and NO lower brand line (CEO correction 2026-11-16 — the header says SILK ROAD VOICES)',!/const _brand='SRV FARSI'/.test(short)&&!/fillText\('SRV FARSI'/.test(short)&&/آهنگ‌های بیشتر در کانال ما/.test(short));
   const ys=[...short.matchAll(/Math\.round\(H\*(0\.\d+)\)/g)].map(m=>parseFloat(m[1]));
   ok('Short: all text sits inside the platform safe zones (below the top 8%, above the bottom 15%)',Math.min(...ys)>=0.08&&Math.max(...ys)<=0.85,'y range '+Math.min(...ys)+' to '+Math.max(...ys));
-  ok('Short: title, Latin title, genre, header and brand/follow line are kept',/fillText\('SILK ROAD VOICES',W\/2/.test(short)&&/String\(titleFinglish\)\.toUpperCase\(\),W\/2,_finY/.test(short)&&/const _brand='SRV FARSI'/.test(short)); }
+  ok('Short: title, Latin title, genre, header and follow line are kept',/fillText\('SILK ROAD VOICES',W\/2/.test(short)&&/String\(titleFinglish\)\.toUpperCase\(\),W\/2,_finY/.test(short)&&!/SRV FARSI'/.test(short)&&/آهنگ‌های بیشتر در کانال ما/.test(short)); }
 // ── Fix pass: fonts ready before the cover, rotation visible at Approve ──
 ok('fonts are loaded with the real title/lyric text before the cover is captured',/_srvFarsiEnsureFonts\(\[title,titleFinglish,hookText,lyrics\]\.join\(' '\)\)/.test(h)&&/document\.fonts\.load\("600 58px 'Noto Nastaliq Urdu'",_txt\)/.test(h));
 ok('build records which library image it used',/pkg\._srvVisualPoolPos=\{n:_fLibA\.indexOf\(_fPicked\)\+1,of:_fLibA\.length/.test(build0));

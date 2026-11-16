@@ -131,7 +131,7 @@ export function createMixScene({ W = 1920, H = 1080, mix, background = 'ice', im
       else { const sc = ctx.createLinearGradient(0, 0, L.x + L.w + 120, 0); sc.addColorStop(0, 'rgba(235,248,253,0.42)'); sc.addColorStop(0.8, 'rgba(235,248,253,0.32)'); sc.addColorStop(1, 'rgba(235,248,253,0)'); ctx.fillStyle = sc; ctx.fillRect(0, 0, L.x + L.w + 160, H); }
       const af = activeFloat(t); drawHeader(ctx); drawTracklist(ctx, t, af); drawCover(ctx, t, af);
       // brand mark (drawn here, not a copied logo)
-      ctx.save(); ctx.fillStyle = spec.accent; ctx.globalAlpha = 0.9; ctx.font = `700 15px ${FONT_LATIN}`; ctx.letterSpacing = '5px'; ctx.textAlign = 'right'; ctx.fillText('SILK ROAD VOICES · SRV FARSI', W - 70, H - 38); ctx.restore();
+      ctx.save(); ctx.fillStyle = spec.accent; ctx.globalAlpha = 0.9; ctx.font = `700 15px ${FONT_LATIN}`; ctx.letterSpacing = '5px'; ctx.textAlign = 'right'; ctx.fillText('SILK ROAD VOICES', W - 70, H - 38); ctx.restore();
     },
     activeAt(t) { let a = 0; for (let i = 1; i < n; i++) if (t >= tr[i].switchAtSec) a = i; return a; },
   };
@@ -164,7 +164,7 @@ export function drawMixThumbnail(ctx, { W = 1280, H = 720, background = 'night-g
 export function drawMixTracklistThumbnail(ctx, { W = 1280, H = 720, moodLabel, tracks = [] }) {
   const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#0f0a05'); g.addColorStop(1, '#2a1b0c'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   const gold = ctx.createLinearGradient(0, 40, 0, 200); gold.addColorStop(0, '#fff1c4'); gold.addColorStop(1, '#b8812f');
-  ctx.save(); ctx.fillStyle = gold; ctx.textAlign = 'left'; ctx.font = `800 96px ${FONT_DISPLAY}`; ctx.fillText(String(moodLabel || '').toUpperCase(), 64, 150); ctx.font = `700 40px ${FONT_LATIN}`; ctx.letterSpacing = '8px'; ctx.fillText('SRV FARSI MIX', 66, 206); ctx.letterSpacing = '0px';
+  ctx.save(); ctx.fillStyle = gold; ctx.textAlign = 'left'; ctx.font = `800 96px ${FONT_DISPLAY}`; ctx.fillText(String(moodLabel || '').toUpperCase(), 64, 150); ctx.font = `700 40px ${FONT_LATIN}`; ctx.letterSpacing = '8px'; ctx.fillText('SILK ROAD VOICES MIX', 66, 206); ctx.letterSpacing = '0px';
   const rows = tracks.slice(0, 9), rh = Math.min(54, 440 / Math.max(1, rows.length)); rows.forEach((t, i) => { const y = 270 + i * rh; ctx.fillStyle = '#e3b25a'; ctx.font = `700 ${Math.round(rh * 0.5)}px ${FONT_MONO}`; ctx.fillText(String(i + 1).padStart(2, '0'), 66, y + rh * 0.6); ctx.fillStyle = '#fff'; ctx.direction = 'rtl'; const s = fit(ctx, t.title, 620, Math.round(rh * 0.62), 700, FONT_FA, 18); ctx.font = `700 ${s}px ${FONT_FA}`; ctx.fillText(t.title, 150, y + rh * 0.62); ctx.direction = 'ltr'; });
   ctx.restore();
 }
