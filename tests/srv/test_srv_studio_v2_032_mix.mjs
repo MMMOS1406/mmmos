@@ -23,10 +23,16 @@ const tl5 = M.srv2MixTimeline(five);
 const sum = five.reduce((a, x) => a + x.durationSec, 0);
 ok('total = sum of songs − (n−1) × crossfade (today\'s 5 public Longs → 19:01)', Math.abs(tl5.totalSec - (sum - 4 * 6)) < 1e-6 && tl5.totalLabel === '19:01', tl5.totalLabel);
 ok('each song starts where the previous ends minus the crossfade; chapter = middle of the crossfade; first chapter 0:00', tl5.items.every((x, i) => i === 0 ? x.startSec === 0 && x.chapterSec === 0 : Math.abs(x.startSec - (tl5.items[i - 1].endSec - 6)) < 1e-6 && x.chapterSec === Math.floor(x.startSec + 3)));
-ok('today\'s catalogue is too short for a 30-min mix (19:01) — the rules say so', !M.srv2MixValidate(tl5).ok && /not within 4 min of 30:00/.test(M.srv2MixValidate(tl5).problems.join()));
+ok('CEO correction 2026-11-16: NO fixed length — today\'s 19:01 mix of 5 songs is valid (the runtime is whatever the songs add up to)', M.srv2MixValidate(tl5).ok, M.srv2MixValidate(tl5).problems.join());
 const eight = el.filter((e) => e.eligible).slice(0, 8); const tl8 = M.srv2MixTimeline(eight);
 ok('8 songs (5 real + 3 TEST stand-ins) → 30:49, rules met', tl8.totalLabel === '30:49' && M.srv2MixValidate(tl8).ok, tl8.totalLabel);
-ok('rules: at most 8 songs, no repeats, chapters ≥ 10 s apart', !M.srv2MixValidate(M.srv2MixTimeline(eight.concat([eight[0]]))).ok && /twice|at most 8/.test(M.srv2MixValidate(M.srv2MixTimeline(eight.concat([eight[0]]))).problems.join()));
+ok('rules: no repeats, chapters ≥ 10 s apart', !M.srv2MixValidate(M.srv2MixTimeline(eight.concat([eight[0]]))).ok && /twice/.test(M.srv2MixValidate(M.srv2MixTimeline(eight.concat([eight[0]]))).problems.join()));
+const two = M.srv2MixTimeline(five.slice(0, 2)); const vTwo = M.srv2MixValidate(two);
+ok('ANY selection of at least two songs is valid (two songs: valid, chapter-bar note is only a warning)', vTwo.ok && vTwo.warnings.length === 1 && /3 timestamps/.test(vTwo.warnings[0]), JSON.stringify(vTwo));
+ok('one song is refused (at least two)', !M.srv2MixValidate(M.srv2MixTimeline(five.slice(0, 1))).ok && /at least 2 songs/.test(M.srv2MixValidate(M.srv2MixTimeline(five.slice(0, 1))).problems.join()));
+ok('NO song-count ceiling: 12 songs (> the old 8) are valid when the file fits', (() => { const many = []; for (let i = 0; i < 12; i++) many.push({ ...eight[i % eight.length], pkgId: 'x' + i, title: 'T' + i }); const v = M.srv2MixValidate(M.srv2MixTimeline(many)); return v.ok; })());
+ok('a Mix too long for the 500 MB file limit is refused with a clear reason (not by song count)', (() => { const huge = []; for (let i = 0; i < 160; i++) huge.push({ pkgId: 'h' + i, title: 'H' + i, durationSec: 240 }); const v = M.srv2MixValidate(M.srv2MixTimeline(huge)); return !v.ok && /fewer songs|YouTube/.test(v.problems.join()); })());
+ok('catalog states: ready / source audio unavailable / private or unpublished / not built (every song is classified, none dropped)', (() => { const c = M.srv2MixCatalogSummary([{ eligible: true }, { reason: 'no_audio_source' }, { reason: 'unknown_duration' }, { reason: 'not_public' }, { reason: 'not_uploaded' }, { reason: 'not_found_on_youtube' }, { reason: 'not_built' }]); return c.total === 7 && c.ready === 1 && c.source_unavailable === 2 && c.private === 3 && c.not_built === 1; })());
 ok('clock labels: m:ss under an hour, h:mm:ss beyond', M.srv2Clock(1849) === '30:49' && M.srv2Clock(3725) === '1:02:05' && M.srv2Clock(0) === '0:00');
 let threw = false; try { M.srv2MixTimeline([{ pkgId: 'x', title: 'x', durationSec: 10 }]); } catch (_) { threw = true; }
 ok('a song shorter than two crossfades is refused', threw);
