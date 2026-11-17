@@ -59,4 +59,20 @@ ok('private-first: the upload decision refuses a second Mix for a month and a du
     ok('snowfall is visible but restrained: some pixels change at every sample time, never more than 2% of the frame, and the artist\'s face area stays clear (under 2% of its pixels change)', diffs.every((d) => d.changedOutside > 80) && nonface / diffs.length / (640 * 360) < 0.02 && face / diffs.length < 0.02 * (Math.PI * (1080 * 0.12) ** 2 / 9), diffs);
     { const all = texts.join(''); ok('no frame draws "Monthly Mix" (or any title) in the Mix scene — only the SRV STUDIO wordmark (drawn letter by letter)', !/monthly|mix/i.test(all) && all.includes('SRV STUDIO'), all.slice(0, 80)); }
     ok('snowfall is cheap and deterministic: under 40 ms per 1080p frame in this environment, and the same time gives the same frame', costMs / 4 < 40 && Buffer.compare(Buffer.from(frame(mk(R.SRV2_FX_SNOWFALL, ''), 40).d), Buffer.from(frame(mk(R.SRV2_FX_SNOWFALL, ''), 40).d)) === 0, costMs / 4); } }
+// ── PM final title correction 2026-11-17: the YouTube Mix title no longer says "Monthly Mix" ──
+{
+  const t2 = E.srv2MixTimeline([{ pkgId: 'a', title: 'Passenger Seat Witness', durationSec: 244 }, { pkgId: 'b', title: 'You Left Your Jacket', durationSec: 197 }]);
+  const dec = E.srv2MixTitle('2026-12', t2);
+  ok('December 2026 title: exact corrected text (SRV Studio branding, month, year, length, Emotional Deep House kept)', dec === 'SRV Studio Mix \u2014 December 2026 | ' + Math.round(t2.totalSec / 60) + ' Min Emotional Deep House for the Night Drive', dec);
+  let bad = [], n = 0;
+  for (let mo = 1; mo <= 12; mo++) for (const secs of [150, 400, 1200, 1800, 3600, 7200]) {
+    const tl = E.srv2MixTimeline([{ pkgId: 'a', title: 'A', durationSec: secs / 2 + 3 }, { pkgId: 'b', title: 'B', durationSec: secs / 2 + 3 }]);
+    const t = E.srv2MixTitle('2026-' + String(mo).padStart(2, '0'), tl); n++;
+    if (!t || /monthly/i.test(t) || t.length > 100 || !/^SRV Studio Mix \u2014 [A-Z][a-z]+ 2026/.test(t) || !/Emotional Deep House/.test(t)) bad.push(t);
+  }
+  ok(`${n} month × length combinations: never "Monthly Mix"/"Monthly", always SRV Studio + month + year + Emotional Deep House, at most 100 characters`, !bad.length, bad.slice(0, 3));
+  ok('description, tags and hashtags are unchanged by the title fix (still the tracklist from 0:00, song links, AI disclosure)', /^Tracklist$/m.test(E.srv2MixDescription('2026-12', t2)) && /^0:00 Passenger Seat Witness$/m.test(E.srv2MixDescription('2026-12', t2)) && E.srv2MixDescription('2026-12', t2).includes(E.SRV2_MIX_AI_DISCLOSURE) && E.srv2MixTags(t2).includes('SRV Studio'));
+  ok('the monthly slot and one-Mix-per-month rule still work internally (planned release for December, second Mix of the month refused)', typeof E.srv2MixMonthlySlot('2026-12').utcIso === 'string' && !E.srv2MixUploadDecide({ entries: [{ monthKey: '2026-12', status: 'uploaded', mixKey: 'x', kind: 'mix' }] }, { mixKey: 'y', monthKey: '2026-12' }).ok);
+  ok('the browser copy of the title generator is identical to the library copy', rd('lib/srvStudioV2Mix.mjs') === rd('public/srv-studio-v2/lib/srvStudioV2Mix.mjs'));
+}
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
