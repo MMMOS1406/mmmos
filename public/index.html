@@ -20809,6 +20809,12 @@ function _srvfMixHost(){
       }catch(e){return {pkg:null,ok:false};}
     },
     setStage:function(id,stage){_srvFarsiSetStage(id,stage);},
+    // CEO correction 2026-11-17: after a verified completion the card moves on. nextTask = the next scheduled, not-yet-done SRV Farsi task (today or later first, else the oldest waiting); with none, the card goes back to the task list (idle).
+    nextTask:function(task){const cur=String(task.taskId||task.id);const today=new Date().toISOString().slice(0,10);
+      const open=(D.tasks||[]).filter(function(t){return t&&t.engine==='SRV Farsi'&&String(t.id)!==cur&&t.status!=='done'&&t.status!=='cancelled'&&!String(_srvFarsiTaskUid(t)||'').startsWith('set-aside:');});
+      open.sort(function(a,b){return String(a.isoDate||'').localeCompare(String(b.isoDate||''))||(Number(a.id)-Number(b.id));});
+      const t=open.find(function(x){return String(x.isoDate||'')>=today;})||open[0]||null;return t?{id:String(t.id),name:String(t.name||''),isoDate:String(t.isoDate||'')}:null;},
+    resetToNext:function(task){const nx=this.nextTask(task);if(nx&&typeof openExec==='function')openExec(nx.id);else if(typeof closeExec==='function')closeExec();},
     rerender:function(id){if(typeof activeExec!=='undefined'&&String(activeExec)===String(id)&&typeof openExec==='function')openExec(String(id));else if(typeof renderTab==='function')renderTab(typeof currentTab!=='undefined'?currentTab:'tasks');},
     copy:function(t){try{navigator.clipboard.writeText(t);}catch(e){}},
     // Eligible songs = published Farsi Longs whose audio is reachable AND whose YouTube video is acceptable RIGHT NOW (visibility asked of YouTube through the server, not guessed from our records) — so a song that is Private on
@@ -20871,7 +20877,7 @@ function _srvfMixHost(){
     reloadCatalog:function(){_srvfMixPkgAt=0;_srvfMixPkgCache=[];_srvfMixChk=null;_srvfMixCat=null;_srvfMixCatalogNoted=false;},
     api:async function(op,body){const r=await _publishFetch('/api/ops?action=srv_farsi_mix',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({op:op},body||{}))});const d=await r.json().catch(function(){return {};});return {status:r.status,body:d};},
     cover:function(c){const art=(c.cover&&c.cover.artist)||c.artist||'female';const lib=(c.cover&&_srvFarsiAvatarById(art,c.cover.id))||null;
-      if(!lib&&c&&c.thumbSrc)return {src:c.thumbSrc,thumb:c.thumbSrc,focus:null,label:'Published thumbnail'};   // the song's own original thumbnail (center-cropped square by the scene)
+      if(!lib&&c&&c.thumbSrc)return {src:c.thumbSrc,thumb:c.thumbSrc,focus:null,label:'Published thumbnail',published:true};   // the song's own original thumbnail (center-cropped square by the scene)
       return _srvfMixEntryCover(lib||_srvFarsiAvatarLibrary(art)[0]||null);},
     libraryCovers:function(){return ['female','male','duet'].flatMap(function(a){return _srvFarsiAvatarLibrary(a).map(_srvfMixEntryCover);});},
     savePkg:async function(pkg){const ok=(typeof savePackageToSupabase==='function')?(await savePackageToSupabase(pkg))!==false:true;if(typeof saveAppState==='function')saveAppState();if(!ok)throw new Error('the database refused the package');return true;},

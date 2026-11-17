@@ -219,25 +219,41 @@ export function srvfTransliterate(fa) {
 }
 
 // ── title and metadata ──
-// "Top Persian — Love Romantic Mix | گلچین آهنگ‌های عاشقانه فارسی" (All Artists); the single-artist categories add the artist word. The VA can edit it freely (≤ 100 characters).
+// "Top Persian — Love Romantic Mix | گلچین آهنگ‌های عاشقانه فارسی". CEO correction 2026-11-17: the ARTIST CATEGORY (Female / Male / Duet / All Artists) stays internal — it selects and filters songs — and is never part of the
+// generated title, cover or description. The VA can still edit the title freely (≤ 100 characters).
 export function srvfMixTitle(category, mood) {
   const c = srvfCategory(category), m = srvfMood(mood); if (!c || !m) return '';
-  const lead = c.id === 'all' ? '' : c.label + ' ';
-  const variants = [`${SRVF_MIX_CONFIG.titlePrefix} — ${lead}${m.label} Mix | ${m.fa}`, `${SRVF_MIX_CONFIG.titlePrefix} — ${lead}${m.label} Mix`, `${SRVF_MIX_CONFIG.titlePrefix} — ${m.label} Mix`];
+  const variants = [`${SRVF_MIX_CONFIG.titlePrefix} — ${m.label} Mix | ${m.fa}`, `${SRVF_MIX_CONFIG.titlePrefix} — ${m.label} Mix`];
   return variants.find((v) => v.length <= 100) || variants[variants.length - 1];
 }
+// Artist-category words never appear on the artwork: strip them from any title that is drawn on a cover/thumbnail (older saved titles may still contain them).
+export const srvfStripCategoryWords = (t) => String(t || '').replace(/\b(All Artists|Female|Male|Duet)\b[\s:·-]*/gi, '').replace(/\s{2,}/g, ' ').trim();
 export function srvfTitleCheck(title) { const t = String(title || '').trim(); return !t ? 'a title is required' : t.length > 100 ? `the title is ${t.length} characters (YouTube allows 100)` : /[<>]/.test(t) ? 'the title cannot contain < or >' : null; }
 export function srvfMixDescription({ title, category, mood }, tl) {
-  const c = srvfCategory(category), m = srvfMood(mood); const mins = Math.round(tl.totalSec / 60); const lines = [];
+  const m = srvfMood(mood); const mins = Math.round(tl.totalSec / 60); const lines = [];
   lines.push(`${m ? m.fa : 'گلچین آهنگ‌های فارسی'} — ${tl.items.length} آهنگ، ${mins} دقیقه موسیقی`);
-  lines.push(`${tl.items.length} Persian ${m ? m.label.toLowerCase() : 'love'} songs from Silk Road Voices${c && c.id !== 'all' ? ' — ' + c.label.toLowerCase() + ' voices' : ''}, one ${mins}-minute mix.`);
+  lines.push(`${tl.items.length} Persian ${m ? m.label.toLowerCase() : 'love'} songs from Silk Road Voices, one ${mins}-minute mix.`);
   lines.push(''); lines.push('Tracklist');
-  for (const x of tl.items) lines.push(`${x.timestamp} ${x.title}${x.finglish ? ' — ' + x.finglish : ''}`);
+  // CEO correction 2026-11-17: each chapter line starts with the timestamp followed by the LATIN title (Finglish), then the Persian title. A line that begins with Latin text stays left-to-right, so the timestamp is the first
+  // thing on every line in YouTube Studio and on the watch page (a Persian-first line was displayed right-to-left with the timestamp pushed to the far end).
+  for (const x of tl.items) lines.push(`${x.timestamp} ${x.finglish ? x.finglish + ' — ' + x.title : x.title}`);
   lines.push(''); lines.push('Full songs');
-  for (const x of tl.items) if (x.youtubeVideoId) lines.push(`${x.title} — https://youtu.be/${x.youtubeVideoId}`);
+  for (const x of tl.items) if (x.youtubeVideoId) lines.push(`${x.finglish || x.title} — https://youtu.be/${x.youtubeVideoId}`);
   lines.push(''); lines.push('Subscribe to Silk Road Voices for a new Persian song every week.'); lines.push(SRVF_AI_DISCLOSURE);
   lines.push('#SilkRoadVoices #PersianMusic #FarsiSongs #PersianLoveSongs #ایرانی #آهنگ_فارسی');
   return lines.join('\n');
+}
+// YouTube's own chapter rules, checked against the description that is about to be uploaded: the first timestamp is 0:00 and sits at the START of its line, timestamps ascend, every chapter lasts at least 10 s, and
+// there are at least three (YouTube draws the chapter bar from three). `items` is the timeline of the file that was actually built; each chapter must be the item's own timestamp, in order.
+export function srvfChapterCheck(description, items) {
+  const problems = [], warnings = []; const rows = []; const re = /^((?:\d{1,2}:)?\d{1,2}:\d{2})\s+(\S.*)$/;
+  for (const raw of String(description || '').split('\n')) { const m = re.exec(raw); if (m) { const p = m[1].split(':').map(Number); rows.push({ at: p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1], ts: m[1], title: m[2] }); } }
+  if (!rows.length) problems.push('no chapter lines (a timestamp at the start of a line) in the description');
+  if (rows.length && rows[0].at !== 0) problems.push('the first chapter must be 0:00');
+  for (let i = 1; i < rows.length; i++) { if (!(rows[i].at > rows[i - 1].at)) problems.push(`chapter ${i + 1} does not come after chapter ${i}`); else if (rows[i].at - rows[i - 1].at < 10) problems.push(`chapter ${i + 1} is shorter than 10 s`); }
+  if (items) { if (rows.length !== items.length) problems.push(`${rows.length} chapter lines for ${items.length} songs`); else items.forEach((x, i) => { if (rows[i].ts !== x.timestamp) problems.push(`chapter ${i + 1} says ${rows[i].ts} but the song starts at ${x.timestamp}`); }); }
+  if (rows.length === 2) warnings.push('YouTube draws the chapter bar only from three timestamps'); else if (rows.length < 2 && rows.length) warnings.push('YouTube draws the chapter bar only from three timestamps');
+  return { ok: !problems.length, problems, warnings, chapters: rows };
 }
 export function srvfMixTags({ category, mood }, tl) {
   const base = ['Silk Road Voices', 'Persian music', 'Farsi songs', 'Persian love songs', 'آهنگ فارسی', 'گلچین آهنگ فارسی', (srvfMood(mood) || { label: 'Persian love' }).label + ' mix', 'persian mix 2026'];
@@ -255,6 +271,15 @@ export function srvfMixKey(monthKey, category, mood, tl) {
   for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = ((h2 << 5) + h2 + c) >>> 0; }
   return 'fmix_' + String(monthKey).replace('-', '') + '_' + h1.toString(36) + h2.toString(36);
 }
+
+// ── a song's own published thumbnail as its cover (older songs without a library cover) ──
+// Those 16:9 thumbnails carry the Persian title, the Latin title and the brand on ONE side and the portrait on the other. A centred square crop shows half of the title text on the cover. The portrait side is the side
+// with the photograph's texture (the other side is a smooth gradient with a few thin text strokes); the cover is the square taken from the middle of that half. `gray` is a w×h array of 0-255 luminance values.
+export function srvfPortraitSide(gray, w, h) {
+  let l = 0, r = 0, nl = 0, nr = 0; for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) { const i = y * w + x, g = Math.abs(gray[i + 1] - gray[i]) + Math.abs(gray[i + w] - gray[i]); if (x < w / 2) { l += g; nl++; } else { r += g; nr++; } }
+  const L = l / Math.max(1, nl), R = r / Math.max(1, nr); return { side: L > R ? 'left' : 'right', left: +L.toFixed(2), right: +R.toFixed(2), ratio: +(Math.max(L, R) / Math.max(0.01, Math.min(L, R))).toFixed(2) };
+}
+export function srvfPortraitCrop(iw, ih, side) { const s = Math.min(iw / 2, ih); const sx = side === 'left' ? 0 : iw - s; const sy = Math.min(ih - s, Math.max(0, ih * 0.04)); return { sx, sy, sw: s, sh: s }; }
 
 // ── backgrounds and cover ──
 // Approved procedural backgrounds (no external assets) plus any image from the SRV Farsi cover libraries ("cover:<avatarId>", blurred and darkened). Saved with the Mix package.

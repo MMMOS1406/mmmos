@@ -25,7 +25,7 @@ const fx = (mixApi) => { const f = makeFixture(); lastFx = f; f.persistTableWrit
   f.api.srv_farsi_mix = mixApi.api; return f; };
 
 const browser = await launch();
-async function session(role, mixApi) { const stub = await startStub({ publicDir: pub, fixture: fx(mixApi) }); const o = await openPage(browser, stub.origin); await fetchJson(stub.origin + '/__stub/reset'); await o.page.evaluate(() => { try { localStorage.setItem('srvfMix', '1'); } catch (e) {} }); await o.page.reload(); await login(o.page, stub.origin, role); await settle(o.page, stub.origin, 1500); return { stub, ...o }; }
+async function session(role, mixApi) { const stub = await startStub({ publicDir: pub, fixture: fx(mixApi) }); const o = await openPage(browser, stub.origin); await o.page.evaluateOnNewDocument(() => { window.__SRVF_RESET_MS = 1e9; }); await fetchJson(stub.origin + '/__stub/reset'); await o.page.evaluate(() => { try { localStorage.setItem('srvfMix', '1'); } catch (e) {} }); await o.page.reload(); await login(o.page, stub.origin, role); await settle(o.page, stub.origin, 1500); return { stub, ...o }; }
 const W = (r, ms = 700) => settle(r.page, r.stub.origin, ms);
 const openMix = async (r) => { await r.page.evaluate(() => { _srvFarsiVaSetArtistFormat(901, 'format', 'Mix'); currentTab = 'tasks'; openExec('901'); }); await W(r, 1800); await r.page.waitForSelector('[data-mix-host="901"] #save', { timeout: 15000 }); };
 

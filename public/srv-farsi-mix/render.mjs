@@ -41,7 +41,7 @@ export async function renderFarsiMix({ tracks, analysis, tl, mix, covers, bgCove
   if (typeof MediaRecorder === 'undefined') throw new Error('This browser cannot record video'); const mime = pickMime(); if (!mime) throw new Error('No supported video format');
   const edges = tracks.map((t) => analysis[t.pkgId].edges), gains = tracks.map((t) => analysis[t.pkgId].gain);
   say('Loading fonts and images…', 0); await loadFonts();
-  const images = { covers: {} }; for (let i = 0; i < tracks.length; i++) { const c = covers[tracks[i].pkgId]; images.covers[i] = { img: c ? await loadImage(c.src) : null, focus: c && c.focus }; }
+  const images = { covers: {} }; for (let i = 0; i < tracks.length; i++) { const c = covers[tracks[i].pkgId]; images.covers[i] = { img: c ? await loadImage(c.src) : null, focus: c && c.focus, published: !!(c && c.published) }; }
   if (bgCoverSrc) images.bg = await loadImage(bgCoverSrc);
   const duration = tl.totalSec; const cfg = F.SRVF_MIX_CONFIG; canvas.width = cfg.width; canvas.height = cfg.height; const ctx = canvas.getContext('2d', { alpha: false });
   const scene = createMixScene({ W: cfg.width, H: cfg.height, mix: { titleLatin: mix.titleLatin || mix.title.split('|')[0].trim(), titleFa: mix.titleFa || (mix.title.split('|')[1] || '').trim(), tracks: tl.items, totalSec: duration }, background: mix.background, images, seed });
@@ -59,6 +59,8 @@ export async function renderFarsiMix({ tracks, analysis, tl, mix, covers, bgCove
   t0 = actx.currentTime + 0.4; schedule(first);
   let failure = null, finished = false; const waitPlaying = async (sec) => { while (!finished && !(signal && signal.aborted) && actx.currentTime < t0 + sec) await sleep(250); };
   const feeder = (async () => { try { for (let k = 1; k < segs.length; k++) { await waitPlaying(segs[k - 1].fromSec); if (finished || (signal && signal.aborted)) return; schedule(await prepare(k)); if (k + 1 < segs.length) getSong(k + 1).catch(() => {}); } } catch (e) { failure = e; } })();
+  // CEO correction 2026-11-17: recording starts at the instant the first audio sample plays, so the file's time zero IS the timeline's time zero and every chapter timestamp lands on its transition (before, the file began about 0.4 s early).
+  while (actx.currentTime < t0 - 0.004) await sleep(4);
   rec.start(1000); let frame = 0, slow = 0;
   try {
     await new Promise((resolve, reject) => {
@@ -75,7 +77,7 @@ export async function renderFarsiMix({ tracks, analysis, tl, mix, covers, bgCove
   }
   const blob = new Blob(chunks, { type: mime.split(';')[0] });
   const tc = document.createElement('canvas'); tc.width = 1280; tc.height = 720; const cv = covers[(mix.thumbCover && mix.thumbCover.pkgId) || tracks[0].pkgId] || covers[tracks[0].pkgId];
-  drawMixThumbnail(tc.getContext('2d'), { background: mix.thumbBackground || 'night-gold', categoryLabel: (F.srvfCategory(mix.category) || {}).short || (F.srvfCategory(mix.category) || {}).label, moodLabel: (F.srvfMood(mix.mood) || {}).label, titleFa: (F.srvfMood(mix.mood) || {}).fa, tracks: tl.items, cover: cv ? { img: images.covers[tracks.findIndex((t) => covers[t.pkgId] === cv)].img, focus: cv.focus } : null, runtimeLabel: Math.round(duration / 60) + ' MIN' });
+  drawMixThumbnail(tc.getContext('2d'), { background: mix.thumbBackground || 'night-gold', categoryLabel: (F.srvfCategory(mix.category) || {}).short || (F.srvfCategory(mix.category) || {}).label, moodLabel: (F.srvfMood(mix.mood) || {}).label, titleFa: (F.srvfMood(mix.mood) || {}).fa, tracks: tl.items, cover: cv ? { img: images.covers[tracks.findIndex((t) => covers[t.pkgId] === cv)].img, focus: cv.focus, published: !!cv.published } : null, runtimeLabel: Math.round(duration / 60) + ' MIN' });
   const thumbBlob = await new Promise((r) => tc.toBlob(r, 'image/jpeg', 0.92));
   return { blob, mime, thumbBlob, stats: { sample: !!previewSample, version: SRVF_RENDER_VERSION, width: cfg.width, height: cfg.height, fps, durationSec: +duration.toFixed(2), sizeBytes: blob.size, slowFrames: slow, frames: frame, peakDecodedSongs: peakSongs, songs: tracks.length, chapters: tl.items.map((x) => ({ at: x.timestamp, title: x.title })) } };
 }
