@@ -197,7 +197,7 @@ export function mount(root, deps) {
     const tags = S.metaEdited.tags != null ? S.metaEdited.tags : M.srv2MixTags(t);
     return { mixId, monthKey: S.month, title, description, tags, crossfadeSec: t.crossfadeSec, totalSec: t.totalSec, version: SRV2_MIX_UI_VERSION,
       tracks: t.items.map((x, i) => { const s = song(x.pkgId), a = S.analysis[x.pkgId] || {}; return { order: i + 1, pkgId: x.pkgId, taskUid: s.taskUid, title: x.title, youtubeVideoId: s.youtubeVideoId, audioSource: s.audioSource, sourceUrl: s.sourceUrl, sourceDurationSec: a.edges ? a.edges.durationSec : s.durationSec, inSec: a.edges ? a.edges.inSec : null, outSec: a.edges ? a.edges.outSec : null, usedSec: x.durationSec, lufs: a.lufs ?? null, gainDb: a.gainDb ?? null, chapterSec: x.chapterSec, timestamp: x.timestamp, analysed: !!a.edges }; }),
-      image: { avatarId: S.avatarId }, plannedRelease: M.srv2MixMonthlySlot(S.month), playlist: { id: S.config.playlistId || null, title: 'SRV Studio Mixes' },
+      image: { avatarId: S.avatarId }, plannedRelease: M.srv2MixMonthlySlot(S.month), playlist: { id: S.config.playlistId || null, title: (S.config.playlistId === M.SRV2_MIX_PLAYLIST.fallback.id ? M.SRV2_MIX_PLAYLIST.fallback.title : 'SRV Studio Mixes') },
       render: S.build ? S.build.stats : null, output: S.output || null, status: S.approved ? 'approved' : S.build ? 'built' : 'draft' };
   };
   async function loadMonth() {
@@ -332,7 +332,7 @@ export function mount(root, deps) {
     const slotLabel = m.plannedRelease ? new Date(m.plannedRelease.utcIso).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '—';
     return `<section><h3>Done — ${esc(m.title)}</h3><table class="mx-t">
       <tr><td>Status</td><td>${esc(m.status)}</td></tr><tr><td>YouTube</td><td>${esc(u.youtubeVideoId || '—')} (PRIVATE until the VA makes it public)</td></tr>
-      <tr><td>Playlist</td><td>${pl.status === 'added' || pl.status === 'already' ? '✓ in SRV Studio Mixes (verified)' : pl.status === 'not_configured' ? 'SRV Studio Mixes not configured yet — add it in YouTube Studio' : esc(pl.error || pl.status || '—')} ${pl.status !== 'added' && pl.status !== 'already' && S.config.playlistId ? '<button id="mx-pl">Retry playlist</button>' : ''}</td></tr>
+      <tr><td>Playlist</td><td>${pl.status === 'added' || pl.status === 'already' ? '✓ in ' + esc(pl.playlistTitle || 'the playlist') + ' (verified)' : pl.status === 'not_configured' ? 'No playlist configured — add it in YouTube Studio' : esc(pl.error || pl.status || '—')} ${pl.status !== 'added' && pl.status !== 'already' && S.config.playlistId ? '<button id="mx-pl">Retry playlist</button>' : ''}</td></tr>
       <tr><td>Thumbnail</td><td>${m.thumbnail && m.thumbnail.status === 'set' ? '✓ custom 1280×720 thumbnail set' : (m.output && m.output.thumbnailPath ? 'not set yet <button id="mx-thumb">Retry thumbnail</button>' : 'none — set one in YouTube Studio')}</td></tr>
       <tr><td>Public release</td><td>At <b>${esc(slotLabel)}</b>: YouTube Studio → this video → Visibility → Public → Save. Do not use YouTube scheduling.</td></tr>
       <tr><td>Confirmation</td><td>${pc ? esc((pc.verifiedByApi ? '✓ ' : '') + 'YouTube reports ' + pc.youtubeReports + ' (' + String(pc.confirmedAt).slice(0, 16).replace('T', ' ') + ' UTC)') : 'not yet'} <button id="mx-public">I made it public</button></td></tr>
