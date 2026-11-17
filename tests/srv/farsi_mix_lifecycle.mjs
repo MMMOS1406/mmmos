@@ -16,7 +16,7 @@ const mk = () => {
 };
 const browser = await launch();
 async function run(role, flag) {
-  const stub = await startStub({ publicDir: pub, fixture: mk() }); const o = await openPage(browser, stub.origin); await fetchJson(stub.origin + '/__stub/reset');
+  const stub = await startStub({ publicDir: pub, fixture: mk() }); const o = await openPage(browser, stub.origin); await o.page.evaluateOnNewDocument(() => { window.__SRVF_RESET_MS = 1e9; }); await fetchJson(stub.origin + '/__stub/reset');
   await o.page.evaluate((f) => { try { f ? localStorage.setItem('srvfMix', '1') : localStorage.removeItem('srvfMix'); } catch (e) {} }, flag); await o.page.reload(); await login(o.page, stub.origin, role); await settle(o.page, stub.origin, 1500);
   return { stub, ...o };
 }

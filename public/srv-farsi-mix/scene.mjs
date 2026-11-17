@@ -2,6 +2,7 @@
 // Layout follows the CEO's benchmark: a full-frame cinematic background with soft light streaks and falling snow/particles; LEFT the title and the ordered tracklist with the
 // current song in a highlight pill; RIGHT a large rounded cover for the song that is playing. At each song transition (the middle of the audio crossfade — the same second as the
 // YouTube chapter) the highlight slides to the new row and the cover cross-fades to the new song's cover. No other channel's logo or artwork is used: everything is drawn here.
+import { srvfPortraitSide, srvfPortraitCrop, srvfStripCategoryWords } from './lib/srvFarsiMix.mjs';
 const TAU = Math.PI * 2;
 const FONT_FA = "'Vazirmatn','Geeza Pro','Noto Naskh Arabic','Damascus','Tahoma',sans-serif", FONT_DISPLAY = "'Lalezar','Vazirmatn','Geeza Pro',sans-serif", FONT_LATIN = "'Syne','Helvetica Neue',Arial,sans-serif", FONT_MONO = "'JetBrains Mono','Menlo',monospace";
 
@@ -26,6 +27,38 @@ function fit(ctx, text, maxW, size, weight, family, min = 14) { let s = size; ct
 export function srvfCoverCrop(iw, ih, focus) {
   const f = focus || { fx: 0.5, fy: 0.4, fw: 0.2 }; const side = Math.min(iw, ih) * (1 - clamp((f.fw || 0.2) - 0.2, 0, 0.3) * 0.0); const s = Math.min(side, iw, ih);
   const sx = clamp(f.fx * iw - s / 2, 0, iw - s), sy = clamp(f.fy * ih - s * 0.42, 0, ih - s); return { sx, sy, sw: s, sh: s };
+}
+
+// The rectangle of a cover that is drawn in the square tile.
+//  - a library cover (has a face focus): the square around the face, as before;
+//  - a song's OWN published thumbnail (older songs): only the portrait half of that thumbnail, so none of its Persian/Latin title text is ever half-visible in the tile (CEO correction 2026-11-17);
+//  - anything else: the centred square.
+// `canvasFactory` lets tests supply a canvas outside the browser.
+let canvasFactory = (w, h) => (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h }));
+export function srvfSetCanvasFactory(f) { canvasFactory = f; }
+export function srvfPublishedPortrait(img) {
+  const w = 480, h = Math.max(2, Math.round(480 * img.height / img.width)); const c = canvasFactory(w, h); const x = c.getContext('2d'); x.drawImage(img, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data, gray = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) gray[i] = (d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114) | 0;
+  const side = srvfPortraitSide(gray, w, h); return { ...srvfPortraitCrop(img.width, img.height, side.side), side: side.side, ratio: side.ratio };
+}
+export function srvfCoverRect(info) {
+  if (!info || !info.img) return null; const iw = info.img.width, ih = info.img.height;
+  if (info.focus) return srvfCoverCrop(iw, ih, info.focus);
+  if (info.published) { if (!info._rect) { try { info._rect = srvfPublishedPortrait(info.img); } catch (_) { info._rect = srvfPortraitCrop(iw, ih, 'right'); } } return info._rect; }
+  return srvfCoverCrop(iw, ih, null);
+}
+// ONE readable song title on a cover (the Short card's presentation): the Persian title large (shrunk, then wrapped onto two lines for long titles), the Latin title under it, and the channel name. `box` = the tile {x,y,s}.
+// Drawn separately from the photograph so the title of the song that is leaving fades out before the next one fades in (never two titles at once).
+export function drawSongCaption(ctx, box, track, alpha) {
+  if (alpha <= 0.001 || !track) return; const s = box.s, k = s / 640; ctx.save(); ctx.globalAlpha = alpha; ctx.textAlign = 'center'; ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 14 * k;
+  const maxW = s - 90 * k; const fa = String(track.title || '').trim(); const lat = String(track.finglish || '').toUpperCase().trim();
+  const brandY = box.y + s - 28 * k; const latSize = Math.round(25 * k), latY = brandY - 34 * k;
+  let faSize = Math.round(66 * k), lines = [fa]; ctx.direction = 'rtl'; ctx.font = `800 ${faSize}px ${FONT_FA}`;
+  while (faSize > 30 * k && ctx.measureText(fa).width > maxW) { faSize -= 2; ctx.font = `800 ${faSize}px ${FONT_FA}`; }
+  if (ctx.measureText(fa).width > maxW) { const words = fa.split(/\s+/); let best = null; for (let i = 1; i < words.length; i++) { const a = words.slice(0, i).join(' '), b = words.slice(i).join(' '); const w = Math.max(ctx.measureText(a).width, ctx.measureText(b).width); if (!best || w < best.w) best = { a, b, w }; } if (best) { lines = [best.a, best.b]; let sz = Math.round(54 * k); ctx.font = `800 ${sz}px ${FONT_FA}`; while (sz > 26 * k && Math.max(ctx.measureText(lines[0]).width, ctx.measureText(lines[1]).width) > maxW) { sz -= 2; ctx.font = `800 ${sz}px ${FONT_FA}`; } faSize = sz; } }
+  ctx.fillStyle = '#fdf6e8'; const lh = faSize * 1.22; const faBase = latY - 30 * k - faSize * 0.36 - (lines.length - 1) * lh; /* room for the Persian descenders above the Latin line */ lines.forEach((ln, i) => ctx.fillText(ln, box.x + s / 2, faBase + i * lh));
+  ctx.direction = 'ltr'; if (lat) { ctx.shadowBlur = 8 * k; ctx.fillStyle = 'rgba(253,246,232,0.9)'; let ls = latSize; ctx.font = `600 ${ls}px ${FONT_LATIN}`; ctx.letterSpacing = `${Math.round(3 * k)}px`; while (ls > 13 && ctx.measureText(lat).width > maxW) { ls -= 1; ctx.font = `600 ${ls}px ${FONT_LATIN}`; } ctx.fillText(lat, box.x + s / 2, latY); ctx.letterSpacing = '0px'; }
+  ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(253,246,232,0.7)'; ctx.font = `600 ${Math.round(15 * k)}px ${FONT_LATIN}`; ctx.letterSpacing = `${Math.round(4 * k)}px`; ctx.fillText('SILK ROAD VOICES', box.x + s / 2, brandY); ctx.letterSpacing = '0px'; ctx.restore();
 }
 
 // ── particles ──
@@ -79,7 +112,7 @@ export function createMixScene({ W = 1920, H = 1080, mix, background = 'ice', im
     ctx.save(); ctx.textBaseline = 'alphabetic'; ctx.fillStyle = spec.accent;
     ctx.font = `800 22px ${FONT_LATIN}`; ctx.letterSpacing = '6px'; ctx.textAlign = 'left'; ctx.fillText('TOP PERSIAN', L.x, 96); ctx.letterSpacing = '0px';
     ctx.fillStyle = spec.ink; ctx.shadowColor = dark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.4)'; ctx.shadowBlur = 8;
-    const tl1 = mix.titleLatin.replace(/^(SRV Farsi|Top Persian)\s*[—-]\s*/i, '').toUpperCase(); const s1 = fit(ctx, tl1, L.w, 62, 800, FONT_LATIN, 28); ctx.font = `800 ${s1}px ${FONT_LATIN}`; ctx.letterSpacing = '2px'; ctx.fillText(tl1, L.x, 164); ctx.letterSpacing = '0px';
+    const tl1 = srvfStripCategoryWords(mix.titleLatin.replace(/^(SRV Farsi|Top Persian)\s*[—-]\s*/i, '')).toUpperCase(); const s1 = fit(ctx, tl1, L.w, 62, 800, FONT_LATIN, 28); ctx.font = `800 ${s1}px ${FONT_LATIN}`; ctx.letterSpacing = '2px'; ctx.fillText(tl1, L.x, 164); ctx.letterSpacing = '0px';
     ctx.fillStyle = spec.dim; ctx.shadowBlur = 0; ctx.direction = 'rtl'; ctx.textAlign = 'left';
     const s2 = fit(ctx, mix.titleFa, L.w, 34, 500, FONT_FA, 20); ctx.font = `500 ${s2}px ${FONT_FA}`; ctx.fillText(mix.titleFa, L.x, 212); ctx.direction = 'ltr';
     ctx.restore();
@@ -102,14 +135,8 @@ export function createMixScene({ W = 1920, H = 1080, mix, background = 'ice', im
   function drawCoverTile(ctx, idx, alpha) {
     const info = images.covers && images.covers[idx]; if (alpha <= 0.001) return; const s = C.s;
     ctx.save(); ctx.globalAlpha = alpha; rr(ctx, C.x, C.y, s, s, 36); ctx.clip();
-    if (info && info.img) { const c = srvfCoverCrop(info.img.width, info.img.height, info.focus); ctx.drawImage(info.img, c.sx, c.sy, c.sw, c.sh, C.x, C.y, s, s); } else { ctx.fillStyle = '#1c2430'; ctx.fillRect(C.x, C.y, s, s); }
-    const g = ctx.createLinearGradient(0, C.y + s * 0.5, 0, C.y + s); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.78)'); ctx.fillStyle = g; ctx.fillRect(C.x, C.y + s * 0.5, s, s * 0.5);
-    ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff'; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 14; ctx.direction = 'ltr';
-    // CEO correction 2026-11-12 (final): the cover caption shows the song's FINGLISH (Latin) title, large, wrapped onto two lines when long — never Persian script (the Persian title stays in the package metadata).
-    const t0 = tr[idx]; const fgt = String(t0.finglish || '').toUpperCase(); const maxCW = s - 90; const words = fgt.split(' '); let lines = [fgt], fs = fit(ctx, fgt, maxCW, 38, 600, FONT_LATIN, 22);
-    if (words.length > 1 && fs < 30) { let best = null; for (let k = 1; k < words.length; k++) { const a = words.slice(0, k).join(' '), b = words.slice(k).join(' '); const sz = Math.min(fit(ctx, a, maxCW, 34, 600, FONT_LATIN, 20), fit(ctx, b, maxCW, 34, 600, FONT_LATIN, 20)); if (!best || sz > best.sz) best = { a, b, sz }; } if (best && best.sz > fs) { lines = [best.a, best.b]; fs = best.sz; } }
-    ctx.font = `600 ${fs}px ${FONT_LATIN}`; ctx.letterSpacing = '1.2px'; const baseY = C.y + s - 70 - (lines.length - 1) * (fs * 1.2); lines.forEach((ln, k) => ctx.fillText(ln, C.x + s / 2, baseY + k * fs * 1.2)); ctx.letterSpacing = '0px';   // CEO/PM correction: lighter (600) and capped at 38 px — no longer dominates the cover
-    ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.72)'; ctx.font = `600 17px ${FONT_LATIN}`; ctx.letterSpacing = '4px'; ctx.fillText('SILK ROAD VOICES', C.x + s / 2, C.y + s - 34); ctx.letterSpacing = '0px';
+    const c = srvfCoverRect(info); if (c) ctx.drawImage(info.img, c.sx, c.sy, c.sw, c.sh, C.x, C.y, s, s); else { ctx.fillStyle = '#1c2430'; ctx.fillRect(C.x, C.y, s, s); }
+    const g = ctx.createLinearGradient(0, C.y + s * 0.46, 0, C.y + s); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.84)'); ctx.fillStyle = g; ctx.fillRect(C.x, C.y + s * 0.46, s, s * 0.54);
     ctx.restore();
   }
   function drawCover(ctx, t, af) {
@@ -118,6 +145,8 @@ export function createMixScene({ W = 1920, H = 1080, mix, background = 'ice', im
     // soft shadow under the tile
     ctx.shadowColor = 'rgba(0,0,0,0.42)'; ctx.shadowBlur = 50; ctx.shadowOffsetY = 22; rr(ctx, C.x, C.y, C.s, C.s, 36); ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fill(); ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     drawCoverTile(ctx, ci, 1); if (k > 0.001 && ci + 1 < n) drawCoverTile(ctx, ci + 1, k);
+    // the photographs cross-fade; the titles do NOT overlap: the outgoing title is gone by the middle of the transition, then the incoming title fades in
+    const tb = { x: C.x, y: C.y, s: C.s }; if (ci + 1 < n && k > 0.001) { drawSongCaption(ctx, tb, tr[ci], clamp(1 - k * 2, 0, 1)); drawSongCaption(ctx, tb, tr[ci + 1], clamp(k * 2 - 1, 0, 1)); } else drawSongCaption(ctx, tb, tr[ci], 1);
     ctx.restore();
     // counter + progress under the tile
     const cur = Math.round(af) + 1; ctx.save(); ctx.textAlign = 'center'; ctx.fillStyle = spec.ink; ctx.globalAlpha = 0.9; ctx.font = `700 24px ${FONT_MONO}`; ctx.fillText(`${String(cur).padStart(2, '0')} / ${String(n).padStart(2, '0')}`, C.x + C.s / 2, C.y + C.s + 64);
@@ -146,10 +175,10 @@ export function drawMixThumbnail(ctx, { W = 1280, H = 720, background = 'night-g
   const sx = ctx.createLinearGradient(0, 0, W * 0.62, 0); sx.addColorStop(0, 'rgba(0,0,0,0.72)'); sx.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = sx; ctx.fillRect(0, 0, W, H);
   // portrait right
   const S = 520, px = W - S - 70, py = (H - S) / 2 - 10; ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 40; rr(ctx, px, py, S, S, 28); ctx.fillStyle = '#111'; ctx.fill(); ctx.restore();
-  ctx.save(); rr(ctx, px, py, S, S, 28); ctx.clip(); if (cover && cover.img) { const c = srvfCoverCrop(cover.img.width, cover.img.height, cover.focus); ctx.drawImage(cover.img, c.sx, c.sy, c.sw, c.sh, px, py, S, S); } else { ctx.fillStyle = '#333'; ctx.fillRect(px, py, S, S); }
-  const gg = ctx.createLinearGradient(0, py + S * 0.55, 0, py + S); gg.addColorStop(0, 'rgba(0,0,0,0)'); gg.addColorStop(1, 'rgba(0,0,0,0.7)'); ctx.fillStyle = gg; ctx.fillRect(px, py + S * 0.55, S, S * 0.45);
-  if (tracks[0]) { ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 10; ctx.direction = 'rtl'; const fs = fit(ctx, tracks[0].title, S - 60, 56, 800, FONT_FA, 26); ctx.font = `800 ${fs}px ${FONT_FA}`; ctx.fillText(tracks[0].title, px + S / 2, py + S - 62); ctx.direction = 'ltr'; ctx.shadowBlur = 0; ctx.font = `700 18px ${FONT_LATIN}`; ctx.letterSpacing = '4px'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fillText('SILK ROAD VOICES', px + S / 2, py + S - 26); ctx.letterSpacing = '0px'; }
+  ctx.save(); rr(ctx, px, py, S, S, 28); ctx.clip(); const cr = srvfCoverRect(cover); if (cr) ctx.drawImage(cover.img, cr.sx, cr.sy, cr.sw, cr.sh, px, py, S, S); else { ctx.fillStyle = '#333'; ctx.fillRect(px, py, S, S); }
+  const gg = ctx.createLinearGradient(0, py + S * 0.46, 0, py + S); gg.addColorStop(0, 'rgba(0,0,0,0)'); gg.addColorStop(1, 'rgba(0,0,0,0.84)'); ctx.fillStyle = gg; ctx.fillRect(px, py + S * 0.46, S, S * 0.54);
   ctx.restore();
+  if (tracks[0]) { const t0 = tracks[0]; drawSongCaption(ctx, { x: px, y: py, s: S }, { title: t0.title, finglish: t0.finglish }, 1); }
   // gold type left
   const gold = ctx.createLinearGradient(0, 150, 0, 420); gold.addColorStop(0, '#fff1c4'); gold.addColorStop(0.45, '#e3b25a'); gold.addColorStop(1, '#9a6a24');
   ctx.save(); ctx.textAlign = 'left'; ctx.fillStyle = '#e3b25a'; ctx.font = `800 24px ${FONT_LATIN}`; ctx.letterSpacing = '9px'; ctx.fillText('TOP PERSIAN', 64, 92); ctx.letterSpacing = '0px';

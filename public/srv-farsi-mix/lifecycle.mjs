@@ -18,6 +18,20 @@ const mono = "font-family:'JetBrains Mono',monospace";
 export function timelineOf(mix) { return mix.build && mix.build.items ? { items: mix.build.items, totalSec: mix.build.durationSec } : F.srvfMixTimeline(mix.tracks); }
 export function descriptionOf(mix) { return F.srvfMixDescription({ title: mix.title, category: mix.category, mood: mix.mood }, timelineOf(mix)); }
 export function mixOf(pkg) { return pkg && pkg.farsiMix ? pkg.farsiMix : null; }
+// COMPLETION (CEO correction 2026-11-17). A Mix is COMPLETE — and its task is marked Done — only when the upload is verified: the server acknowledged a finished upload with an 11-character video id, it is Private, and the independent YouTube
+// read confirms the same video on the exact channel, still Private and not scheduled. YouTube's own later processing (transcoding / HD) is shown separately and never blocks completion; the thumbnail, the playlist and the description
+// match are reported as warnings on the card. Anything short of that keeps the task open at Publish so it can be re-checked — nothing is reset prematurely.
+const CORE_CHECKS = ['video_found', 'channel_is_exact_srv_farsi_channel', 'privacy_is_private', 'not_scheduled_for_public_release'];
+export function completionGate(mix) {
+  const up = (mix && mix.upload) || {}; const v = mix && mix.verification;
+  if (up.status !== 'uploaded' || !VID.test(String(up.youtubeVideoId || ''))) return { ok: false, why: 'the server has not acknowledged a finished upload' };
+  if (up.privacy !== 'private') return { ok: false, why: 'the upload is not recorded as Private' };
+  if (!v || v.error) return { ok: false, why: 'the independent YouTube check has not run yet' };
+  const by = Object.fromEntries((v.checks || []).map((c) => [c.name, c])); const bad = CORE_CHECKS.filter((n) => !by[n] || !by[n].ok);
+  if (bad.length) return { ok: false, why: 'the check failed: ' + bad.map((n) => n.replace(/_/g, ' ')).join(', ') };
+  if (v.videoId && v.videoId !== up.youtubeVideoId) return { ok: false, why: 'the checked video id differs from the uploaded one' };
+  return { ok: true, why: '' };
+}
 const mix0 = mixOf;
 // The four monthly releases: one Female, one Male, one Duet, one All Artists — shown on the Generate step so nobody has to remember which are done.
 export function monthSlots(pkgs, monthKey) {
@@ -74,6 +88,11 @@ export function stageHtml(host, task, stage, pkg) {
     if (stage === 'approve') return headerHtml(host, task, mix) + media + meta + gate + box('🤖 <strong>AI Use / Altered content: YES</strong> — set automatically at upload. The video is uploaded as <strong>Private</strong> first; making it public stays your separate decision.', '245,158,11')
       + `<div style="display:flex;gap:8px;flex-wrap:wrap">${btn('approve', 'Approve → Publish', 'green', v.ok && b ? '' : 'disabled style="opacity:.4;cursor:not-allowed"')}${btn('back-build', '← Rebuild', 'ghost')}</div>`;
     const up = mix.upload || {}; const U2 = S.up || {}; const pct = U2.total ? Math.round((U2.offset / U2.total) * 100) : 0;
+    if (up.status === 'uploaded' && !mix.completion) {
+      const g = completionGate(mix); const idu = up.youtubeVideoId;
+      return headerHtml(host, task, mix) + box(`<strong>Uploaded to YouTube as Private</strong> (video <span style="${mono}">${host.esc(idu || '')}</span>). The upload is safe and will not be repeated. The task is marked <strong>Done</strong> as soon as the independent check confirms the video (this channel, Private, not scheduled).${S.completing ? ' <span style="color:#f59e0b">Checking YouTube now…</span>' : g.ok ? '' : `<div style="margin-top:6px;color:#f59e0b">Not confirmed yet: ${host.esc(g.why)}. Nothing is lost.</div>`}${U2.error ? `<div style="margin-top:6px;color:#f59e0b">${host.esc(U2.error)}</div>` : ''}`, '245,158,11')
+        + verificationHtml(host, mix, S) + `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${btn('complete', S.completing ? 'Checking…' : '✓ Check and complete', 'green', S.completing ? 'disabled style="opacity:.5;cursor:wait"' : '')}</div>` + tracksHtml(host, mix);
+    }
     const checks = [[v.ok, 'Rules (songs, Finglish, title)'], [!!b, 'Built file present (this browser)'], [!!(b && b.thumbBlob), 'Thumbnail ready']].map(([k, t]) => `<span style="${mono};font-size:10px;margin-right:10px;color:${k ? '#22c55e' : '#ef4444'}">${k ? '✓' : '✗'} ${t}</span>`).join('');
     const prog = U2.running ? box(`<div id="srvfUpMsg" style="${mono}">${host.esc(U2.msg || 'Starting upload…')}</div><div style="height:8px;background:rgba(255,255,255,.1);border-radius:4px;margin-top:8px"><div id="srvfUpBar" style="height:8px;border-radius:4px;background:#22c55e;width:${pct}%"></div></div>`) : '';
     const interrupted = !U2.running && (U2.error || up.status === 'interrupted') ? box('⚠ ' + host.esc(U2.error || ('Upload interrupted at ' + (up.offset && up.bytes ? Math.round(up.offset / up.bytes * 100) : 0) + '% — nothing was lost. Resume continues from where YouTube stopped.')), '245,158,11') : '';
@@ -87,7 +106,9 @@ export function stageHtml(host, task, stage, pkg) {
     const id = pkg.youtubeVideoId || pkg.youtube_video_id;
     const pl = (mix.playlists || []).map((x) => (x.ok ? '✓ ' : '✗ ') + host.esc(x.playlistName || x.key || '') + (x.ok ? '' : ' (' + host.esc(x.error || 'failed') + ')')).join(' · ') || 'not added';
     const th = mix.thumbnail ? (mix.thumbnail.status === 'set' ? '✓ set' : '✗ ' + host.esc(mix.thumbnail.error || 'failed')) : 'manual / not set';
-    return headerHtml(host, task, mix) + box('✓ <strong>Uploaded — Private.</strong> ' + (id ? `<a href="https://studio.youtube.com/video/${host.esc(id)}/edit" target="_blank" style="color:#ef4444">Open in YouTube Studio</a>` : '') + `<div style="font-size:11px;margin-top:4px;color:var(--dim)">Thumbnail: ${th} · Playlist: ${pl}</div><div style="font-size:11px;color:var(--dim)">It stays Private until you publish it in YouTube Studio. Analytics appear after the next channel sync.</div>`, '34,197,94') + verificationHtml(host, mix, S) + tracksHtml(host, mix);
+    const nx = host.nextTask ? host.nextTask(task) : null; const cp = mix.completion;
+    const nextBox = cp ? box(`✓ <strong>Completed</strong> ${host.esc(localTime(cp.at))} — the upload was verified (video ${host.esc(cp.youtubeVideoId || id || '')}, Private). YouTube's own processing is reported separately below and does not hold this task open. This record stays in your history.${nx ? `<div style="margin-top:6px">Next scheduled task: <strong>${host.esc(nx.name)}</strong>${nx.isoDate ? ' · ' + host.esc(nx.isoDate) : ''}</div>` : '<div style="margin-top:6px">No other SRV Farsi task is waiting.</div>'}${S.resetTimer ? '<div style="margin-top:4px;color:var(--dim)">Opening it automatically in a few seconds.</div>' : ''}<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${btn('open-next', nx ? 'Open the next task now →' : '← Back to Tasks', 'green')}${S.resetTimer ? btn('stay', 'Stay on this record', 'ghost') : ''}</div>`, '34,197,94') : '';
+    return headerHtml(host, task, mix) + nextBox + box('✓ <strong>Uploaded — Private.</strong> ' + (id ? `<a href="https://studio.youtube.com/video/${host.esc(id)}/edit" target="_blank" style="color:#ef4444">Open in YouTube Studio</a>` : '') + `<div style="font-size:11px;margin-top:4px;color:var(--dim)">Thumbnail: ${th} · Playlist: ${pl}</div><div style="font-size:11px;color:var(--dim)">It stays Private until you publish it in YouTube Studio. Analytics appear after the next channel sync.</div>`, '34,197,94') + verificationHtml(host, mix, S) + tracksHtml(host, mix);
   }
   return '';
 }
@@ -115,11 +136,12 @@ export async function afterRender(host, task, stage, root) {
     const S0 = st(taskId); S0.restoreTried = true; const f = await U.opfsLoad(mix0(pkg).key);
     if (f) { S0.blobs = { blob: f.blob, url: URL.createObjectURL(f.blob), thumbBlob: f.thumbBlob, thumbUrl: f.thumbBlob ? URL.createObjectURL(f.thumbBlob) : '', mime: (f.meta && f.meta.mime) || f.blob.type || 'video/webm', stats: (f.meta && f.meta.stats) || { mime: f.blob.type } }; return host.rerender(taskId); }
   }
+  if (stage === 'publish' && mix0(pkg) && mix0(pkg).upload && mix0(pkg).upload.status === 'uploaded' && !mix0(pkg).completion && !st(taskId).completing && !st(taskId).autoCompleted) { st(taskId).autoCompleted = true; setTimeout(() => { const p2 = host.pkgFor(task); if (p2) completeMix(host, task, p2, mix0(p2), st(taskId), false); }, 0); }
   if (stage === 'done' && mix0(pkg) && mix0(pkg).upload && mix0(pkg).upload.entryId) {                                       // YouTube still processing? look again now, then every minute while this card is open
     const S1 = st(taskId), m1 = mix0(pkg), v1 = m1.verification;
     if (!S1.autoChecked && (!v1 || v1.pending)) { S1.autoChecked = true; setTimeout(() => { const p2 = host.pkgFor(task); if (p2) verifyUpload(host, task, p2, mix0(p2), false); }, 0); }
     if (!S1.pollTimer && (!v1 || v1.pending)) { S1.pollCount = 0; S1.pollTimer = setInterval(() => { const live = document.getElementById('srvfMixRoot-' + taskId); const p2 = host.pkgFor(task); const mm = p2 && mix0(p2);
-      if (!live || !mm || (mm.verification && !mm.verification.pending) || ++S1.pollCount > 45) { clearInterval(S1.pollTimer); S1.pollTimer = null; return; } verifyUpload(host, task, p2, mm, false); }, 60000); }
+      if (!live || !mm || (mm.verification && !mm.verification.pending) || ++S1.pollCount > 20) { clearInterval(S1.pollTimer); S1.pollTimer = null; return; } verifyUpload(host, task, p2, mm, false); }, 60000); }
   }
   if (scope.dataset && scope.dataset.wired) return; if (scope.dataset) scope.dataset.wired = '1';   // one set of listeners per rendered card
   scope.querySelectorAll('[data-mix-act]').forEach((b) => b.addEventListener('click', () => act(host, task, b.getAttribute('data-mix-act'), scope)));
@@ -140,6 +162,9 @@ async function act(host, task, a, scope) {
     try { await host.savePkg(pkg); } catch (e) { delete mix.approved; delete mix.approvedAt; alert('The approval could not be saved: ' + e.message); return; }
     return go('publish');
   }
+  if (a === 'complete') return completeMix(host, task, pkg, mix, S, false);
+  if (a === 'stay') { if (S.resetTimer) { clearTimeout(S.resetTimer); S.resetTimer = null; } return host.rerender(taskId); }
+  if (a === 'open-next') { if (S.resetTimer) { clearTimeout(S.resetTimer); S.resetTimer = null; } return host.resetToNext ? host.resetToNext(task) : host.rerender(taskId); }
   if (a === 'verify') return verifyUpload(host, task, pkg, mix);
   if (a === 'fix-playlist') return fixPlaylist(host, task, pkg, mix);
   if (a === 'discard-temp') { if (!confirm('Delete the temporary copy of the built video from this browser? You would have to build it again.')) return; await U.opfsDelete(mix.key); if (S.blobs) { try { URL.revokeObjectURL(S.blobs.url); if (S.blobs.thumbUrl) URL.revokeObjectURL(S.blobs.thumbUrl); } catch (_) {} S.blobs = null; S.restoreTried = true; } return host.rerender(taskId); }
@@ -191,6 +216,7 @@ export const _test = { st };
 
 async function upload(host, task, pkg, mix, S) {
   const taskId = String(task.taskId || task.id); if (S.up && S.up.running) return;
+  if (mix.upload && mix.upload.status === 'uploaded') return completeMix(host, task, pkg, mix, S, false);   // already on YouTube: never a second upload (refresh / retry / double click) — only the completion check
   if (!S.blobs) { S.up = { error: 'The built file is not in this browser any more — go back to Build.' }; return host.rerender(taskId); }
   S.up = { running: true, msg: 'Starting…', offset: 0, total: S.blobs.blob.size }; S.upAbort = new AbortController(); host.rerender(taskId);
   const tl = timelineOf(mix); const payload = { key: mix.key, category: mix.category, mood: mix.mood, title: mix.title, description: descriptionOf(mix), tags: F.srvfMixTags({ category: mix.category, mood: mix.mood }, tl),
@@ -207,9 +233,7 @@ async function upload(host, task, pkg, mix, S) {
     await host.savePkg(pkg);                                                                                      // the video id is recorded BEFORE the optional steps below
     try { if (S.blobs.thumbBlob) { const r = await host.api('thumbnail', { entryId: res.entryId, mixKey: mix.key, data: await U.blobToBase64(S.blobs.thumbBlob) }); mix.thumbnail = r.body && r.body.thumbnail ? r.body.thumbnail : { status: 'failed', error: (r.body && r.body.error) || 'thumbnail_failed' }; } } catch (e) { mix.thumbnail = { status: 'failed', error: String(e.message).slice(0, 120) }; }
     try { const r = await host.api('playlist', { entryId: res.entryId, mixKey: mix.key }); mix.playlists = (r.body && r.body.playlists) || [{ ok: false, error: (r.body && r.body.error) || 'playlist_failed' }]; } catch (e) { mix.playlists = [{ ok: false, error: String(e.message).slice(0, 120) }]; }
-    await verifyUpload(host, task, pkg, mix, true); await host.savePkg(pkg); await U.opfsDelete(mix.key);                                                         // temporary copy removed once the upload is safe on YouTube
-    if (S.blobs) { try { URL.revokeObjectURL(S.blobs.url); if (S.blobs.thumbUrl) URL.revokeObjectURL(S.blobs.thumbUrl); } catch (_) {} S.blobs = null; }
-    S.up = null; host.setStage(taskId, 'done');
+    S.up = null; await completeMix(host, task, pkg, mix, S, true);
   } catch (e) {
     const code = e && (e.code || e.name); const why = explainProblems(mix, e && e.detail && e.detail.problems);
     S.up = { running: false, offset: S.up.offset, total: S.up.total, error: e && e.name === 'AbortError' ? 'Upload paused. Resume continues from where YouTube stopped.' : code === 'session_expired_start_again' ? 'The YouTube upload session expired. Use "Start over" — your built file is still here.' : code === 'retries_exhausted' ? 'The connection kept failing. Nothing was lost — Resume when the connection is back.' : 'Upload stopped: ' + (why ? why + ' (' + ((e && e.detail && e.detail.error) || code) + ')' : ((code || e.message) + (e && e.detail && e.detail.error ? ' (' + e.detail.error + ')' : ''))) };
@@ -217,6 +241,20 @@ async function upload(host, task, pkg, mix, S) {
   } finally { S.upAbort = null; host.rerender(taskId); }
 }
 
+// Verify, then complete. Idempotent: a refresh, a retry or a double click re-runs only the check and never uploads again. `fresh` = this session just finished the upload (so the card resets to the next task after a short pause).
+async function completeMix(host, task, pkg, mix, S, fresh) {
+  const taskId = String(task.taskId || task.id); if (S.completing) return; if (mix.completion) { if (host.pkgFor(task) && host.setStage) host.setStage(taskId, 'done'); return host.rerender(taskId); }
+  S.completing = true; host.rerender(taskId);
+  try {
+    await verifyUpload(host, task, pkg, mix, true); const g = completionGate(mix);
+    if (!g.ok) { S.up = { running: false, error: 'The upload is on YouTube but is not confirmed yet (' + g.why + '). Nothing is lost — press "Check and complete" again.' }; try { await host.savePkg(pkg); } catch (_) {} return; }
+    mix.completion = { at: new Date().toISOString(), by: host.who(), youtubeVideoId: mix.upload.youtubeVideoId, privacy: 'private', verifiedAt: (mix.verification && mix.verification.at) || null, processing: (mix.verification && mix.verification.processing && mix.verification.processing.state) || null };
+    await host.savePkg(pkg); try { await U.opfsDelete(mix.key); } catch (_) {}                                  // the temporary copy goes only once the upload is verified
+    if (S.blobs) { try { URL.revokeObjectURL(S.blobs.url); if (S.blobs.thumbUrl) URL.revokeObjectURL(S.blobs.thumbUrl); } catch (_) {} S.blobs = null; }
+    S.up = null; host.setStage(taskId, 'done');                                                                    // the task is marked Done here and only here
+    if (fresh && host.resetToNext) { if (S.resetTimer) clearTimeout(S.resetTimer); S.resetTimer = setTimeout(() => { S.resetTimer = null; if (document.getElementById('srvfMixRoot-' + taskId)) host.resetToNext(task); }, (typeof window !== 'undefined' && window.__SRVF_RESET_MS) || 15000); }   // the delay can be overridden only by tests
+  } finally { S.completing = false; host.rerender(taskId); }
+}
 // Independent check through the YouTube API (server side): ALWAYS a fresh read of the video, processing state, playlists and thumbnail result — never a cached copy. The result carries the time it was taken.
 // A failed attempt never replaces the last good result (it is shown beside it), and the lifecycle stays DONE: YouTube's own processing is displayed separately.
 async function verifyUpload(host, task, pkg, mix, quiet) {
