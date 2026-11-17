@@ -15210,7 +15210,8 @@ function _srvEnglishV2QualityHtml(task,pkg){
 // is the Long's, already reviewed when the Long was made).
 function _srvEnglishV2PromoSourceHtml(pkg){
   const so=pkg&&pkg.srvShortOf;if(!so)return '';
-  const L=(D.packages||[]).find(function(p){return String(p.id)===String(so.longPkgId);});
+  const L=_srvEnglishV2LongOfShort(so);
+  if(!L&&!_srvEnglishLongLoadedAt&&!_srvEnglishLongFailed)_srvEnglishV2EnsureLongSources(pkg.taskId);   // the Long is not in the package list yet: read it once (the panel redraws when it arrives)
   const lt=L&&L.srvTaskUid?_srvEnglishTaskByUid(L.srvTaskUid):null;
   const row=function(k,v){return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)"><span style="color:var(--dim)">${k}</span><span style="color:var(--text);text-align:right">${v}</span></div>`;};
   return `<div id="srv2q_${escHTML(String(pkg.id||''))}" style="margin-bottom:16px;padding:14px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.25);border-radius:10px;font-size:11px;font-family:'JetBrains Mono',monospace">
@@ -15919,7 +15920,8 @@ async function _srvEnglishV2Build(pkgId,taskId){
   let section=null;
   if(promo){
     const so=pkg.srvShortOf;
-    const L=(D.packages||[]).find(function(p){return String(p.id)===String(so.longPkgId);});
+    let L=_srvEnglishV2LongOfShort(so);
+    if(!L){setStatus('Looking up the Long this Short comes from…','#f59e0b');await _srvEnglishV2EnsureLongSources(taskId);L=_srvEnglishV2LongOfShort(so);for(let i=0;i<40&&!L&&_srvEnglishLongLoading;i++){await new Promise(function(r){setTimeout(r,500);});L=_srvEnglishV2LongOfShort(so);}}
     if(!L||L.engine!=='SRV English'||_srvEnglishV2IsPromoPkg(L)){setStatus('⚠ The Long this Short comes from is not an SRV Studio Long in MMMOS — build refused.','#ef4444');return;}
     if(String(L.title||'').trim()!==String(pkg.title||'').trim()){setStatus('⚠ The Long\'s title changed after this Short was created. Use “Choose the Long again” at Review — build refused.','#ef4444');return;}
     const d=Number(so.durationSec),st=Number(so.startSec);
@@ -16350,7 +16352,7 @@ function _srvEnglishV2PlanLabel(plan){
 // The planned release of the Long a promotional Short promotes (the Short goes on the Sunday after it).
 function _srvEnglishV2LongReleaseMs(pkg){
   const so=pkg&&pkg.srvShortOf;if(!so)return null;
-  const L=(D.packages||[]).find(function(p){return String(p.id)===String(so.longPkgId);});
+  const L=_srvEnglishV2LongOfShort(so);
   return L&&L.srvSchedulePlan&&L.srvSchedulePlan.utcIso?Date.parse(L.srvSchedulePlan.utcIso):null;
 }
 function _srvEnglishV2TakenSlots(kind,exceptPkgId){
@@ -16715,6 +16717,15 @@ async function _srvEnglishV2EnsureLongSources(taskId){
     if(typeof activeExec!=='undefined'&&String(activeExec)===String(taskId)&&typeof openExec==='function')openExec(String(taskId));
   }catch(e){ _srvEnglishLongFailed=true; console.warn('[SRV English] source Long load failed (non-fatal):',e&&e.message); }
   finally{ _srvEnglishLongLoading=false; }
+}
+// CEO 2026-11-17 (Short build refused: "The Long this Short comes from is not an SRV Studio Long in MMMOS"). The in-memory package list drops a package whose
+// title equals a newer one's, and a promotional Short carries the SAME title as its Long — so after a reload the Long was gone and its Short could not be
+// built or described. The Long of a Short is therefore looked up in the list first and then in the SRV English Long cache above (read ONLY by SRV English
+// Short code); no shared loader or other business changes.
+function _srvEnglishV2LongOfShort(so){
+  if(!so||!so.longPkgId)return null;
+  const id=String(so.longPkgId);
+  return (D.packages||[]).find(function(p){return String(p&&p.id)===id;})||_srvEnglishLongCache.find(function(p){return String(p&&p.id)===id;})||null;
 }
 // SRV Studio Longs a Short can be cut from: SRV English only (never another business), a built Long video, not itself
 // a Short, not this task. Uploaded Longs first, then newest.

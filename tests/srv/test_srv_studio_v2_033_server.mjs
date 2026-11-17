@@ -105,16 +105,16 @@ ok('the V2 flag off → every mix operation refused', (await MS.srv2RunMixOp({ .
   ok('list restores the saved draft', !!listed.mixes[rec.mixId]);
 }
 
-// ── 4. upload: happy path, private only, chunks, playlist not configured ──
+// ── 4. upload: happy path, private only, chunks, default playlist = SRV Studio, the full Collection ──
 {
-  const w = world(); const rec = record(); await run(w, { op: 'save', mix: rec });
+  const w = world({ yt: fakeYt({ playlists: { PLXCBPiF9p6SA: CH } }) }); const rec = record(); await run(w, { op: 'save', mix: rec });
   const init = await run(w, { op: 'upload_init', mixId: rec.mixId });
   ok('upload_init: verifies channel, lineage (sources still public SRV Studio Longs), stored file size/type; opens a PRIVATE session without publishAt', init.status === 200 && w.yt.st.calls.some((c) => c[0] === 'init' && c[1] === 'private' && c[2] === false && c[4] === 'video/mp4'), init.json);
   ok('the YouTube session URL is sealed before it is stored and never returned to the app', w.sealed.length === 1 && !JSON.stringify(init.json).includes('upload.fake') && !w.table.srv_studio_v2_mix_ledger.includes('upload.fake'));
   let r, calls = 0; do { r = await run(w, { op: 'upload_chunk', mixId: rec.mixId, entryId: init.json.entryId }); calls++; } while (r.json.ok && !r.json.done && calls < 20);
   ok('upload_chunk: one 64 MiB chunk per call (3 calls for 150 MB), resumable offsets, done with a verified PRIVATE video', r.json.done && calls === 3 && r.json.privacyStatus === 'private' && /^MIXvid/.test(r.json.youtubeVideoId), { calls, r: r.json });
   const L = JSON.parse(w.table.srv_studio_v2_mix_ledger).entries[0]; const m = (await run(w, { op: 'list' })).json.mixes[rec.mixId];
-  ok('ledger + mix record: uploaded, video id, lineage kept, session removed; mix status uploaded; playlist "not configured" (manual step)', L.status === 'uploaded' && L.youtubeVideoId === r.json.youtubeVideoId && L.lineage.length === 8 && !('session' in L) && m.status === 'uploaded' && m.playlist.status === 'not_configured');
+  ok('ledger + mix record: uploaded, video id, lineage kept, session removed; mix status uploaded; with no Mix playlist configured the video is added to "SRV Studio, the full Collection" (verified)', L.status === 'uploaded' && L.youtubeVideoId === r.json.youtubeVideoId && L.lineage.length === 8 && !('session' in L) && m.status === 'uploaded' && m.playlist.status === 'added' && m.playlist.playlistId === 'PLXCBPiF9p6SA' && w.yt.st.items.PLXCBPiF9p6SA.includes(r.json.youtubeVideoId) && r.json.playlist.status === 'added');
   const again = await run(w, { op: 'upload_init', mixId: rec.mixId });
   ok('duplicate prevention: an uploaded mix cannot be uploaded again (record locked; ledger also refuses)', again.status === 409);
   const lockedSave = await run(w, { op: 'save', mix: rec });
@@ -190,4 +190,19 @@ ok('the V2 flag off → every mix operation refused', (await MS.srv2RunMixOp({ .
   const lib = fs.readFileSync(path.join(repo, 'lib/srvStudioV2MixServer.mjs'), 'utf8');
   ok('the mix never touches the Long/Short production ledger or other businesses\' keys', !/srv_studio_v2_production_ledger|srv_studio_v2_pilot_ledger|srv_studio_v2_va_ledger|SRV Farsi|NextWave/.test(lib));
 }
-console.log(out.join('\n')); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
+console.log(out.join('\n')); // ── playlist default (CEO 2026-11-17) ──
+{
+  const PLX = 'PLXCBPiF9p6SA', OWN = 'PLownMixPlaylist123';
+  const full = async (w) => { const rec = record(); await run(w, { op: 'save', mix: rec }); const init = await run(w, { op: 'upload_init', mixId: rec.mixId }); let r, c = 0; do { r = await run(w, { op: 'upload_chunk', mixId: rec.mixId, entryId: init.json.entryId }); c++; } while (r.json.ok && !r.json.done && c < 20); return { r, rec }; };
+  const w1 = world({ yt: fakeYt({ playlists: { [PLX]: CH, [OWN]: CH } }) }); const a = await full(w1);
+  ok('default playlist: list reports the full Collection as the Mix playlist when none is configured', (await run(w1, { op: 'list' })).json.config.playlistId === PLX);
+  ok('default playlist: a configured Mix playlist still wins over the default', (() => { const c = MS.srv2ParseMixConfig(JSON.stringify({ enabled: true, channelId: CH, playlistId: OWN })); return c.config.playlistId === OWN; })());
+  const w2 = world({ cfg: { enabled: true, channelId: CH, playlistId: OWN }, yt: fakeYt({ playlists: { [PLX]: CH, [OWN]: CH } }) }); const b = await full(w2);
+  ok('a configured Mix playlist receives the video, the default one does not', b.r.json.playlist.playlistId === OWN && w2.yt.st.items[OWN].length === 1 && !(w2.yt.st.items[PLX] || []).length);
+  const w3 = world({ yt: fakeYt({ playlists: {} }) }); const c3 = await full(w3);
+  ok('default playlist missing or not on the SRV Studio channel: the PRIVATE upload still completes and the playlist step is recorded as failed (retryable)', c3.r.json.done === true && c3.r.json.privacyStatus === 'private' && c3.r.json.playlist.status === 'failed');
+  const w4 = world({ yt: fakeYt({ playlists: { [PLX]: 'UCCUa5BLzGh2eRBoqqWBCK_g' } }) }); const d4 = await full(w4);
+  ok('a playlist that belongs to another channel (Silk Road Voices) is refused and never receives the video', d4.r.json.done === true && d4.r.json.playlist.status === 'failed' && d4.r.json.playlist.error === 'playlist_not_srv_studio' && !(w4.yt.st.items[PLX] || []).length);
+  const ret = await run(w3, { op: 'playlist', mixId: c3.rec.mixId }); ok('Retry playlist works against the default playlist (still failing here because the fake channel has none — error is reported, not thrown)', ret.status === 200 && ret.json.playlist.status === 'failed');
+}
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
