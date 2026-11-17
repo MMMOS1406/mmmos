@@ -79,9 +79,26 @@ ok('private-first: the upload decision refuses a second Mix for a month and a du
 {
   const P = rd('public/srv-studio-v2/srv2-mix.mjs'); const a = P.slice(P.indexOf('async function approveAndUpload'), P.indexOf('function releaseBuild'));
   ok('Approve has a synchronous in-flight guard (a second click returns at once) and clears it at the end', /if \(S\.inflight\) return;/.test(a) && /S\.inflight = true;/.test(a) && /S\.inflight = false;/.test(a));
-  ok('the stored-output record is built locally and assigned once (the thumbnail path can never be overwritten by another run)', /const outRec = /.test(a) && /outRec\.thumbnailPath = tp/.test(a) && /S\.output = outRec;/.test(a) && !/S\.output = \{ storagePath/.test(a));
+  ok('the stored video is remembered at once (S.output set right after the video is stored), so a failure in the thumbnail step never stores the video again; the thumbnail step only runs while there is no thumbnail path', /S\.output = \{ storagePath: obj,/.test(a) && /if \(S\.build\.thumbBlob && !S\.output\.thumbnailPath\)/.test(a) && a.indexOf('S.output = { storagePath: obj,') < a.indexOf('S.build.thumbBlob'));
+  ok('the thumbnail gets its OWN folder per build (mixes/<mixId><stamp>/thumbnail.jpg — the shape the storage rules allow) and the old fixed path is no longer written', /mixes\/\$\{rec\.mixId\}\$\{Date\.now\(\)\.toString\(36\)\}\/thumbnail\.jpg/.test(a) && !/mixes\/\$\{rec\.mixId\}\/thumbnail\.jpg/.test(a));
   ok('the thumbnail step reads the saved server record (not in-memory state) and retries once before asking for "Retry thumbnail"', /m0\.output && m0\.output\.thumbnailPath/.test(a) && (a.match(/op: 'thumbnail'/g) || []).length === 2);
   const r = P.slice(P.indexOf('async function resumeUpload'), P.indexOf('function startNextMonth'));
   ok('Resume has the same guard', /if \(S\.inflight\) return;/.test(r) && /S\.inflight = false;/.test(r));
+}
+// ── thumbnail path fix 2026-11-17: server accepts the per-build folder and the legacy path, nothing else ──
+{
+  const S2 = await import('../../lib/srvStudioV2MixServer.mjs');
+  const mixId = 'mix_202612_jqc85uhtto2q', CHN = 'UC0nzWQX6AaUqlF5FozNpWPg';
+  const rec = { mixId, monthKey: '2026-12', status: 'uploaded', upload: { verified: true, youtubeVideoId: 'abcdefghijk' }, output: {}, tracks: [] };
+  const store = {}; const sets = [];
+  const mkDeps = (tp) => { rec.output = { thumbnailPath: tp }; store.srv_studio_v2_mixes = JSON.stringify({ rev: 1, mixes: { [mixId]: { ...rec } } }); return { now: () => 1e12, by: 'ceo', flagOn: async () => true, getSetting: async (k) => k === 'srv_studio_v2_mix' ? { text: JSON.stringify({ enabled: true, channelId: CHN, playlistId: null, maxBytes: 524288000 }) } : (k in store ? { text: store[k] } : null), casSetting: async (k, o, n) => { store[k] = n; return true; }, lookupChannel: async () => ({ channel_id: CHN }), ytFor: async () => ({ getVideosStatus: async () => ({ abcdefghijk: { channelId: CHN, privacyStatus: 'private' } }), setThumbnail: async (v) => { sets.push(v); } }), headObject: async () => ({ bytes: 1000 }), readRange: async () => Buffer.from([0xff, 0xd8, 0xff, 0, 0, 0]) .length === 6 ? Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(997)]) : null }; };
+  const run = async (tp) => { sets.length = 0; return S2.srv2RunMixOp(mkDeps(tp), { op: 'thumbnail', mixId }); };
+  const good = ['mixes/' + mixId + '/thumbnail.jpg', 'mixes/' + mixId + 'm3k9x2ab/thumbnail.jpg'];
+  const bad = ['mixes/' + mixId + '/thumbnail_1.jpg', 'mixes/mix_202612_zzzzzzzzzzzz/thumbnail.jpg', 'mixes/' + mixId + 'm3k9x2ab/extra/thumbnail.jpg', 'mixes/' + mixId + 'ab/thumbnail.jpg', 'mixes/' + mixId + 'M3K9X2AB/thumbnail.jpg', 'mixes/' + mixId + 'm3k9x2ab/thumbnail.png', '../mixes/' + mixId + 'm3k9x2ab/thumbnail.jpg', 'pkg_1234567890/thumb_1234567890_x.jpg'];
+  for (const tp of good) { const r = await run(tp); ok('thumbnail op accepts ' + tp, r.status === 200 && r.json.ok === true && sets.length === 1, r.json); }
+  for (const tp of bad) { const r = await run(tp); ok('thumbnail op refuses ' + tp, r.status === 400 && r.json.error === 'thumbnail_path_invalid' && sets.length === 0, r.json); }
+  // the storage rule (Policy A, unchanged) must accept the shape the page now writes
+  const POLICY = /^mixes\/mix_[0-9]{6}_[A-Za-z0-9]{3,40}\/(mix_[0-9]{10,16}\.(webm|mp4)|thumbnail\.jpg)$/;
+  ok('the folder shape written by the page fits the existing storage insert rule (no policy change needed), the video name too', POLICY.test('mixes/' + mixId + Date.now().toString(36) + '/thumbnail.jpg') && POLICY.test('mixes/' + mixId + '/mix_' + Date.now() + '.mp4') && !POLICY.test('mixes/' + mixId + '/thumbnail_' + Date.now() + '.jpg'));
 }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

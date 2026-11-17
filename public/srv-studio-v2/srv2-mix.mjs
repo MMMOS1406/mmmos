@@ -245,10 +245,10 @@ export function mount(root, deps) {
       if (!S.output) {
         const obj = `mixes/${rec.mixId}/mix_${Date.now()}.${S.build.ext}`;
         await tusUpload({ supabaseUrl: deps.supabaseUrl, supabaseKey: deps.supabaseKey, objectName: obj, blob: S.build.blob, contentType: S.build.blob.type.split(';')[0], signal: S.abort.signal, fetchImpl: deps.fetchImpl, onProgress: (o, n) => { S.busy = `Saving the video to storage ${Math.round(o / n * 100)}% (${Math.round(o / 1048576)} / ${Math.round(n / 1048576)} MB)`; const b = root.querySelector('#mx-busy'); if (b) b.textContent = S.busy; } });
-        const outRec = { storagePath: obj, bytes: S.build.blob.size, mime: S.build.blob.type.split(';')[0] };
-        if (S.build.thumbBlob) { const tp = `mixes/${rec.mixId}/thumbnail.jpg`; S.busy = 'Saving the thumbnail…'; draw(); await tusUpload({ supabaseUrl: deps.supabaseUrl, supabaseKey: deps.supabaseKey, objectName: tp, blob: S.build.thumbBlob, contentType: 'image/jpeg', signal: S.abort.signal, fetchImpl: deps.fetchImpl }); outRec.thumbnailPath = tp; }
-        S.output = outRec;
+        S.output = { storagePath: obj, bytes: S.build.blob.size, mime: S.build.blob.type.split(';')[0] };   // remembered at once: a later failure in the thumbnail step never stores the video again
       }
+      // the thumbnail lives in its OWN folder per build (mixes/<mixId><stamp>/thumbnail.jpg — the storage rules allow exactly this shape): a fixed path per Mix id collided with an earlier thumbnail of the same id (HTTP 409) and made every retry store the whole video again
+      if (S.build.thumbBlob && !S.output.thumbnailPath) { const tp = `mixes/${rec.mixId}${Date.now().toString(36)}/thumbnail.jpg`; S.busy = 'Saving the thumbnail…'; draw(); await tusUpload({ supabaseUrl: deps.supabaseUrl, supabaseKey: deps.supabaseKey, objectName: tp, blob: S.build.thumbBlob, contentType: 'image/jpeg', signal: S.abort.signal, fetchImpl: deps.fetchImpl }); S.output.thumbnailPath = tp; }
       S.approved = true; const sv = await saveDraft('approved'); if (!sv || !sv.ok) throw new Error('the approval could not be saved');
       S.busy = 'Uploading privately to YouTube…'; draw();
       const r = await serverUpload({ op: deps.op, mixId: rec.mixId, entryId: S.upload && S.upload.entryId, signal: S.abort.signal, onProgress: (o, n, id) => { S.upload = { entryId: id, offset: o, total: n }; S.busy = `Uploading privately to YouTube ${Math.round((o || 0) / n * 100)}%`; const b = root.querySelector('#mx-busy'); if (b) b.textContent = S.busy; } });
