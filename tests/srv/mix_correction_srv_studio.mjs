@@ -75,4 +75,13 @@ ok('private-first: the upload decision refuses a second Mix for a month and a du
   ok('the monthly slot and one-Mix-per-month rule still work internally (planned release for December, second Mix of the month refused)', typeof E.srv2MixMonthlySlot('2026-12').utcIso === 'string' && !E.srv2MixUploadDecide({ entries: [{ monthKey: '2026-12', status: 'uploaded', mixKey: 'x', kind: 'mix' }] }, { mixKey: 'y', monthKey: '2026-12' }).ok);
   ok('the browser copy of the title generator is identical to the library copy', rd('lib/srvStudioV2Mix.mjs') === rd('public/srv-studio-v2/lib/srvStudioV2Mix.mjs'));
 }
+// ── thumbnail fix 2026-11-17: repeated clicks on Approve must not start overlapping runs (browser proof: headless double-click run, 6/6 after the fix; 3 stored videos and no thumbnail step before) ──
+{
+  const P = rd('public/srv-studio-v2/srv2-mix.mjs'); const a = P.slice(P.indexOf('async function approveAndUpload'), P.indexOf('function releaseBuild'));
+  ok('Approve has a synchronous in-flight guard (a second click returns at once) and clears it at the end', /if \(S\.inflight\) return;/.test(a) && /S\.inflight = true;/.test(a) && /S\.inflight = false;/.test(a));
+  ok('the stored-output record is built locally and assigned once (the thumbnail path can never be overwritten by another run)', /const outRec = /.test(a) && /outRec\.thumbnailPath = tp/.test(a) && /S\.output = outRec;/.test(a) && !/S\.output = \{ storagePath/.test(a));
+  ok('the thumbnail step reads the saved server record (not in-memory state) and retries once before asking for "Retry thumbnail"', /m0\.output && m0\.output\.thumbnailPath/.test(a) && (a.match(/op: 'thumbnail'/g) || []).length === 2);
+  const r = P.slice(P.indexOf('async function resumeUpload'), P.indexOf('function startNextMonth'));
+  ok('Resume has the same guard', /if \(S\.inflight\) return;/.test(r) && /S\.inflight = false;/.test(r));
+}
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

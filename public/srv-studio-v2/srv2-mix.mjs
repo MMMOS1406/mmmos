@@ -238,30 +238,34 @@ export function mount(root, deps) {
     S.busy = null; S.abort = null; draw();
   }
   async function approveAndUpload() {
-    const rec = record(); S.abort = new AbortController();
+    const rec = record();
+    if (S.inflight) return;   // a second click while an upload is running must not start a second run (a double click used to store the video three times and skip the thumbnail)
+    S.inflight = true; S.busy = S.busy || 'Starting the upload…'; draw(); S.abort = new AbortController();
     try {
       if (!S.output) {
         const obj = `mixes/${rec.mixId}/mix_${Date.now()}.${S.build.ext}`;
         await tusUpload({ supabaseUrl: deps.supabaseUrl, supabaseKey: deps.supabaseKey, objectName: obj, blob: S.build.blob, contentType: S.build.blob.type.split(';')[0], signal: S.abort.signal, fetchImpl: deps.fetchImpl, onProgress: (o, n) => { S.busy = `Saving the video to storage ${Math.round(o / n * 100)}% (${Math.round(o / 1048576)} / ${Math.round(n / 1048576)} MB)`; const b = root.querySelector('#mx-busy'); if (b) b.textContent = S.busy; } });
-        S.output = { storagePath: obj, bytes: S.build.blob.size, mime: S.build.blob.type.split(';')[0] };
-        if (S.build.thumbBlob) { const tp = `mixes/${rec.mixId}/thumbnail.jpg`; S.busy = 'Saving the thumbnail…'; draw(); await tusUpload({ supabaseUrl: deps.supabaseUrl, supabaseKey: deps.supabaseKey, objectName: tp, blob: S.build.thumbBlob, contentType: 'image/jpeg', signal: S.abort.signal, fetchImpl: deps.fetchImpl }); S.output.thumbnailPath = tp; }
+        const outRec = { storagePath: obj, bytes: S.build.blob.size, mime: S.build.blob.type.split(';')[0] };
+        if (S.build.thumbBlob) { const tp = `mixes/${rec.mixId}/thumbnail.jpg`; S.busy = 'Saving the thumbnail…'; draw(); await tusUpload({ supabaseUrl: deps.supabaseUrl, supabaseKey: deps.supabaseKey, objectName: tp, blob: S.build.thumbBlob, contentType: 'image/jpeg', signal: S.abort.signal, fetchImpl: deps.fetchImpl }); outRec.thumbnailPath = tp; }
+        S.output = outRec;
       }
       S.approved = true; const sv = await saveDraft('approved'); if (!sv || !sv.ok) throw new Error('the approval could not be saved');
       S.busy = 'Uploading privately to YouTube…'; draw();
       const r = await serverUpload({ op: deps.op, mixId: rec.mixId, entryId: S.upload && S.upload.entryId, signal: S.abort.signal, onProgress: (o, n, id) => { S.upload = { entryId: id, offset: o, total: n }; S.busy = `Uploading privately to YouTube ${Math.round((o || 0) / n * 100)}%`; const b = root.querySelector('#mx-busy'); if (b) b.textContent = S.busy; } });
       if (!r || r.done !== true || !/^[A-Za-z0-9_-]{11}$/.test(String(r.youtubeVideoId || '')) || r.privacyStatus !== 'private') throw Object.assign(new Error('the server did not confirm a finished Private upload'), { result: { error: 'upload_not_confirmed' }, entryId: S.upload && S.upload.entryId });   // never Done without the server's verified answer
       S.result = r; let note = '';
-      if (S.output && S.output.thumbnailPath) { S.busy = 'Setting the thumbnail…'; draw(); const th = await deps.op({ op: 'thumbnail', mixId: rec.mixId }).catch(() => null); if (!th || !th.ok) note = ' The thumbnail was not set — press "Retry thumbnail".'; }
+      { const ls0 = await deps.op({ op: 'list' }).catch(() => null); const m0 = ls0 && ls0.ok && ls0.mixes[rec.mixId];   // the stored record, not in-memory state, says whether a thumbnail file exists and whether it is already set
+        if (m0 && m0.output && m0.output.thumbnailPath && !(m0.thumbnail && m0.thumbnail.status === 'set')) { S.busy = 'Setting the thumbnail…'; draw(); let th = await deps.op({ op: 'thumbnail', mixId: rec.mixId }).catch(() => null); if (!th || !th.ok) th = await deps.op({ op: 'thumbnail', mixId: rec.mixId }).catch(() => null); if (!th || !th.ok) note = ' The thumbnail was not set — press "Retry thumbnail".'; } }
       const ls = await deps.op({ op: 'list' }); if (ls.ok) { S.mixes = ls.mixes; S.saved = ls.mixes[rec.mixId]; }
       S.step = 'done'; S.msg = 'Uploaded PRIVATELY to SRV Studio — verified by the server (private, SRV Studio channel).' + note; releaseBuild();
     } catch (e) { S.msg = e.name === 'AbortError' ? 'Upload paused — press "Approve & upload privately" to resume.' : 'Upload stopped: ' + (e.result && e.result.error || e.message) + ' — press the button again to resume.'; if (e.entryId) S.upload = { ...(S.upload || {}), entryId: e.entryId }; }
-    S.busy = null; S.abort = null; draw();
+    S.inflight = false; S.busy = null; S.abort = null; draw();
   }
   // The finished upload is on YouTube: free the in-memory video (hundreds of MB) and the object URL.
   function releaseBuild() { try { const v = root.querySelector('#mx-video'); if (v) v.removeAttribute('src'); } catch (_) {} S.build = null; S.output = null; S.upload = null; S.abort = null; }
   // Upload (or finish uploading) a Mix whose video is ALREADY in storage — after a refresh, a closed tab or a failed attempt. It never builds or stores again and never starts a second upload: with an entry id it continues that upload.
   async function resumeUpload() {
-    const m = S.saved; if (!m) return; S.abort = new AbortController(); S.busy = 'Uploading privately to YouTube…'; draw();
+    if (S.inflight) return; const m = S.saved; if (!m) return; S.inflight = true; S.abort = new AbortController(); S.busy = 'Uploading privately to YouTube…'; draw();
     try {
       const r = await serverUpload({ op: deps.op, mixId: m.mixId, entryId: (S.upload && S.upload.entryId) || (m.upload && m.status === 'uploading' && m.upload.entryId) || undefined, signal: S.abort.signal, onProgress: (o, n, id) => { S.upload = { entryId: id, offset: o, total: n }; S.busy = `Uploading privately to YouTube ${Math.round((o || 0) / n * 100)}%`; const b = root.querySelector('#mx-busy'); if (b) b.textContent = S.busy; } });
       if (!r || r.done !== true || r.privacyStatus !== 'private' || !/^[A-Za-z0-9_-]{11}$/.test(String(r.youtubeVideoId || ''))) throw Object.assign(new Error('the server did not confirm a finished Private upload'), { result: { error: 'upload_not_confirmed' } });
@@ -269,7 +273,7 @@ export function mount(root, deps) {
       const ls = await deps.op({ op: 'list' }); if (ls.ok) { S.mixes = ls.mixes; S.saved = ls.mixes[m.mixId]; }
       S.step = 'done'; S.msg = 'Uploaded PRIVATELY to SRV Studio — verified by the server (private, SRV Studio channel).' + note; releaseBuild();
     } catch (e) { S.msg = e.name === 'AbortError' ? 'Upload paused — press Resume to continue.' : 'Upload stopped: ' + (e.result && e.result.error || e.message) + ' — press Resume to continue (no second upload is started).'; const ls = await deps.op({ op: 'list' }).catch(() => null); if (ls && ls.ok) { S.mixes = ls.mixes; S.saved = ls.mixes[m.mixId] || S.saved; if (S.saved && S.saved.status === 'uploading' && S.saved.upload) S.upload = { entryId: S.saved.upload.entryId }; else if (S.saved && S.saved.status === 'approved') S.upload = null; } }
-    S.busy = null; S.abort = null; draw();
+    S.inflight = false; S.busy = null; S.abort = null; draw();
   }
   // After a verified Done: leave the finished Mix in the history and get ready for the next month (an idle selection screen), without losing anything.
   function startNextMonth() { const [y, mo] = S.month.split('-').map(Number); const nm = mo === 12 ? (y + 1) + '-01' : y + '-' + String(mo + 1).padStart(2, '0'); Object.assign(S, { month: nm, order: [], analysis: {}, build: null, approved: false, output: null, saved: null, upload: null, step: 'select', msg: 'Ready for the next Mix. The finished Mix stays in the history.', metaEdited: {} }); loadMonth(); }
