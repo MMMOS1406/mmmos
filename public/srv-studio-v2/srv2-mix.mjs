@@ -57,7 +57,8 @@ export async function renderMix({ tracks, analysis, tl, avatar, monthLabel, vide
   say('Loading fonts and image…', 0);
   const [fontsOk, img] = await Promise.all([R.srv2LoadFonts(), R.srv2LoadImage(avatar.src)]);
   const duration = tl.totalSec; const prepared = R.srv2PrepareSource(img, avatar.crop);
-  const scene = R.srv2CreateScene({ kind: 'long', img, avatar, title: 'Monthly Mix', hook: '', timeline: R.srv2LongTimeline({ duration, chorusStart: null, hook: '', seed: avatar.id + '|mix|' + monthLabel }), logo: null, prepared, fx: R.srv2NormalizeFx(fx === undefined ? R.SRV2_FX_DEFAULTS : fx) });
+  // CEO correction 2026-11-17: no "Monthly Mix" words anywhere in the video (the scene has NO title — only the SRV STUDIO wordmark and the NOW PLAYING song line), and a subtle snowfall layer (R.SRV2_FX_SNOWFALL) over the artist's photograph.
+  const scene = R.srv2CreateScene({ kind: 'long', img, avatar, title: '', hook: '', timeline: R.srv2LongTimeline({ duration, chorusStart: null, hook: '', seed: avatar.id + '|mix|' + monthLabel }), logo: null, prepared, fx: R.srv2NormalizeFx(fx === undefined ? R.SRV2_FX_SNOWFALL : fx) });
   canvas.width = cfg.width; canvas.height = cfg.height; const ctx = canvas.getContext('2d', { alpha: false });
   // audio graph: segment sources → bus → (recorder, analyser)
   const actx = new AudioContext({ sampleRate: SR }); const bus = actx.createGain(); const an = actx.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.6;
@@ -94,6 +95,8 @@ export async function renderMix({ tracks, analysis, tl, avatar, monthLabel, vide
   let finished = false;
   const waitPlaying = async (sec) => { while (!finished && !(signal && signal.aborted) && actx.currentTime < t0 + sec) await sleep(250); };
   const feeder = (async () => { try { for (let k = 1; k < segs.length; k++) { await waitPlaying(segs[k - 1].fromSec); if (finished || (signal && signal.aborted)) return; const p = await prepare(k); schedule(p); if (k + 1 < segs.length) getSong(k + 1).catch((e) => { failure = e; }); } schedule(lim.flush()); } catch (e) { failure = e; } })();
+  // CEO correction 2026-11-17: recording starts at the instant the first audio sample plays, so the file's time zero IS the timeline's time zero and every chapter timestamp lands on its transition.
+  while (actx.currentTime < t0 - 0.004) await sleep(4);
   rec.start(1000); const started = performance.now(); let frame = 0;
   try {
     await new Promise((resolve, reject) => {
@@ -126,7 +129,6 @@ export function drawMixOverlay(ctx, tl, t, monthLabel) {
   const H = ctx.canvas.height; const cur = tl.items.filter((x) => x.chapterSec <= t).pop(); if (!cur) return;
   const since = t - cur.chapterSec; const a = since < 0.8 ? since / 0.8 : since > 9 ? Math.max(0, 10 - since) : 1;
   ctx.save(); ctx.textAlign = 'left'; ctx.shadowColor = 'rgba(0,0,0,0.75)'; ctx.shadowBlur = 14;
-  if (t < 8) { ctx.globalAlpha = t < 1 ? t : t > 7 ? 8 - t : 1; ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = `600 22px ${R.SRV2_FONTS.sans}`; ctx.fillText(('Monthly Mix · ' + monthLabel).toUpperCase(), 72, 96); }
   if (a > 0) { ctx.globalAlpha = a; ctx.fillStyle = 'rgba(255,255,255,0.78)'; ctx.font = `600 19px ${R.SRV2_FONTS.sans}`; ctx.fillText(String(cur.index + 1).padStart(2, '0') + ' / ' + String(tl.items.length).padStart(2, '0') + '  ·  NOW PLAYING', 72, H - 214); ctx.fillStyle = '#fff'; ctx.font = `600 42px ${R.SRV2_FONTS.display}`; ctx.fillText(cur.title.slice(0, 40), 72, H - 164); }
   ctx.restore();
 }
@@ -204,7 +206,9 @@ export function mount(root, deps) {
     S.busy = null; if (!el.ok) { S.msg = 'Could not load songs: ' + (el.error || 'error'); draw(); return; }
     S.el = el; S.mixes = (ls.ok && ls.mixes) || {}; S.config = (ls.ok && ls.config) || {};
     const saved = Object.values(S.mixes).filter((m) => m.monthKey === S.month).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
-    if (saved && ['uploading', 'uploaded', 'public'].includes(saved.status)) { S.saved = saved; S.step = 'done'; }
+    if (saved && ['uploaded', 'public'].includes(saved.status)) { S.saved = saved; S.step = 'done'; }          // Done = the server verified a finished private upload (status 'uploaded'); never merely 'started'
+    else if (saved && saved.status === 'uploading' && saved.upload && saved.upload.entryId) { S.saved = saved; S.step = 'resume'; S.upload = { entryId: saved.upload.entryId }; S.msg = 'An upload of this Mix was started and did not finish. Nothing is lost — Resume continues it (no second upload).'; }
+    else if (saved && saved.status === 'approved' && saved.output && saved.output.storagePath) { S.saved = saved; S.step = 'resume'; S.msg = 'This Mix is approved and its video is already stored. Upload it privately without building again.'; }
     else if (saved) { S.order = saved.tracks.map((t) => t.pkgId).filter((id) => song(id) && song(id).eligible); for (const t of saved.tracks) if (t.analysed) S.analysis[t.pkgId] = { edges: { inSec: t.inSec, outSec: t.outSec, usedSec: t.usedSec, durationSec: t.sourceDurationSec }, lufs: t.lufs, gainDb: t.gainDb, gain: Math.pow(10, (t.gainDb || 0) / 20) }; S.avatarId = (saved.image && saved.image.avatarId) || S.avatarId; { S.metaEdited = {}; const g = record(); if (g) { if (saved.title !== g.title) S.metaEdited.title = saved.title; if (saved.description !== g.description) S.metaEdited.description = saved.description; if (JSON.stringify(saved.tags) !== JSON.stringify(g.tags)) S.metaEdited.tags = saved.tags; } } S.msg = 'Draft restored (' + saved.updatedAt.slice(0, 16).replace('T', ' ') + ' UTC).'; }
     else loadLocal();
     draw();
@@ -245,13 +249,30 @@ export function mount(root, deps) {
       S.approved = true; const sv = await saveDraft('approved'); if (!sv || !sv.ok) throw new Error('the approval could not be saved');
       S.busy = 'Uploading privately to YouTube…'; draw();
       const r = await serverUpload({ op: deps.op, mixId: rec.mixId, entryId: S.upload && S.upload.entryId, signal: S.abort.signal, onProgress: (o, n, id) => { S.upload = { entryId: id, offset: o, total: n }; S.busy = `Uploading privately to YouTube ${Math.round((o || 0) / n * 100)}%`; const b = root.querySelector('#mx-busy'); if (b) b.textContent = S.busy; } });
+      if (!r || r.done !== true || !/^[A-Za-z0-9_-]{11}$/.test(String(r.youtubeVideoId || '')) || r.privacyStatus !== 'private') throw Object.assign(new Error('the server did not confirm a finished Private upload'), { result: { error: 'upload_not_confirmed' }, entryId: S.upload && S.upload.entryId });   // never Done without the server's verified answer
       S.result = r; let note = '';
       if (S.output && S.output.thumbnailPath) { S.busy = 'Setting the thumbnail…'; draw(); const th = await deps.op({ op: 'thumbnail', mixId: rec.mixId }).catch(() => null); if (!th || !th.ok) note = ' The thumbnail was not set — press "Retry thumbnail".'; }
       const ls = await deps.op({ op: 'list' }); if (ls.ok) { S.mixes = ls.mixes; S.saved = ls.mixes[rec.mixId]; }
-      S.step = 'done'; S.msg = 'Uploaded PRIVATELY to SRV Studio.' + note;
+      S.step = 'done'; S.msg = 'Uploaded PRIVATELY to SRV Studio — verified by the server (private, SRV Studio channel).' + note; releaseBuild();
     } catch (e) { S.msg = e.name === 'AbortError' ? 'Upload paused — press "Approve & upload privately" to resume.' : 'Upload stopped: ' + (e.result && e.result.error || e.message) + ' — press the button again to resume.'; if (e.entryId) S.upload = { ...(S.upload || {}), entryId: e.entryId }; }
     S.busy = null; S.abort = null; draw();
   }
+  // The finished upload is on YouTube: free the in-memory video (hundreds of MB) and the object URL.
+  function releaseBuild() { try { const v = root.querySelector('#mx-video'); if (v) v.removeAttribute('src'); } catch (_) {} S.build = null; S.output = null; S.upload = null; S.abort = null; }
+  // Upload (or finish uploading) a Mix whose video is ALREADY in storage — after a refresh, a closed tab or a failed attempt. It never builds or stores again and never starts a second upload: with an entry id it continues that upload.
+  async function resumeUpload() {
+    const m = S.saved; if (!m) return; S.abort = new AbortController(); S.busy = 'Uploading privately to YouTube…'; draw();
+    try {
+      const r = await serverUpload({ op: deps.op, mixId: m.mixId, entryId: (S.upload && S.upload.entryId) || (m.upload && m.status === 'uploading' && m.upload.entryId) || undefined, signal: S.abort.signal, onProgress: (o, n, id) => { S.upload = { entryId: id, offset: o, total: n }; S.busy = `Uploading privately to YouTube ${Math.round((o || 0) / n * 100)}%`; const b = root.querySelector('#mx-busy'); if (b) b.textContent = S.busy; } });
+      if (!r || r.done !== true || r.privacyStatus !== 'private' || !/^[A-Za-z0-9_-]{11}$/.test(String(r.youtubeVideoId || ''))) throw Object.assign(new Error('the server did not confirm a finished Private upload'), { result: { error: 'upload_not_confirmed' } });
+      let note = ''; if (m.output && m.output.thumbnailPath && !(m.thumbnail && m.thumbnail.status === 'set')) { const th = await deps.op({ op: 'thumbnail', mixId: m.mixId }).catch(() => null); if (!th || !th.ok) note = ' The thumbnail was not set — press "Retry thumbnail".'; }
+      const ls = await deps.op({ op: 'list' }); if (ls.ok) { S.mixes = ls.mixes; S.saved = ls.mixes[m.mixId]; }
+      S.step = 'done'; S.msg = 'Uploaded PRIVATELY to SRV Studio — verified by the server (private, SRV Studio channel).' + note; releaseBuild();
+    } catch (e) { S.msg = e.name === 'AbortError' ? 'Upload paused — press Resume to continue.' : 'Upload stopped: ' + (e.result && e.result.error || e.message) + ' — press Resume to continue (no second upload is started).'; const ls = await deps.op({ op: 'list' }).catch(() => null); if (ls && ls.ok) { S.mixes = ls.mixes; S.saved = ls.mixes[m.mixId] || S.saved; if (S.saved && S.saved.status === 'uploading' && S.saved.upload) S.upload = { entryId: S.saved.upload.entryId }; else if (S.saved && S.saved.status === 'approved') S.upload = null; } }
+    S.busy = null; S.abort = null; draw();
+  }
+  // After a verified Done: leave the finished Mix in the history and get ready for the next month (an idle selection screen), without losing anything.
+  function startNextMonth() { const [y, mo] = S.month.split('-').map(Number); const nm = mo === 12 ? (y + 1) + '-01' : y + '-' + String(mo + 1).padStart(2, '0'); Object.assign(S, { month: nm, order: [], analysis: {}, build: null, approved: false, output: null, saved: null, upload: null, step: 'select', msg: 'Ready for the next Mix. The finished Mix stays in the history.', metaEdited: {} }); loadMonth(); }
   async function confirmPublic() { const id = S.saved && S.saved.mixId; const r = await deps.op({ op: 'confirm_public', mixId: id }); S.msg = r.ok ? (r.publicConfirmation.verifiedByApi ? 'Confirmed: YouTube reports PUBLIC.' : 'Recorded. YouTube still reports ' + r.publicConfirmation.youtubeReports + ' — make it public in YouTube Studio, then confirm again.') : 'Could not confirm: ' + r.error; const ls = await deps.op({ op: 'list' }); if (ls.ok) S.saved = ls.mixes[id]; draw(); }
   async function retryThumbnail() { const r = await deps.op({ op: 'thumbnail', mixId: S.saved.mixId }); S.msg = r.ok ? 'Thumbnail set.' : 'Thumbnail: ' + r.error; const ls = await deps.op({ op: 'list' }); if (ls.ok) S.saved = ls.mixes[S.saved.mixId]; draw(); }
   async function retryPlaylist() { const r = await deps.op({ op: 'playlist', mixId: S.saved.mixId }); S.msg = r.ok ? 'Playlist: ' + r.playlist.status : 'Playlist: ' + r.error; const ls = await deps.op({ op: 'list' }); if (ls.ok) S.saved = ls.mixes[S.saved.mixId]; draw(); }
@@ -273,7 +294,7 @@ export function mount(root, deps) {
     <div id="mx-busy" class="mx-busy" ${S.busy ? '' : 'hidden'}>${esc(S.busy || '')}</div>
     ${S.busy && S.abort ? '<button id="mx-cancel" class="mx-ghost">Cancel</button>' : ''}
     <div class="mx-msg">${esc(S.msg)}</div>
-    ${S.step === 'done' && S.saved ? doneHtml() : `
+    ${S.step === 'done' && S.saved ? doneHtml() : S.step === 'resume' && S.saved ? resumeHtml() : `
     <section><h3>Songs — every SRV Studio song is listed (${songs().length})</h3><table class="mx-t"><tr><th></th><th></th><th>Song</th><th>Length</th><th>YouTube</th><th>Public</th><th>Audio</th><th>Package</th><th>Status</th></tr>
       ${songs().map((s) => { const st = M.srv2MixCatalogState(s); return `<tr class="${s.eligible ? '' : 'dim'}" data-state="${st}"><td>${s.eligible ? `<input type="checkbox" data-pick="${esc(s.pkgId)}" ${S.order.includes(s.pkgId) ? 'checked' : ''}>` : ''}</td><td>${s.thumbUrl ? `<img src="${esc(s.thumbUrl)}" alt="" width="64" height="36">` : ''}</td><td>${esc(s.title)}</td><td>${s.durationSec ? M.srv2Clock(s.durationSec) : '—'}</td><td>${esc(s.youtubeVideoId || '—')}</td><td>${esc(s.privacyStatus || '—')}</td><td>${s.audioSource === 'original-mp3' ? 'original MP3' : 'Long soundtrack'}</td><td>${esc(s.pkgId)}</td><td><span class="${st === 'ready' ? 'ok' : 'warn'}">${esc(M.SRV2_MIX_STATE_LABEL[st])}</span>${s.eligible ? '' : `<div class="dim">${esc(reasonText(s.reason))}</div>`}</td></tr>`; }).join('')}
     </table><div class="mx-row"><button id="mx-addall">Add every ready song</button><button id="mx-suggest" title="Optional helper: newest ready songs until about 30 minutes — not a rule">Fill about 30 min (optional)</button><button id="mx-analyse" ${S.order.length ? '' : 'disabled'}>Analyse songs (exact timing &amp; loudness)</button><button id="mx-save" ${S.order.length ? '' : 'disabled'}>Save draft</button></div></section>
@@ -297,6 +318,11 @@ export function mount(root, deps) {
     </section>` : ''}`}`;
     bind();
   }
+  function resumeHtml() {
+    const m = S.saved; const u = m.upload || {}; const pct = u.bytes ? Math.round((u.offset || 0) / u.bytes * 100) : 0;
+    return `<section><h3>Upload not finished — ${esc(m.title)}</h3><table class="mx-t"><tr><td>Status</td><td>${esc(m.status)}${m.status === 'uploading' ? ` · ${pct}% sent to YouTube` : ''}</td></tr><tr><td>Video</td><td>already stored — it is NOT built or stored again</td></tr><tr><td>Songs</td><td>${m.tracks.map((t) => esc(t.timestamp + ' ' + t.title)).join('<br>')}</td></tr></table>
+      <div class="mx-row"><button id="mx-resume" ${S.busy ? 'disabled' : ''}>▶ Resume private upload</button></div><div class="dim">The task stays open (not Done) until the server confirms a finished Private upload on the SRV Studio channel. Pressing Resume continues the same upload; a second upload of this Mix is refused by the server.</div></section>`;
+  }
   function doneHtml() {
     const m = S.saved; const u = m.upload || {}; const pl = m.playlist || {}; const pc = m.publicConfirmation;
     const slotLabel = m.plannedRelease ? new Date(m.plannedRelease.utcIso).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '—';
@@ -307,13 +333,14 @@ export function mount(root, deps) {
       <tr><td>Public release</td><td>At <b>${esc(slotLabel)}</b>: YouTube Studio → this video → Visibility → Public → Save. Do not use YouTube scheduling.</td></tr>
       <tr><td>Confirmation</td><td>${pc ? esc((pc.verifiedByApi ? '✓ ' : '') + 'YouTube reports ' + pc.youtubeReports + ' (' + String(pc.confirmedAt).slice(0, 16).replace('T', ' ') + ' UTC)') : 'not yet'} <button id="mx-public">I made it public</button></td></tr>
       <tr><td>Songs</td><td>${m.tracks.map((t) => esc(t.timestamp + ' ' + t.title)).join('<br>')}</td></tr></table>
-      ${u.youtubeVideoId ? `<a href="https://studio.youtube.com/video/${esc(u.youtubeVideoId)}/edit" target="_blank" rel="noopener">Open in YouTube Studio</a>` : ''}</section>`;
+      <div class="dim" style="margin-top:6px">✓ Completed: the server verified a finished Private upload on the SRV Studio channel. YouTube may keep processing the file (HD/transcoding) for a while — that is separate and does not hold this task open.</div>
+      <div class="mx-row">${u.youtubeVideoId ? `<a href="https://studio.youtube.com/video/${esc(u.youtubeVideoId)}/edit" target="_blank" rel="noopener">Open in YouTube Studio</a>` : ''}<button id="mx-next">Prepare the next month's Mix →</button></div></section>`;
   }
   function bind() {
     const q = (s) => root.querySelector(s), on = (s, f) => { const e = q(s); if (e) e.onclick = f; };
     on('#mx-close', () => { if (S.busy && !confirm('A build or upload is running. Close anyway?')) return; if (S.abort) S.abort.abort(); deps.close && deps.close(); });
     on('#mx-cancel', () => S.abort && S.abort.abort()); on('#mx-suggest', suggest); on('#mx-addall', addAllReady); on('#mx-analyse', () => analyseAll().catch((e) => { S.busy = null; S.msg = 'Analysis failed: ' + e.message; draw(); }));
-    on('#mx-save', () => saveDraft()); on('#mx-build', build); on('#mx-approve', approveAndUpload); on('#mx-public', confirmPublic); on('#mx-pl', retryPlaylist); on('#mx-thumb', retryThumbnail);
+    on('#mx-resume', resumeUpload); on('#mx-next', startNextMonth); on('#mx-save', () => saveDraft()); on('#mx-build', build); on('#mx-approve', approveAndUpload); on('#mx-public', confirmPublic); on('#mx-pl', retryPlaylist); on('#mx-thumb', retryThumbnail);
     on('#mx-meta-reset', () => { S.metaEdited = {}; changed(); });
     const mm = q('#mx-month'); if (mm) mm.onchange = () => { S.month = mm.value; Object.assign(S, { order: [], analysis: {}, build: null, approved: false, output: null, saved: null, step: 'select', msg: '' }); loadMonth(); };
     const ti = q('#mx-title'), de = q('#mx-desc'), tg = q('#mx-tags');
@@ -329,7 +356,7 @@ export function mount(root, deps) {
     root.querySelectorAll('[data-join]').forEach((e) => { e.onclick = async () => { const i = +e.dataset.join; const t = tl(); S.busy = 'Preparing the transition…'; draw(); try { const p = await transitionPreview(song(t.items[i - 1].pkgId), song(t.items[i].pkgId), S.analysis, { fetchImpl: deps.fetchImpl }); S.lastJoin = { i, continuity: p.continuity }; const ac = new AudioContext({ sampleRate: SR }); const s = ac.createBufferSource(); s.buffer = p.buffer; s.connect(ac.destination); s.start(); s.onended = () => ac.close(); S.msg = `▶ ${t.items[i - 1].title} → ${t.items[i].title}: level through the join ${p.continuity.minDb}…${p.continuity.maxDb} dBFS (no gap)`; } catch (err) { S.msg = 'Transition preview failed: ' + err.message; } S.busy = null; draw(); }; });
   }
   loadMonth().catch((e) => { S.busy = null; S.msg = 'Could not load: ' + e.message; draw(); });
-  return { state: S, actions: { loadMonth, analyseAll, saveDraft, build, approveAndUpload, confirmPublic, retryPlaylist, retryThumbnail, suggest, addAllReady, draw } };
+  return { state: S, actions: { loadMonth, analyseAll, saveDraft, build, approveAndUpload, resumeUpload, startNextMonth, confirmPublic, retryPlaylist, retryThumbnail, suggest, addAllReady, draw } };
 }
 const REASONS = { not_public: 'private or not public on YouTube', not_uploaded: 'not uploaded to YouTube yet', not_built: 'no finished Long video yet', no_audio_source: 'its audio file is missing', unknown_duration: 'its length is not recorded', other_channel: 'belongs to another channel', not_found_on_youtube: 'not found on the SRV Studio channel' };
 const reasonText = (r) => REASONS[r] || r;

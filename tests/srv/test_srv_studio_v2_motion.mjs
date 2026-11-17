@@ -21,7 +21,7 @@ const top = (src, name) => { const m = src.match(new RegExp('\\n(async )?functio
 const D4_COMMIT = '1dc4f7e', D5_COMMIT = 'a84bccd'; // scope is measured on the D5 commit itself; later checkpoints have their own scope checks
 
 // ── 1. Defaults and wiring ──
-ok('Defaults: production = camera, atmosphere, film, music response ON; rain OFF', JSON.stringify(R.SRV2_FX_DEFAULTS) === JSON.stringify({ camera: true, atmosphere: true, film: true, reactive: true, rain: false }));
+ok('Defaults: production = camera, atmosphere, film, music response ON; rain OFF', JSON.stringify(R.SRV2_FX_DEFAULTS) === JSON.stringify({ camera: true, atmosphere: true, film: true, reactive: true, rain: false, snow: false }) && JSON.stringify(R.SRV2_FX_SNOWFALL) === JSON.stringify({ camera: true, atmosphere: true, film: true, reactive: true, rain: false, snow: true }));   // snow: ONLY the Monthly Mix (CEO 2026-11-17); Long and Short stay exactly as approved
 ok('Defaults: SRV2_FX_STATIC is every layer off; a scene without fx is static (D4)', R.SRV2_FX_KEYS.every((k) => R.SRV2_FX_STATIC[k] === false) && JSON.stringify(R.srv2NormalizeFx(undefined)) === JSON.stringify(R.SRV2_FX_STATIC));
 ok('Defaults: the production entry srv2RenderVideo uses the defaults when no fx is given, and records fx in its stats', /opts\.fx === undefined \? SRV2_FX_DEFAULTS : opts\.fx/.test(MOD) && /logo: !!logo, fx,/.test(MOD));
 ok('App: V2 Build passes the production defaults explicitly; the render record keeps them (shown at Approve)', /fx:R\.SRV2_FX_DEFAULTS/.test(top(H, '_srvEnglishV2Build')) && /r\.fx\?row\('Motion'/.test(top(H, '_srvEnglishV2RenderHtml')));

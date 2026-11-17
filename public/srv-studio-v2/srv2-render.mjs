@@ -27,9 +27,11 @@ export const SRV2_RENDER_VERSION = 'srv2-render-2';
 //   film ......... soft luminance variation, breathing vignette, depth falloff (grain is part of the base look)
 //   reactive ..... restrained music response: smoothed bass lifts the atmosphere and adds ≤0.5% zoom; text never moves
 //   rain ......... optional fine rain texture (off by default)
-export const SRV2_FX_KEYS = ['camera', 'atmosphere', 'film', 'reactive', 'rain'];
-export const SRV2_FX_DEFAULTS = Object.freeze({ camera: true, atmosphere: true, film: true, reactive: true, rain: false }); // production
-export const SRV2_FX_STATIC = Object.freeze({ camera: false, atmosphere: false, film: false, reactive: false, rain: false }); // = D4
+//   snow ......... optional fine snowfall / light particles (off by default; only the compilation video turns it on, Long and Short never do — CEO 2026-11-17)
+export const SRV2_FX_KEYS = ['camera', 'atmosphere', 'film', 'reactive', 'rain', 'snow'];
+export const SRV2_FX_DEFAULTS = Object.freeze({ camera: true, atmosphere: true, film: true, reactive: true, rain: false, snow: false }); // production (Long and Short)
+export const SRV2_FX_SNOWFALL = Object.freeze({ ...SRV2_FX_DEFAULTS, snow: true }); // the compilation video (everything as production plus the snowfall)
+export const SRV2_FX_STATIC = Object.freeze({ camera: false, atmosphere: false, film: false, reactive: false, rain: false, snow: false }); // = D4
 export function srv2NormalizeFx(fx) { const o = {}; for (const k of SRV2_FX_KEYS) o[k] = !!(fx && fx[k]); return o; }
 export const SRV2_MOTION = { overscan: 1.06, breathe: 0.035, breatheSec: 16, breathe2: 0.02, breathe2Sec: 41, swaySec: 23, sway2Sec: 37, liftSec: 29, swayAmt: 0.8, reactZoom: 0.005,
   shortZoomShare: 0.45 }; // the Short card breathes less and has no overscan, so the master is never enlarged (≤ ×1.0)
@@ -449,6 +451,7 @@ function drawLong(ctx, s, t, level, frame) {
   }
   if (moving && s.fx.atmosphere) drawAtmosphere(ctx, s, t, (s.focus.fx * src.w - r.x) / r.w * W, (s.focus.fy * src.h - r.y) / r.h * H, null);
   if (moving && s.fx.rain) drawRain(ctx, s, t, null);
+  if (moving && s.fx.snow) drawSnow(ctx, s, t, (s.focus.fx * src.w - r.x) / r.w * W, (s.focus.fy * src.h - r.y) / r.h * H);
   ctx.drawImage(s.vignette, 0, 0);
   if (moving && s.fx.film) drawFilm(ctx, s, t);
   drawGrain(ctx, s, W, H, frame, 0.055);
@@ -456,7 +459,7 @@ function drawLong(ctx, s, t, level, frame) {
   const titleA = Math.min(fade(t, 1.2, 2.6), 1 - fade(t, 6.6, tl.titleEnd));
   const outroA = fade(t, tl.outroStart + 1, tl.outroStart + 2.6);
   const cardA = Math.max(titleA, outroA);
-  if (cardA > 0) drawTitleCard(ctx, s, cardA, t < tl.titleEnd ? (1 - fade(t, 1.2, 2.6)) * 24 : 0);
+  if (cardA > 0 && s.title) drawTitleCard(ctx, s, cardA, t < tl.titleEnd ? (1 - fade(t, 1.2, 2.6)) * 24 : 0);
   if (outroA > 0) {
     ctx.save(); ctx.globalAlpha = fade(t, tl.outroStart + 2.5, tl.outroStart + 3.8);
     ctx.fillStyle = 'rgba(240,240,240,0.82)'; ctx.font = `500 ${Math.round(H * 0.026)}px ${SRV2_FONTS.sans}`;
@@ -467,8 +470,8 @@ function drawLong(ctx, s, t, level, frame) {
   const lowA = 0.6 * Math.min(fade(t, tl.titleEnd + 1, tl.titleEnd + 2.5), 1 - fade(t, tl.outroStart - 0.5, tl.outroStart + 1));
   if (lowA > 0) {
     ctx.save(); ctx.globalAlpha = lowA; ctx.textAlign = 'left'; ctx.fillStyle = SRV2_BRAND.ink;
-    ctx.font = `600 ${Math.round(H * 0.026)}px ${SRV2_FONTS.display}`; ctx.fillText(s.title, W * 0.045, H * 0.915);
-    ctx.restore(); drawBrand(ctx, s, W * 0.045, H * 0.952, Math.round(H * 0.014), 'left', lowA);
+    if (s.title) { ctx.font = `600 ${Math.round(H * 0.026)}px ${SRV2_FONTS.display}`; ctx.fillText(s.title, W * 0.045, H * 0.915); }
+    ctx.restore(); drawBrand(ctx, s, W * 0.045, s.title ? H * 0.952 : H * 0.93, Math.round(H * 0.014), 'left', lowA);
   }
   // hook at the chorus
   for (const hk of tl.hooks) {
@@ -589,6 +592,22 @@ function drawAtmosphere(ctx, s, t, faceX, faceY, region) {
   ctx.translate(sx, R.y); ctx.rotate(-0.21); ctx.drawImage(A.sweep, 0, -R.h * 0.2, A.sweep.width, R.h * 1.5);
   ctx.restore();
 }
+// Fine, slow snowfall: ~70 small soft flakes, deterministic from the scene seed (the same frame is always the same), drifting down with a gentle sideways sway. Restrained on purpose: tiny flakes, low opacity, and
+// they fade out over the artist's face so she stays clearly visible. Drawn under all text and under the vignette/film, so it never competes with the picture. (CEO 2026-11-17, compilation video only.)
+const SNOW_N = 150;
+function snowField(seed) { let a = (seed >>> 0) || 1; const r = () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; const f = []; for (let i = 0; i < SNOW_N; i++) { const big = r() < 0.16; f.push(big ? { x: r(), y: r(), v: 9 + r() * 12, rad: 3.4 + r() * 2.6, sway: 14 + r() * 26, ph: r() * 6.283, al: 0.16 + r() * 0.16, big: true } : { x: r(), y: r(), v: 16 + r() * 26, rad: 1.1 + r() * 2.1, sway: 10 + r() * 22, ph: r() * 6.283, al: 0.4 + r() * 0.45, big: false }); } return f; }
+function snowSprite(mk) { const c = mk(64, 64); const x = c.getContext('2d'); const g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return c; }
+function drawSnow(ctx, s, t, faceX, faceY) {
+  const { W, H } = s; if (!s._snow) { s._snow = snowField(s.seed ^ 0x5bd1e995); s._snowSprite = snowSprite(mk); } const k = H / 1080; const fr = H * 0.2;
+  ctx.save(); ctx.fillStyle = '#ffffff';
+  for (const f of s._snow) {
+    const y = ((f.y * (H + 40) + t * f.v * k) % (H + 40)) - 20, x = ((f.x * W + Math.sin(t * 0.45 + f.ph) * f.sway * k + t * 3 * k) % (W + 20) + (W + 20)) % (W + 20) - 10;
+    const d = Math.hypot(x - faceX, (y - faceY) * 0.9); const fade = d < fr ? 0.12 + 0.88 * (d / fr) * (d / fr) : 1;   // a clear area around the face
+    ctx.globalAlpha = f.al * fade; const rr = f.rad * k;
+    if (f.big) ctx.drawImage(s._snowSprite, x - rr, y - rr, rr * 2, rr * 2); else { ctx.beginPath(); ctx.arc(x, y, rr, 0, 6.2832); ctx.fill(); }
+  }
+  ctx.restore();
+}
 function drawRain(ctx, s, t, region) {
   const A = fxAssets(s); const R = region || { x: 0, y: 0, w: s.W, h: s.H };
   const pat = ctx.createPattern(A.rain, 'repeat'); if (!pat) return;
@@ -605,7 +624,7 @@ function drawFilm(ctx, s, t) {
   ctx.restore();
 }
 function fxPrepare(s, t, level) {
-  if (!s.fx.camera && !s.fx.atmosphere && !s.fx.film && !s.fx.reactive && !s.fx.rain) return false;
+  if (!s.fx.camera && !s.fx.atmosphere && !s.fx.film && !s.fx.reactive && !s.fx.rain && !s.fx.snow) return false;
   s.state.lvSlow += ((s.fx.reactive ? level : 0) - s.state.lvSlow) * 0.06; // slow, restrained response
   s.cam = s.fx.camera ? srv2Camera(t, s.seed) : { zoom: 1, mx: 0, my: 0 };
   return true;
