@@ -35,9 +35,13 @@ try {
         const expTask = open.length ? trunc(open[0].name || open[0].title || 'Open task', 44) + ' · ' + open[0].status + (open.length > 1 ? ` (+${open.length - 1})` : '') : 'Nothing waiting';
         check(`${b}: next action = oldest open task (${open.length} open)`, c['Next action'] === expTask, c['Next action']);
         const ch = real.youtube_channels.find((x) => x.mmm_engine === b); const rows = real.youtube_videos_analytics.filter((r) => r.channel_id === ch.channel_id);
-        const views = rows.reduce((a, r) => a + (Number(r.views) || 0), 0), subs = rows.reduce((a, r) => a + (Number(r.subs_gained) || 0), 0), last = rows.map((r) => r.analytics_synced_at).sort().pop();
-        check(`${b}: views ${views.toLocaleString()} = sum over ALL ${rows.length} synced videos`, c['Views (all synced videos)'] === views.toLocaleString(), c['Views (all synced videos)']);
-        check(`${b}: subscribers gained +${subs} = sum over all synced videos`, c['Subscribers gained (from videos)'] === '+' + subs.toLocaleString(), c['Subscribers gained (from videos)']);
+        const last = rows.map((r) => r.analytics_synced_at).sort().pop();
+        // CORRECTED rule (R-A): the card shows the LATEST analytics window of this channel only — rows refreshed by the newest pull, [TEST] uploads excluded — never a sum over older windows
+        const win = rows.filter((r) => r.analytics_synced_at && String(r.analytics_synced_at).slice(0, 10) === String(last).slice(0, 10) && !/^\[test\]/i.test(String(r.title || '')));
+        const views = win.reduce((a, r) => a + (Number(r.views) || 0), 0), subs = win.reduce((a, r) => a + (Number(r.subs_gained) || 0), 0);
+        const vk = Object.keys(c).find((k) => /^Views \(/.test(k)), sk = Object.keys(c).find((k) => /^Subscribers gained/.test(k));
+        check(`${b}: views ${views.toLocaleString()} = latest analytics window (${win.length} of ${rows.length} rows; older windows are not added in)`, c[vk] === views.toLocaleString(), c[vk]);
+        check(`${b}: subscribers gained +${subs} = same window, attributed to videos`, c[sk] === '+' + subs.toLocaleString(), c[sk]);
         const age = (Date.now() - new Date(last).getTime()) / 86400000;
         check(`${b}: YouTube health reflects last sync (${age.toFixed(1)} days ago)`, age <= 3 ? /^Connected/.test(c['YouTube']) && /22c55e|34, 197, 94/.test(cards[i].dot) : /^Needs attention/.test(c['YouTube']), c['YouTube']);
       }

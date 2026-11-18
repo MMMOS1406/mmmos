@@ -3429,9 +3429,9 @@ async function ytFoundationReport(){
           + '<div><div style="color:var(--dim)">SUBS 30d Δ</div><div style="color:'+growthColor(g.subs30dDelta)+';font-weight:700">'+growthLabel(g.subs30dDelta)+'</div></div>'
         + '</div>'
         + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:10px;margin-bottom:6px">'
-          + '<div><div style="color:var(--dim)">VIDEOS (30d)</div><div style="color:#fff;font-weight:700">'+w.videosPublished+'</div></div>'
-          + '<div><div style="color:var(--dim)">WATCH MIN (30d)</div><div style="color:#fff;font-weight:700">'+w.totalWatchMin+'</div></div>'
-          + '<div><div style="color:var(--dim)">AVG RET (30d)</div><div style="color:#fff;font-weight:700">'+(w.avgRetention != null ? w.avgRetention+'%' : '—')+'</div></div>'
+          + '<div><div style="color:var(--dim)">NEW VIDEOS (30d)</div><div style="color:#fff;font-weight:700">'+w.videosPublished+'</div></div>'
+          + '<div><div style="color:var(--dim)">WATCH MIN (30d, new videos)</div><div style="color:#fff;font-weight:700">'+w.totalWatchMin+'</div></div>'
+          + '<div><div style="color:var(--dim)">AVG RET (30d, new videos, simple mean)</div><div style="color:#fff;font-weight:700">'+(w.avgRetention != null ? w.avgRetention+'%' : '—')+'</div></div>'
         + '</div>'
         + topicHtml
         + topVidsHtml
@@ -6744,6 +6744,7 @@ function _deptKPIs(key,F){
     }
     case 'marketing_sales': {
       const a=D.youtubeAnalytics; const per=(a&&a.perEngine)||[];
+      const ytLoaded=!!(a&&!a.error&&per.length);   // not loaded yet / failed / no analytics => show "—", never a misleading 0
       const ytViews=per.reduce((s,e)=>s+(e.views||0),0);
       const ytSubsGained=per.reduce((s,e)=>s+(e.subsGained||0),0);
       const oh=(typeof _overallAnalyticsHealth==='function')?_overallAnalyticsHealth():{state:'disconnected'};
@@ -6761,8 +6762,8 @@ function _deptKPIs(key,F){
       const dsrVal=dsr&&dsr.rate!=null?dsr.rate+'%':'—';
       const dsrColor=dsr&&dsr.rate!=null?(dsr.rate>=60?'#22c55e':dsr.rate>=35?'#f59e0b':'#ef4444'):'#6b7280';
       return [
-        {label:'YT VIEWS', value:ytViews>=1000?(ytViews/1000).toFixed(1)+'K':String(ytViews), color:'#fff'},
-        {label:'YT SUBS GAINED', value:'+'+ytSubsGained, color:'#22c55e'},
+        {label:'YT VIEWS', value:!ytLoaded?'—':ytViews>=1000?(ytViews/1000).toFixed(1)+'K':String(ytViews), color:'#fff'},
+        {label:'YT SUBS GAINED', value:!ytLoaded?'—':'+'+ytSubsGained, color:'#22c55e'},
         {label:'SYNC STATUS', value:lbl, color:oh.state==='current'?'#22c55e':oh.state==='stale'?'#f59e0b':'#ef4444'},
         {label:'DECISION SUCCESS RATE', value:dsrVal+(dsr&&dsr.decidedCount?' ('+dsr.decidedCount+' decided)':''), color:dsrColor},
       ];

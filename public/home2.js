@@ -175,12 +175,20 @@
     // per-channel totals are read per channel: the app's shared analytics loader caps at 200 rows across ALL channels and so understates a business
     Promise.all([Promise.all(pk), rest('youtube_channels?select=channel_id,mmm_engine&mmm_engine=not.is.null')]).then(function (r) {
       var chans = r[1].rows, yt = {};
+      // The corrected analytics rules live in ONE place (/growth/growthAnalytics.mjs, also used by the detailed Analytics screen): the numbers below are the
+      // latest Analytics window of that business's own channel (older windows are never added in), so Home and the detailed screen always agree.
+      var GM = import('/growth/growthAnalytics.mjs').catch(function () { return null; });
       return Promise.all(BIZ.map(function (b) {
         var ch = chans.filter(function (c) { return c.mmm_engine === b[0]; })[0];
         if (!ch) { yt[b[0]] = { ok: r[1].ok, channel: false }; return null; }
-        return rest('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&analytics_synced_at=not.is.null&select=views,subs_gained,analytics_synced_at&limit=1000').then(function (a) {
-          var v = 0, s = 0, last = null; a.rows.forEach(function (x) { v += Number(x.views) || 0; s += Number(x.subs_gained) || 0; if (x.analytics_synced_at && (!last || x.analytics_synced_at > last)) last = x.analytics_synced_at; });
-          yt[b[0]] = { ok: a.ok, channel: true, videos: a.rows.length, views: v, subs: s, lastSync: last };
+        return Promise.all([GM, rest('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&analytics_synced_at=not.is.null&select=channel_id,video_id,title,views,watch_time_min,subs_gained,analytics_synced_at,synced_at&limit=1000')]).then(function (x) {
+          var G = x[0], a = x[1], last = null;
+          a.rows.forEach(function (r0) { if (r0.analytics_synced_at && (!last || r0.analytics_synced_at > last)) last = r0.analytics_synced_at; });
+          var biz = G && Object.keys(G.GROWTH_BUSINESSES).map(function (k) { return G.GROWTH_BUSINESSES[k]; }).filter(function (q) { return q.channelId === ch.channel_id; })[0];
+          var ws = null; try { if (G && biz && a.ok) ws = G.buildWorkspace(a.rows.map(G.normaliseRow), { business: biz }); } catch (e) { ws = null; }
+          // no corrected figure available (module or data missing) => show "—", never a legacy sum
+          yt[b[0]] = { ok: a.ok, channel: true, videos: ws ? ws.rows.inWindow : 0, views: ws ? ws.metrics.views_window.value : null, subs: ws ? ws.metrics.subs_attributed_window.value : null,
+            lastSync: last, periodTo: ws && ws.period ? ws.period.to : null, periodDays: ws && ws.period ? ws.period.days : null, partial: !!(ws && ws.metrics.views_window.status === 'partial') };
         });
       })).then(function () {
         S.data = { pkg: r[0].map(function (x) { return { ok: x.ok, row: x.rows[0] || null }; }), yt: yt };
@@ -216,7 +224,8 @@
       b: b, px: px, p: p, h: h, e: e, t: t,
       next: t.length ? esc(trunc(t[0].name || t[0].title || 'Open task', 44)) + ' · ' + esc(t[0].status || '') + (t.length > 1 ? ' (+' + (t.length - 1) + ')' : '') : 'Nothing waiting',
       last: p ? esc(trunc(p.title || ('#' + p.id), 48)) : (S.data ? (px && px.ok ? 'None yet' : 'Could not load') : 'Loading…'),
-      views: e && e.videos ? Number(e.views).toLocaleString() : '—', subs: e && e.videos ? '+' + Number(e.subs).toLocaleString() : '—'
+      views: e && e.videos && e.views !== null ? Number(e.views).toLocaleString() + (e.partial ? ' (partial)' : '') : '—', subs: e && e.videos && e.subs !== null ? '+' + Number(e.subs).toLocaleString() : '—',
+      win: e && e.periodTo ? e.periodDays + '-day window to ' + e.periodTo : 'latest analytics window'
     };
   }
   function row(label, value, dest) { return '<div class="h2-kv"' + (dest ? ' data-h2="' + esc(dest) + '" role="link" tabindex="0"' : '') + '><span>' + esc(label) + '</span><b>' + value + '</b></div>'; }
@@ -224,7 +233,7 @@
     var f = facts(i), n = f.b[0];
     return '<div class="h2-card"><h3><span class="h2-dot" style="background:' + f.h[0] + '"></span>' + esc(n) + '</h3>' +
       row('Last package', f.last, 'ws:' + n + ':packages') + row('Stage', esc(stage(f.px)), 'ws:' + n + ':packages') + row('Next action', f.next, 'ws:' + n + ':production') +
-      row('YouTube', esc(f.h[1]), 'ws:' + n + ':analytics') + row('Views (all synced videos)', f.views, 'ws:' + n + ':analytics') + row('Subscribers gained (from videos)', f.subs, 'ws:' + n + ':analytics') +
+      row('YouTube', esc(f.h[1]), 'ws:' + n + ':analytics') + row('Views (' + f.win + ')', f.views, 'ws:' + n + ':analytics') + row('Subscribers gained (from videos, same window)', f.subs, 'ws:' + n + ':analytics') +
       '<button type="button" class="h2-btn" data-h2="biz:' + esc(n) + '">Open ' + esc(n) + '</button></div>';
   }
   function moneyStrip() {
@@ -237,7 +246,7 @@
       lnk('<div class="h2-sm">Monthly income</div><div class="h2-big">' + money(F.incomeTotal) + '</div>') +
       lnk('<div class="h2-sm">Monthly spend</div><div class="h2-big">' + money(F.expenseTotal) + '</div>') +
       lnk('<div class="h2-sm">Net per month (income minus spend)</div><div class="h2-big">' + money((F.incomeTotal || 0) - (F.expenseTotal || 0)) + '</div><div class="h2-sm">' + esc(src) + '</div>') +
-      '<div class="h2-card lnk" data-h2="analytics" role="link" tabindex="0"><div class="h2-sm" style="margin-bottom:4px">Analytics (all synced videos)</div>' + an + '<div class="h2-go">Open Analytics →</div></div></div>';
+      '<div class="h2-card lnk" data-h2="analytics" role="link" tabindex="0"><div class="h2-sm" style="margin-bottom:4px">Analytics (latest analytics window)</div>' + an + '<div class="h2-go">Open Analytics →</div></div></div>';
   }
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
@@ -248,7 +257,7 @@
     var i = bizIndex(engine), f = facts(i), n = engine;
     var lnk = function (title, line, dest) { return '<div class="h2-card lnk" data-h2="' + esc(dest) + '" role="link" tabindex="0"><h3>' + esc(title) + '</h3><div class="h2-sm">' + line + '</div><div class="h2-go">Open ' + esc(title) + ' →</div></div>'; };
     return '<div class="h2-wrap"><div class="h2-grid c2"><div class="h2-card"><h3><span class="h2-dot" style="background:' + f.h[0] + '"></span>' + esc(n) + ' — status</h3>' +
-      row('Last package', f.last) + row('Stage', esc(stage(f.px))) + row('Next action', f.next) + row('YouTube', esc(f.h[1])) + row('Views (all synced videos)', f.views) + row('Subscribers gained (from videos)', f.subs) + '</div>' +
+      row('Last package', f.last) + row('Stage', esc(stage(f.px))) + row('Next action', f.next) + row('YouTube', esc(f.h[1])) + row('Views (' + f.win + ')', f.views) + row('Subscribers gained (from videos, same window)', f.subs) + '</div>' +
       '<div class="h2-grid" style="grid-template-columns:minmax(0,1fr)">' +
       lnk('Production', f.t.length ? f.t.length + ' open task' + (f.t.length > 1 ? 's' : '') + ' · next: ' + f.next : 'No open tasks', 'ws:' + n + ':production') +
       lnk('Packages', 'Package history for ' + esc(n) + ' only', 'ws:' + n + ':packages') +
