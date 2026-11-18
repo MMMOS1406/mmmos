@@ -17,7 +17,7 @@ import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, c
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
-import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
+import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
@@ -8831,11 +8831,13 @@ async function youtubeVideoStatus(req, res) {
 // watch-time over a configurable lookback window, upserts to youtube_videos columns.
 // Requires the yt-analytics.readonly scope (added to YT_SCOPES in callback.js;
 // operator must re-auth after the scope upgrade lands).
-// R-B — read-only YouTube API probe. CEO session only, POST only. Two modes:
-//   {business, dryRun:true}                       -> returns the planned requests and the documented capability matrix; contacts nobody, reads nothing, costs no quota.
-//   {business, confirm:'RUN-LIVE-READ-ONLY-PROBE', days?, reference?}  -> LIVE: reads the ONE connection of that business, issues GET-only calls to Google's read endpoints
-//      (lib/growthProbe.mjs), writes NOTHING (no database write, no Google-side write), returns a token-free report with channel-level aggregates only.
-// `reference` = optional Studio figures typed by the CEO for reconciliation ({totalViews, advertisingViews, netSubscribers, watchHours}); used in memory, never stored or logged.
+// R-B — read-only YouTube API probe. CEO session only, POST only. Deployment approval is NOT permission to contact Google: a live run also needs a time-boxed authorization record
+// (app setting `growth_probe_live`, written by engineering only after the CEO's separate written authorization; no browser can write that key).
+//   {business, dryRun:true}  -> the planned requests, the documented capability matrix and the current live-authorization state. Contacts Google: NEVER. Reads: that one setting only.
+//   {business, confirm:'RUN-LIVE-READ-ONLY-PROBE', days?, reference?} -> LIVE, only while authorized: one run at a time per business (10-minute cooldown), reads the ONE connection of that
+//      business, issues GET-only requests to Google's read endpoints (lib/growthProbe.mjs; no retries, 20 s per request, 120 s total), writes NOTHING, returns a token-free aggregate-only report.
+// `reference` = optional Studio figures for reconciliation ({totalViews, advertisingViews, netSubscribers, watchHours}); used in memory, never stored or logged.
+const _growthProbeGuard = _growthCreateRunGuard({ cooldownMs: 600000 });
 async function growthProbe(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
@@ -8843,16 +8845,22 @@ async function growthProbe(req, res) {
   const days = Math.min(90, Math.max(1, parseInt(b.days || '28', 10) || 28));
   const videoId = /^[A-Za-z0-9_-]{6,20}$/.test(String(b.videoId || '')) ? String(b.videoId) : undefined;
   const ref = {}; if (b.reference && typeof b.reference === 'object') for (const k of ['totalViews', 'advertisingViews', 'netSubscribers', 'watchHours']) { const v = Number(b.reference[k]); if (Number.isFinite(v)) ref[k] = v; }
+  let began = false;
   try {
     const want = { silk_road_voices: 'UCCUa5BLzGh2eRBoqqWBCK_g', srv_studio: 'UC0nzWQX6AaUqlF5FozNpWPg' }[business];
     if (!want) return res.status(400).json({ ok: false, error: 'unknown_business' });
     const { from, to } = _growthDefaultPeriod(Date.now(), days);   // last N complete Pacific-time days ending yesterday (Studio convention)
-    if (b.dryRun === true) return res.status(200).json({ ok: true, dryRun: true, business, plan: _growthProbeSteps({ from, to, videoId }).map((s) => ({ id: s.id, cap: s.cap, expect: s.expect, quota: s.quota, url: s.url })), capabilities: _growthCapabilities() });
+    let authRows = null; try { authRows = await sbGet('app_settings?key=eq.growth_probe_live&select=value&limit=1'); } catch (_) { authRows = null; }
+    const auth = _growthLiveAuth(Array.isArray(authRows) && authRows[0] ? authRows[0].value : null, Date.now(), business);
+    if (b.dryRun === true) return res.status(200).json({ ok: true, dryRun: true, business, period: { from, to }, liveAuthorization: auth, plan: _growthProbeSteps({ from, to, videoId }).map((s) => ({ id: s.id, cap: s.cap, expect: s.expect, quota: s.quota, url: s.url })), capabilities: _growthCapabilities() });
     if (b.confirm !== 'RUN-LIVE-READ-ONLY-PROBE') return res.status(400).json({ ok: false, error: 'live_confirmation_required' });
+    if (!auth.ok) return res.status(403).json({ ok: false, error: auth.reason, detail: auth.detail });
+    const g = _growthProbeGuard.begin(business, Date.now()); if (!g.ok) return res.status(429).json({ ok: false, error: g.reason, retryAfterMs: g.retryAfterMs || null }); began = true;
     const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2');
     const out = await _growthRunProbe({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, from, to, videoId, reference: Object.keys(ref).length ? ref : null, provenance: { real: true } });
     return res.status(out.ok ? 200 : (out.error === 'no_connection' ? 404 : 502)).json(out);
   } catch (e) { return res.status(500).json({ ok: false, error: 'growth_probe_failed' }); }
+  finally { if (began) _growthProbeGuard.end(business); }
 }
 
 async function youtubeAnalyticsPull(req, res) {

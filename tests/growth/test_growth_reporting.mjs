@@ -27,6 +27,7 @@ ok('daily paid series keeps the day and the paid flag (shows a campaign window)'
 const e1 = R.normalizeResponse('earn_longform_365d_by_source', { columnHeaders: H('insightTrafficSourceType', 'creatorContentType', 'estimatedMinutesWatched', 'views'), rows: [['YT_SEARCH', 'VIDEO_ON_DEMAND', 6000, 1], ['ADVERTISING', 'VIDEO_ON_DEMAND', 3000, 1], ['SHORTS', 'VIDEO_ON_DEMAND', 1200, 1], ['SHORTS', 'SHORTS', 9999, 1]] }, ctx());
 ok('Earn watch-hours estimate excludes paid-ad time and Shorts-feed time and is labeled an approximation (6000 min = 100.0 h; 50 h paid and 20 h feed shown separately)', e1[0].estimate === 100 && e1[0].excluded_paid === 50 && e1[0].excluded_shorts_feed === 20 && e1[0].approximation === true, e1[0]);
 const e2 = R.normalizeResponse('earn_shorts_90d_by_source', { columnHeaders: H('insightTrafficSourceType', 'creatorContentType', 'views'), rows: [['SHORTS', 'SHORTS', 700], ['ADVERTISING', 'SHORTS', 300], ['YT_CHANNEL', 'VIDEO_ON_DEMAND', 55]] }, ctx());
+ok('Earn rows are named as estimates (measure contains "estimate", approximation=true) — never "qualified"', [e1[0], e2[0]].every((r) => /estimate/.test(r.measure) && r.approximation === true && !/qualified/i.test(JSON.stringify(r))));
 ok('Earn Shorts-views estimate counts SHORTS content only and excludes paid ads', e2[0].estimate === 700 && e2[0].excluded_paid === 300 && e2[0].approximation === true);
 ok('unknown query ids throw (no silent guess)', (() => { try { R.normalizeResponse('nope', {}, ctx()); return false; } catch (e) { return /no normalizer/.test(e.message); } })());
 
