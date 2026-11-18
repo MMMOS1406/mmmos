@@ -26124,6 +26124,48 @@ function renderBusinessAssetsSection(b){
 }
 
 // ── INTEGRATIONS ──
+// R-B — CEO-only trigger for the read-only YouTube analytics probe. The page never contacts Google: it calls OUR server action (CEO session header), which reads the one
+// connection of that business and issues GET-only requests. "Show plan" contacts nobody. A live run asks for confirmation and writes nothing anywhere.
+function _growthProbeCardHtml(){
+  if(!(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken()))return '';
+  const btn=function(b,mode,label,col){return '<button onclick="growthProbeRun(\''+b+'\',\''+mode+'\')" style="padding:5px 10px;margin:2px 4px 2px 0;background:rgba(255,255,255,0.04);border:1px solid '+col+';border-radius:6px;color:'+col+';font-size:10px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif">'+label+'</button>';};
+  const inp=function(id,ph){return '<input id="gp-'+id+'" type="number" step="any" placeholder="'+ph+'" style="width:92px;padding:3px 5px;margin:2px 4px 2px 0;background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:5px;color:#fff;font-size:10px">';};
+  return '<div class="card" style="padding:14px;margin-top:16px"><div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;margin-bottom:6px">YOUTUBE ANALYTICS PROBE · READ-ONLY (CEO)</div>'
+    +'<div style="font-size:10px;color:var(--dim);line-height:1.5;margin-bottom:8px">Checks which YouTube Analytics and Reporting metrics each channel can really return. Read-only: nothing is written or changed on YouTube, in the database, or anywhere else. <b>Show plan</b> sends nothing to Google. <b>Run live</b> uses that channel\'s own existing connection and about 20 read requests.</div>'
+    +'<div style="font-size:10px;color:var(--dim);margin-bottom:4px">Optional Studio figures for the same last 28 days (reconciliation):</div>'
+    +'<div style="margin-bottom:6px">'+inp('views','total views')+inp('adv','advertising views')+inp('subs','net subscribers')+inp('hrs','watch hours')+'</div>'
+    +'<div style="margin-bottom:4px"><span style="font-size:11px;color:#fff;font-weight:700">Silk Road Voices</span> '+btn('silk_road_voices','plan','Show plan (no Google call)','#6b7280')+btn('silk_road_voices','live','Run live (read-only)','#22c55e')+'</div>'
+    +'<div><span style="font-size:11px;color:#fff;font-weight:700">SRV Studio</span> '+btn('srv_studio','plan','Show plan (no Google call)','#6b7280')+btn('srv_studio','live','Run live (read-only)','#22c55e')+'</div>'
+    +'<div id="growth-probe-out" style="margin-top:10px;font-size:10px;color:var(--dim)"></div></div>';
+}
+async function growthProbeRun(business,mode){
+  const out=document.getElementById('growth-probe-out');if(!out)return;
+  const name=business==='srv_studio'?'SRV Studio':'Silk Road Voices';const live=mode==='live';
+  if(live&&!confirm('Run the READ-ONLY YouTube analytics probe for '+name+'?\n\nIt reads that channel\'s own analytics (about 20 requests). Nothing is written or changed.'))return;
+  out.innerHTML='<span style="color:#c9a84c">⏳ '+(live?'running live read-only probe for ':'building plan for ')+escHTML(name)+'…</span>';
+  try{
+    const body={business:business};
+    if(live){body.confirm='RUN-LIVE-READ-ONLY-PROBE';const ref={};[['views','totalViews'],['adv','advertisingViews'],['subs','netSubscribers'],['hrs','watchHours']].forEach(function(p){const el=document.getElementById('gp-'+p[0]);if(el&&el.value!==''&&isFinite(Number(el.value)))ref[p[1]]=Number(el.value);});if(Object.keys(ref).length)body.reference=ref;}else body.dryRun=true;
+    const r=await fetch('/api/ops?action=growth_probe',{method:'POST',headers:{'Content-Type':'application/json','X-MMM-CEO-Session':_ceoGetSessionToken()||''},body:JSON.stringify(body)});
+    const d=await r.json().catch(function(){return {ok:false,error:'unreadable_response'};});
+    out.innerHTML=_growthProbeResultHtml(d,name,live);
+  }catch(e){out.innerHTML='<span style="color:#ef4444">Could not run: '+escHTML(e.message)+'</span>';}
+}
+function _growthProbeResultHtml(d,name,live){
+  const T=function(t,c){return '<span style="color:'+(c||'#fff')+'">'+t+'</span>';};
+  if(!d||!d.ok&&!d.results)return T('Not run: '+escHTML((d&&d.error)||'failed'),'#ef4444');
+  let h='';
+  if(d.dryRun){h+='<div style="color:#c9a84c;font-weight:700;margin-bottom:6px">PLAN ONLY — nothing was sent to Google ('+escHTML(name)+'). '+(d.plan||[]).length+' requests would be made; all GET, read-only.</div>';
+    h+='<table style="width:100%;border-collapse:collapse"><tr style="color:var(--dim)"><th style="text-align:left;padding:2px 4px">Capability (documented)</th><th style="text-align:left;padding:2px 4px">What the documentation says</th><th style="text-align:left;padding:2px 4px">Live</th></tr>'+(d.capabilities||[]).map(function(c){return '<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:2px 4px;color:#fff">'+escHTML(c.label)+'</td><td style="padding:2px 4px">'+escHTML(c.documented)+'</td><td style="padding:2px 4px;color:var(--dim)">'+escHTML(c.live)+'</td></tr>';}).join('')+'</table>';return h;}
+  const real=d.provenance&&d.provenance.real===true;
+  h+='<div style="font-weight:700;margin-bottom:6px;color:'+(real?'#22c55e':'#ef4444')+'">'+(real?'REAL YouTube data':'NOT real YouTube data')+' — live read-only probe, '+escHTML(name)+(d.aborted?' — STOPPED: '+escHTML(d.aborted):'')+'</div>';
+  const s=d.summary;if(s)h+='<div style="margin-bottom:6px">'+s.steps+' requests · ok '+s.ok+' · empty '+s.okEmpty+' · unsupported as documented '+s.unsupportedAsDocumented+' · bad request '+s.badRequest+' · forbidden '+s.forbidden+' · quota '+s.quotaExceeded+' · failed '+s.failed+' · skipped '+s.skipped+' · latency total '+s.latencyMs.total+' ms (max '+s.latencyMs.max+' ms) · quota used: Data '+s.quotaUnits.data+', Analytics '+s.quotaUnits.analytics+', Reporting '+s.quotaUnits.reporting+'</div>';
+  const col={retrievable:'#22c55e',retrievable_but_empty:'#c9a84c',partly_retrievable:'#c9a84c',not_supported_confirmed:'#6b7280',not_retrievable:'#ef4444',forbidden:'#ef4444',quota_exceeded:'#ef4444',retrievable_UNEXPECTED:'#f59e0b',not_run:'#6b7280'};
+  if(d.capabilities)h+='<table style="width:100%;border-collapse:collapse"><tr style="color:var(--dim)"><th style="text-align:left;padding:2px 4px">Capability</th><th style="text-align:left;padding:2px 4px">Documented</th><th style="text-align:left;padding:2px 4px">Live result</th></tr>'+d.capabilities.map(function(c){return '<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:2px 4px;color:#fff">'+escHTML(c.cap)+'</td><td style="padding:2px 4px">'+escHTML(c.documented||'')+'</td><td style="padding:2px 4px;color:'+(col[c.verdict]||'#fff')+'">'+escHTML(c.verdict)+'</td></tr>';}).join('')+'</table>';
+  if(d.reach)h+='<div style="margin-top:6px">Reach (thumbnail impressions / CTR): report types listed: '+escHTML((d.reach.typesListed||[]).join(', ')||'none')+' · jobs existing: '+escHTML((d.reach.jobsExisting||[]).join(', ')||'none — a job must be created (a separate, authorized step) before data exists')+'</div>';
+  if(d.reconcile)h+='<div style="margin-top:6px">Reconciliation with the Studio figures you typed: '+Object.keys(d.reconcile).map(function(k){const x=d.reconcile[k];return escHTML(k)+' API '+x.api+' vs Studio '+x.studio+' ('+(x.diffPct===null?'n/a':(x.diffPct>0?'+':'')+x.diffPct+'%')+(x.within1pct?' ✓':' ✗')+')';}).join(' · ')+'</div>';
+  return h;
+}
 function renderIntegrations(){
   const isAdmin=currentUser.id==='admin';
 
@@ -26385,6 +26427,7 @@ function renderIntegrations(){
     ${integrations.finance.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">Finance</div>${integrations.finance.map(intCard).join('')}` : ''}
     ${integrations.system.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">System</div>${integrations.system.map(intCard).join('')}` : ''}
     ${isAdmin?_publishAuthCardHtml():''}
+    ${isAdmin?_growthProbeCardHtml():''}
   `;
 }
 
