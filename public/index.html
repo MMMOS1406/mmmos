@@ -10126,41 +10126,28 @@ function renderAssetLibrarySection(){
 // a tab's entry point; it no-ops if data is already cached or a load is in flight.
 // Previously named _loadEnginesAnalytics/_renderEnginesAnalyticsPanel and was
 // fetched only from Overview (renamed for clarity as part of the consolidation).
+// Analytics accuracy (R-A): the detailed view is built per channel from that channel's OWN rows (never the top 200 of all channels),
+// uses only rows of the latest pull for period totals, weights retention by views and labels every number (lib/growthAnalytics.mjs).
 async function loadYouTubeAnalytics(){
   if(D._youtubeAnalyticsLoading)return;
   D._youtubeAnalyticsLoading=true;
   if(typeof renderTab==='function'&&typeof currentTab!=='undefined')renderTab(currentTab);
   try{
-    const [chRes,vidRes]=await Promise.all([
-      fetch(SUPABASE_URL+'/rest/v1/youtube_channels?select=channel_id,title,mmm_engine&mmm_engine=not.is.null',{
-        headers:{apikey:SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}
-      }),
-      fetch(SUPABASE_URL+'/rest/v1/youtube_videos_analytics?select=channel_id,title,views,watch_time_min,retention_pct,subs_gained,analytics_synced_at&analytics_synced_at=not.is.null&order=views.desc&limit=200',{
-        headers:{apikey:SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY}
-      })
-    ]);
+    const G=await import('/growth/growthAnalytics.mjs');
+    const hdr={apikey:SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY};
+    const chRes=await fetch(SUPABASE_URL+'/rest/v1/youtube_channels?select=channel_id,title,mmm_engine,subscribers,total_views,updated_at&mmm_engine=not.is.null',{headers:hdr});
     const channels=chRes.ok?await chRes.json():[];
-    const videos=vidRes.ok?await vidRes.json():[];
     const ENGINE_ICONS={'SRV Farsi':'🌹','SRV English':'🎵'};
-    const perEngine=(Array.isArray(channels)?channels:[]).map(function(ch){
-      const chVids=(Array.isArray(videos)?videos:[]).filter(function(v){return v.channel_id===ch.channel_id;});
-      const totalViews=chVids.reduce(function(a,v){return a+(Number(v.views)||0);},0);
-      const totalWatchMin=chVids.reduce(function(a,v){return a+(Number(v.watch_time_min)||0);},0);
-      const totalSubs=chVids.reduce(function(a,v){return a+(Number(v.subs_gained)||0);},0);
-      const validRet=chVids.filter(function(v){return v.retention_pct!=null;});
-      const avgRet=validRet.length?validRet.reduce(function(a,v){return a+(Number(v.retention_pct)||0);},0)/validRet.length:null;
-      const topVideo=chVids.find(function(v){return v.views;})||null;
-      const lastSync=chVids.length?(chVids[0].analytics_synced_at||null):null;
-      return{
-        channelId:ch.channel_id,channelTitle:ch.title,engine:ch.mmm_engine,
-        icon:ENGINE_ICONS[ch.mmm_engine]||'▶',
-        views:totalViews,watchHours:Math.round(totalWatchMin/60),
-        avgRetentionPct:avgRet!=null?Math.round(avgRet*10)/10:null,
-        subsGained:totalSubs,
-        topVideo:topVideo?{title:topVideo.title,views:topVideo.views,retention:topVideo.retention_pct}:null,
-        videoCount:chVids.length,lastSync
-      };
-    });
+    const bizByChannel={};Object.keys(G.GROWTH_BUSINESSES).forEach(function(k){bizByChannel[G.GROWTH_BUSINESSES[k].channelId]=G.GROWTH_BUSINESSES[k];});
+    const perEngine=[];
+    for(const ch of (Array.isArray(channels)?channels:[])){
+      const biz=bizByChannel[ch.channel_id];if(!biz)continue;   // only the two businesses; each has its own query and its own workspace
+      const vr=await fetch(SUPABASE_URL+'/rest/v1/youtube_videos_analytics?select=channel_id,video_id,title,views,view_count,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,analytics_synced_at,synced_at,published_at&channel_id=eq.'+encodeURIComponent(ch.channel_id)+'&limit=1000',{headers:hdr});
+      if(!vr.ok)throw new Error('analytics read failed for '+biz.name+' ('+vr.status+')');
+      const rows=(await vr.json()).map(G.normaliseRow);
+      const ws=G.buildWorkspace(rows,{business:biz,channel:{subscribers:ch.subscribers,totalViews:ch.total_views,updatedAt:ch.updated_at}});
+      perEngine.push({channelId:ch.channel_id,channelTitle:ch.title,engine:ch.mmm_engine,icon:ENGINE_ICONS[ch.mmm_engine]||'▶',ws:ws,lastSync:ws.period?ws.period.to:null});
+    }
     D.youtubeAnalytics={loadedAt:new Date().toISOString(),perEngine,error:null};
   }catch(e){
     D.youtubeAnalytics={loadedAt:null,perEngine:[],error:e.message};
@@ -10173,6 +10160,27 @@ async function loadYouTubeAnalytics(){
 function _ensureYouTubeAnalyticsLoaded(){
   if(!D.youtubeAnalytics&&!D._youtubeAnalyticsLoading)loadYouTubeAnalytics();
 }
+// One card per business, every metric labeled with period, source, last sync, coverage and status; unavailable metrics are listed with the reason (never shown as 0).
+function _growthChip(st){const c={ok:'#22c55e',partial:'#c9a84c',stale:'#f59e0b',unavailable:'#6b7280',unknown:'#6b7280'}[st]||'#6b7280';return '<span style="color:'+c+';border:1px solid '+c+';border-radius:8px;padding:0 5px;font-size:9px">'+escHTML(st||'')+'</span>';}
+function _growthVal(m){if(!m||m.value===null||m.value===undefined)return '<span style="color:var(--dim)">—</span>';const v=Number(m.value);const t=(m.unit==='%'||m.unit==='hours')?(v.toLocaleString(undefined,{maximumFractionDigits:1})+(m.unit==='%'?'%':' h')):(m.unit==='seconds'?(Math.floor(v/60)+':'+String(Math.round(v%60)).padStart(2,'0')):v.toLocaleString());return '<b>'+escHTML(t)+'</b>';}
+function _growthPeriod(m){const p=m&&m.period;if(!p)return '—';if(p.kind==='window')return escHTML(p.from+' → '+p.to);if(p.kind==='lifetime')return 'lifetime';if(p.kind==='current')return 'current';return '—';}
+function _growthEngineCard(e){
+  const ws=e.ws,m=ws.metrics,p=ws.period;let h='<div style="margin:0 0 14px;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:10px">';
+  h+='<div style="font-size:12px;font-weight:800;color:#fff">'+(e.icon||'▶')+' '+escHTML(ws.businessName)+' <span style="color:var(--dim);font-weight:400;font-size:10px">· '+escHTML(e.engine||'')+'</span></div>';
+  h+='<div style="font-size:10px;color:var(--dim);margin:3px 0 8px">'+(p?('Selected period '+escHTML(p.from)+' → '+escHTML(p.to)+' ('+p.days+' days; the window length is not stored with the data, so it is assumed) · last Analytics pull '+escHTML(p.to)):'No Analytics pull yet — period totals are unavailable.')+'</div>';
+  h+='<table style="width:100%;border-collapse:collapse;font-size:10px;font-family:\'JetBrains Mono\',monospace"><tr style="color:var(--dim);border-bottom:1px solid rgba(255,255,255,0.08)"><th style="text-align:left;padding:3px 4px">Metric</th><th style="text-align:right;padding:3px 4px">Value</th><th style="text-align:left;padding:3px 4px">Period</th><th style="text-align:left;padding:3px 4px">Last sync</th><th style="text-align:left;padding:3px 4px">Coverage</th><th style="text-align:left;padding:3px 4px">Status</th></tr>';
+  ['views_window','watch_hours_window','avg_view_pct_weighted','avg_view_duration','subs_attributed_window','subscribers_total','views_lifetime_channel','views_lifetime_tracked'].forEach(function(k){const x=m[k];if(!x)return;
+    const cov=x.coverage?(x.coverage.total!=null&&x.coverage.used!=null&&x.coverage.pct!=null?(x.coverage.pct+'% ('+Number(x.coverage.used).toLocaleString()+' of '+Number(x.coverage.total).toLocaleString()+')'):'—'):'—';
+    h+='<tr title="'+escHTML((x.source||'')+(x.note?' — '+x.note:''))+'" style="border-bottom:1px solid rgba(255,255,255,0.04)"><td style="padding:3px 4px;color:#fff">'+escHTML(x.label)+'</td><td style="text-align:right;padding:3px 4px">'+_growthVal(x)+'</td><td style="padding:3px 4px;color:var(--dim)">'+_growthPeriod(x)+'</td><td style="padding:3px 4px;color:var(--dim)">'+escHTML(x.lastSync||'—')+'</td><td style="padding:3px 4px;color:var(--dim)">'+escHTML(cov)+'</td><td style="padding:3px 4px">'+_growthChip(x.status)+'</td></tr>';});
+  h+='</table>';
+  if(ws.periods&&ws.periods.length){h+='<div style="font-size:10px;font-weight:700;color:#fff;margin:8px 0 3px">Reporting periods (never blended)</div><table style="width:100%;border-collapse:collapse;font-size:10px;font-family:\'JetBrains Mono\',monospace"><tr style="color:var(--dim);border-bottom:1px solid rgba(255,255,255,0.08)"><th style="text-align:left;padding:3px 4px">Period</th><th style="text-align:right;padding:3px 4px">Views</th><th style="text-align:right;padding:3px 4px">Subscribers</th><th style="text-align:left;padding:3px 4px">Status</th></tr>';
+    ws.periods.forEach(function(x){h+='<tr title="'+escHTML((x.source||'')+(x.note?' — '+x.note:''))+'" style="border-bottom:1px solid rgba(255,255,255,0.04)"><td style="padding:3px 4px;color:#fff">'+escHTML(x.label)+'</td><td style="text-align:right;padding:3px 4px">'+(x.views===null||x.views===undefined?'<span style="color:var(--dim)">—</span>':Number(x.views).toLocaleString())+'</td><td style="text-align:right;padding:3px 4px">'+(x.subscribers===null||x.subscribers===undefined?'<span style="color:var(--dim)">—</span>':Number(x.subscribers).toLocaleString())+'</td><td style="padding:3px 4px">'+_growthChip(x.status)+(x.status==='unavailable'&&x.note?' <span style="color:var(--dim);font-size:9px">'+escHTML(x.note)+'</span>':'')+'</td></tr>';});
+    h+='</table>';}
+  h+='<div style="font-size:9px;color:var(--dim);margin-top:6px;line-height:1.5">'+ws.rows.inWindow+' videos in the period · '+ws.excluded.staleRows+' videos refreshed by an older pull are NOT summed ('+Number(ws.excluded.staleViewsNotSummed).toLocaleString()+' old-window views kept as history) · '+ws.rows.unverifiedOnChannel+' not refreshed for 3+ days (cannot confirm they are still on the channel) · '+ws.rows.test+' test uploads excluded.</div>';
+  if(ws.top&&ws.top[0]&&ws.top[0].title)h+='<div style="font-size:10px;color:var(--dim);margin-top:4px">▲ Top in period: '+escHTML(String(ws.top[0].title).slice(0,60))+' · '+Number(ws.top[0].views||0).toLocaleString()+' views</div>';
+  h+='<details style="margin-top:6px"><summary style="font-size:10px;color:var(--dim);cursor:pointer">Not available yet ('+ws.unavailable.length+')</summary><div style="font-size:10px;color:var(--dim);line-height:1.6;margin-top:4px">'+ws.unavailable.map(function(u){return '• <b style="color:#fff">'+escHTML(u.label)+'</b> — '+escHTML(u.reason);}).join('<br>')+'</div></details>';
+  return h+'</div>';
+}
 function _renderYouTubeAnalyticsDetail(){
   const a=D.youtubeAnalytics;
   const loading=D._youtubeAnalyticsLoading;
@@ -10180,43 +10188,24 @@ function _renderYouTubeAnalyticsDetail(){
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
   h+='<div style="font-size:10px;font-weight:700;color:#22c55e;letter-spacing:1px;font-family:\'JetBrains Mono\',monospace">📊 DETAILED ANALYTICS</div>';
   h+='<div style="display:flex;align-items:center;gap:8px">';
-  if(a&&a.loadedAt)h+='<span style="font-size:9px;color:var(--dim);font-family:\'JetBrains Mono\',monospace">'+timeAgo(new Date(a.loadedAt).getTime())+'</span>';
+  if(a&&a.loadedAt)h+='<span style="font-size:9px;color:var(--dim);font-family:\'JetBrains Mono\',monospace">read '+timeAgo(new Date(a.loadedAt).getTime())+'</span>';
   if(loading){
     h+='<span style="font-size:10px;color:#c9a84c">⏳ loading…</span>';
   }else{
-    h+='<button onclick="loadYouTubeAnalytics()" style="padding:4px 10px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.30);border-radius:6px;color:#22c55e;font-size:10px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif">↻ Sync</button>';
+    h+='<button onclick="loadYouTubeAnalytics()" style="padding:4px 10px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.30);border-radius:6px;color:#22c55e;font-size:10px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif">↻ Refresh</button>';
   }
   h+='</div></div>';
+  const vis=a&&a.perEngine?a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle)&&_analyticsEngineInScope(e.engine,e.channelTitle);}):[];
   if(!a&&!loading){
-    h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">No data — click Sync to pull from YouTube Analytics.</div>';
+    h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">No data — click Refresh to read the analytics.</div>';
   }else if(loading&&!a){
     h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">Loading analytics…</div>';
   }else if(a&&a.error){
     h+='<div style="font-size:11px;color:#ef4444;padding:8px 0">Error: '+escHTML(a.error)+'</div>';
-  }else if(a&&a.perEngine&&a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle)&&_analyticsEngineInScope(e.engine,e.channelTitle);}).length){
-    h+='<table style="width:100%;border-collapse:collapse;font-size:11px;font-family:\'JetBrains Mono\',monospace">';
-    h+='<tr style="color:var(--dim);border-bottom:1px solid rgba(255,255,255,0.08)"><th style="text-align:left;padding:4px 6px;font-weight:700">Engine</th><th style="text-align:right;padding:4px 6px;font-weight:700">Views</th><th style="text-align:right;padding:4px 6px;font-weight:700">Watch hrs</th><th style="text-align:right;padding:4px 6px;font-weight:700">Ret%</th><th style="text-align:right;padding:4px 6px;font-weight:700">Subs+</th><th style="text-align:right;padding:4px 6px;font-weight:700">Vids</th><th style="text-align:right;padding:4px 6px;font-weight:700">Synced</th></tr>';
-    a.perEngine.filter(function(e){return !_isRetiredBusiness(e.engine)&&!_isRetiredBusiness(e.channelTitle)&&_analyticsEngineInScope(e.engine,e.channelTitle);}).forEach(function(e){
-      const ret=e.avgRetentionPct!=null?(e.avgRetentionPct.toFixed(1)+'%'):'—';
-      const retCol=e.avgRetentionPct!=null?(e.avgRetentionPct>=40?'#22c55e':e.avgRetentionPct>=25?'#c9a84c':'#ef4444'):'var(--dim)';
-      const syncedLbl=e.lastSync?timeAgo(new Date(e.lastSync).getTime()):'never';
-      h+='<tr style="border-bottom:1px solid rgba(255,255,255,0.04)">';
-      h+='<td style="padding:5px 6px;color:#fff;font-weight:700">'+(e.icon||'▶')+' '+escHTML(e.engine||'')+'</td>';
-      h+='<td style="text-align:right;padding:5px 6px">'+(e.views>0?Number(e.views).toLocaleString():'—')+'</td>';
-      h+='<td style="text-align:right;padding:5px 6px;color:#c9a84c">'+(e.watchHours>0?e.watchHours+'h':'—')+'</td>';
-      h+='<td style="text-align:right;padding:5px 6px;color:'+retCol+';font-weight:800">'+ret+'</td>';
-      h+='<td style="text-align:right;padding:5px 6px;color:#22c55e">'+(e.subsGained>0?'+'+e.subsGained:'—')+'</td>';
-      h+='<td style="text-align:right;padding:5px 6px;color:var(--dim)">'+e.videoCount+'</td>';
-      h+='<td style="text-align:right;padding:5px 6px;color:var(--dim);font-size:9px">'+escHTML(syncedLbl)+'</td>';
-      h+='</tr>';
-      if(e.topVideo&&e.topVideo.title){
-        const tt=(e.topVideo.title||'').length>50?(e.topVideo.title.slice(0,47)+'…'):e.topVideo.title;
-        h+='<tr><td colspan="7" style="padding:2px 6px 6px 22px;font-size:10px;color:var(--dim)">▲ Top: '+escHTML(tt)+' · '+Number(e.topVideo.views||0).toLocaleString()+' views</td></tr>';
-      }
-    });
-    h+='</table>';
+  }else if(vis.length){
+    vis.forEach(function(e){h+=_growthEngineCard(e);});
   }else if(a){
-    h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">No analytics data yet — click Sync to pull.</div>';
+    h+='<div style="font-size:11px;color:var(--dim);padding:8px 0">No analytics data yet.</div>';
   }
   h+='</div>';
   return h;
