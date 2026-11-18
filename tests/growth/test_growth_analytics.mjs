@@ -93,4 +93,11 @@ ok('lifetime coverage is disclosed: tracked counters are not presented as the ch
 ok('public page copy is byte-identical to the library', fs.readFileSync(new URL('../../lib/growthAnalytics.mjs', import.meta.url), 'utf8') === fs.readFileSync(new URL('../../public/growth/growthAnalytics.mjs', import.meta.url), 'utf8'));
 { const dir = new URL('./', import.meta.url); const files = fs.readdirSync(dir); ok('tests/growth contains no data files (psv/csv/json/export) — only code', files.every((f) => /\.(mjs|js)$/.test(f)), files);
   const src = fs.readFileSync(new URL('../../lib/growthAnalytics.mjs', import.meta.url), 'utf8'); ok('the library performs no network or file I/O', !/\bfetch\(|require\(|from 'node:(fs|http|https|net)'|XMLHttpRequest/.test(src)); }
+
+// ── 9. line-level review additions ──
+{ const z = G.compareToStudio(wf, { views: 0, watchHours: 0 }); ok('compareToStudio: a Studio figure of 0 cannot reconcile (no division by zero, never "ok")', z.views.ok === false && z.views.diffPct === null && z.watchHours.ok === false && z.watchHours.diffPct === null, z); }
+{ const big = []; for (let i = 0; i < 200; i++) big.push(G.normaliseRow({ channel_id: S.channelId, video_id: 'B' + i, title: 'x', views: 10, watch_time_min: 5, retention_pct: 50, analytics_synced_at: PULL, synced_at: PULL }));
+  const w = G.buildWorkspace(big, { business: S }); ok('a pull that returned its maximum (200 videos) is marked "partial" and says totals may be incomplete', w.metrics.views_window.status === 'partial' && /may be incomplete/.test(w.metrics.views_window.note) && ws.metrics.views_window.status === 'ok', w.metrics.views_window.status); }
+{ const one = G.normaliseRow({ channel_id: S.channelId, video_id: 'N1', title: 'x', views: 0, watch_time_min: 0, retention_pct: null, analytics_synced_at: PULL, synced_at: PULL });
+  const w = G.buildWorkspace([one], { business: S }); ok('zero-view rows: totals are 0 with retention and duration unavailable (null), not NaN', w.metrics.views_window.value === 0 && w.metrics.avg_view_pct_weighted.value === null && w.metrics.avg_view_duration.value === null); }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

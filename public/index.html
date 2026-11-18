@@ -10146,7 +10146,11 @@ async function loadYouTubeAnalytics(){
       if(!vr.ok)throw new Error('analytics read failed for '+biz.name+' ('+vr.status+')');
       const rows=(await vr.json()).map(G.normaliseRow);
       const ws=G.buildWorkspace(rows,{business:biz,channel:{subscribers:ch.subscribers,totalViews:ch.total_views,updatedAt:ch.updated_at}});
-      perEngine.push({channelId:ch.channel_id,channelTitle:ch.title,engine:ch.mmm_engine,icon:ENGINE_ICONS[ch.mmm_engine]||'▶',ws:ws,lastSync:ws.period?ws.period.to:null});
+      const mv=ws.metrics,top=ws.top&&ws.top[0]?ws.top[0]:null;
+      // Compatibility fields: other screens (Marketing & Sales KPIs, Home) read these names. They carry the CORRECTED window values (null-safe), never the legacy sums.
+      perEngine.push({channelId:ch.channel_id,channelTitle:ch.title,engine:ch.mmm_engine,icon:ENGINE_ICONS[ch.mmm_engine]||'▶',ws:ws,lastSync:ws.period?ws.period.to:null,
+        views:mv.views_window.value||0,watchHours:mv.watch_hours_window.value||0,avgRetentionPct:mv.avg_view_pct_weighted.value,subsGained:mv.subs_attributed_window.value||0,videoCount:ws.rows.inWindow,
+        topVideo:top&&top.title?{title:top.title,views:top.views,retention:null}:null});
     }
     D.youtubeAnalytics={loadedAt:new Date().toISOString(),perEngine,error:null};
   }catch(e){
@@ -10165,6 +10169,9 @@ function _growthChip(st){const c={ok:'#22c55e',partial:'#c9a84c',stale:'#f59e0b'
 function _growthVal(m){if(!m||m.value===null||m.value===undefined)return '<span style="color:var(--dim)">—</span>';const v=Number(m.value);const t=(m.unit==='%'||m.unit==='hours')?(v.toLocaleString(undefined,{maximumFractionDigits:1})+(m.unit==='%'?'%':' h')):(m.unit==='seconds'?(Math.floor(v/60)+':'+String(Math.round(v%60)).padStart(2,'0')):v.toLocaleString());return '<b>'+escHTML(t)+'</b>';}
 function _growthPeriod(m){const p=m&&m.period;if(!p)return '—';if(p.kind==='window')return escHTML(p.from+' → '+p.to);if(p.kind==='lifetime')return 'lifetime';if(p.kind==='current')return 'current';return '—';}
 function _growthEngineCard(e){
+  if(!e.ws){   // an entry without a corrected workspace (older shape): show its plain numbers, labeled as unlabeled legacy values — never throw
+    return '<div style="margin:0 0 10px;padding:8px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;font-size:11px;color:#fff">'+(e.icon||'▶')+' '+escHTML(e.channelTitle||e.engine||'')+' <span style="color:var(--dim);font-size:10px">· '+Number(e.views||0).toLocaleString()+' views · '+(e.watchHours||0)+' h · unlabeled legacy values</span></div>';
+  }
   const ws=e.ws,m=ws.metrics,p=ws.period;let h='<div style="margin:0 0 14px;padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:10px">';
   h+='<div style="font-size:12px;font-weight:800;color:#fff">'+(e.icon||'▶')+' '+escHTML(ws.businessName)+' <span style="color:var(--dim);font-weight:400;font-size:10px">· '+escHTML(e.engine||'')+'</span></div>';
   h+='<div style="font-size:10px;color:var(--dim);margin:3px 0 8px">'+(p?('Selected period '+escHTML(p.from)+' → '+escHTML(p.to)+' ('+p.days+' days; the window length is not stored with the data, so it is assumed) · last Analytics pull '+escHTML(p.to)):'No Analytics pull yet — period totals are unavailable.')+'</div>';

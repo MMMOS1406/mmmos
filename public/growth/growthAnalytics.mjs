@@ -16,7 +16,7 @@ export const GROWTH_BUSINESSES = Object.freeze({
   silk_road_voices: Object.freeze({ key: 'silk_road_voices', name: 'Silk Road Voices', engine: 'SRV Farsi', channelId: 'UCCUa5BLzGh2eRBoqqWBCK_g' }),
   srv_studio: Object.freeze({ key: 'srv_studio', name: 'SRV Studio', engine: 'SRV English', channelId: 'UC0nzWQX6AaUqlF5FozNpWPg' }),
 });
-export const GROWTH_DEFAULTS = Object.freeze({ lookbackDays: 30, staleDays: 3, channelStaleDays: 2 });
+export const GROWTH_DEFAULTS = Object.freeze({ lookbackDays: 30, staleDays: 3, channelStaleDays: 2, pullCap: 200 });   // pullCap: the Analytics pull returns at most this many videos per channel
 
 const DAY = 86400000;
 const toDay = (d) => (d ? String(d).slice(0, 10) : null);
@@ -107,10 +107,11 @@ export function buildWorkspace(allRows, opts) {
   const over100 = retRows.filter((r) => r.retPct > 100).length;
   const cov = (used, total) => ({ used, total, pct: total ? Math.round((used / total) * 1000) / 10 : null });
   const base = { source: 'YouTube Analytics API → youtube_videos (views, watch_time_min, retention_pct, subs_gained)', period, lastSync: pull };
-  const status = (!pull ? 'unavailable' : 'ok');
+  const capped = !!pull && inWindow.length >= o.pullCap;                        // the pull may have been cut off: videos beyond the cap are not in the totals
+  const status = (!pull ? 'unavailable' : capped ? 'partial' : 'ok');
 
   const m = {};
-  m.views_window = metric('views_window', 'Views (selected period)', pull ? winViews : null, 'views', { ...base, status, coverage: cov(inWindow.length, inWindow.length), note: 'Analytics-API views for the period; Shorts count each start/replay.' });
+  m.views_window = metric('views_window', 'Views (selected period)', pull ? winViews : null, 'views', { ...base, status, coverage: cov(inWindow.length, inWindow.length), note: 'Analytics-API views for the period; Shorts count each start/replay. Only videos returned by the pull are counted (videos with no views in the period are not listed).' + (capped ? ` The pull returned ${inWindow.length} videos, its maximum: totals may be incomplete.` : '') });
   m.watch_hours_window = metric('watch_hours_window', 'Watch time (selected period)', pull ? Math.round((winMin / 60) * 10) / 10 : null, 'hours', { ...base, status, coverage: cov(inWindow.filter((r) => r.watchMin !== null).length, inWindow.length) });
   m.subs_attributed_window = metric('subs_attributed_window', 'Subscribers gained, attributed to videos (selected period)', pull ? winSubs : null, 'subscribers', { ...base, status: pull ? 'partial' : 'unavailable', coverage: cov(inWindow.filter((r) => r.subs !== null).length, inWindow.length),
     note: 'Sum of per-video subscribersGained. YouTube Studio shows the channel-level number, which is higher (subscribers who join from the channel page are not attributed to a video).' });
@@ -148,8 +149,8 @@ export function buildWorkspace(allRows, opts) {
 export function compareToStudio(ws, studio, tol = { views: 0.05, watchHours: 0.05 }) {
   const rel = (a, b) => (b ? (a - b) / b : null);
   const out = {};
-  if (studio.views != null) { const d = rel(ws.metrics.views_window.value, studio.views); out.views = { app: ws.metrics.views_window.value, studio: studio.views, diffPct: Math.round(d * 1000) / 10, ok: Math.abs(d) <= tol.views }; }
-  if (studio.watchHours != null) { const d = rel(ws.metrics.watch_hours_window.value, studio.watchHours); out.watchHours = { app: ws.metrics.watch_hours_window.value, studio: studio.watchHours, diffPct: Math.round(d * 1000) / 10, ok: Math.abs(d) <= tol.watchHours }; }
+  if (studio.views != null) { const d = rel(ws.metrics.views_window.value, studio.views); out.views = { app: ws.metrics.views_window.value, studio: studio.views, diffPct: d === null ? null : Math.round(d * 1000) / 10, ok: d !== null && Math.abs(d) <= tol.views }; }
+  if (studio.watchHours != null) { const d = rel(ws.metrics.watch_hours_window.value, studio.watchHours); out.watchHours = { app: ws.metrics.watch_hours_window.value, studio: studio.watchHours, diffPct: d === null ? null : Math.round(d * 1000) / 10, ok: d !== null && Math.abs(d) <= tol.watchHours }; }
   if (studio.subsChannel != null) out.subs = { app: ws.metrics.subs_attributed_window.value, studio: studio.subsChannel, note: 'attributed-to-videos vs channel-level: the app value is expected to be lower', ok: ws.metrics.subs_attributed_window.value <= studio.subsChannel };
   const lv = ws.legacy.views, nv = ws.metrics.views_window.value;
   out.legacyOverstatementPct = nv ? Math.round(((lv - nv) / nv) * 1000) / 10 : null;

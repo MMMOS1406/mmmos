@@ -22,7 +22,9 @@ try {
     window._analyticsScope = 'SRV Farsi'; const far = _renderYouTubeAnalyticsDetail();
     window._analyticsScope = 'SRV English'; const eng = _renderYouTubeAnalyticsDetail(); window._analyticsScope = '';
     const host = document.createElement('div'); host.id = 'growth-test-host'; host.style.cssText = 'position:fixed;left:0;top:0;width:1100px;z-index:99999;background:#0b0b10;color:#ddd;padding:12px'; host.innerHTML = all; document.body.appendChild(host);
-    return { error: a.error, engines: a.perEngine.map((e) => ({ biz: e.ws.business, views: e.ws.metrics.views_window.value, hours: e.ws.metrics.watch_hours_window.value, ret: e.ws.metrics.avg_view_pct_weighted.value, ch: e.ws.channelId })), paths: window.__paths.slice(), all, far, eng };
+    const mk = _deptKPIs('marketing_sales', {}); const kpi = {}; mk.forEach((k) => { kpi[k.label] = k.value; }); const compat = a.perEngine.map((x) => ({ biz: x.ws.business, views: x.views, subs: x.subsGained, hours: x.watchHours, ret: x.avgRetentionPct }));
+    const legacyShape = (() => { const sv = D.youtubeAnalytics; D.youtubeAnalytics = { loadedAt: sv.loadedAt, perEngine: [{ engine: 'SRV English', channelTitle: 'Old shape', views: 2000, watchHours: 6, icon: 'x' }], error: null }; let r, err = null; try { r = _renderYouTubeAnalyticsDetail(); } catch (x) { err = String(x); } D.youtubeAnalytics = sv; return { r, err }; })();
+    return { kpi, compat, legacyShape, error: a.error, engines: a.perEngine.map((e) => ({ biz: e.ws.business, views: e.ws.metrics.views_window.value, hours: e.ws.metrics.watch_hours_window.value, ret: e.ws.metrics.avg_view_pct_weighted.value, ch: e.ws.channelId })), paths: window.__paths.slice(), all, far, eng };
   });
   const vq = out.paths.filter((p) => /^youtube_videos_analytics/.test(p));
   ok('the page loads without error', !out.error, out.error);
@@ -33,6 +35,11 @@ try {
   ok('each business shows ONLY its latest-pull window total (the oracle value), not the legacy sum of all rows', eA.views === expV(synthRowsF()) && eB.views === expV(synthRowsS()), [eA, eB]);
   ok('view-weighted retention equals the oracle for both businesses', eA.ret === expR(synthRowsF()) && eB.ret === expR(synthRowsS()), [eA.ret, eB.ret]);
   ok('the reporting-period table is on screen: lifetime, Analytics window, last 7 / 28 days and custom, the last three marked unavailable', /Reporting periods/.test(out.all) && /Lifetime/.test(out.all) && /Analytics window/.test(out.all) && /Last 7 days/.test(out.all) && /Last 28 days/.test(out.all) && /Custom range/.test(out.all), out.all.length);
+  const expS = (db) => db.filter((r) => !/^\[test\]/i.test(r.title) && r.analytics_synced_at === PULL).reduce((x, r) => x + r.subs_gained, 0);
+  const totV = expV(synthRowsF()) + expV(synthRowsS()), fmtK = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n));
+  ok('Marketing & Sales KPIs ("YT VIEWS", "YT SUBS GAINED") still work and now show the CORRECTED window totals of the two businesses', out.kpi['YT VIEWS'] === fmtK(totV) && out.kpi['YT SUBS GAINED'] === '+' + (expS(synthRowsF()) + expS(synthRowsS())), [out.kpi, totV]);
+  ok('compatibility fields on each entry carry the corrected values (views, subscribers, hours, weighted retention)', out.compat.every((c) => c.views === (c.biz === 'silk_road_voices' ? expV(synthRowsF()) : expV(synthRowsS()))) && out.compat.every((c) => c.ret !== undefined), out.compat);
+  ok('an entry in the older shape (no workspace) renders without throwing and is labeled as unlabeled legacy values', !out.legacyShape.err && /unlabeled legacy values/.test(out.legacyShape.r) && /2,000/.test(out.legacyShape.r), out.legacyShape.err);
   ok('each number is labeled: period dates, last sync, coverage, status chip, and the "not summed" disclosure are on screen', new RegExp(PULL).test(out.all) && /Last sync/.test(out.all) && /Coverage/.test(out.all) && />ok</.test(out.all) && />partial</.test(out.all) && /NOT summed/.test(out.all) && /lifetime/.test(out.all));
   ok('unavailable metrics are listed with their reason (impressions, CTR, traffic sources, retention curve, revenue…) and never drawn as 0', /Not available yet \(8\)/.test(out.all) && /Thumbnail impressions/.test(out.all) && /Traffic sources/.test(out.all));
   ok('Silk Road Voices scope shows ONLY Silk Road Voices; SRV Studio scope shows ONLY SRV Studio (independent workspaces)', /Silk Road Voices/.test(out.far) && !/SRV Studio/.test(out.far) && /SRV Studio/.test(out.eng) && !/Silk Road Voices/.test(out.eng));
