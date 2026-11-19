@@ -14,7 +14,7 @@ const fixture = makeFixture(); fixture.tables.youtube_channels = [{ channel_id: 
 let current = payload(null), seenHeaders = []; fixture.api.revenue_dashboard = () => current;
 const stub = await startStub({ publicDir: pub, fixture, quiet: true }); const browser = await launch();
 try {
-  const { page } = await openPage(browser, stub.origin, { realClock: true });
+  const { page, pageErrors: pageErrs } = await openPage(browser, stub.origin, { realClock: true });
   await page.evaluateOnNewDocument(() => { const f = window.fetch; window.__revHeaders = []; window.fetch = function (u, i) { try { if (String(u && u.url || u).indexOf('revenue_dashboard') >= 0) window.__revHeaders.push(JSON.stringify((i && i.headers) || {})); } catch (e) {} return f.apply(this, arguments); }; });
   await page.reload({ waitUntil: 'domcontentloaded' }); await login(page, stub.origin, 'admin'); await settle(page, stub.origin, 1200);
   const show = async (scope) => page.evaluate(async (sc) => { window._analyticsScope = sc || ''; D.ypp = null; await loadYppCards(); const host = document.getElementById('ypp-test-host') || Object.assign(document.createElement('div'), { id: 'ypp-test-host' }); host.style.cssText = 'position:fixed;left:0;top:0;width:900px;z-index:99999;background:#0b0b10;color:#ddd;padding:12px'; host.innerHTML = _renderYppSection(); document.body.appendChild(host); return { html: host.innerHTML, text: host.innerText, headers: window.__revHeaders.slice() }; }, scope);
@@ -43,6 +43,6 @@ try {
   current = payload({ [F]: [cap()] });
   const mounted = await page.evaluate(async () => { currentTab = 'engines'; D.ypp = null; setEnginesSub('analytics'); await new Promise((r) => setTimeout(r, 1500)); return { has: !!document.getElementById('yt-revenue-output'), txt: (document.getElementById('yt-revenue-output') || {}).innerText || '' }; });
   ok('the card is mounted inside Engines → Analytics and loads on entry', mounted.has && /REVENUE \/ YPP/.test(mounted.txt) && /Silk Road Voices/.test(mounted.txt), mounted.txt.slice(0, 200));
-  const errs = await page.evaluate(() => window.__errs || []); ok('no page errors recorded', errs.length === 0, errs);
+  const errs = pageErrs; ok('no page errors recorded', errs.length === 0, errs);
 } finally { await browser.close(); await stub.close(); }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
