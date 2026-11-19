@@ -1,0 +1,61 @@
+// Growth data collection: authorization (default disabled), the request plan, the runner (identity first, read-only, quota/timeout), the merge into one document per business, reconciliation, isolation. SYNTHETIC data.
+import * as C from '../../lib/growthCollect.mjs';
+import { isReadOnlyAllowed } from '../../lib/growthProbe.mjs';
+import { makeWorld, addDays } from './collect_fixtures.mjs';
+let pass = 0, fail = 0; const ok = (n, c, d) => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, d !== undefined ? JSON.stringify(d).slice(0, 300) : ''); } };
+const NOW = Date.parse('2030-03-15T18:00:00Z'), NOWISO = new Date(NOW).toISOString(), B1 = 'silk_road_voices', B2 = 'srv_studio';
+const END = '2030-03-14';
+// 1. authorization
+const A = (rec, mode, b = B1) => C.collectAuthorization(rec, NOW, b, mode);
+ok('DEFAULT DISABLED: no record / null / {} / enabled:false are all refused', [undefined, null, '', '{}', { enabled: false }, 'nope{'].every((r) => !A(r).ok && !A(r, 'scheduled').ok));
+ok('manual run needs an unexpired authorized_until and the business to be named', A({ enabled: true, businesses: [B1], authorized_until: '2030-03-15T19:00:00Z' }).ok && !A({ enabled: true, businesses: [B1], authorized_until: '2030-03-15T17:00:00Z' }).reason.endsWith('expired') === false && A({ enabled: true, businesses: [B1], authorized_until: '2030-03-15T17:00:00Z' }).reason === 'collection_authorization_expired' && !A({ enabled: true, businesses: [B2], authorized_until: '2030-03-15T19:00:00Z' }).ok && !A({ enabled: true, businesses: [B1] }).ok);
+ok('scheduled run needs schedule:true — a manual authorization alone never enables the schedule', !A({ enabled: true, businesses: [B1], authorized_until: '2030-03-15T19:00:00Z' }, 'scheduled').ok && A({ enabled: true, businesses: [B1], schedule: true }, 'scheduled').ok && !A({ enabled: true, businesses: [B1], schedule: true, schedule_until: '2030-03-01T00:00:00Z' }, 'scheduled').ok);
+// 2. plan
+const steps = C.collectSteps({ to: END });
+ok('the plan has 10 report steps + identity; every URL is a GET to an allowed Google READ endpoint', steps.length === 10 && steps.every((s) => isReadOnlyAllowed(s.url)));
+ok('NO search.list, NO revenue/monetary metric, NO Reporting API/Reach job in the plan', !steps.some((s) => /search|estimatedRevenue|cpm|youtubereporting|impressions|thumbnail/i.test(s.url)));
+ok('28-day window ends on the last complete day; daily series and daily paid series cover 90 days; 7-day and previous-28 windows are exact', (() => { const g = (id) => new URL(steps.find((s) => s.id === id).url).searchParams; return g('channel_totals').get('startDate') === addDays(END, -27) && g('channel_totals').get('endDate') === END && g('daily_series').get('startDate') === addDays(END, -89) && g('traffic_source_daily').get('startDate') === addDays(END, -89) && g('channel_totals_7d').get('startDate') === addDays(END, -6) && g('channel_totals_prev').get('endDate') === addDays(END, -28); })());
+ok('only requests verified live in R-B are used (no audienceType on basic metrics, no subscribers-by-source)', !steps.some((s) => /audienceType/.test(s.url)) && !steps.some((s) => /dimensions=insightTrafficSourceType&metrics=subscribersGained/.test(s.url)));
+// 3. runner
+const runWorld = async (w, extra = {}) => C.runCollection({ business: w.business, steps: C.collectSteps({ to: END }), fetchJson: w.fetchJson, now: () => NOW, ...extra });
+{ const w = makeWorld(B1, { paidFrom: addDays(END, -10), paidTo: addDays(END, -6), paidPerDay: 300 }); const run = await runWorld(w);
+  ok('identity is the FIRST request; all steps answered; retention is requested only for top videos with >= 50 views (5 max) — all and organic', /googleapis\.com\/youtube\/v3\/channels/.test(w.calls[0]) && run.steps.every((s) => s.status === 'ok') && w.calls.filter((u) => /elapsedVideoTimeRatio/.test(u)).length === 10 && !w.calls.some((u) => /vidAAAAAAA6|vidAAAAAAA7/.test(u)), { n: w.calls.length });
+  ok('request cost of one full run is 1 Data API unit + 19 Analytics requests (9 reports + 10 retention curves; far below 100,000/day)', run.requests.data === 1 && run.requests.analytics === 19, run.requests); }
+{ const w = makeWorld(B1, { identity: async () => ({ status: 200, json: { items: [{ id: 'UCsomeoneElseXXXXXXXXXXXX' }] } }) }); const run = await runWorld(w);
+  ok('ISOLATION: an authorization belonging to another channel aborts before ANY report is read', run.aborted && /isolation/.test(run.aborted) && w.calls.length === 1 && Object.keys(run.results).length === 0); }
+{ const w = makeWorld(B1, { identity: async () => ({ status: 401, json: {} }) }); const run = await runWorld(w);
+  ok('identity failure (expired authorization) aborts with a clear message; nothing else requested', /identity check failed/.test(run.aborted) && w.calls.length === 1); }
+{ const w = makeWorld(B1, { behave: { daily_series: { status: 403, json: { error: { errors: [{ reason: 'dailyLimitExceeded' }], message: 'quota' } } } } }); const run = await runWorld(w);
+  ok('a quota error stops the run: later steps are skipped (not retried) and the status is recorded', run.steps.find((s) => s.id === 'daily_series').status === 'http_403' && run.steps.filter((s) => s.status === 'skipped_quota').length >= 5); }
+{ const w = makeWorld(B1); let t = 0; const run = await C.runCollection({ business: B1, steps: C.collectSteps({ to: END }), fetchJson: w.fetchJson, now: () => (t += 60000), deadlineMs: 150000 });
+  ok('the total time budget is enforced: steps past the deadline are skipped, never overrun', run.steps.some((s) => s.status === 'skipped_deadline')); }
+{ const w = makeWorld(B1); const evil = [{ id: 'x', kind: 'analytics', url: 'https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&metrics=estimatedRevenue', from: END, to: END }, { id: 'y', kind: 'analytics', url: 'https://www.googleapis.com/youtube/v3/search?q=a', from: END, to: END }]; const run = await C.runCollection({ business: B1, steps: [{ id: 'identity', kind: 'identity', url: 'https://www.googleapis.com/youtube/v3/channels?part=id&mine=true' }, ...evil], fetchJson: w.fetchJson, now: () => NOW });
+  ok('anything not on the read-only allow-list (search.list) is refused by the runner — revenue reports are allowed by URL shape only if the caller builds them, and the plan never does', run.steps.find((s) => s.id === 'y').status === 'refused_not_read_only'); }
+// 4. merge
+const full = async (b, over = {}) => { const w = makeWorld(b, over); const run = await runWorld(w); return { w, run, doc: C.mergeCollection(null, run, { business: b, from: addDays(END, -27), to: END, nowIso: NOWISO }) }; };
+{ const { doc } = await full(B1, { paidFrom: addDays(END, -10), paidTo: addDays(END, -6), paidPerDay: 300 });
+  ok('daily series stored for ≥ 90 days with views, minutes, gained, lost', Object.keys(doc.days).length === 90 && Object.values(doc.days).every((d) => d.views >= 0 && d.minutes >= 0 && Number.isFinite(d.subs_gained)));
+  ok('PAID views per day come from ADVERTISING rows; days without ads are a verified 0 (the daily paid report answered), not "unknown"', Object.entries(doc.days).every(([d, v]) => (d >= addDays(END, -10) && d <= addDays(END, -6) ? v.paid_views >= 300 : v.paid_views === 0)));
+  ok('one period record: totals, 7-day totals, previous-28 totals, traffic with paid flag, formats mapped from videoOnDemand/shorts, subscribed split', (() => { const p = doc.periods[0]; return p.totals.views > 0 && p.totals_7d.views > 0 && p.totals_prev.views > 0 && p.traffic.some((t) => t.paid && t.source === 'ADVERTISING') && p.formats.map((f) => f.type).sort().join() === 'long,short' && p.subscribed.length === 2; })());
+  ok('per-video rows (≤ 200) and retention for ≤ 5 videos, each with an all-viewers and an organic curve of 100 points', doc.videos.rows.length === 7 && Object.keys(doc.retention).length === 5 && Object.values(doc.retention).every((c) => c.all.length === 100 && c.organic.length === 100));
+  ok('RECONCILIATION inside the collection: channel totals equal the sum of the daily series (views, minutes, net subscribers)', doc.reconciliation.checks.every((c) => c.ok === true) && doc.reconciliation.days_present === 28, doc.reconciliation);
+  ok('the collection log records every step status and the request counts', doc.collections[0].steps.channel_totals === 'ok' && doc.collections[0].requests.analytics >= 19);
+  ok('a business document carries only its own channel id and no token / credential field', doc.channel_id === 'UCCUa5BLzGh2eRBoqqWBCK_g' && !/token|secret|authorization|bearer/i.test(JSON.stringify(doc))); }
+{ const { doc: d1 } = await full(B1), { doc: d2 } = await full(B2);
+  const cross = C.mergeCollection(d1, { results: {}, steps: [], requests: {} }, { business: B2, from: addDays(END, -27), to: END, nowIso: NOWISO });
+  ok('ISOLATION: merging a document of business A into business B starts a fresh document (no carry-over of A\'s days, videos or retention)', cross.channel_id === d2.channel_id && cross.business === B2 && Object.keys(cross.days).length === 0 && cross.videos === null && Object.keys(cross.retention).length === 0); }
+{ // a failed step never overwrites or zeroes
+  const { doc: first } = await full(B1);
+  const w2 = makeWorld(B1, { end: END, behave: { daily_series: { status: 500, json: {} }, per_video: { status: 400, json: { error: { message: 'x' } } }, content_type: { status: 200, json: { columnHeaders: [{ name: 'creatorContentType' }], rows: [] } } } });
+  const run2 = await runWorld(w2); const doc2 = C.mergeCollection(first, run2, { business: B1, from: addDays(END, -27), to: END, nowIso: '2030-03-16T00:00:00Z' });
+  ok('FAILED / EMPTY / UNSUPPORTED steps keep the stored data: days unchanged, per-video unchanged, no zero written', JSON.stringify(doc2.days) === JSON.stringify(first.days) && doc2.videos.rows.length === 7 && JSON.stringify(doc2.periods[0].formats) === JSON.stringify(first.periods[0].formats) && doc2.periods[0].formats.length === 2);
+  ok('the step statuses of the failed run are recorded (http_500 / unsupported / ok_empty)', doc2.collections[0].steps.daily_series === 'error' && doc2.collections[0].steps.per_video === 'unsupported' && doc2.collections[0].steps.content_type === 'ok_empty', doc2.collections[0].steps);
+  ok('the period record is replaced (newest wins) and never duplicated for the same window', doc2.periods.length === 1); }
+{ const { doc: first } = await full(B1); const w3 = makeWorld(B1, { end: addDays(END, 1) }); const run3 = await C.runCollection({ business: B1, steps: C.collectSteps({ to: addDays(END, 1) }), fetchJson: w3.fetchJson, now: () => NOW }); const doc3 = C.mergeCollection(first, run3, { business: B1, from: addDays(END, -26), to: addDays(END, 1), nowIso: '2030-03-16T00:00:00Z' });
+  ok('a LATER run extends the history by merging dates (no duplicates, newest value wins) and keeps the earlier period record', Object.keys(doc3.days).length === 91 && doc3.days[END].views === w3.series[END].views && doc3.days[END].views !== first.days[END].views, Object.keys(doc3.days).length); ok('both period records are kept (history of 28-day snapshots)', doc3.periods.length === 2); }
+{ // bounded size
+  let doc = null; const big = { results: {}, steps: [], requests: {} }; const days = {}; for (let i = 0; i < 700; i++) days[addDays('2028-01-01', i)] = { views: 1, minutes: 1, subs_gained: 0, subs_lost: 0, paid_views: 0 };
+  doc = C.mergeCollection({ ...C.emptyDoc(B1), days }, big, { business: B1, from: END, to: END, nowIso: NOWISO });
+  ok('the document is size-bounded: at most 400 days are kept (oldest dropped first) and the JSON stays under the limit', Object.keys(doc.days).length === 400 && !('2028-01-01' in doc.days) && JSON.stringify(doc).length < C.LIMITS.maxDocBytes); }
+{ const { doc } = await full(B1, { days: 400 }); ok('a full 400-day document with retention and videos stays well under the size limit', JSON.stringify(doc).length < C.LIMITS.maxDocBytes, JSON.stringify(doc).length); }
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
