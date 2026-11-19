@@ -15,7 +15,7 @@ let current = { ok: true, role: 'ceo', reports: [repA, repB] }, bodies = [], col
 const fixture = makeFixture(); fixture.api.growth_report = (json) => { bodies.push(json); return current; }; fixture.api.growth_collect = (json) => { collectBodies.push(json); return { ok: true, business: json.business, days_stored: 90, reconciliation: true, steps: {} }; };
 const stub = await startStub({ publicDir: pub, fixture, quiet: true }); const browser = await launch();
 try {
-  const { page } = await openPage(browser, stub.origin, { realClock: true });
+  const { page, pageErrors: pageErrs } = await openPage(browser, stub.origin, { realClock: true });
   await page.evaluateOnNewDocument(() => { window.__dialogs = []; window.confirm = (m) => { window.__dialogs.push(['confirm', String(m)]); return true; }; window.alert = (m) => { window.__dialogs.push(['alert', String(m)]); }; const f = window.fetch; window.__gr = []; window.fetch = function (u, i) { try { if (String(u && u.url || u).indexOf('growth_report') >= 0) window.__gr.push(JSON.stringify((i && i.headers) || {})); } catch (e) {} return f.apply(this, arguments); }; });
   await page.reload({ waitUntil: 'domcontentloaded' }); await login(page, stub.origin, 'admin'); await settle(page, stub.origin, 1200);
   const show = async (scope) => page.evaluate(async (sc) => { window._analyticsScope = sc || ''; D.gdc = null; await loadGrowthCenter(); const host = document.getElementById('gdc-test-host') || Object.assign(document.createElement('div'), { id: 'gdc-test-host' }); host.style.cssText = 'position:absolute;left:0;top:0;width:1000px;z-index:99999;background:#0b0b10;color:#ddd;padding:12px'; host.innerHTML = _renderGrowthCenterSection(); document.body.appendChild(host); return { text: host.innerText, html: host.innerHTML, headers: window.__gr.slice() }; }, scope);
@@ -38,10 +38,11 @@ try {
   ok('VA role: same analytics but no collection state and NO "Collect now" button', !/Collect now/.test(r.html) && !/Collection: manual/.test(r.text) && /Silk Road Voices/.test(r.text));
   // errors
   current = { __status: 401, ok: false, error: 'session_required' }; r = await show(''); ok('an auth error is shown as an error, not as empty analytics or zeros', /Could not read: session_required/.test(r.text) && !/Views/.test(r.text));
+  current = { ok: true }; r = await show(''); ok('an unexpected/empty server response is shown as an error and never throws in the page (stub default response)', /Could not read: unexpected response/.test(r.text));
   // mounted
   current = { ok: true, role: 'ceo', reports: [repA, repB] };
   const m = await page.evaluate(async () => { currentTab = 'engines'; D.gdc = null; D.ypp = null; setEnginesSub('analytics'); await new Promise((x) => setTimeout(x, 1800)); const g = document.getElementById('growth-center'), y = document.getElementById('yt-revenue-output'); return { g: !!g, y: !!y, gt: g ? g.innerText.slice(0, 200) : '', order: g && y ? (g.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? 'growth-before-revenue' : 'other') : null, cards: g ? g.querySelectorAll('.gdc-card').length : 0 }; });
   ok('mounted in Engines → Analytics (above the Revenue / YPP card), loads on entry', m.g && m.y && m.order === 'growth-before-revenue' && m.cards === 2, m);
-  const errs = await page.evaluate(() => window.__errs || []); ok('no page errors recorded', errs.length === 0, errs);
+  const errs = pageErrs; ok('no page errors recorded', errs.length === 0, errs);
 } finally { await browser.close(); await stub.close(); }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

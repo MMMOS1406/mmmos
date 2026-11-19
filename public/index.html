@@ -3334,7 +3334,7 @@ async function loadGrowthCenter(){
     const ceo=(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||'',op=(typeof _operatorGetSessionToken==='function'&&_operatorGetSessionToken())||'';
     const r=await fetch('/api/ops?action=growth_report',{method:'POST',headers:{'Content-Type':'application/json','X-MMM-CEO-Session':ceo},body:JSON.stringify(op&&!ceo?{operator_session_token:op}:{})});
     const d=await r.json().catch(function(){return null;});
-    D.gdc=(!r.ok||!d||!d.ok)?{loadedAt:null,error:(d&&(d.message||d.error))||('HTTP '+r.status),reports:null}:{loadedAt:new Date().toISOString(),error:null,role:d.role,reports:d.reports};
+    D.gdc=(!r.ok||!d||!d.ok||!Array.isArray(d.reports))?{loadedAt:null,error:(d&&(d.message||d.error))||(r.ok?'unexpected response':'HTTP '+r.status),reports:null}:{loadedAt:new Date().toISOString(),error:null,role:d.role,reports:d.reports};
   }catch(e){D.gdc={loadedAt:null,error:e.message,reports:null};}
   D._gdcLoading=false;
   if(typeof renderTab==='function'&&typeof currentTab!=='undefined')renderTab(currentTab);
@@ -3355,7 +3355,7 @@ function _renderGrowthCenterSection(){
   h+='</div>';
   if(!g){h+='<div style="font-size:11px;color:var(--dim)">'+(D._gdcLoading?'Loading…':'Not loaded — click Refresh.')+'</div>';}
   else if(g.error){h+='<div style="font-size:11px;color:#ef4444">Could not read: '+escHTML(g.error)+'</div>';}
-  else if(D._gdcMod){
+  else if(D._gdcMod&&Array.isArray(g.reports)){
     const reps=g.reports.filter(function(x){const eng=({silk_road_voices:'SRV Farsi',srv_studio:'SRV English'})[x.business];return _analyticsEngineInScope(eng,x.business);});
     h+=reps.length?reps.map(function(x){return D._gdcMod.renderGrowthCenterHtml(x,escHTML,{canCollect:g.role==='ceo'});}).join(''):'<div style="font-size:11px;color:var(--dim)">No business in scope.</div>';
   }
