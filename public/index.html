@@ -3325,6 +3325,42 @@ function _renderYppSection(){
   return h+'</div>';
 }
 async function ytRevenueDashboard(){await loadYppCards();}
+// Growth Decision Center (CEO directive 2026-11-19): per business — daily/7/28-day performance, paid vs non-advertising, Long/Short/Mix, top/bottom videos, retention and drop-off, conversion,
+// trends, freshness / source / reconciliation, and evidence-based recommendations (lib/growthDecisions.mjs, rendered by lib/growthCenterView.mjs). The server builds the model (growth_report); this only draws it.
+async function loadGrowthCenter(){
+  if(D._gdcLoading)return;D._gdcLoading=true;
+  try{
+    const V=await import('/growth/growthCenterView.mjs');D._gdcMod=V;
+    const ceo=(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||'',op=(typeof _operatorGetSessionToken==='function'&&_operatorGetSessionToken())||'';
+    const r=await fetch('/api/ops?action=growth_report',{method:'POST',headers:{'Content-Type':'application/json','X-MMM-CEO-Session':ceo},body:JSON.stringify(op&&!ceo?{operator_session_token:op}:{})});
+    const d=await r.json().catch(function(){return null;});
+    D.gdc=(!r.ok||!d||!d.ok)?{loadedAt:null,error:(d&&(d.message||d.error))||('HTTP '+r.status),reports:null}:{loadedAt:new Date().toISOString(),error:null,role:d.role,reports:d.reports};
+  }catch(e){D.gdc={loadedAt:null,error:e.message,reports:null};}
+  D._gdcLoading=false;
+  if(typeof renderTab==='function'&&typeof currentTab!=='undefined')renderTab(currentTab);
+}
+async function growthCollectNow(business){
+  if(!confirm('Collect YouTube Analytics now for '+business+'?\n\nRead-only requests to YouTube for this business only (about 20 requests). It runs only while the CEO authorization record is active. Nothing is changed on YouTube.'))return;
+  try{
+    const r=await fetch('/api/ops?action=growth_collect',{method:'POST',headers:{'Content-Type':'application/json','X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''},body:JSON.stringify({business:business,confirm:'COLLECT-ANALYTICS-READ-ONLY'})});
+    const d=await r.json().catch(function(){return null;});
+    alert(r.ok&&d&&d.ok?('Collection finished. Days stored: '+d.days_stored+'. Reconciled: '+d.reconciliation):('Collection did not run: '+((d&&(d.error+(d.detail?' — '+d.detail:'')))||('HTTP '+r.status))));
+  }catch(e){alert('Collection failed: '+e.message);}
+  D.gdc=null;loadGrowthCenter();
+}
+function _renderGrowthCenterSection(){
+  const g=D.gdc;let h='<div id="growth-center" style="margin-top:16px;padding:14px;background:rgba(59,130,246,0.04);border:1px solid rgba(59,130,246,0.2);border-radius:12px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#3b82f6;letter-spacing:1px;font-family:\'JetBrains Mono\',monospace">🧭 GROWTH DECISION CENTER'+escHTML(_analyticsScopeLabel())+'</div>';
+  h+=D._gdcLoading?'<span style="font-size:10px;color:#3b82f6">⏳ loading…</span>':'<button onclick="loadGrowthCenter()" style="padding:4px 10px;background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.30);border-radius:6px;color:#3b82f6;font-size:10px;font-weight:700;cursor:pointer">↻ Refresh</button>';
+  h+='</div>';
+  if(!g){h+='<div style="font-size:11px;color:var(--dim)">'+(D._gdcLoading?'Loading…':'Not loaded — click Refresh.')+'</div>';}
+  else if(g.error){h+='<div style="font-size:11px;color:#ef4444">Could not read: '+escHTML(g.error)+'</div>';}
+  else if(D._gdcMod){
+    const reps=g.reports.filter(function(x){const eng=({silk_road_voices:'SRV Farsi',srv_studio:'SRV English'})[x.business];return _analyticsEngineInScope(eng,x.business);});
+    h+=reps.length?reps.map(function(x){return D._gdcMod.renderGrowthCenterHtml(x,escHTML,{canCollect:g.role==='ceo'});}).join(''):'<div style="font-size:11px;color:var(--dim)">No business in scope.</div>';
+  }
+  return h+'</div>';
+}
 // v13.62.9 PRIORITY B — Decision Engine. Per-channel specific recommendations.
 async function ytDecisionEngine(){
   const el = document.getElementById('yt-decision-output');
@@ -4386,7 +4422,7 @@ function renderTab(tab){
   if(tab==='engines'){
     // v13.69.46 — Overview is default; Analytics + Packages still available.
     if(currentEnginesSub==='packages')loadAndShowPackages();
-    if(currentEnginesSub==='analytics'){_ensureYouTubeAnalyticsLoaded();if(!D.ypp&&!D._yppLoading)loadYppCards();}
+    if(currentEnginesSub==='analytics'){_ensureYouTubeAnalyticsLoaded();if(!D.ypp&&!D._yppLoading)loadYppCards();if(!D.gdc&&!D._gdcLoading)loadGrowthCenter();}
   }
   if(tab==='marketing') _ensureYouTubeAnalyticsLoaded(); // v16.12.0 — Marketing & Sales reuses the Analytics dataset
   if(tab==='system'){
@@ -4407,7 +4443,7 @@ function setEnginesSub(sub){
   const c=document.getElementById('mainContent');
   if(c){ c.innerHTML = renderEnginesShell(); attachEditors(); }
   if(sub==='packages') loadAndShowPackages();
-  if(sub==='analytics'){ _ensureYouTubeAnalyticsLoaded(); if(!D.ypp&&!D._yppLoading) loadYppCards(); }
+  if(sub==='analytics'){ _ensureYouTubeAnalyticsLoaded(); if(!D.ypp&&!D._yppLoading) loadYppCards(); if(!D.gdc&&!D._gdcLoading) loadGrowthCenter(); }
 }
 function setSystemSub(sub){
   currentSystemSub = sub;
@@ -9765,6 +9801,7 @@ function renderEngineAnalytics(){
     }).join('')}
     </div>
     ${_renderYouTubeAnalyticsDetail()}
+    ${_renderGrowthCenterSection()}
     ${_renderYppSection()}
     ${_renderTikTokAnalyticsDetail()}
   `;
