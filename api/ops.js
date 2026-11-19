@@ -19,6 +19,9 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BUSINESSES as _yppBusinesses, YPP_STORE_KEY as _yppStoreKey, YPP_FRESH_DAYS as _yppFreshDays } from '../lib/yppCard.mjs'; // R-C1 B: Revenue/YPP card from OFFICIAL dated Studio Earn captures only (read-only)
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
+import { collectAuthorization as _gcAuth, collectSteps as _gcSteps, collectForBusiness as _gcCollect, mergeCollection as _gcMerge, parseDoc as _gcParseDoc, dataKey as _gcKey, COLLECT_SWITCH_KEY as _gcSwitchKey, COLLECT_CONFIRMATION as _gcConfirm, collectPeriod as _gcPeriod, cronSignatureInput as _gcCronInput } from '../lib/growthCollect.mjs'; // Growth system: minimum server-side collection (default DISABLED; read-only Google GETs; one JSON document per business in app_settings)
+import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Growth Decision Center model + recommendations (pure)
+import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
 import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
@@ -8811,6 +8814,88 @@ async function youtubeVideoStatus(req, res) {
 // watch-time over a configurable lookback window, upserts to youtube_videos columns.
 // Requires the yt-analytics.readonly scope (added to YT_SCOPES in callback.js;
 // operator must re-auth after the scope upgrade lands).
+// ───────────────────────── Growth system: collection + report (default DISABLED) ─────────────────────────
+// growth_collect   POST, CEO session. {business, dryRun:true} → the plan + authorization state (never contacts Google). {business, confirm:'COLLECT-ANALYTICS-READ-ONLY'} → one read-only collection
+//                  run, ONLY while app_settings.growth_collect authorizes it (enabled, business named, unexpired authorized_until). Single-flight + 10-minute cooldown per business.
+// growth_collect_scheduled  GET/POST from the existing daily cron only (shared secret derived from the service key; no new credential). Runs only if growth_collect.schedule === true. Default: does nothing.
+// growth_report    POST, CEO or VA session. Builds the Growth Decision Center model per business from the stored document (or the database snapshot). Reads only; never contacts Google.
+// Writes: ONLY the one app_settings row growth_data_<business> of the business collected. No table, no migration. Revenue, Reach/Reporting API and search.list are never requested.
+const _growthCollectGuard = _growthCreateRunGuard({ cooldownMs: 600000 });
+const _GROWTH_BUSINESSES = ['silk_road_voices', 'srv_studio'];
+async function _growthLoadSwitch() { try { const r = await sbGet('app_settings?key=eq.' + _gcSwitchKey + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? r[0].value : null; } catch (_) { return null; } }
+async function _growthLoadDoc(business) { try { const r = await sbGet('app_settings?key=eq.' + _gcKey(business) + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? _gcParseDoc(r[0].value, business) : null; } catch (_) { return null; } }
+async function _growthSaveDoc(business, doc) {
+  const key = _gcKey(business), value = JSON.stringify(doc), existing = await sbGet('app_settings?key=eq.' + key + '&select=key&limit=1');
+  if (Array.isArray(existing) && existing[0]) await sbPatch('app_settings', 'key=eq.' + key, { value, updated_at: new Date().toISOString() });
+  else await sbInsert('app_settings', { key, value, updated_at: new Date().toISOString() });
+}
+async function _growthRunCollection(business, mode) {
+  const want = _gaBiz[business] && _gaBiz[business].channelId; if (!want) return { ok: false, error: 'unknown_business' };
+  const { from, to } = _gcPeriod(Date.now(), 28);
+  const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2');
+  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to });
+  if (!out.ok) { console.warn('[growth_collect] ' + business + ' ' + mode + ' failed: ' + (out.error || '') + ' ' + (out.detail || '')); return { ok: false, business, error: out.error, detail: out.detail || null, steps: out.run ? out.run.steps : [] }; }
+  const prev = await _growthLoadDoc(business);
+  const doc = _gcMerge(prev, out.run, { business, from, to, nowIso: new Date().toISOString() });
+  await _growthSaveDoc(business, doc);
+  const failed = Object.entries(doc.collections[0].steps).filter(([, v]) => v !== 'ok').map(([k, v]) => k + ':' + v);
+  if (failed.length) console.warn('[growth_collect] ' + business + ' steps not ok: ' + failed.join(', '));
+  return { ok: true, business, steps: doc.collections[0].steps, requests: out.run.requests, days_stored: Object.keys(doc.days).length, reconciliation: doc.reconciliation ? doc.reconciliation.checks.every((c) => c.ok !== false) : null };
+}
+async function growthCollect(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const b = req.body || {}; const business = String(b.business || ''); let began = false;
+  try {
+    if (!_GROWTH_BUSINESSES.includes(business)) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    const auth = _gcAuth(await _growthLoadSwitch(), Date.now(), business, 'manual');
+    if (b.dryRun === true) return res.status(200).json({ ok: true, dryRun: true, business, authorization: auth, period: _gcPeriod(Date.now(), 28), plan: _gcSteps({ to: _gcPeriod(Date.now(), 28).to }).map((s) => ({ id: s.id, url: s.url })), note: 'Plus up to 10 retention-curve requests for the top videos. Nothing was sent to Google.' });
+    if (b.confirm !== _gcConfirm) return res.status(400).json({ ok: false, error: 'collection_confirmation_required' });
+    if (!auth.ok) return res.status(403).json({ ok: false, error: auth.reason, detail: auth.detail });
+    const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) return res.status(429).json({ ok: false, error: g.reason, retryAfterMs: g.retryAfterMs || null }); began = true;
+    const out = await _growthRunCollection(business, 'manual');
+    return res.status(out.ok ? 200 : (out.error === 'no_connection' ? 404 : 502)).json(out);
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_collect_failed' }); }
+  finally { if (began) _growthCollectGuard.end(business); }
+}
+async function growthCollectScheduled(req, res) {
+  try {
+    const sig = String((req.headers && (req.headers['x-mmm-cron'] || req.headers['X-MMM-Cron'])) || '');
+    const want = createHash('sha256').update(_gcCronInput(SUPABASE_SERVICE_KEY)).digest('hex');
+    if (!SUPABASE_SERVICE_KEY || sig.length !== want.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return res.status(401).json({ ok: false, error: 'cron_signature_required' });
+    const raw = await _growthLoadSwitch(); const results = [];
+    for (const business of _GROWTH_BUSINESSES) {
+      const auth = _gcAuth(raw, Date.now(), business, 'scheduled');
+      if (!auth.ok) { results.push({ business, skipped: auth.reason }); continue; }
+      const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) { results.push({ business, skipped: g.reason }); continue; }
+      try { results.push(await _growthRunCollection(business, 'scheduled')); } catch (e) { results.push({ business, ok: false, error: 'collection_failed' }); } finally { _growthCollectGuard.end(business); }
+    }
+    return res.status(200).json({ ok: true, results });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_collect_scheduled_failed' }); }
+}
+async function growthReport(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  const who = await _publisherFromRequest(req); if (!who) return res.status(401).json({ ok: false, error: 'session_required' });
+  try {
+    const want = String((req.body || {}).business || ''); const list = want ? [want] : _GROWTH_BUSINESSES; if (!list.every((x) => _GROWTH_BUSINESSES.includes(x))) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    const sw = who.role === 'ceo' ? await _growthLoadSwitch() : null; const yraw = who.role === 'ceo' ? await (async () => { try { const r = await sbGet('app_settings?key=eq.' + _yppStoreKey + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? r[0].value : null; } catch (_) { return null; } })() : null;
+    const store = who.role === 'ceo' ? _yppParseStore(yraw) : null; const reports = [];
+    for (const business of list) {
+      const id = _gaBiz[business].channelId; const doc = await _growthLoadDoc(business);
+      const rows = await sbGet('youtube_videos_analytics?select=channel_id,video_id,title,views,view_count,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,analytics_synced_at,synced_at,published_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000');
+      const chs = await sbGet('youtube_channels?select=channel_id,subscribers,total_views,updated_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1'); const ch = Array.isArray(chs) && chs[0] ? chs[0] : {};
+      const norm = (Array.isArray(rows) ? rows : []).map(_gaNorm); const titles = {}; for (const r of Array.isArray(rows) ? rows : []) if (r.video_id && r.title) titles[r.video_id] = r.title;
+      let fallback = null; try { const ws = _gaBuild(norm, { business: _gaBiz[business], channel: { subscribers: ch.subscribers, totalViews: ch.total_views, updatedAt: ch.updated_at } }); fallback = { period: ws.period, metrics: Object.fromEntries(['views_window', 'watch_hours_window', 'avg_view_pct_weighted', 'avg_view_duration', 'subs_attributed_window', 'subscribers_total', 'views_lifetime_channel'].map((k) => [k, { label: ws.metrics[k].label, value: ws.metrics[k].value, unit: ws.metrics[k].unit, status: ws.metrics[k].status }])), top: (ws.top || []).slice(0, 3) }; } catch (_) { fallback = null; }
+      const ypp = who.role === 'ceo' ? _yppBuild({ business, records: store.byChannel[id] || [], nowMs: Date.now(), appCounters: null }) : undefined;
+      const dash = _gdBuild({ business, doc, nowMs: Date.now(), titles, fallback, ypp });
+      const a = _gcAuth(sw, Date.now(), business, 'manual'), sch = _gcAuth(sw, Date.now(), business, 'scheduled');
+      dash.collection = who.role === 'ceo' ? { manual_authorized: a.ok, manual_until: a.until || null, manual_reason: a.ok ? null : a.reason, scheduled: sch.ok, last: doc && doc.collections && doc.collections[0] ? { at: doc.collections[0].at, steps: doc.collections[0].steps, requests: doc.collections[0].requests, aborted: doc.collections[0].aborted } : null } : null;
+      reports.push(dash);
+    }
+    return res.status(200).json({ ok: true, role: who.role, reports });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_report_failed', message: String(e && e.message || e).slice(0, 120) }); }
+}
+
 // R-B — read-only YouTube API probe. CEO session only, POST only. Deployment approval is NOT permission to contact Google: a live run also needs a time-boxed authorization record
 // (app setting `growth_probe_live`, written by engineering only after the CEO's separate written authorization; no browser can write that key).
 //   {business, dryRun:true}  -> the planned requests, the documented capability matrix and the current live-authorization state. Contacts Google: NEVER. Reads: that one setting only.
@@ -21365,6 +21450,9 @@ export default async function handler(req, res) {
     if (action === 'youtube_snapshot_now')       return await youtubeSnapshotNow(req, res); // v13.58.0
     if (action === 'analytics_foundation')       return await analyticsFoundationReport(req, res); // v13.58.0
     if (action === 'growth_probe')               return await growthProbe(req, res); // R-B read-only probe (CEO session; not released)
+    if (action === 'growth_collect')             return await growthCollect(req, res); // Growth system: read-only collection (default DISABLED; CEO session + authorization record)
+    if (action === 'growth_collect_scheduled')   return await growthCollectScheduled(req, res); // Growth system: daily cron hook (signature; does nothing unless schedule is switched on)
+    if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
     if (action === 'decision_engine')            return await decisionEngine(req, res); // v13.58.1
     if (action === 'revenue_dashboard')          return await revenueDashboard(req, res); // v13.58.2
     if (action === 'optimization_apply_recs')    return await optimizationApplyRecommendations(req, res); // v13.59.0
