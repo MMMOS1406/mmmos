@@ -18,6 +18,7 @@ import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validati
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
+import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
@@ -7147,150 +7148,128 @@ async function deleteMemoryItemFn(req, res) {
 
 // ── YouTube Performance Sync ──────────────────────────────────────────────────
 
+// R-C1 release A — upload detection. Same purpose and same package/task effects as before; the DETECTION mechanism changed (lib/uploadDetection.mjs):
+//  - the channel's UPLOADS PLAYLIST (playlistItems.list, 1 unit, no 100/day cap) replaces search.list (own 100/day cap, 66% refused, failures swallowed);
+//  - channels come from the existing business records (youtube_channels.mmm_engine of SRV Farsi / SRV English), never from the client; retired engines are never polled;
+//  - a video is matched ONLY against packages of its own business engine; a playlist item owned by another channel is dropped;
+//  - CEO session required (it was open to anyone); per-channel server throttle (3 min) + single-flight; quota/permission/not-found errors are REPORTED per channel, never swallowed;
+//  - the task advance is a compare-and-set (status=queued in the PATCH filter), so two tabs can never advance the same task or raise two notifications.
+const _udThrottle = _udCreateThrottle(), _udWarn = _udCreateWarnLimiter(), _udPlaylistCache = new Map();
 async function youtubeSyncPerformance(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { channelIds } = req.body || {};
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required', synced: 0, matched: 0, advanced: 0 });
   const apiKey = process.env.YOUTUBE_API_KEY;
   if (!apiKey) return res.json({ error: 'YOUTUBE_API_KEY not configured', synced: 0, matched: 0, advanced: 0 });
-  if (!Array.isArray(channelIds) || channelIds.length === 0) return res.json({ synced: 0, matched: 0, advanced: 0 });
 
-  function normalizeTitle(str){
-    if(!str) return [];
-    // Preserve Persian/Arabic unicode range U+0600–U+06FF
-    // Strip only characters that are not word chars, not Persian, not spaces
-    var s = str
-      .toLowerCase()
-      .replace(/[^\w\s\u0600-\u06FF]/g,'')
-      .trim();
-    return s.split(/\s+/).filter(function(t){ return t.length>1; });
-  }
-
-  let synced = 0, matched = 0, advanced = 0;
+  const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  let synced = 0, matched = 0, advanced = 0, quotaUnits = 0; const channels = [];
   try {
-    let packages = [];
-    try { packages = await sbGet('packages?select=*&order=created_at.desc&limit=500'); } catch(e) {}
+    let chRows = []; try { chRows = await sbGet('youtube_channels?select=channel_id,title,mmm_engine&mmm_engine=not.is.null'); } catch (e) {}
+    const configured = _udSelectChannels(Array.isArray(chRows) ? chRows : []);
+    if (!configured.length) return res.json({ synced: 0, matched: 0, advanced: 0, channels: [], error: 'no_channels_configured' });
+    let packages = []; try { packages = await sbGet('packages?select=*&order=created_at.desc&limit=500'); } catch (e) {}
+    const fetchJson = async (url) => { const r = await fetch(url); let json = null; try { json = await r.json(); } catch (_) {} return { status: r.status, json }; };
 
-    const allVideoIds = [];
-    for (const channelId of channelIds) {
-      if (!channelId) continue;
+    for (const ch of configured) {
+      const entry = { channelId: ch.channelId, business: ch.engine }; const key = ch.channelId;
+      const gate = _udThrottle.begin(key, Date.now());
+      if (!gate.ok) { channels.push({ ...entry, status: gate.reason, retryAfterMs: gate.retryAfterMs || null }); continue; }
+      let succeeded = false;
       try {
-        const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(channelId)}&type=video&order=date&maxResults=10&key=${apiKey}`;
-        const sr = await fetch(searchUrl);
-        if (!sr.ok) continue;
-        const sd = await sr.json();
-        if (sd.error) { console.warn('[yt_sync_perf] YT search error:', sd.error.message); continue; }
-        for (const item of (sd.items || [])) {
-          const vid = item.id && item.id.videoId;
-          if (vid) allVideoIds.push(vid);
+        const det = await _udDetectChannel({ channel: ch, fetchJson, apiKey, knownPlaylist: _udPlaylistCache.get(key) || null });
+        quotaUnits += det.quotaUnits || 0; if (det.uploadsPlaylist) _udPlaylistCache.set(key, det.uploadsPlaylist);
+        entry.status = det.status; if (det.reason) entry.reason = det.reason; if (det.mismatched) entry.mismatched = det.mismatched;
+        succeeded = det.status === 'ok' || det.status === 'ok_with_mismatch' || det.status === 'channel_mismatch';
+        if (!succeeded) { if (_udWarn(key + '|' + det.status, Date.now())) console.warn('[upload_detection] ' + ch.engine + ' ' + det.status + (det.reason ? ' (' + det.reason + ')' : '')); channels.push(entry); continue; }
+        synced += det.videos.length;
+        const pkgs = _udPackagesForEngine(packages, ch.engine);   // business isolation: only this channel's own business packages can match
+        for (const video of det.videos) {
+          const { id: videoId, snippet, statistics } = video;
+          const bestMatch = _udBestMatch(snippet.title, pkgs);
+          if (!bestMatch) continue;
+          matched++;
+
+          const publishedAt = snippet.publishedAt;
+          const daysSince = Math.max(1, (Date.now() - new Date(publishedAt)) / 86400000);
+          const viewCount = parseInt(statistics.viewCount || 0);
+          const likeCount = parseInt(statistics.likeCount || 0);
+          const commentCount = parseInt(statistics.commentCount || 0);
+          const viewsPerDay = Math.round((viewCount / daysSince) * 100) / 100;
+          const uploadDay = DAY_NAMES[new Date(publishedAt).getDay()];
+          const uploadHour = new Date(publishedAt).getHours();
+          const videoUrl = 'https://youtube.com/watch?v=' + videoId;
+
+          const perfPayload = {
+            package_id: bestMatch.id,
+            video_id: videoId,
+            video_url: videoUrl,
+            upload_timestamp: publishedAt,
+            views: viewCount,
+            likes: likeCount,
+            comments: commentCount,
+            shares: 0,
+            watch_time_seconds: 0,
+            views_per_day: viewsPerDay,
+            engine_id: bestMatch.engine_id || bestMatch.engineId || null,
+            mode: bestMatch.mode || null,
+            hook: bestMatch.hook || null,
+            upload_day: uploadDay,
+            upload_hour: uploadHour,
+            auto_linked: true,
+            performance_score: viewCount + likeCount * 10 + commentCount * 15,
+          };
+
+          try {
+            const existing = await sbGet(`package_performance?package_id=eq.${encodeURIComponent(bestMatch.id)}&limit=1`).catch(() => []);
+            if (existing && existing[0]) {
+              await sbPatch('package_performance', `package_id=eq.${encodeURIComponent(bestMatch.id)}`, perfPayload);
+            } else {
+              await sbInsert('package_performance', perfPayload);
+            }
+          } catch (e) { console.warn('[yt_sync_perf] perf upsert error:', e.message); }
+
+          try {
+            const tasks = await sbGet(`operator_tasks?package_id=eq.${encodeURIComponent(bestMatch.id)}&status=eq.queued&limit=1`).catch(() => []);
+            if (tasks && tasks[0]) {
+              // compare-and-set: the PATCH only applies while the task is still queued, so a second tab/instance cannot advance it (or notify) twice
+              const won = await sbPatch('operator_tasks', `id=eq.${tasks[0].id}&status=eq.queued`, {
+                status: 'uploaded',
+                updated_at: new Date().toISOString(),
+              });
+              if (won) {
+                advanced++;
+                // Attempt to write video fields if columns exist (silent fail if not)
+                try {
+                  await sbPatch('operator_tasks', `id=eq.${tasks[0].id}`, { video_id: videoId, video_url: videoUrl });
+                } catch (e) {}
+                try {
+                  // v16.15.0 — Phase 6: tagged department='operations' — this event advances an
+                  // operator_task through the Factory production pipeline (Operations owns task
+                  // state), even though the trigger is a YouTube signal. requires_ceo_approval
+                  // stays false: this is a routine completion event, not a decision.
+                  await sbInsert('notifications', {
+                    type: 'upload_detected',
+                    title: 'YouTube Upload Detected',
+                    message: (bestMatch.title || 'Package') + ' auto-linked and advanced to uploaded',
+                    task_id: String(tasks[0].id),
+                    created_by: 'system',
+                    department: 'operations',
+                    requires_ceo_approval: false,
+                  });
+                } catch (e) { console.warn('[yt_sync_perf] notification error:', e.message); }
+              }
+            }
+          } catch (e) { console.warn('[yt_sync_perf] task advance error:', e.message); }
         }
-      } catch(e) { console.warn('[yt_sync_perf] search error channel', channelId, e.message); }
+        channels.push(entry);
+      } finally { _udThrottle.end(key, Date.now(), succeeded); }
     }
 
-    synced = allVideoIds.length;
-    if (allVideoIds.length === 0) return res.json({ synced: 0, matched: 0, advanced: 0 });
-
-    const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet&id=${allVideoIds.join(',')}&key=${apiKey}`;
-    const statsRes = await fetch(statsUrl);
-    if (!statsRes.ok) return res.json({ error: 'YouTube stats API error ' + statsRes.status, synced, matched: 0, advanced: 0 });
-    const statsData = await statsRes.json();
-    if (statsData.error) return res.json({ error: statsData.error.message, synced, matched: 0, advanced: 0 });
-
-    const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-
-    for (const video of (statsData.items || [])) {
-      const { id: videoId, snippet, statistics } = video;
-      if (!snippet || !statistics) continue;
-      const videoTokens = normalizeTitle(snippet.title);
-      if (videoTokens.length === 0) continue;
-
-      let bestMatch = null, bestOverlap = 0;
-      for (const pkg of packages) {
-        const pkgTokens = normalizeTitle(pkg.title);
-        if (pkgTokens.length === 0) continue;
-        const shared = videoTokens.filter(t => pkgTokens.includes(t)).length;
-        const overlap = shared / Math.max(videoTokens.length, pkgTokens.length);
-        if (overlap >= 0.7 && overlap > bestOverlap) { bestOverlap = overlap; bestMatch = pkg; }
-      }
-      if (!bestMatch) continue;
-      matched++;
-
-      const publishedAt = snippet.publishedAt;
-      const daysSince = Math.max(1, (Date.now() - new Date(publishedAt)) / 86400000);
-      const viewCount = parseInt(statistics.viewCount || 0);
-      const likeCount = parseInt(statistics.likeCount || 0);
-      const commentCount = parseInt(statistics.commentCount || 0);
-      const viewsPerDay = Math.round((viewCount / daysSince) * 100) / 100;
-      const uploadDay = DAY_NAMES[new Date(publishedAt).getDay()];
-      const uploadHour = new Date(publishedAt).getHours();
-      const videoUrl = 'https://youtube.com/watch?v=' + videoId;
-
-      const perfPayload = {
-        package_id: bestMatch.id,
-        video_id: videoId,
-        video_url: videoUrl,
-        upload_timestamp: publishedAt,
-        views: viewCount,
-        likes: likeCount,
-        comments: commentCount,
-        shares: 0,
-        watch_time_seconds: 0,
-        views_per_day: viewsPerDay,
-        engine_id: bestMatch.engine_id || bestMatch.engineId || null,
-        mode: bestMatch.mode || null,
-        hook: bestMatch.hook || null,
-        upload_day: uploadDay,
-        upload_hour: uploadHour,
-        auto_linked: true,
-        performance_score: viewCount + likeCount * 10 + commentCount * 15,
-      };
-
-      try {
-        const existing = await sbGet(`package_performance?package_id=eq.${encodeURIComponent(bestMatch.id)}&limit=1`).catch(() => []);
-        if (existing && existing[0]) {
-          await sbPatch('package_performance', `package_id=eq.${encodeURIComponent(bestMatch.id)}`, perfPayload);
-        } else {
-          await sbInsert('package_performance', perfPayload);
-        }
-      } catch(e) { console.warn('[yt_sync_perf] perf upsert error:', e.message); }
-
-      try {
-        const tasks = await sbGet(`operator_tasks?package_id=eq.${encodeURIComponent(bestMatch.id)}&status=eq.queued&limit=1`).catch(() => []);
-        if (tasks && tasks[0]) {
-          // Always update status — safe columns only
-          await sbPatch('operator_tasks', `id=eq.${tasks[0].id}`, {
-            status: 'uploaded',
-            updated_at: new Date().toISOString(),
-          });
-          advanced++;
-          // Attempt to write video fields if columns exist (silent fail if not)
-          try {
-            await sbPatch('operator_tasks', `id=eq.${tasks[0].id}`, { video_id: videoId, video_url: videoUrl });
-          } catch(e) {}
-          try {
-            // v16.15.0 — Phase 6: tagged department='operations' — this event advances an
-            // operator_task through the Factory production pipeline (Operations owns task
-            // state), even though the trigger is a YouTube signal. requires_ceo_approval
-            // stays false: this is a routine completion event, not a decision — it belongs
-            // in Operations' own Department Inbox, not the Executive Inbox.
-            await sbInsert('notifications', {
-              type: 'upload_detected',
-              title: 'YouTube Upload Detected',
-              message: (bestMatch.title || 'Package') + ' auto-linked and advanced to uploaded',
-              task_id: String(tasks[0].id),
-              created_by: 'system',
-              department: 'operations',
-              requires_ceo_approval: false,
-            });
-          } catch(e) { console.warn('[yt_sync_perf] notification error:', e.message); }
-        }
-      } catch(e) { console.warn('[yt_sync_perf] task advance error:', e.message); }
-    }
-
-    console.log(`[v12.8] youtube_sync_performance: synced=${synced} matched=${matched} advanced=${advanced}`);
-    return res.json({ synced, matched, advanced });
-  } catch(e) {
+    console.log(`[v12.8] youtube_sync_performance: synced=${synced} matched=${matched} advanced=${advanced} units=${quotaUnits}`);
+    return res.json({ synced, matched, advanced, channels, quotaUnits });
+  } catch (e) {
     console.error('[v12.8] youtube_sync_performance error:', e.message);
-    return res.json({ error: e.message, synced, matched: 0, advanced: 0 });
+    return res.json({ error: e.message, synced, matched: 0, advanced: 0, channels });
   }
 }
 

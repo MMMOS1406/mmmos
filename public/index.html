@@ -27095,33 +27095,46 @@ function markAllNotifRead(){
     .then(function(){loadNotifications();var p=document.getElementById('notifPanel');if(p)p.classList.remove('open');});
 }
 
-function getActiveChannelIds(){
-  return [
-    'UCCUa5BLzGh2eRBoqqWBCK_g',
-    window.YT_CHANNEL_SRV_ENGLISH||'',
-    window.YT_CHANNEL_NEXTWAVE||''
-  ].filter(function(id){return id.length>0;});
+// R-C1 A — upload detection: the SERVER decides which channels to check (the two business channels from the business records) and throttles; the page only asks, every 5 minutes, and only
+// while this tab is visible (a hidden tab does not poll; when it becomes visible again it asks at once if the last ask is older than 5 minutes). Notifications still refresh every minute.
+let _ydLastSyncAt=0,_ydBusy=false;
+function _ydShouldRun(now,last,visible){return !!visible&&(now-last>=300000);}
+function _ydApplyStatus(data,httpStatus){
+  const bell=document.getElementById('notifBell');let note='';
+  if(httpStatus===401)note='Upload detection paused: sign in again.';
+  else if(data&&data.error&&!data.channels)note='Upload detection error: '+data.error;
+  else if(data&&Array.isArray(data.channels)){
+    const bad=data.channels.filter(function(c){return ['quota_exceeded','forbidden','not_found','bad_request','error','channel_mismatch'].indexOf(c.status)>=0;});
+    if(bad.length)note='Upload detection problem: '+bad.map(function(c){return c.business+' — '+c.status+(c.reason?' ('+c.reason+')':'');}).join('; ');
+  }
+  window._uploadDetectionNote=note;
+  if(bell){bell.title=note||'Notifications';bell.style.outline=note?'1px solid #f59e0b':'';}
 }
-
+async function _ydRunSync(){
+  if(_ydBusy)return;_ydBusy=true;_ydLastSyncAt=Date.now();
+  try{
+    const r=await fetch('/api/ops?action=youtube_sync_performance',{method:'POST',headers:{'Content-Type':'application/json','X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''},body:'{}'});
+    const data=await r.json().catch(function(){return null;});
+    _ydApplyStatus(data,r.status);
+    if(data&&data.advanced>0){
+      if(currentTab==='tasks')renderTab('tasks');
+      if(currentTab==='packages')renderTab('packages');
+    }
+  }catch(e){}
+  finally{_ydBusy=false;}
+}
+function _notifPollTick(){
+  loadNotifications();
+  if(_ydShouldRun(Date.now(),_ydLastSyncAt,document.visibilityState==='visible'))_ydRunSync();
+}
+let _ydVisBound=false;
 function startNotifPolling(){
   loadNotifications();
   if(notifPollTimer)clearInterval(notifPollTimer);
-  notifPollTimer=setInterval(function(){
-    loadNotifications();
-    fetch('/api/ops?action=youtube_sync_performance',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({channelIds:getActiveChannelIds()})
-    })
-    .then(function(r){return r.json();})
-    .then(function(data){
-      if(data.advanced>0){
-        if(currentTab==='tasks')renderTab('tasks');
-        if(currentTab==='packages')renderTab('packages');
-      }
-    })
-    .catch(function(){});
-  },60000);
+  _ydLastSyncAt=0;
+  notifPollTimer=setInterval(_notifPollTick,60000);
+  if(!_ydVisBound){_ydVisBound=true;document.addEventListener('visibilitychange',function(){if(notifPollTimer&&document.visibilityState==='visible')_notifPollTick();});}
+  if(document.visibilityState==='visible')_ydRunSync();
 }
 
 function stopNotifPolling(){
