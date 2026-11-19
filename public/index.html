@@ -9194,6 +9194,10 @@ async function disconnectPlaidItem(itemId){
     });
     const data = await r.json();
     if(!r.ok){
+      if(data && (data.status==='revoke_pending'||data.status==='needs_manual_revoke')){   // Finance V2 2A: the bank was NOT revoked at the provider — keep it visible instead of hiding a live connection
+        setPlaidStatus(data.status==='needs_manual_revoke'?'Bank NOT removed: its stored credential could not be read — revoke it in the Plaid dashboard, then remove it here with force.':'Bank NOT removed: the provider did not confirm the revoke. Try again; nothing was deleted.', 'error');
+        return;
+      }
       setPlaidStatus('Server-side remove failed: '+(data.error||r.status)+' (continuing with local cleanup)', 'error');
     }
   }catch(e){

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { vaultFromEnv as _finVaultFromEnv, plaidAad as _plaidAad, planDisconnect as _planDisconnect, safeDbError as _safeDbError } from '../lib/finCrypto.mjs'; // Finance V2 2A: AES-256-GCM credential vault (keys from environment only; DEFAULT OFF — with no keys configured behaviour is unchanged)
 import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BUSINESSES as _yppBusinesses, YPP_STORE_KEY as _yppStoreKey, YPP_FRESH_DAYS as _yppFreshDays } from '../lib/yppCard.mjs'; // R-C1 B: Revenue/YPP card from OFFICIAL dated Studio Earn captures only (read-only)
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
@@ -7387,6 +7388,12 @@ const PLAID_SECRET = _PLAID_ENV === 'production'
       ? (process.env.PLAID_SECRET_SANDBOX || process.env.PLAID_SECRET)
       : (process.env.PLAID_SECRET_DEV || process.env.PLAID_SECRET));
 
+// Finance V2 2A — credential vault. With FIN_TOKEN_KEYS unset (today) nothing changes: tokens are stored exactly as before. With keys set, new Plaid access tokens are sealed (AES-256-GCM, bound to
+// the item id) before they reach the database and are opened only inside the server functions below; a misconfigured key fails CLOSED (no token is stored or read).
+let _finVault = null, _finVaultErr = null;
+try { _finVault = _finVaultFromEnv(process.env); } catch (e) { _finVaultErr = (e && e.code) || 'vault_error'; console.error('[fin] token vault configuration invalid: ' + _finVaultErr); }
+const _plaidTokenOpen = (stored, itemId) => { if (!_finVault) throw new Error('vault_misconfigured'); return _finVault.openCompat(stored, _plaidAad(itemId)).value; };
+
 async function sbUpsertPlaidItem(data) {
   const url = `${SUPABASE_URL}/rest/v1/plaid_items?on_conflict=item_id`;
   const res = await fetch(url, {
@@ -7401,7 +7408,7 @@ async function sbUpsertPlaidItem(data) {
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Supabase plaid_items upsert ${res.status}: ${t}`);
+    throw new Error(_safeDbError('plaid_items', 'upsert', res.status, t));   // never echo the response body: it can contain the failing row (the token)
   }
 }
 
@@ -7415,7 +7422,7 @@ async function sbSelectPlaid(query) {
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Supabase plaid_items select ${res.status}: ${t}`);
+    throw new Error(_safeDbError('plaid_items', 'select', res.status, t));
   }
   return res.json();
 }
@@ -7434,7 +7441,7 @@ async function sbPatchPlaid(query, data) {
   });
   if (!r.ok) {
     const t = await r.text();
-    throw new Error(`Supabase plaid_items patch ${r.status}: ${t}`);
+    throw new Error(_safeDbError('plaid_items', 'patch', r.status, t));
   }
 }
 
@@ -7482,6 +7489,9 @@ async function plaidExchange(req, res) {
   const metadata = body.metadata || {};
   const userLabel = body.userId || 'admin';
   if (!publicToken) return res.status(400).json({ error: 'missing_public_token' });
+  // Finance V2 2A — refuse BEFORE contacting Plaid if the credential cannot be stored safely (a misconfigured key, or encryption required but not configured): no orphan item.
+  if (_finVaultErr) return res.status(500).json({ error: 'token_encryption_misconfigured' });
+  if (_finVault.requireEncryption && !_finVault.configured) return res.status(500).json({ error: 'token_encryption_not_configured' });
 
   const exchRes = await fetch(`${PLAID_BASE}/item/public_token/exchange`, {
     method: 'POST',
@@ -7526,9 +7536,15 @@ async function plaidExchange(req, res) {
     }
   }
 
+  let storedToken;
+  try { storedToken = _finVault.sealOrPlain(accessToken, _plaidAad(itemId)); }
+  catch (e) {   // sealing failed after the exchange: release the item at Plaid so no live credential is left unstored
+    try { await fetch(`${PLAID_BASE}/item/remove`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: PLAID_CLIENT_ID, secret: PLAID_SECRET, access_token: accessToken }) }); } catch (_) { /* best effort */ }
+    return res.status(500).json({ error: 'token_encryption_failed' });
+  }
   await sbUpsertPlaidItem({
     item_id: itemId,
-    access_token: accessToken,
+    access_token: storedToken,
     institution_id: institutionId,
     institution_name: institutionName,
     available_products: availableProducts,
@@ -7692,23 +7708,30 @@ async function plaidRemoveItem(req, res) {
   const query = req.query || {};
   const itemId = body.item_id || query.item_id;
   if (!itemId) return res.status(400).json({ error: 'missing_item_id' });
-  let plaidErr = null;
-  // Find access_token for this item
+  // Finance V2 2A — SAFE DISCONNECTION: the provider revoke comes first; the stored credential is deleted only when the provider confirms the item is gone (or was already dead).
+  // A network/5xx/unknown failure keeps the row (status revoke_pending) so a live token is never orphaned at the provider; an unreadable credential needs a manual revoke unless force:true.
+  let providerResult = null, decryptOk = true, rowFound = false;
   try {
     const items = await sbSelectPlaid(`item_id=eq.${encodeURIComponent(itemId)}&select=access_token`);
-    if (items && items.length && items[0].access_token && PLAID_CLIENT_ID && PLAID_SECRET) {
-      try {
-        const r = await fetch(`${PLAID_BASE}/item/remove`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ client_id: PLAID_CLIENT_ID, secret: PLAID_SECRET, access_token: items[0].access_token }),
-        });
-        if (!r.ok) plaidErr = `plaid_status_${r.status}`;
-      } catch (e) { plaidErr = 'plaid_exception: ' + e.message; }
-    }
-  } catch (e) { plaidErr = 'sb_select_exception: ' + e.message; }
-  // Delete the row regardless — if Plaid rejected the access_token (e.g., stale Sandbox token in Production env),
-  // we still want the row gone so it stops appearing on every Refresh.
+    rowFound = !!(items && items.length);
+    if (rowFound && items[0].access_token) {
+      let token = null;
+      try { token = _plaidTokenOpen(items[0].access_token, itemId); } catch (e) { decryptOk = false; }
+      if (decryptOk && PLAID_CLIENT_ID && PLAID_SECRET) {
+        try {
+          const r = await fetch(`${PLAID_BASE}/item/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ client_id: PLAID_CLIENT_ID, secret: PLAID_SECRET, access_token: token }),
+          });
+          let rb = null; try { rb = await r.json(); } catch (_) { rb = null; }
+          providerResult = { ok: r.ok, status: r.status, errorCode: rb && rb.error_code ? String(rb.error_code) : undefined };
+        } catch (e) { providerResult = { ok: false, networkError: true }; }
+      }
+    } else if (!rowFound) { providerResult = { ok: true, status: 200 }; }   // nothing stored: nothing to revoke
+  } catch (e) { providerResult = { ok: false, networkError: true }; }
+  const plan = _planDisconnect({ providerResult, decryptOk, force: body.force === true });
+  if (plan.action === 'keep') return res.status(plan.status === 'needs_manual_revoke' ? 409 : 502).json({ removed: false, item_id: itemId, status: plan.status, error: plan.error, plaidErr: plan.error });
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/plaid_items?item_id=eq.${encodeURIComponent(itemId)}`, {
       method: 'DELETE',
@@ -7719,13 +7742,12 @@ async function plaidRemoveItem(req, res) {
       },
     });
   } catch (e) {
-    return res.status(500).json({ error: 'delete_failed', detail: e.message });
+    return res.status(500).json({ error: 'delete_failed' });
   }
-  return res.status(200).json({ removed: true, item_id: itemId, plaidErr });
+  return res.status(200).json({ removed: true, item_id: itemId, status: plan.status, warn: plan.warn || null, plaidErr: null });
 }
 
 async function plaidPullForItem(item) {
-  const accessToken = item.access_token;
   const result = {
     item_id: item.item_id,
     institution_name: item.institution_name,
@@ -7734,6 +7756,9 @@ async function plaidPullForItem(item) {
     error: null,
     lastSyncAt: null,
   };
+  let accessToken;
+  try { accessToken = _plaidTokenOpen(item.access_token, item.item_id); }
+  catch (e) { result.error = 'token_unreadable: ' + ((e && e.code) || 'vault_error'); return result; }   // Finance V2 2A: a credential that cannot be opened is reported by code only
   try {
     const balRes = await fetch(`${PLAID_BASE}/accounts/balance/get`, {
       method: 'POST',
