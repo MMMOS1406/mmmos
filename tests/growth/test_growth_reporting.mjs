@@ -1,0 +1,47 @@
+// R-B phase 3: normalized reporting structure + recommendation contract. SYNTHETIC mock responses only (provenance_real is false unless the caller asserts real origin).
+import fs from 'node:fs';
+import * as R from '../../lib/growthReporting.mjs';
+import { PROBE_CHANNELS } from '../../lib/growthProbe.mjs';
+let pass = 0, fail = 0; const ok = (n, c, d) => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, d !== undefined ? JSON.stringify(d).slice(0, 300) : ''); } };
+const A = PROBE_CHANNELS.silk_road_voices, B = PROBE_CHANNELS.srv_studio;
+const ctx = (over = {}) => ({ business: 'silk_road_voices', channelId: A, from: '2030-01-01', to: '2030-01-28', retrievedAt: '2030-01-29T00:00:00Z', ...over });
+const H = (...n) => n.map((name) => ({ name }));
+
+// ── structure ──
+const T = R.NORMALIZED_TABLES;
+ok('normalized tables: every table is keyed by channel_id (a business can never be mixed) and names its source and period', Object.values(T).every((t) => t.key[0] === 'channel_id' && t.source && t.period && t.columns.length));
+ok('the structure covers the 5 priorities\' data: discovery (traffic source), retention curve, formats, subscribed status, reach, subscriber/watch metrics, Earn estimates', ['traffic_source_period', 'traffic_source_day', 'retention_curve', 'format_period', 'subscribed_status_period', 'reach_day', 'channel_day', 'video_period', 'earn_estimate'].every((k) => T[k]));
+ok('priorities and owners are fixed lists', R.GROWTH_PRIORITIES.join() === 'organic_growth,subscriber_conversion,listening_retention,thumbnail_performance,format_comparison' && R.GROWTH_OWNERS.includes('PM') && R.GROWTH_OWNERS.includes('VA'));
+
+// ── normalization ──
+const ts = R.normalizeResponse('traffic_source', { columnHeaders: H('insightTrafficSourceType', 'views', 'engagedViews', 'estimatedMinutesWatched'), rows: [['ADVERTISING', 800, 700, 60], ['YT_SEARCH', 20, 18, 3], ['PROMOTED', 5, 5, 1]] }, ctx());
+ok('traffic source rows: paid = ADVERTISING only (PROMOTED is unpaid YouTube promotion), channel and period attached', ts.length === 3 && ts[0].is_paid === true && ts[1].is_paid === false && ts[2].is_paid === false && ts.every((r) => r.channel_id === A && r.period_from === '2030-01-01' && r.table === 'traffic_source_period'));
+ok('PROVENANCE: rows are provenance_real=false unless the caller asserts real origin (mock never becomes real by accident)', ts.every((r) => r.provenance_real === false) && R.normalizeResponse('traffic_source', { columnHeaders: H('insightTrafficSourceType', 'views'), rows: [['ADVERTISING', 1]] }, ctx({ provenance: { real: true } }))[0].provenance_real === true);
+ok('ISOLATION: a response for the wrong channel is refused; an unknown business is refused', (() => { try { R.normalizeResponse('traffic_source', { columnHeaders: [], rows: [] }, ctx({ channelId: B })); return false; } catch (e) { return /isolation violation/.test(e.message); } })() && (() => { try { R.normalizeResponse('traffic_source', {}, ctx({ business: 'x' })); return false; } catch (e) { return e.message === 'unknown business'; } })());
+const vr = R.normalizeResponse('per_video', { columnHeaders: H('video', 'views', 'estimatedMinutesWatched', 'averageViewDuration', 'averageViewPercentage', 'subscribersGained', 'subscribersLost'), rows: [['MOCK1', 10, 5, 30, 40, 1, 0]] }, ctx());
+ok('per-video rows keep subscribers as watch-page attributed (documented in the table note) and null for missing columns', vr[0].video_id === 'MOCK1' && vr[0].subscribers_gained === 1 && vr[0].engaged_views === null && /watch-page/.test(T.video_period.note));
+const ct = R.normalizeResponse('content_type', { columnHeaders: H('creatorContentType', 'views', 'estimatedMinutesWatched', 'averageViewDuration'), rows: [['VIDEO_ON_DEMAND', 100, 50, 60], ['SHORTS', 900, 20, 20]] }, ctx());
+ok('format rows map Google content types to long / short (Mix is a Long: no separate type exists)', ct[0].content_type === 'long' && ct[1].content_type === 'short');
+const ds = R.normalizeResponse('traffic_source_daily', { columnHeaders: H('insightTrafficSourceType', 'day', 'views', 'estimatedMinutesWatched'), rows: [['ADVERTISING', '2030-01-02', 5, 1]] }, ctx());
+ok('daily paid series keeps the day and the paid flag (shows a campaign window)', ds[0].date === '2030-01-02' && ds[0].is_paid === true && ds[0].table === 'traffic_source_day');
+const e1 = R.normalizeResponse('earn_longform_365d_by_source', { columnHeaders: H('insightTrafficSourceType', 'creatorContentType', 'estimatedMinutesWatched', 'views'), rows: [['YT_SEARCH', 'VIDEO_ON_DEMAND', 6000, 1], ['ADVERTISING', 'VIDEO_ON_DEMAND', 3000, 1], ['SHORTS', 'VIDEO_ON_DEMAND', 1200, 1], ['SHORTS', 'SHORTS', 9999, 1]] }, ctx());
+ok('Earn watch-hours estimate excludes paid-ad time and Shorts-feed time and is labeled an approximation (6000 min = 100.0 h; 50 h paid and 20 h feed shown separately)', e1[0].estimate === 100 && e1[0].excluded_paid === 50 && e1[0].excluded_shorts_feed === 20 && e1[0].approximation === true, e1[0]);
+const e2 = R.normalizeResponse('earn_shorts_90d_by_source', { columnHeaders: H('insightTrafficSourceType', 'creatorContentType', 'views'), rows: [['SHORTS', 'SHORTS', 700], ['ADVERTISING', 'SHORTS', 300], ['YT_CHANNEL', 'VIDEO_ON_DEMAND', 55]] }, ctx());
+ok('Earn rows are named as estimates (measure contains "estimate", approximation=true) — never "qualified"', [e1[0], e2[0]].every((r) => /estimate/.test(r.measure) && r.approximation === true && !/qualified/i.test(JSON.stringify(r))));
+ok('Earn Shorts-views estimate counts SHORTS content only and excludes paid ads', e2[0].estimate === 700 && e2[0].excluded_paid === 300 && e2[0].approximation === true);
+ok('unknown query ids throw (no silent guess)', (() => { try { R.normalizeResponse('nope', {}, ctx()); return false; } catch (e) { return /no normalizer/.test(e.message); } })());
+
+// ── recommendation contract ──
+const ev = (over = {}) => ({ business: 'silk_road_voices', sourceQuery: 'traffic_source', provenanceReal: false, ...over });
+const good = (over = {}) => ({ business: 'silk_road_voices', priority: 'organic_growth', dataShows: 'Paid ads delivered most views while organic watch seconds per view were higher.', evidence: [ev()], whyMayBeHappening: 'Skippable ads end early; organic viewers chose the video.', evidenceStatus: 'hypothetical', proposedChange: 'Judge content on organic-only metrics and test a promoted high-retention video.', measurementPlan: { metric: 'subs per 1,000 organic views', baseline: 'x', target: 'y', period: '28 days', method: 'weekly Studio/API capture' }, owner: 'PM', confidence: 'medium', expectedBenefit: 'Better content decisions', experiment: { design: 'Two promoted videos, equal budget', stopRule: 'min 1,000 views each' }, ...over });
+ok('a complete hypothetical recommendation with an experiment design is valid', R.validateRecommendation(good()).ok, R.validateRecommendation(good()));
+for (const [field, label] of [['dataShows', '1'], ['whyMayBeHappening', '2'], ['evidenceStatus', '3'], ['proposedChange', '4'], ['measurementPlan', '5'], ['owner', '6']]) { const bad = good(); delete bad[field]; const v = R.validateRecommendation(bad); ok(`required element ${label} (${field}) is enforced`, !v.ok && v.errors.some((e) => e.startsWith(label + '.')), v.errors); }
+ok('a hypothesis without an experiment design / stop rule is refused', !R.validateRecommendation(good({ experiment: undefined })).ok);
+ok('PROVEN needs real-provenance evidence: mock evidence cannot support a proven conclusion', !R.validateRecommendation(good({ evidenceStatus: 'proven', experiment: undefined })).ok && R.validateRecommendation(good({ evidenceStatus: 'proven', experiment: undefined, evidence: [ev({ provenanceReal: true })] })).ok);
+ok('a causal claim needs a completed controlled experiment with a result', !R.validateRecommendation(good({ evidenceStatus: 'proven', causal: true, evidence: [ev({ provenanceReal: true })] })).ok && R.validateRecommendation(good({ evidenceStatus: 'proven', causal: true, evidence: [ev({ provenanceReal: true })], experiment: { design: 'd', stopRule: 's', completed: true, result: 'B beat A' } })).ok);
+ok('a claim about lyrics, visuals or music without an experiment design is refused (no causal claim without evidence)', !R.validateRecommendation(good({ whyMayBeHappening: 'The lyrics are emotional so viewers stay', experiment: undefined, evidenceStatus: 'proven', evidence: [ev({ provenanceReal: true })] })).ok);
+ok('ISOLATION: evidence from another business is refused', !R.validateRecommendation(good({ evidence: [ev({ business: 'srv_studio' })] })).ok);
+ok('causal wording in dataShows produces a warning (observation vs explanation are kept apart)', R.validateRecommendation(good({ dataShows: 'Views rose because the thumbnail changed last week, clearly.' })).warnings.length === 1);
+ok('invalid business, priority, owner and confidence are refused', ['business', 'priority', 'owner', 'confidence'].every((f) => !R.validateRecommendation(good({ [f]: 'bogus' })).ok) && !R.validateRecommendation(null).ok);
+{ const lib = fs.readFileSync(new URL('../../lib/growthReporting.mjs', import.meta.url), 'utf8'); ok('the library does no I/O and embeds no analytics figure (no 4+ digit number at all)', !/\bfetch\(|require\(|from 'node:(fs|http|https|net)'/.test(lib) && !/\b\d{4,}\b/.test(lib)); }
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

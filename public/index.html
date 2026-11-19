@@ -26124,6 +26124,65 @@ function renderBusinessAssetsSection(b){
 }
 
 // ── INTEGRATIONS ──
+// R-B — CEO-only trigger for the read-only YouTube analytics probe. The page never contacts Google: it calls OUR server action (CEO session header), which reads the one
+// connection of that business and issues GET-only requests. "Show plan" contacts nobody. A live run needs the CEO's written authorization (a time-boxed server setting) AND a click
+// + confirmation; it writes nothing anywhere. After a live run the aggregate-only result (no token, no per-video or viewer data) is saved as a JSON file so nobody has to transcribe it.
+function _growthProbeCardHtml(){
+  if(!(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken()))return '';
+  const btn=function(js,label,col){return '<button class="gp-btn" onclick="'+js+'" style="padding:5px 10px;margin:2px 4px 2px 0;background:rgba(255,255,255,0.04);border:1px solid '+col+';border-radius:6px;color:'+col+';font-size:10px;font-weight:700;cursor:pointer;font-family:\'Syne\',sans-serif">'+label+'</button>';};
+  return '<div class="card" style="padding:14px;margin-top:16px"><div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1px;margin-bottom:6px">YOUTUBE ANALYTICS PROBE · READ-ONLY · CEO ONLY</div>'
+    +'<div style="font-size:10px;color:var(--dim);line-height:1.5;margin-bottom:8px">Checks which YouTube Analytics and Reporting metrics each channel can really return. Read-only: nothing is written or changed on YouTube, in the database, or anywhere else. <b>Show plan</b> sends nothing to Google and shows whether live runs are currently authorized. <b>Run live</b> works only while you have authorized it in writing, uses that channel\'s own existing connection (about 20 read requests) and saves the result as a file for engineering — nothing to type or copy.</div>'
+    +'<div style="margin-bottom:4px"><span style="font-size:11px;color:#fff;font-weight:700">Silk Road Voices</span> '+btn("growthProbeRun('silk_road_voices','plan')",'Show plan (no Google call)','#6b7280')+btn("growthProbeRun('silk_road_voices','live')",'Run live (read-only)','#22c55e')+'</div>'
+    +'<div style="margin-bottom:6px"><span style="font-size:11px;color:#fff;font-weight:700">SRV Studio</span> '+btn("growthProbeRun('srv_studio','plan')",'Show plan (no Google call)','#6b7280')+btn("growthProbeRun('srv_studio','live')",'Run live (read-only)','#22c55e')+'</div>'
+    +'<div>'+btn("growthProbeRunBoth()",'Run live — both channels, one confirmation','#22c55e')+'</div>'
+    +'<div id="growth-probe-out" style="margin-top:10px;font-size:10px;color:var(--dim)"></div></div>';
+}
+let _growthProbeBusy=false;   // one run at a time in this page; the server adds its own single-flight and 10-minute cooldown
+function _growthProbeSetBusy(on){_growthProbeBusy=on;document.querySelectorAll('.gp-btn').forEach(function(b){b.disabled=on;b.style.opacity=on?'0.4':'1';});}
+function _growthProbeSave(business,d){
+  try{const stamp=new Date().toISOString().slice(0,10);const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='growth-probe-'+business+'-'+stamp+(d&&d.provenance&&d.provenance.real===true?'':'-NOT-REAL')+'.json';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);return true;}catch(e){return false;}
+}
+async function _growthProbeCall(business,mode){
+  const body={business:business};if(mode==='live')body.confirm='RUN-LIVE-READ-ONLY-PROBE';else body.dryRun=true;
+  const r=await fetch('/api/ops?action=growth_probe',{method:'POST',headers:{'Content-Type':'application/json','X-MMM-CEO-Session':_ceoGetSessionToken()||''},body:JSON.stringify(body)});
+  return await r.json().catch(function(){return {ok:false,error:'unreadable_response'};});
+}
+async function growthProbeRun(business,mode){
+  const out=document.getElementById('growth-probe-out');if(!out||_growthProbeBusy)return;
+  const name=business==='srv_studio'?'SRV Studio':'Silk Road Voices';const live=mode==='live';
+  if(live&&!confirm('Run the READ-ONLY YouTube analytics probe for '+name+'?\n\nIt reads that channel\'s own analytics (about 20 requests) and saves the result as a file. Nothing is written or changed.'))return;
+  _growthProbeSetBusy(true);out.innerHTML='<span style="color:#c9a84c">⏳ '+(live?'running live read-only probe for ':'building plan for ')+escHTML(name)+'…</span>';
+  try{const d=await _growthProbeCall(business,mode);out.innerHTML=_growthProbeResultHtml(d,name,live)+(live&&d&&d.results?(_growthProbeSave(business,d)?'<div style="margin-top:6px;color:#22c55e">Result saved as a file in your Downloads folder.</div>':'<div style="margin-top:6px;color:#f59e0b">Could not save the file automatically.</div>'):'');}
+  catch(e){out.innerHTML='<span style="color:#ef4444">Could not run: '+escHTML(e.message)+'</span>';}
+  finally{_growthProbeSetBusy(false);}
+}
+async function growthProbeRunBoth(){
+  const out=document.getElementById('growth-probe-out');if(!out||_growthProbeBusy)return;
+  if(!confirm('Run the READ-ONLY YouTube analytics probe for BOTH channels, one after the other?\n\nEach run reads that channel\'s own analytics (about 20 requests) and saves its result as a file. Nothing is written or changed.'))return;
+  _growthProbeSetBusy(true);let html='';
+  try{for(const b of ['silk_road_voices','srv_studio']){const name=b==='srv_studio'?'SRV Studio':'Silk Road Voices';out.innerHTML=html+'<span style="color:#c9a84c">⏳ running live read-only probe for '+escHTML(name)+'…</span>';
+      const d=await _growthProbeCall(b,'live');html+='<div style="margin-bottom:10px">'+_growthProbeResultHtml(d,name,true)+(d&&d.results?(_growthProbeSave(b,d)?'<div style="margin-top:4px;color:#22c55e">Result saved as a file in your Downloads folder.</div>':'<div style="margin-top:4px;color:#f59e0b">Could not save the file automatically.</div>'):'')+'</div>';
+      if(!d||!d.results)break;}   // stop at the first refusal (not authorized, cooldown, no connection): never push on
+    out.innerHTML=html;}
+  catch(e){out.innerHTML=html+'<span style="color:#ef4444">Could not run: '+escHTML(e.message)+'</span>';}
+  finally{_growthProbeSetBusy(false);}
+}
+function _growthProbeResultHtml(d,name,live){
+  const T=function(t,c){return '<span style="color:'+(c||'#fff')+'">'+t+'</span>';};
+  if(!d||(!d.ok&&!d.results)){const why={live_not_authorized:'Live runs are not authorized right now (no active written authorization).',live_authorization_expired:'The live-run authorization has expired.',run_in_progress:'A run for this channel is already in progress.',cooldown:'This channel was probed a moment ago; wait for the 10-minute cooldown.',live_confirmation_required:'Confirmation missing.',ceo_authorization_required:'CEO session required.',no_connection:'No YouTube connection exists for this channel.',missing_yt_analytics_scope:'The channel\'s connection lacks the analytics permission.',token_refresh_failed:'YouTube did not accept the stored connection (reconnect needed).'}[d&&d.error];return '<div style="color:#ef4444;font-weight:700">'+escHTML(name)+': not run — '+escHTML(why||((d&&d.error)||'failed'))+'</div>';}
+  let h='';
+  if(d.dryRun){const a=d.liveAuthorization||{};h+='<div style="color:#c9a84c;font-weight:700;margin-bottom:4px">PLAN ONLY — nothing was sent to Google ('+escHTML(name)+'). '+(d.plan||[]).length+' requests would be made; all GET, read-only. Period: '+escHTML(d.period?d.period.from+' → '+d.period.to:'—')+'.</div>';
+    h+='<div style="margin-bottom:6px;font-weight:700;color:'+(a.ok?'#22c55e':'#f59e0b')+'">Live runs: '+(a.ok?'AUTHORIZED until '+escHTML(a.until):'NOT authorized ('+escHTML(a.detail||a.reason||'')+')')+'</div>';
+    h+='<table style="width:100%;border-collapse:collapse"><tr style="color:var(--dim)"><th style="text-align:left;padding:2px 4px">Capability (documented)</th><th style="text-align:left;padding:2px 4px">What the documentation says</th><th style="text-align:left;padding:2px 4px">Live</th></tr>'+(d.capabilities||[]).map(function(c){return '<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:2px 4px;color:#fff">'+escHTML(c.label)+'</td><td style="padding:2px 4px">'+escHTML(c.documented)+'</td><td style="padding:2px 4px;color:var(--dim)">'+escHTML(c.live)+'</td></tr>';}).join('')+'</table>';return h;}
+  const real=d.provenance&&d.provenance.real===true;const s=d.summary;const got=s&&(s.ok+s.okEmpty)>0;
+  h+='<div style="font-weight:700;margin-bottom:6px;color:'+(real?'#22c55e':'#ef4444')+'">'+(real?'LIVE — real answers from YouTube':'NOT real YouTube data'+(d.provenance&&d.provenance.note?' ('+escHTML(d.provenance.note)+')':''))+' · read-only · '+escHTML(name)+(d.period?' · '+escHTML(d.period.from+' → '+d.period.to):'')+(d.aborted?' · STOPPED: '+escHTML(d.aborted):'')+'</div>';
+  if(s)h+='<div style="margin-bottom:6px">'+s.steps+' requests · ok '+s.ok+' · empty answer '+s.okEmpty+' · unsupported as documented '+s.unsupportedAsDocumented+' · bad request '+s.badRequest+' · forbidden '+s.forbidden+' · quota '+s.quotaExceeded+' · failed '+s.failed+' · skipped '+s.skipped+' · latency total '+s.latencyMs.total+' ms (max '+s.latencyMs.max+' ms) · quota used: Data '+s.quotaUnits.data+', Analytics '+s.quotaUnits.analytics+', Reporting '+s.quotaUnits.reporting+'</div>';
+  const col={retrievable:'#22c55e',retrievable_but_empty:'#c9a84c',partly_retrievable:'#c9a84c',not_supported_confirmed:'#6b7280',not_retrievable:'#ef4444',forbidden:'#ef4444',quota_exceeded:'#ef4444',retrievable_UNEXPECTED:'#f59e0b',not_run:'#6b7280'};
+  if(d.capabilities)h+='<table style="width:100%;border-collapse:collapse"><tr style="color:var(--dim)"><th style="text-align:left;padding:2px 4px">Capability</th><th style="text-align:left;padding:2px 4px">Documented</th><th style="text-align:left;padding:2px 4px">Live result</th></tr>'+d.capabilities.map(function(c){return '<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:2px 4px;color:#fff">'+escHTML(c.cap)+'</td><td style="padding:2px 4px">'+escHTML(c.documented||'')+'</td><td style="padding:2px 4px;color:'+(col[c.verdict]||'#fff')+'">'+escHTML(c.verdict)+'</td></tr>';}).join('')+'</table>';
+  if(d.reach)h+='<div style="margin-top:6px">Reach (thumbnail impressions / CTR): report types listed: '+escHTML((d.reach.typesListed||[]).join(', ')||'none')+' · jobs existing: '+escHTML((d.reach.jobsExisting||[]).join(', ')||'none — a job must be created (a separate, authorized step) before data exists')+'</div>';
+  if(!got)h+='<div style="margin-top:6px;color:#f59e0b">Google returned no usable answer; nothing here is a zero — these metrics were simply not retrieved.</div>';
+  return h;
+}
 function renderIntegrations(){
   const isAdmin=currentUser.id==='admin';
 
@@ -26385,6 +26444,7 @@ function renderIntegrations(){
     ${integrations.finance.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">Finance</div>${integrations.finance.map(intCard).join('')}` : ''}
     ${integrations.system.length ? `<div class="card-title" style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin:16px 0 10px;font-family:'JetBrains Mono',monospace">System</div>${integrations.system.map(intCard).join('')}` : ''}
     ${isAdmin?_publishAuthCardHtml():''}
+    ${isAdmin?_growthProbeCardHtml():''}
   `;
 }
 
