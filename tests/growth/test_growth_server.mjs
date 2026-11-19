@@ -85,6 +85,12 @@ const readOnlyHost = (u) => /^https:\/\/(www\.googleapis\.com\/youtube\/v3\/chan
   ok('VA role: same analytics, but NO collection controls/state and NO monetization statement; the capture store and the switch are not read', vd.collection === null && !vd.recommendations.some((x) => x.id === 'monetization') && vd.windows.d28.views === d.windows.d28.views && !w.reads.slice(mark).some((q) => /ypp_earn_capture|growth_collect&/.test(q)) && w.reads.length > mark);
   ok('the report contains no token, key or secret', !/AT-|RT-|Bearer|SERVICE-KEY/.test(JSON.stringify(r.body))); }
 { const w = world(); const r = await w.report({ body: { business: 'other' } }); ok('unknown business → 400', r.code === 400); }
+{ const w = world({ switch: switchRec() }); await w.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); w.docs[B2] = { business: B2, channel_id: CH2, days: 'garbage', periods: [null, 5], videos: 7, retention: [] };
+  const origRows = w.rows; w.rows = new Proxy(origRows, { get(t, k) { if (k === CH2) throw new Error('db exploded'); return t[k]; } });
+  const r = await w.report(); const a = r.body.reports.find((x) => x.business === B1), b = r.body.reports.find((x) => x.business === B2);
+  ok('FAILURE ISOLATION: when one business\'s report cannot be built, the response is still 200, the other business is complete, and the failed one is an explicit error entry (no partial numbers)', r.code === 200 && a.source === 'collected_youtube_analytics' && a.windows.d28.views > 0 && b.error === 'report_failed' && !b.windows);
+  w.rows = origRows; const r2 = await w.report(); const b2 = r2.body.reports.find((x) => x.business === B2);
+  ok('a malformed stored document is sanitized, not fatal: report builds as "not collected" for that business', r2.code === 200 && b2.source === 'database_snapshot' && !b2.error); }
 // 4. browsers cannot read or write the growth keys (data proxy)
 for (const role of ['operator', 'family', undefined]) ok(`data proxy: ${role || 'anonymous'} cannot READ growth_data_* or growth_collect`, ['growth_data_' + B1, 'growth_collect'].every((k) => !decide({ role, method: 'GET', path: `app_settings?key=eq.${k}` }).allow));
 for (const role of ['ceo', 'operator', 'family']) ok(`data proxy: ${role} cannot WRITE growth keys from a browser`, ['growth_data_' + B1, 'growth_collect'].every((k) => !decide({ role, method: 'POST', path: 'app_settings', body: { key: k, value: '{}' } }).allow && !decide({ role, method: 'PATCH', path: `app_settings?key=eq.${k}`, body: { value: '{}' } }).allow));

@@ -8881,6 +8881,7 @@ async function growthReport(req, res) {
     const sw = who.role === 'ceo' ? await _growthLoadSwitch() : null; const yraw = who.role === 'ceo' ? await (async () => { try { const r = await sbGet('app_settings?key=eq.' + _yppStoreKey + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? r[0].value : null; } catch (_) { return null; } })() : null;
     const store = who.role === 'ceo' ? _yppParseStore(yraw) : null; const reports = [];
     for (const business of list) {
+      try {   // one business failing never hides the other
       const id = _gaBiz[business].channelId; const doc = await _growthLoadDoc(business);
       const rows = await sbGet('youtube_videos_analytics?select=channel_id,video_id,title,views,view_count,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,analytics_synced_at,synced_at,published_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000');
       const chs = await sbGet('youtube_channels?select=channel_id,subscribers,total_views,updated_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1'); const ch = Array.isArray(chs) && chs[0] ? chs[0] : {};
@@ -8891,6 +8892,7 @@ async function growthReport(req, res) {
       const a = _gcAuth(sw, Date.now(), business, 'manual'), sch = _gcAuth(sw, Date.now(), business, 'scheduled');
       dash.collection = who.role === 'ceo' ? { manual_authorized: a.ok, manual_until: a.until || null, manual_reason: a.ok ? null : a.reason, scheduled: sch.ok, last: doc && doc.collections && doc.collections[0] ? { at: doc.collections[0].at, steps: doc.collections[0].steps, requests: doc.collections[0].requests, aborted: doc.collections[0].aborted } : null } : null;
       reports.push(dash);
+      } catch (e) { console.warn('[growth_report] ' + business + ' failed: ' + String(e && e.message || e).slice(0, 100)); reports.push({ business, error: 'report_failed', collected: false, source: 'error', recommendations: [], unavailable: [] }); }
     }
     return res.status(200).json({ ok: true, role: who.role, reports });
   } catch (e) { return res.status(500).json({ ok: false, error: 'growth_report_failed', message: String(e && e.message || e).slice(0, 120) }); }
