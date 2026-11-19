@@ -91,5 +91,5 @@ for (const role of ['ceo', 'operator', 'family']) ok(`data proxy: ${role} cannot
 // 5. static
 ok('the growth block makes no direct Google call: Google is reached only through collectForBusiness (read-only, allow-listed)', !/fetch\(['"`]https/.test(src) && /_gcCollect\(/.test(src));
 ok('the growth block writes only the growth_data_<business> row (no other sbInsert/sbPatch target)', (src.match(/sb(Insert|Patch)\(/g) || []).length === 2 && /_growthSaveDoc/.test(src) && !/sbInsert\('(?!app_settings)/.test(src));
-ok('the daily cron is NOT modified in this commit (autosync.js untouched)', !/growth_collect/.test(fs.readFileSync(new URL('../../api/youtube/autosync.js', import.meta.url), 'utf8')));
+ok('the daily cron references ONLY the scheduled hook action (never growth_collect directly, never a Google URL)', (() => { const a = fs.readFileSync(new URL('../../api/youtube/autosync.js', import.meta.url), 'utf8').replace(/\/\/.*$/gm, ''); return !/action=growth_collect['"`&]/.test(a) && !/googleapis\.com/.test(a); })());
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
