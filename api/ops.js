@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BUSINESSES as _yppBusinesses, YPP_STORE_KEY as _yppStoreKey, YPP_FRESH_DAYS as _yppFreshDays } from '../lib/yppCard.mjs'; // R-C1 B: Revenue/YPP card from OFFICIAL dated Studio Earn captures only (read-only)
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
 import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
@@ -9260,69 +9261,44 @@ async function optimizationGetState(req, res) {
   } catch(e) { return res.status(500).json({ ok:false, error: e.message }); }
 }
 
-// v13.58.2 PRIORITY D — Revenue Dashboard. Tracks per-channel monetization readiness
-// against YouTube Partner Program thresholds: 1k subs + 4k watch hours (240k min) in
-// last 12 months OR 10M Shorts views in 90 days. ETA-to-YPP at current growth rate.
+// v13.58.2 PRIORITY D — Revenue Dashboard (R-C1 B: OFFICIAL FIGURES ONLY).
+// The calculated YPP readiness (watch hours / Shorts views summed from app analytics, progress bars, ETA, "ready") was removed: YouTube Analytics
+// has no qualified-watch-hours field and the app estimates did not reconcile with Studio. The card now shows ONLY dated figures captured from
+// YouTube Studio → Earn (app_settings key ypp_earn_capture, written separately and only with CEO authorization), or says "Not captured".
+// The legacy upload counters (uploads30d/uploads7d) and subscriber fields remain because strategyRecompute reads them; no YPP verdict field is returned.
 async function revenueDashboard(req, res) {
   try {
     const channels = await sbGet('youtube_channels?select=channel_id,title,mmm_engine,subscribers,total_views,total_videos&mmm_engine=not.is.null');
     if (!Array.isArray(channels)) return res.status(500).json({ ok:false, error:'channels_load_failed' });
-    const YPP_SUBS = 1000;
-    const YPP_WATCH_HOURS_12M = 4000;
-    const YPP_SHORTS_VIEWS_90D = 10000000;
-    const lookback365 = new Date(Date.now() - 365 * 86400 * 1000).toISOString();
-    const lookback90 = new Date(Date.now() - 90 * 86400 * 1000).toISOString();
     const lookback30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
     const lookback7 = new Date(Date.now() - 7 * 86400 * 1000).toISOString();
-    const out = { ok: true, perChannel: [] };
+    const out = { ok: true, perChannel: [], ypp: null };
     for (const ch of channels) {
-      const vids12m = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback365) + '&select=watch_time_min,views,published_at');
-      const w12m = (Array.isArray(vids12m) ? vids12m : []).reduce((a,v)=>a+(Number(v.watch_time_min)||0), 0);
-      const watchHours12m = w12m / 60;
-      const vids90d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback90) + '&select=views,published_at');
-      const shortsViews90d = (Array.isArray(vids90d) ? vids90d : []).reduce((a,v)=>a+(Number(v.views)||0), 0);
       const vids30d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback30) + '&select=video_id');
       const vids7d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback7) + '&select=video_id');
-      const uploads30d = Array.isArray(vids30d) ? vids30d.length : 0;
-      const uploads7d = Array.isArray(vids7d) ? vids7d.length : 0;
       const chSnaps = await sbGet('youtube_channel_snapshots?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&order=snapshot_date.desc&limit=60');
       const snaps = Array.isArray(chSnaps) ? chSnaps : [];
-      const find = (daysAgo) => {
-        const target = new Date(Date.now() - daysAgo * 86400 * 1000).toISOString().slice(0,10);
-        return snaps.find(s => s.snapshot_date <= target) || null;
-      };
-      const s30 = find(30);
+      const target = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0,10);
+      const s30 = snaps.find(s => s.snapshot_date <= target) || null;
       const subsNow = ch.subscribers || 0;
-      const subsGrowth30d = s30 ? (subsNow - (s30.subscribers||0)) : null;
-      const subsProgress = Math.min(100, (subsNow / YPP_SUBS) * 100);
-      const watchProgress = Math.min(100, (watchHours12m / YPP_WATCH_HOURS_12M) * 100);
-      const shortsProgress = Math.min(100, (shortsViews90d / YPP_SHORTS_VIEWS_90D) * 100);
-      const pathSubs = subsProgress >= 100;
-      const pathWatch = watchProgress >= 100;
-      const pathShorts = shortsProgress >= 100;
-      const yppReady = pathSubs && (pathWatch || pathShorts);
-      let etaToYpp = null;
-      if (!pathSubs && subsGrowth30d != null && subsGrowth30d > 0) {
-        const subsNeeded = YPP_SUBS - subsNow;
-        const subsPerDay = subsGrowth30d / 30;
-        etaToYpp = subsPerDay > 0 ? Math.round(subsNeeded / subsPerDay) : null;
-      }
       out.perChannel.push({
         channelId: ch.channel_id, title: ch.title, engine: ch.mmm_engine,
         subscribers: subsNow,
-        subsGrowth30d,
-        watchHours12m: Math.round(watchHours12m),
-        shortsViews90d,
-        uploads30d, uploads7d,
-        progress: {
-          subs: Math.round(subsProgress * 10) / 10,
-          watchHours: Math.round(watchProgress * 10) / 10,
-          shortsViews: Math.round(shortsProgress * 10) / 10,
-        },
-        yppReady,
-        etaToYppDays: etaToYpp,
-        thresholds: { subs: YPP_SUBS, watchHours12m: YPP_WATCH_HOURS_12M, shortsViews90d: YPP_SHORTS_VIEWS_90D },
+        subsGrowth30d: s30 ? (subsNow - (s30.subscribers||0)) : null,
+        uploads30d: Array.isArray(vids30d) ? vids30d.length : 0,
+        uploads7d: Array.isArray(vids7d) ? vids7d.length : 0,
       });
+    }
+    // Official capture model: CEO session only; read-only; absent store => "not captured".
+    if (await requireCeoSession(req)) {
+      let raw = null;
+      try { const rows = await sbGet('app_settings?key=eq.' + _yppStoreKey + '&select=value&limit=1'); raw = Array.isArray(rows) && rows[0] ? rows[0].value : null; } catch (_) { raw = null; }
+      const store = _yppParseStore(raw);
+      out.ypp = { storeKey: _yppStoreKey, storePresent: store.present, storeErrors: store.errors, freshDays: _yppFreshDays, cards: [] };
+      for (const key of Object.keys(_yppBusinesses)) {
+        const biz = _yppBusinesses[key]; const row = out.perChannel.find(c => c.channelId === biz.channelId);
+        out.ypp.cards.push(_yppBuild({ business: key, records: store.byChannel[biz.channelId] || [], nowMs: Date.now(), appCounters: row ? { subscribers: row.subscribers } : null }));
+      }
     }
     return res.status(200).json(out);
   } catch(e) {

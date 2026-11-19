@@ -3295,49 +3295,36 @@ async function ytLoadOptimizationState(){
     el.innerHTML = html;
   }catch(e){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">Error: '+e.message+'</div>'; }
 }
-// v13.62.9 PRIORITY D — Revenue Dashboard. YPP readiness per channel.
-async function ytRevenueDashboard(){
-  const el = document.getElementById('yt-revenue-output');
-  if(!el) return;
-  el.innerHTML = '<div style="color:var(--dim);font-size:11px;padding:6px 0">⏳ calculating…</div>';
+// R-C1 B — Revenue / YPP card: OFFICIAL dated YouTube Studio → Earn figures only (lib/yppCard.mjs). The earlier calculated readiness (watch hours and Shorts views
+// summed from app analytics, progress bars, an ETA and a ready state) was removed: it never reconciled with Studio. Missing/stale captures are shown explicitly; nothing is shown as 0.
+async function loadYppCards(){
+  if(D._yppLoading)return;D._yppLoading=true;
   try{
-    const r = await fetch('/api/ops?action=revenue_dashboard');
-    const d = await r.json();
-    if(!d.ok){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">'+(d.message||d.error||'failed')+'</div>'; return; }
-    const focus = [];   // NextWave retired: no focus channel
-    const others = d.perChannel.filter(c => c.engine === 'SRV Farsi' || c.engine === 'SRV English');
-    const bar = (pct, color) => '<div style="display:inline-block;width:100%;height:6px;background:rgba(255,255,255,0.05);border-radius:3px;overflow:hidden;vertical-align:middle"><div style="width:'+Math.min(100,pct)+'%;height:100%;background:'+color+';transition:width 0.3s"></div></div>';
-    const renderChannel = (c) => {
-      const eta = c.etaToYppDays != null ? Math.round(c.etaToYppDays)+' days to 1k subs at current growth' : (c.yppReady ? 'YPP-READY' : 'no growth signal yet');
-      return '<div style="border:1px solid '+(c.yppReady?'rgba(34,197,94,0.40)':'rgba(201,168,76,0.25)')+';border-radius:8px;padding:12px;margin-bottom:10px;background:rgba(0,0,0,0.2)">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-          + '<div style="font-size:13px;font-weight:700;color:#fff">'+c.title+' <span style="color:var(--dim);font-size:10px">· '+c.engine+'</span></div>'
-          + '<div style="font-size:11px;font-weight:700;color:'+(c.yppReady?'#22c55e':'#c9a84c')+'">'+eta+'</div>'
-        + '</div>'
-        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:8px;font-size:10px">'
-          + '<div><div style="color:var(--dim)">SUBS / 1000</div><div style="color:#fff;font-weight:700;margin-bottom:3px">'+c.subscribers+' ('+c.progress.subs+'%)</div>'+bar(c.progress.subs, '#22c55e')+'</div>'
-          + '<div><div style="color:var(--dim)">WATCH HRS / 4000 (12m)</div><div style="color:#fff;font-weight:700;margin-bottom:3px">'+c.watchHours12m+' ('+c.progress.watchHours+'%)</div>'+bar(c.progress.watchHours, '#3b82f6')+'</div>'
-          + '<div><div style="color:var(--dim)">SHORTS VIEWS / 10M (90d)</div><div style="color:#fff;font-weight:700;margin-bottom:3px">'+c.shortsViews90d.toLocaleString()+' ('+c.progress.shortsViews+'%)</div>'+bar(c.progress.shortsViews, '#a855f7')+'</div>'
-        + '</div>'
-        + '<div style="display:flex;gap:14px;font-size:10px;color:var(--dim)">'
-          + '<div>30d growth: <span style="color:'+(c.subsGrowth30d>0?'#22c55e':'var(--dim)')+'">'+(c.subsGrowth30d==null?'no baseline':((c.subsGrowth30d>0?'+':'')+c.subsGrowth30d+' subs'))+'</span></div>'
-          + '<div>Uploads 30d: <span style="color:#fff">'+c.uploads30d+'</span></div>'
-          + '<div>Uploads 7d: <span style="color:#fff">'+c.uploads7d+'</span></div>'
-        + '</div>'
-      + '</div>';
-    };
-    let html = '';
-    if(focus.length){
-      html += '<div style="font-size:11px;color:var(--gold);font-weight:700;letter-spacing:0.5px;margin-bottom:8px">⚡ FOCUS — AI STUDIO + NEXTWAVE → YPP THRESHOLDS</div>';
-      html += focus.map(renderChannel).join('');
-    }
-    if(others.length){
-      html += '<div style="font-size:11px;color:var(--dim);font-weight:700;letter-spacing:0.5px;margin-top:14px;margin-bottom:8px">SECONDARY</div>';
-      html += others.map(renderChannel).join('');
-    }
-    el.innerHTML = html;
-  }catch(e){ el.innerHTML = '<div style="color:#ef4444;font-size:11px">Error: '+e.message+'</div>'; }
+    const Y=await import('/growth/yppCard.mjs');D._yppMod=Y;
+    const r=await fetch('/api/ops?action=revenue_dashboard',{headers:{'X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''}});
+    const d=await r.json().catch(function(){return null;});
+    if(!r.ok||!d||!d.ok)D.ypp={loadedAt:null,error:(d&&(d.message||d.error))||('HTTP '+r.status),cards:null};
+    else D.ypp={loadedAt:new Date().toISOString(),error:null,cards:d.ypp?d.ypp.cards:null,storePresent:d.ypp?d.ypp.storePresent:null,storeErrors:d.ypp?d.ypp.storeErrors:[]};
+  }catch(e){D.ypp={loadedAt:null,error:e.message,cards:null};}
+  D._yppLoading=false;
+  if(typeof renderTab==='function'&&typeof currentTab!=='undefined')renderTab(currentTab);
 }
+function _renderYppSection(){
+  const y=D.ypp;let h='<div id="yt-revenue-output" style="margin-top:16px;padding:14px;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.18);border-radius:12px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#c9a84c;letter-spacing:1px;font-family:\'JetBrains Mono\',monospace">💰 REVENUE / YPP — OFFICIAL STUDIO FIGURES ONLY'+escHTML(_analyticsScopeLabel())+'</div>';
+  h+=D._yppLoading?'<span style="font-size:10px;color:#c9a84c">⏳ loading…</span>':'<button onclick="loadYppCards()" style="padding:4px 10px;background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.30);border-radius:6px;color:#c9a84c;font-size:10px;font-weight:700;cursor:pointer">↻ Refresh</button>';
+  h+='</div>';
+  if(!y){h+='<div style="font-size:11px;color:var(--dim)">'+(D._yppLoading?'Loading…':'Not loaded — click Refresh.')+'</div>';}
+  else if(y.error){h+='<div style="font-size:11px;color:#ef4444">Could not read: '+escHTML(y.error)+'</div>';}
+  else if(!y.cards){h+='<div style="font-size:11px;color:var(--dim)">Official Studio Earn figures are shown to the CEO session only. Sign in as CEO to see them. Nothing here is estimated.</div>';}
+  else if(D._yppMod){
+    const cards=y.cards.filter(function(c){return _analyticsEngineInScope(c.engine,c.name);});
+    h+=cards.length?cards.map(function(c){return D._yppMod.renderYppCardHtml(c,escHTML);}).join(''):'<div style="font-size:11px;color:var(--dim)">No business in scope.</div>';
+    if(y.storeErrors&&y.storeErrors.length)h+='<div style="font-size:10px;color:#f59e0b">Store notes: '+escHTML(y.storeErrors.join(', '))+'</div>';
+  }
+  return h+'</div>';
+}
+async function ytRevenueDashboard(){await loadYppCards();}
 // v13.62.9 PRIORITY B — Decision Engine. Per-channel specific recommendations.
 async function ytDecisionEngine(){
   const el = document.getElementById('yt-decision-output');
@@ -4399,7 +4386,7 @@ function renderTab(tab){
   if(tab==='engines'){
     // v13.69.46 — Overview is default; Analytics + Packages still available.
     if(currentEnginesSub==='packages')loadAndShowPackages();
-    if(currentEnginesSub==='analytics')_ensureYouTubeAnalyticsLoaded();
+    if(currentEnginesSub==='analytics'){_ensureYouTubeAnalyticsLoaded();if(!D.ypp&&!D._yppLoading)loadYppCards();}
   }
   if(tab==='marketing') _ensureYouTubeAnalyticsLoaded(); // v16.12.0 — Marketing & Sales reuses the Analytics dataset
   if(tab==='system'){
@@ -4420,7 +4407,7 @@ function setEnginesSub(sub){
   const c=document.getElementById('mainContent');
   if(c){ c.innerHTML = renderEnginesShell(); attachEditors(); }
   if(sub==='packages') loadAndShowPackages();
-  if(sub==='analytics') _ensureYouTubeAnalyticsLoaded();
+  if(sub==='analytics'){ _ensureYouTubeAnalyticsLoaded(); if(!D.ypp&&!D._yppLoading) loadYppCards(); }
 }
 function setSystemSub(sub){
   currentSystemSub = sub;
@@ -6299,7 +6286,7 @@ function computeOpportunityPriority(item){
     // Monetization proximity — up to 35 pts, weighted heaviest: reaching the threshold is a
     // one-time unlock (changes what a channel CAN earn), not incremental growth.
     score+=Math.round(sig.monetizationProximity*35);
-    if(sig.monetizationProximity>0.5) reasons.push(`${Math.max(0,Math.round((1-sig.monetizationProximity)*1000))} subs from monetization`);
+    if(sig.monetizationProximity>0.5) reasons.push(`subscriber count is above half of the 1,000 mark (subscribers are only one YPP requirement; eligibility comes from YouTube Studio only)`);
 
     // Upload cadence — 0 uploads this week on a non-maintenance engine is a real stall
     // signal, worth flagging with urgency (up to 15 pts).
@@ -6485,9 +6472,8 @@ function computeMarketingRecommendations(){
   });
   // Monetization milestones.
   _nearMon.filter(e=>!_untrustedEngines.has(e.name)).slice(0,2).forEach(e=>{
-    const toGo=YT_MON_SUBS-e.subs;
-    push('Medium', 'monetization_milestone', `${e.icon} ${e.name} — ${toGo.toLocaleString()} subs to monetization`,
-      `Currently at ${e.subs.toLocaleString()} of the ${YT_MON_SUBS.toLocaleString()} YouTube subscribers needed to unlock monetization.`,
+    push('Medium', 'monetization_milestone', `${e.icon} ${e.name} — subscriber growth toward YouTube Partner Program requirements`,
+      `Currently ${e.subs.toLocaleString()} subscribers (app counter). Partner Program eligibility is NOT computed here: it depends on subscribers plus watch hours or Shorts views and is shown only from official YouTube Studio → Earn captures (Engines → Analytics → Revenue / YPP).`,
       'Prioritize subscriber-growth content for this channel.', e.name,
       'The threshold doesn\'t move itself — every week without subscriber-focused content is a week the monetization unlock is pushed further out.');
   });
@@ -9779,6 +9765,7 @@ function renderEngineAnalytics(){
     }).join('')}
     </div>
     ${_renderYouTubeAnalyticsDetail()}
+    ${_renderYppSection()}
     ${_renderTikTokAnalyticsDetail()}
   `;
 }
