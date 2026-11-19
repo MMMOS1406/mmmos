@@ -4,6 +4,8 @@
 // Loads all connected channels, syncs each one, retries once on failure,
 // logs every result to youtube_sync_logs.
 
+import { createHash } from 'node:crypto';
+import { cronSignatureInput } from '../../lib/growthCollect.mjs'; // Growth system: signature for the scheduled collection hook (no new credential)
 import { loadDisabled, filterEnabled } from '../../lib/channelSyncControl.mjs'; // per-channel sync switch (default: nothing disabled = unchanged behaviour)
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -218,6 +220,19 @@ export default async function handler(req, res) {
     tiktokAuto = { ok: false, error: e.message };
   }
 
+  // Growth system — scheduled analytics collection (LAST, so it can never delay the syncs above). It does NOTHING unless app_settings.growth_collect has
+  // schedule:true for a business (default: absent => every business is skipped, zero Google requests). The action verifies this signature itself.
+  let growthAuto = null;
+  try {
+    const sig = createHash('sha256').update(cronSignatureInput(SUPABASE_SERVICE_KEY)).digest('hex');
+    const gRes = await fetch(`${appUrl}/api/ops?action=growth_collect_scheduled`, { headers: { 'x-mmm-cron': sig }, signal: AbortSignal.timeout(150000) });
+    growthAuto = await gRes.json();
+    console.log('[growth] scheduled collection:', JSON.stringify((growthAuto && growthAuto.results || []).map(r => r.business + ':' + (r.skipped || (r.ok ? 'ok' : 'failed')))));
+  } catch (e) {
+    console.error('[growth] scheduled collection call failed:', e.message);
+    growthAuto = { ok: false, error: e.message };
+  }
+
   return res.status(200).json({
     startedAt,
     completedAt: new Date().toISOString(),
@@ -227,5 +242,6 @@ export default async function handler(req, res) {
     results,
     analyticsAuto,
     tiktokAuto,
+    growthAuto,
   });
 }

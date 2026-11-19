@@ -16,8 +16,13 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BUSINESSES as _yppBusinesses, YPP_STORE_KEY as _yppStoreKey, YPP_FRESH_DAYS as _yppFreshDays } from '../lib/yppCard.mjs'; // R-C1 B: Revenue/YPP card from OFFICIAL dated Studio Earn captures only (read-only)
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
+import { collectAuthorization as _gcAuth, collectSteps as _gcSteps, collectForBusiness as _gcCollect, mergeCollection as _gcMerge, parseDoc as _gcParseDoc, dataKey as _gcKey, COLLECT_SWITCH_KEY as _gcSwitchKey, COLLECT_CONFIRMATION as _gcConfirm, collectPeriod as _gcPeriod, cronSignatureInput as _gcCronInput } from '../lib/growthCollect.mjs'; // Growth system: minimum server-side collection (default DISABLED; read-only Google GETs; one JSON document per business in app_settings)
+import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Growth Decision Center model + recommendations (pure)
+import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
+import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
@@ -7147,150 +7152,128 @@ async function deleteMemoryItemFn(req, res) {
 
 // ── YouTube Performance Sync ──────────────────────────────────────────────────
 
+// R-C1 release A — upload detection. Same purpose and same package/task effects as before; the DETECTION mechanism changed (lib/uploadDetection.mjs):
+//  - the channel's UPLOADS PLAYLIST (playlistItems.list, 1 unit, no 100/day cap) replaces search.list (own 100/day cap, 66% refused, failures swallowed);
+//  - channels come from the existing business records (youtube_channels.mmm_engine of SRV Farsi / SRV English), never from the client; retired engines are never polled;
+//  - a video is matched ONLY against packages of its own business engine; a playlist item owned by another channel is dropped;
+//  - CEO session required (it was open to anyone); per-channel server throttle (3 min) + single-flight; quota/permission/not-found errors are REPORTED per channel, never swallowed;
+//  - the task advance is a compare-and-set (status=queued in the PATCH filter), so two tabs can never advance the same task or raise two notifications.
+const _udThrottle = _udCreateThrottle(), _udWarn = _udCreateWarnLimiter(), _udPlaylistCache = new Map();
 async function youtubeSyncPerformance(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-  const { channelIds } = req.body || {};
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required', synced: 0, matched: 0, advanced: 0 });
   const apiKey = process.env.YOUTUBE_API_KEY;
   if (!apiKey) return res.json({ error: 'YOUTUBE_API_KEY not configured', synced: 0, matched: 0, advanced: 0 });
-  if (!Array.isArray(channelIds) || channelIds.length === 0) return res.json({ synced: 0, matched: 0, advanced: 0 });
 
-  function normalizeTitle(str){
-    if(!str) return [];
-    // Preserve Persian/Arabic unicode range U+0600–U+06FF
-    // Strip only characters that are not word chars, not Persian, not spaces
-    var s = str
-      .toLowerCase()
-      .replace(/[^\w\s\u0600-\u06FF]/g,'')
-      .trim();
-    return s.split(/\s+/).filter(function(t){ return t.length>1; });
-  }
-
-  let synced = 0, matched = 0, advanced = 0;
+  const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  let synced = 0, matched = 0, advanced = 0, quotaUnits = 0; const channels = [];
   try {
-    let packages = [];
-    try { packages = await sbGet('packages?select=*&order=created_at.desc&limit=500'); } catch(e) {}
+    let chRows = []; try { chRows = await sbGet('youtube_channels?select=channel_id,title,mmm_engine&mmm_engine=not.is.null'); } catch (e) {}
+    const configured = _udSelectChannels(Array.isArray(chRows) ? chRows : []);
+    if (!configured.length) return res.json({ synced: 0, matched: 0, advanced: 0, channels: [], error: 'no_channels_configured' });
+    let packages = []; try { packages = await sbGet('packages?select=*&order=created_at.desc&limit=500'); } catch (e) {}
+    const fetchJson = async (url) => { const r = await fetch(url); let json = null; try { json = await r.json(); } catch (_) {} return { status: r.status, json }; };
 
-    const allVideoIds = [];
-    for (const channelId of channelIds) {
-      if (!channelId) continue;
+    for (const ch of configured) {
+      const entry = { channelId: ch.channelId, business: ch.engine }; const key = ch.channelId;
+      const gate = _udThrottle.begin(key, Date.now());
+      if (!gate.ok) { channels.push({ ...entry, status: gate.reason, retryAfterMs: gate.retryAfterMs || null }); continue; }
+      let succeeded = false;
       try {
-        const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(channelId)}&type=video&order=date&maxResults=10&key=${apiKey}`;
-        const sr = await fetch(searchUrl);
-        if (!sr.ok) continue;
-        const sd = await sr.json();
-        if (sd.error) { console.warn('[yt_sync_perf] YT search error:', sd.error.message); continue; }
-        for (const item of (sd.items || [])) {
-          const vid = item.id && item.id.videoId;
-          if (vid) allVideoIds.push(vid);
+        const det = await _udDetectChannel({ channel: ch, fetchJson, apiKey, knownPlaylist: _udPlaylistCache.get(key) || null });
+        quotaUnits += det.quotaUnits || 0; if (det.uploadsPlaylist) _udPlaylistCache.set(key, det.uploadsPlaylist);
+        entry.status = det.status; if (det.reason) entry.reason = det.reason; if (det.mismatched) entry.mismatched = det.mismatched;
+        succeeded = det.status === 'ok' || det.status === 'ok_with_mismatch' || det.status === 'channel_mismatch';
+        if (!succeeded) { if (_udWarn(key + '|' + det.status, Date.now())) console.warn('[upload_detection] ' + ch.engine + ' ' + det.status + (det.reason ? ' (' + det.reason + ')' : '')); channels.push(entry); continue; }
+        synced += det.videos.length;
+        const pkgs = _udPackagesForEngine(packages, ch.engine);   // business isolation: only this channel's own business packages can match
+        for (const video of det.videos) {
+          const { id: videoId, snippet, statistics } = video;
+          const bestMatch = _udBestMatch(snippet.title, pkgs);
+          if (!bestMatch) continue;
+          matched++;
+
+          const publishedAt = snippet.publishedAt;
+          const daysSince = Math.max(1, (Date.now() - new Date(publishedAt)) / 86400000);
+          const viewCount = parseInt(statistics.viewCount || 0);
+          const likeCount = parseInt(statistics.likeCount || 0);
+          const commentCount = parseInt(statistics.commentCount || 0);
+          const viewsPerDay = Math.round((viewCount / daysSince) * 100) / 100;
+          const uploadDay = DAY_NAMES[new Date(publishedAt).getDay()];
+          const uploadHour = new Date(publishedAt).getHours();
+          const videoUrl = 'https://youtube.com/watch?v=' + videoId;
+
+          const perfPayload = {
+            package_id: bestMatch.id,
+            video_id: videoId,
+            video_url: videoUrl,
+            upload_timestamp: publishedAt,
+            views: viewCount,
+            likes: likeCount,
+            comments: commentCount,
+            shares: 0,
+            watch_time_seconds: 0,
+            views_per_day: viewsPerDay,
+            engine_id: bestMatch.engine_id || bestMatch.engineId || null,
+            mode: bestMatch.mode || null,
+            hook: bestMatch.hook || null,
+            upload_day: uploadDay,
+            upload_hour: uploadHour,
+            auto_linked: true,
+            performance_score: viewCount + likeCount * 10 + commentCount * 15,
+          };
+
+          try {
+            const existing = await sbGet(`package_performance?package_id=eq.${encodeURIComponent(bestMatch.id)}&limit=1`).catch(() => []);
+            if (existing && existing[0]) {
+              await sbPatch('package_performance', `package_id=eq.${encodeURIComponent(bestMatch.id)}`, perfPayload);
+            } else {
+              await sbInsert('package_performance', perfPayload);
+            }
+          } catch (e) { console.warn('[yt_sync_perf] perf upsert error:', e.message); }
+
+          try {
+            const tasks = await sbGet(`operator_tasks?package_id=eq.${encodeURIComponent(bestMatch.id)}&status=eq.queued&limit=1`).catch(() => []);
+            if (tasks && tasks[0]) {
+              // compare-and-set: the PATCH only applies while the task is still queued, so a second tab/instance cannot advance it (or notify) twice
+              const won = await sbPatch('operator_tasks', `id=eq.${tasks[0].id}&status=eq.queued`, {
+                status: 'uploaded',
+                updated_at: new Date().toISOString(),
+              });
+              if (won) {
+                advanced++;
+                // Attempt to write video fields if columns exist (silent fail if not)
+                try {
+                  await sbPatch('operator_tasks', `id=eq.${tasks[0].id}`, { video_id: videoId, video_url: videoUrl });
+                } catch (e) {}
+                try {
+                  // v16.15.0 — Phase 6: tagged department='operations' — this event advances an
+                  // operator_task through the Factory production pipeline (Operations owns task
+                  // state), even though the trigger is a YouTube signal. requires_ceo_approval
+                  // stays false: this is a routine completion event, not a decision.
+                  await sbInsert('notifications', {
+                    type: 'upload_detected',
+                    title: 'YouTube Upload Detected',
+                    message: (bestMatch.title || 'Package') + ' auto-linked and advanced to uploaded',
+                    task_id: String(tasks[0].id),
+                    created_by: 'system',
+                    department: 'operations',
+                    requires_ceo_approval: false,
+                  });
+                } catch (e) { console.warn('[yt_sync_perf] notification error:', e.message); }
+              }
+            }
+          } catch (e) { console.warn('[yt_sync_perf] task advance error:', e.message); }
         }
-      } catch(e) { console.warn('[yt_sync_perf] search error channel', channelId, e.message); }
+        channels.push(entry);
+      } finally { _udThrottle.end(key, Date.now(), succeeded); }
     }
 
-    synced = allVideoIds.length;
-    if (allVideoIds.length === 0) return res.json({ synced: 0, matched: 0, advanced: 0 });
-
-    const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet&id=${allVideoIds.join(',')}&key=${apiKey}`;
-    const statsRes = await fetch(statsUrl);
-    if (!statsRes.ok) return res.json({ error: 'YouTube stats API error ' + statsRes.status, synced, matched: 0, advanced: 0 });
-    const statsData = await statsRes.json();
-    if (statsData.error) return res.json({ error: statsData.error.message, synced, matched: 0, advanced: 0 });
-
-    const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-
-    for (const video of (statsData.items || [])) {
-      const { id: videoId, snippet, statistics } = video;
-      if (!snippet || !statistics) continue;
-      const videoTokens = normalizeTitle(snippet.title);
-      if (videoTokens.length === 0) continue;
-
-      let bestMatch = null, bestOverlap = 0;
-      for (const pkg of packages) {
-        const pkgTokens = normalizeTitle(pkg.title);
-        if (pkgTokens.length === 0) continue;
-        const shared = videoTokens.filter(t => pkgTokens.includes(t)).length;
-        const overlap = shared / Math.max(videoTokens.length, pkgTokens.length);
-        if (overlap >= 0.7 && overlap > bestOverlap) { bestOverlap = overlap; bestMatch = pkg; }
-      }
-      if (!bestMatch) continue;
-      matched++;
-
-      const publishedAt = snippet.publishedAt;
-      const daysSince = Math.max(1, (Date.now() - new Date(publishedAt)) / 86400000);
-      const viewCount = parseInt(statistics.viewCount || 0);
-      const likeCount = parseInt(statistics.likeCount || 0);
-      const commentCount = parseInt(statistics.commentCount || 0);
-      const viewsPerDay = Math.round((viewCount / daysSince) * 100) / 100;
-      const uploadDay = DAY_NAMES[new Date(publishedAt).getDay()];
-      const uploadHour = new Date(publishedAt).getHours();
-      const videoUrl = 'https://youtube.com/watch?v=' + videoId;
-
-      const perfPayload = {
-        package_id: bestMatch.id,
-        video_id: videoId,
-        video_url: videoUrl,
-        upload_timestamp: publishedAt,
-        views: viewCount,
-        likes: likeCount,
-        comments: commentCount,
-        shares: 0,
-        watch_time_seconds: 0,
-        views_per_day: viewsPerDay,
-        engine_id: bestMatch.engine_id || bestMatch.engineId || null,
-        mode: bestMatch.mode || null,
-        hook: bestMatch.hook || null,
-        upload_day: uploadDay,
-        upload_hour: uploadHour,
-        auto_linked: true,
-        performance_score: viewCount + likeCount * 10 + commentCount * 15,
-      };
-
-      try {
-        const existing = await sbGet(`package_performance?package_id=eq.${encodeURIComponent(bestMatch.id)}&limit=1`).catch(() => []);
-        if (existing && existing[0]) {
-          await sbPatch('package_performance', `package_id=eq.${encodeURIComponent(bestMatch.id)}`, perfPayload);
-        } else {
-          await sbInsert('package_performance', perfPayload);
-        }
-      } catch(e) { console.warn('[yt_sync_perf] perf upsert error:', e.message); }
-
-      try {
-        const tasks = await sbGet(`operator_tasks?package_id=eq.${encodeURIComponent(bestMatch.id)}&status=eq.queued&limit=1`).catch(() => []);
-        if (tasks && tasks[0]) {
-          // Always update status — safe columns only
-          await sbPatch('operator_tasks', `id=eq.${tasks[0].id}`, {
-            status: 'uploaded',
-            updated_at: new Date().toISOString(),
-          });
-          advanced++;
-          // Attempt to write video fields if columns exist (silent fail if not)
-          try {
-            await sbPatch('operator_tasks', `id=eq.${tasks[0].id}`, { video_id: videoId, video_url: videoUrl });
-          } catch(e) {}
-          try {
-            // v16.15.0 — Phase 6: tagged department='operations' — this event advances an
-            // operator_task through the Factory production pipeline (Operations owns task
-            // state), even though the trigger is a YouTube signal. requires_ceo_approval
-            // stays false: this is a routine completion event, not a decision — it belongs
-            // in Operations' own Department Inbox, not the Executive Inbox.
-            await sbInsert('notifications', {
-              type: 'upload_detected',
-              title: 'YouTube Upload Detected',
-              message: (bestMatch.title || 'Package') + ' auto-linked and advanced to uploaded',
-              task_id: String(tasks[0].id),
-              created_by: 'system',
-              department: 'operations',
-              requires_ceo_approval: false,
-            });
-          } catch(e) { console.warn('[yt_sync_perf] notification error:', e.message); }
-        }
-      } catch(e) { console.warn('[yt_sync_perf] task advance error:', e.message); }
-    }
-
-    console.log(`[v12.8] youtube_sync_performance: synced=${synced} matched=${matched} advanced=${advanced}`);
-    return res.json({ synced, matched, advanced });
-  } catch(e) {
+    console.log(`[v12.8] youtube_sync_performance: synced=${synced} matched=${matched} advanced=${advanced} units=${quotaUnits}`);
+    return res.json({ synced, matched, advanced, channels, quotaUnits });
+  } catch (e) {
     console.error('[v12.8] youtube_sync_performance error:', e.message);
-    return res.json({ error: e.message, synced, matched: 0, advanced: 0 });
+    return res.json({ error: e.message, synced, matched: 0, advanced: 0, channels });
   }
 }
 
@@ -8831,6 +8814,90 @@ async function youtubeVideoStatus(req, res) {
 // watch-time over a configurable lookback window, upserts to youtube_videos columns.
 // Requires the yt-analytics.readonly scope (added to YT_SCOPES in callback.js;
 // operator must re-auth after the scope upgrade lands).
+// ───────────────────────── Growth system: collection + report (default DISABLED) ─────────────────────────
+// growth_collect   POST, CEO session. {business, dryRun:true} → the plan + authorization state (never contacts Google). {business, confirm:'COLLECT-ANALYTICS-READ-ONLY'} → one read-only collection
+//                  run, ONLY while app_settings.growth_collect authorizes it (enabled, business named, unexpired authorized_until). Single-flight + 10-minute cooldown per business.
+// growth_collect_scheduled  GET/POST from the existing daily cron only (shared secret derived from the service key; no new credential). Runs only if growth_collect.schedule === true. Default: does nothing.
+// growth_report    POST, CEO or VA session. Builds the Growth Decision Center model per business from the stored document (or the database snapshot). Reads only; never contacts Google.
+// Writes: ONLY the one app_settings row growth_data_<business> of the business collected. No table, no migration. Revenue, Reach/Reporting API and search.list are never requested.
+const _growthCollectGuard = _growthCreateRunGuard({ cooldownMs: 600000 });
+const _GROWTH_BUSINESSES = ['silk_road_voices', 'srv_studio'];
+async function _growthLoadSwitch() { try { const r = await sbGet('app_settings?key=eq.' + _gcSwitchKey + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? r[0].value : null; } catch (_) { return null; } }
+async function _growthLoadDoc(business) { try { const r = await sbGet('app_settings?key=eq.' + _gcKey(business) + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? _gcParseDoc(r[0].value, business) : null; } catch (_) { return null; } }
+async function _growthSaveDoc(business, doc) {
+  const key = _gcKey(business), value = JSON.stringify(doc), existing = await sbGet('app_settings?key=eq.' + key + '&select=key&limit=1');
+  if (Array.isArray(existing) && existing[0]) await sbPatch('app_settings', 'key=eq.' + key, { value, updated_at: new Date().toISOString() });
+  else await sbInsert('app_settings', { key, value, updated_at: new Date().toISOString() });
+}
+async function _growthRunCollection(business, mode) {
+  const want = _gaBiz[business] && _gaBiz[business].channelId; if (!want) return { ok: false, error: 'unknown_business' };
+  const { from, to } = _gcPeriod(Date.now(), 28);
+  const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2');
+  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to });
+  if (!out.ok) { console.warn('[growth_collect] ' + business + ' ' + mode + ' failed: ' + (out.error || '') + ' ' + (out.detail || '')); return { ok: false, business, error: out.error, detail: out.detail || null, steps: out.run ? out.run.steps : [] }; }
+  const prev = await _growthLoadDoc(business);
+  const doc = _gcMerge(prev, out.run, { business, from, to, nowIso: new Date().toISOString() });
+  await _growthSaveDoc(business, doc);
+  const failed = Object.entries(doc.collections[0].steps).filter(([, v]) => v !== 'ok').map(([k, v]) => k + ':' + v);
+  if (failed.length) console.warn('[growth_collect] ' + business + ' steps not ok: ' + failed.join(', '));
+  return { ok: true, business, steps: doc.collections[0].steps, requests: out.run.requests, days_stored: Object.keys(doc.days).length, reconciliation: doc.reconciliation ? doc.reconciliation.checks.every((c) => c.ok !== false) : null };
+}
+async function growthCollect(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const b = req.body || {}; const business = String(b.business || ''); let began = false;
+  try {
+    if (!_GROWTH_BUSINESSES.includes(business)) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    const auth = _gcAuth(await _growthLoadSwitch(), Date.now(), business, 'manual');
+    if (b.dryRun === true) return res.status(200).json({ ok: true, dryRun: true, business, authorization: auth, period: _gcPeriod(Date.now(), 28), plan: _gcSteps({ to: _gcPeriod(Date.now(), 28).to }).map((s) => ({ id: s.id, url: s.url })), note: 'Plus up to 10 retention-curve requests for the top videos. Nothing was sent to Google.' });
+    if (b.confirm !== _gcConfirm) return res.status(400).json({ ok: false, error: 'collection_confirmation_required' });
+    if (!auth.ok) return res.status(403).json({ ok: false, error: auth.reason, detail: auth.detail });
+    const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) return res.status(429).json({ ok: false, error: g.reason, retryAfterMs: g.retryAfterMs || null }); began = true;
+    const out = await _growthRunCollection(business, 'manual');
+    return res.status(out.ok ? 200 : (out.error === 'no_connection' ? 404 : 502)).json(out);
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_collect_failed' }); }
+  finally { if (began) _growthCollectGuard.end(business); }
+}
+async function growthCollectScheduled(req, res) {
+  try {
+    const sig = String((req.headers && (req.headers['x-mmm-cron'] || req.headers['X-MMM-Cron'])) || '');
+    const want = createHash('sha256').update(_gcCronInput(SUPABASE_SERVICE_KEY)).digest('hex');
+    if (!SUPABASE_SERVICE_KEY || sig.length !== want.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return res.status(401).json({ ok: false, error: 'cron_signature_required' });
+    const raw = await _growthLoadSwitch(); const results = [];
+    for (const business of _GROWTH_BUSINESSES) {
+      const auth = _gcAuth(raw, Date.now(), business, 'scheduled');
+      if (!auth.ok) { results.push({ business, skipped: auth.reason }); continue; }
+      const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) { results.push({ business, skipped: g.reason }); continue; }
+      try { results.push(await _growthRunCollection(business, 'scheduled')); } catch (e) { results.push({ business, ok: false, error: 'collection_failed' }); } finally { _growthCollectGuard.end(business); }
+    }
+    return res.status(200).json({ ok: true, results });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_collect_scheduled_failed' }); }
+}
+async function growthReport(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  const who = await _publisherFromRequest(req); if (!who) return res.status(401).json({ ok: false, error: 'session_required' });
+  try {
+    const want = String((req.body || {}).business || ''); const list = want ? [want] : _GROWTH_BUSINESSES; if (!list.every((x) => _GROWTH_BUSINESSES.includes(x))) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    const sw = who.role === 'ceo' ? await _growthLoadSwitch() : null; const yraw = who.role === 'ceo' ? await (async () => { try { const r = await sbGet('app_settings?key=eq.' + _yppStoreKey + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? r[0].value : null; } catch (_) { return null; } })() : null;
+    const store = who.role === 'ceo' ? _yppParseStore(yraw) : null; const reports = [];
+    for (const business of list) {
+      try {   // one business failing never hides the other
+      const id = _gaBiz[business].channelId; const doc = await _growthLoadDoc(business);
+      const rows = await sbGet('youtube_videos_analytics?select=channel_id,video_id,title,views,view_count,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,analytics_synced_at,synced_at,published_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000');
+      const chs = await sbGet('youtube_channels?select=channel_id,subscribers,total_views,updated_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1'); const ch = Array.isArray(chs) && chs[0] ? chs[0] : {};
+      const norm = (Array.isArray(rows) ? rows : []).map(_gaNorm); const titles = {}; for (const r of Array.isArray(rows) ? rows : []) if (r.video_id && r.title) titles[r.video_id] = r.title;
+      let fallback = null; try { const ws = _gaBuild(norm, { business: _gaBiz[business], channel: { subscribers: ch.subscribers, totalViews: ch.total_views, updatedAt: ch.updated_at } }); fallback = { period: ws.period, metrics: Object.fromEntries(['views_window', 'watch_hours_window', 'avg_view_pct_weighted', 'avg_view_duration', 'subs_attributed_window', 'subscribers_total', 'views_lifetime_channel'].map((k) => [k, { label: ws.metrics[k].label, value: ws.metrics[k].value, unit: ws.metrics[k].unit, status: ws.metrics[k].status }])), top: (ws.top || []).slice(0, 3) }; } catch (_) { fallback = null; }
+      const ypp = who.role === 'ceo' ? _yppBuild({ business, records: store.byChannel[id] || [], nowMs: Date.now(), appCounters: null }) : undefined;
+      const dash = _gdBuild({ business, doc, nowMs: Date.now(), titles, fallback, ypp });
+      const a = _gcAuth(sw, Date.now(), business, 'manual'), sch = _gcAuth(sw, Date.now(), business, 'scheduled');
+      dash.collection = who.role === 'ceo' ? { manual_authorized: a.ok, manual_until: a.until || null, manual_reason: a.ok ? null : a.reason, scheduled: sch.ok, last: doc && doc.collections && doc.collections[0] ? { at: doc.collections[0].at, steps: doc.collections[0].steps, requests: doc.collections[0].requests, aborted: doc.collections[0].aborted } : null } : null;
+      reports.push(dash);
+      } catch (e) { console.warn('[growth_report] ' + business + ' failed: ' + String(e && e.message || e).slice(0, 100)); reports.push({ business, error: 'report_failed', collected: false, source: 'error', recommendations: [], unavailable: [] }); }
+    }
+    return res.status(200).json({ ok: true, role: who.role, reports });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_report_failed', message: String(e && e.message || e).slice(0, 120) }); }
+}
+
 // R-B — read-only YouTube API probe. CEO session only, POST only. Deployment approval is NOT permission to contact Google: a live run also needs a time-boxed authorization record
 // (app setting `growth_probe_live`, written by engineering only after the CEO's separate written authorization; no browser can write that key).
 //   {business, dryRun:true}  -> the planned requests, the documented capability matrix and the current live-authorization state. Contacts Google: NEVER. Reads: that one setting only.
@@ -9281,69 +9348,44 @@ async function optimizationGetState(req, res) {
   } catch(e) { return res.status(500).json({ ok:false, error: e.message }); }
 }
 
-// v13.58.2 PRIORITY D — Revenue Dashboard. Tracks per-channel monetization readiness
-// against YouTube Partner Program thresholds: 1k subs + 4k watch hours (240k min) in
-// last 12 months OR 10M Shorts views in 90 days. ETA-to-YPP at current growth rate.
+// v13.58.2 PRIORITY D — Revenue Dashboard (R-C1 B: OFFICIAL FIGURES ONLY).
+// The calculated YPP readiness (watch hours / Shorts views summed from app analytics, progress bars, ETA, "ready") was removed: YouTube Analytics
+// has no qualified-watch-hours field and the app estimates did not reconcile with Studio. The card now shows ONLY dated figures captured from
+// YouTube Studio → Earn (app_settings key ypp_earn_capture, written separately and only with CEO authorization), or says "Not captured".
+// The legacy upload counters (uploads30d/uploads7d) and subscriber fields remain because strategyRecompute reads them; no YPP verdict field is returned.
 async function revenueDashboard(req, res) {
   try {
     const channels = await sbGet('youtube_channels?select=channel_id,title,mmm_engine,subscribers,total_views,total_videos&mmm_engine=not.is.null');
     if (!Array.isArray(channels)) return res.status(500).json({ ok:false, error:'channels_load_failed' });
-    const YPP_SUBS = 1000;
-    const YPP_WATCH_HOURS_12M = 4000;
-    const YPP_SHORTS_VIEWS_90D = 10000000;
-    const lookback365 = new Date(Date.now() - 365 * 86400 * 1000).toISOString();
-    const lookback90 = new Date(Date.now() - 90 * 86400 * 1000).toISOString();
     const lookback30 = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
     const lookback7 = new Date(Date.now() - 7 * 86400 * 1000).toISOString();
-    const out = { ok: true, perChannel: [] };
+    const out = { ok: true, perChannel: [], ypp: null };
     for (const ch of channels) {
-      const vids12m = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback365) + '&select=watch_time_min,views,published_at');
-      const w12m = (Array.isArray(vids12m) ? vids12m : []).reduce((a,v)=>a+(Number(v.watch_time_min)||0), 0);
-      const watchHours12m = w12m / 60;
-      const vids90d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback90) + '&select=views,published_at');
-      const shortsViews90d = (Array.isArray(vids90d) ? vids90d : []).reduce((a,v)=>a+(Number(v.views)||0), 0);
       const vids30d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback30) + '&select=video_id');
       const vids7d = await sbGet('youtube_videos_analytics?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&published_at=gte.' + encodeURIComponent(lookback7) + '&select=video_id');
-      const uploads30d = Array.isArray(vids30d) ? vids30d.length : 0;
-      const uploads7d = Array.isArray(vids7d) ? vids7d.length : 0;
       const chSnaps = await sbGet('youtube_channel_snapshots?channel_id=eq.' + encodeURIComponent(ch.channel_id) + '&order=snapshot_date.desc&limit=60');
       const snaps = Array.isArray(chSnaps) ? chSnaps : [];
-      const find = (daysAgo) => {
-        const target = new Date(Date.now() - daysAgo * 86400 * 1000).toISOString().slice(0,10);
-        return snaps.find(s => s.snapshot_date <= target) || null;
-      };
-      const s30 = find(30);
+      const target = new Date(Date.now() - 30 * 86400 * 1000).toISOString().slice(0,10);
+      const s30 = snaps.find(s => s.snapshot_date <= target) || null;
       const subsNow = ch.subscribers || 0;
-      const subsGrowth30d = s30 ? (subsNow - (s30.subscribers||0)) : null;
-      const subsProgress = Math.min(100, (subsNow / YPP_SUBS) * 100);
-      const watchProgress = Math.min(100, (watchHours12m / YPP_WATCH_HOURS_12M) * 100);
-      const shortsProgress = Math.min(100, (shortsViews90d / YPP_SHORTS_VIEWS_90D) * 100);
-      const pathSubs = subsProgress >= 100;
-      const pathWatch = watchProgress >= 100;
-      const pathShorts = shortsProgress >= 100;
-      const yppReady = pathSubs && (pathWatch || pathShorts);
-      let etaToYpp = null;
-      if (!pathSubs && subsGrowth30d != null && subsGrowth30d > 0) {
-        const subsNeeded = YPP_SUBS - subsNow;
-        const subsPerDay = subsGrowth30d / 30;
-        etaToYpp = subsPerDay > 0 ? Math.round(subsNeeded / subsPerDay) : null;
-      }
       out.perChannel.push({
         channelId: ch.channel_id, title: ch.title, engine: ch.mmm_engine,
         subscribers: subsNow,
-        subsGrowth30d,
-        watchHours12m: Math.round(watchHours12m),
-        shortsViews90d,
-        uploads30d, uploads7d,
-        progress: {
-          subs: Math.round(subsProgress * 10) / 10,
-          watchHours: Math.round(watchProgress * 10) / 10,
-          shortsViews: Math.round(shortsProgress * 10) / 10,
-        },
-        yppReady,
-        etaToYppDays: etaToYpp,
-        thresholds: { subs: YPP_SUBS, watchHours12m: YPP_WATCH_HOURS_12M, shortsViews90d: YPP_SHORTS_VIEWS_90D },
+        subsGrowth30d: s30 ? (subsNow - (s30.subscribers||0)) : null,
+        uploads30d: Array.isArray(vids30d) ? vids30d.length : 0,
+        uploads7d: Array.isArray(vids7d) ? vids7d.length : 0,
       });
+    }
+    // Official capture model: CEO session only; read-only; absent store => "not captured".
+    if (await requireCeoSession(req)) {
+      let raw = null;
+      try { const rows = await sbGet('app_settings?key=eq.' + _yppStoreKey + '&select=value&limit=1'); raw = Array.isArray(rows) && rows[0] ? rows[0].value : null; } catch (_) { raw = null; }
+      const store = _yppParseStore(raw);
+      out.ypp = { storeKey: _yppStoreKey, storePresent: store.present, storeErrors: store.errors, freshDays: _yppFreshDays, cards: [] };
+      for (const key of Object.keys(_yppBusinesses)) {
+        const biz = _yppBusinesses[key]; const row = out.perChannel.find(c => c.channelId === biz.channelId);
+        out.ypp.cards.push(_yppBuild({ business: key, records: store.byChannel[biz.channelId] || [], nowMs: Date.now(), appCounters: row ? { subscribers: row.subscribers } : null }));
+      }
     }
     return res.status(200).json(out);
   } catch(e) {
@@ -21410,6 +21452,9 @@ export default async function handler(req, res) {
     if (action === 'youtube_snapshot_now')       return await youtubeSnapshotNow(req, res); // v13.58.0
     if (action === 'analytics_foundation')       return await analyticsFoundationReport(req, res); // v13.58.0
     if (action === 'growth_probe')               return await growthProbe(req, res); // R-B read-only probe (CEO session; not released)
+    if (action === 'growth_collect')             return await growthCollect(req, res); // Growth system: read-only collection (default DISABLED; CEO session + authorization record)
+    if (action === 'growth_collect_scheduled')   return await growthCollectScheduled(req, res); // Growth system: daily cron hook (signature; does nothing unless schedule is switched on)
+    if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
     if (action === 'decision_engine')            return await decisionEngine(req, res); // v13.58.1
     if (action === 'revenue_dashboard')          return await revenueDashboard(req, res); // v13.58.2
     if (action === 'optimization_apply_recs')    return await optimizationApplyRecommendations(req, res); // v13.59.0

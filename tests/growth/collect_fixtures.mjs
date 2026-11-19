@@ -1,0 +1,33 @@
+// 100% SYNTHETIC YouTube Analytics API responses in the REAL raw shape ({columnHeaders:[{name}], rows}) as returned by the live probe (R-B) — no real number appears here.
+import { PROBE_CHANNELS } from '../../lib/growthProbe.mjs';
+export const addDays = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const H = (names) => names.map((name) => ({ name, columnType: name === 'day' || /Type|video|Status|ratio/i.test(name) ? 'DIMENSION' : 'METRIC', dataType: 'STRING' }));
+const resp = (names, rows) => ({ kind: 'youtubeAnalytics#resultTable', columnHeaders: H(names), rows });
+const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+// A fake Google. `world` describes one business: end date, number of days, paid window, video list, behaviours per step id (status overrides).
+export function makeWorld(business, over = {}) {
+  const w = { business, channelId: PROBE_CHANNELS[business], end: '2030-03-14', days: 100, paidFrom: null, paidTo: null, paidPerDay: 0, basePerDay: 40, seed: 7, videos: [], behave: {}, calls: [], identity: null, ...over };
+  const r = rng(w.seed); w.series = {};
+  for (let i = 0; i < w.days; i++) { const d = addDays(w.end, -(w.days - 1 - i)); const paid = w.paidFrom && d >= w.paidFrom && d <= w.paidTo ? w.paidPerDay + Math.floor(r() * 20) : 0; const org = Math.floor(w.basePerDay * (0.7 + r() * 0.6)); w.series[d] = { organic: org, paid, views: org + paid, minutes: Math.round((org * 0.9 + paid * 0.4) * 1), gained: Math.floor(org / 25), lost: Math.floor(r() * 2) }; }
+  if (!w.videos.length) w.videos = [{ id: 'vidAAAAAAA1', views: 900 }, { id: 'vidAAAAAAA2', views: 420 }, { id: 'vidAAAAAAA3', views: 180 }, { id: 'vidAAAAAAA4', views: 60 }, { id: 'vidAAAAAAA5', views: 55 }, { id: 'vidAAAAAAA6', views: 12 }, { id: 'vidAAAAAAA7', views: 3 }];
+  const sum = (from, to, k) => Object.keys(w.series).filter((d) => d >= from && d <= to).reduce((a, d) => a + w.series[d][k], 0);
+  w.fetchJson = async (url) => {
+    w.calls.push(url); const u = new URL(url); const q = u.searchParams; const host = u.host;
+    if (host === 'www.googleapis.com') return w.identity ? w.identity() : { status: 200, json: { items: [{ id: w.channelId }] } };
+    const id = (() => { const dims = q.get('dimensions') || '', f = q.get('filters') || ''; if (/^video==/.test(f) || /video==/.test(f)) return 'retention' + (/ORGANIC/.test(f) ? '_organic' : ''); if (dims === 'day') return 'daily_series'; if (dims === 'insightTrafficSourceType,day') return 'traffic_source_daily'; if (dims === 'insightTrafficSourceType') return 'traffic_source'; if (dims === 'creatorContentType') return 'content_type'; if (dims === 'subscribedStatus') return 'subscribed_status'; if (dims === 'video') return 'per_video'; if (!dims) return 'totals'; return 'other'; })();
+    const b = w.behave[id]; if (b) return b;
+    const from = q.get('startDate'), to = q.get('endDate');
+    switch (id) {
+      case 'totals': { const v = sum(from, to, 'views'); return { status: 200, json: resp(['views', 'engagedViews', 'estimatedMinutesWatched', 'averageViewDuration', 'averageViewPercentage', 'subscribersGained', 'subscribersLost'], [[v, Math.round(v * 0.5), sum(from, to, 'minutes'), 61, 29.5, sum(from, to, 'gained'), sum(from, to, 'lost')]]) }; }
+      case 'daily_series': return { status: 200, json: resp(['day', 'views', 'estimatedMinutesWatched', 'subscribersGained', 'subscribersLost'], Object.keys(w.series).filter((d) => d >= from && d <= to).sort().map((d) => [d, w.series[d].views, w.series[d].minutes, w.series[d].gained, w.series[d].lost])) };
+      case 'traffic_source_daily': { const rows = []; for (const d of Object.keys(w.series).filter((x) => x >= from && x <= to).sort()) { rows.push(['RELATED_VIDEO', d, w.series[d].organic, Math.round(w.series[d].organic * 0.9)]); if (w.series[d].paid) rows.push(['ADVERTISING', d, w.series[d].paid, Math.round(w.series[d].paid * 0.4)]); } return { status: 200, json: resp(['insightTrafficSourceType', 'day', 'views', 'estimatedMinutesWatched'], rows) }; }
+      case 'traffic_source': { const paid = sum(from, to, 'paid'), org = sum(from, to, 'organic'); const rows = [['RELATED_VIDEO', Math.round(org * 0.6), Math.round(org * 0.3), Math.round(org * 0.5)], ['SUBSCRIBER', Math.round(org * 0.4), Math.round(org * 0.3), Math.round(org * 0.3)]]; if (paid) rows.unshift(['ADVERTISING', paid, Math.round(paid * 0.4), Math.round(paid * 0.4)]); return { status: 200, json: resp(['insightTrafficSourceType', 'views', 'engagedViews', 'estimatedMinutesWatched'], rows) }; }
+      case 'content_type': { const v = sum(from, to, 'views'), m = sum(from, to, 'minutes'); return { status: 200, json: resp(['creatorContentType', 'views', 'estimatedMinutesWatched', 'averageViewDuration'], [['videoOnDemand', Math.round(v * 0.7), Math.round(m * 0.9), 80], ['shorts', Math.round(v * 0.3), Math.round(m * 0.1), 20]]) }; }
+      case 'subscribed_status': { const v = sum(from, to, 'views'); return { status: 200, json: resp(['subscribedStatus', 'views', 'estimatedMinutesWatched', 'averageViewDuration', 'averageViewPercentage'], [['SUBSCRIBED', Math.round(v * 0.1), 100, 90, 40], ['UNSUBSCRIBED', Math.round(v * 0.9), 500, 50, 25]]) }; }
+      case 'per_video': return { status: 200, json: resp(['video', 'views', 'engagedViews', 'estimatedMinutesWatched', 'averageViewDuration', 'averageViewPercentage', 'subscribersGained', 'subscribersLost'], w.videos.map((v) => [v.id, v.views, Math.round(v.views / 2), Math.round(v.views * 0.8), 55, 27, Math.floor(v.views / 100), 0])) };
+      case 'retention': case 'retention_organic': { const vid = /video==([A-Za-z0-9_-]+)/.exec(q.get('filters'))[1]; const org = id === 'retention_organic'; const shape = (t) => (vid === 'vidAAAAAAA1' ? Math.max(0.05, 1 - 3 * t) : Math.max(0.2, 1 - 0.5 * t)) + (org ? 0.1 : 0); const rows = []; for (let i = 0; i < 100; i++) { const t = (i + 1) / 100; rows.push([t, shape(t), 1]); } return { status: 200, json: resp(['elapsedVideoTimeRatio', 'audienceWatchRatio', 'relativeRetentionPerformance'], rows) }; }
+      default: return { status: 400, json: { error: { code: 400, message: 'unsupported' } } };
+    }
+  };
+  return w;
+}
