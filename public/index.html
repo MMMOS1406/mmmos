@@ -8863,13 +8863,13 @@ function renderFinance(){
         : `<div class="row">
             <div>
               <div class="row-label">Available Cash</div>
-              <div style="font-size:10px;color:var(--dim);margin-top:2px">Manual — connect a bank for live data</div>
+              <div style="font-size:10px;color:var(--dim);margin-top:2px">Manual — connect a bank for live data</div>${_finChip('availableCash')}
             </div>
             <input class="editable" type="number" value="${D.availableCash||0}" onchange="updateAvailableCash(this.value)" style="width:90px">
           </div>`
       }
       ${renderEmergencyFundRow(s)}
-      <div class="row"><span style="font-weight:800">Net Worth</span><span class="row-val" style="color:${getValueColor(s.netWorth)}">${$k(s.netWorth)}</span></div>
+      <div class="row"><span style="font-weight:800">Net Worth${_finChip('netWorth',true)}</span><span class="row-val" style="color:${getValueColor(s.netWorth)}">${$k(s.netWorth)}</span></div>
     </div>`:''}
     ${/* v13.69.46 — Bank Connections wrapped in collapsible (default closed) per operator directive. */ ''}
     ${isAdmin?section('Bank Connections', renderBankConnectionsCard(true), {defaultClosed:true}):''}
@@ -8879,7 +8879,7 @@ function renderFinance(){
     ${section('Expenses',renderExpensesSection(isAdmin,s),{defaultClosed:true})}
     <div class="card">
       <div class="collapse-header" onclick="toggleSection('debtBody')">
-        <div class="card-title" style="margin-bottom:0">Debt — Avalanche Strategy</div>
+        <div class="card-title" style="margin-bottom:0">Debt — Avalanche Strategy${_finChip('debts',true)}</div>
         <span class="collapse-arrow" id="arr_debtBody">▾</span>
       </div>
       <div class="collapse-body" id="debtBody" data-expanded="false" style="max-height:0px;margin-top:12px;overflow:hidden">
@@ -8895,7 +8895,7 @@ function renderFinance(){
         <span class="collapse-arrow" id="arr_portBody">▾</span>
       </div>
       <div class="collapse-body" id="portBody" data-expanded="false" style="max-height:0px;margin-top:12px;overflow:hidden">
-        ${(parseFloat(D.plaidInvestments)||0) > 0
+        ${_finIEPanel()}${(parseFloat(D.plaidInvestments)||0) > 0
           ? `<div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;line-height:1.5"><strong style="color:#22c55e">● AUTOMATED · PLAID</strong> · ${$k(parseFloat(D.plaidInvestments)||0)} from connected investment account(s).</div>`
           : `<div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;line-height:1.5"><strong style="color:#22c55e">● ACTIVE · MANUAL DATA FEED</strong> · Wealth Engine on autopilot since Jan 2021. Reporting layer is updated monthly via the <strong>Update Investment Engine</strong> task. Future state: API-automated data feed.</div>`}
         ${renderInvestmentEngineMonthlyCard(isAdmin)}
@@ -8917,12 +8917,48 @@ function renderFinance(){
         ${miniChart('Net Worth Trend','chart_networth','net','#c9a84c')}
         ${miniChart('Portfolio Growth','chart_portfolio','portfolio','#f59e0b')}
         ${miniChart('Debt Remaining','chart_debt','debt','#ef4444',true)}
-        ${miniChart('Income vs Expenses','chart_income_exp','income','#22c55e')}
+        ${miniChart('Income vs Expenses','chart_income_exp','income','#22c55e')}${_finHistoryNote()}
       </div>
     </div>
   `;
 }
 
+// ── Finance V2 phase 1 — source transparency (display only). Reads Finance state through public/finance/financeSources.js; never writes, saves or recalculates anything. ──
+function _finCtx(){try{if(typeof currentUser==='undefined'||!currentUser||currentUser.id!=='admin')return null;   // labels are shown to the CEO only; the Family / VA Finance views are unchanged
+    return (window.FinSrc&&window.FinSrc.buildCtx(D,Date.now()))||null;}catch(e){return null;}}
+function _finChip(key,inline){try{const c=_finCtx();if(!c)return '';return window.FinSrc.chip(window.FinSrc.describe(key,c),inline?{margin:'0 0 0 8px'}:undefined);}catch(e){return '';}}
+// Per-goal chips: where the CURRENT value comes from and whether the TARGET is a default. Machine Income is split into business revenue vs investment market gain (display only — the stored/calculated total is unchanged).
+function _finGoalChips(label){
+  try{
+    const c=_finCtx();if(!c)return '';const F=window.FinSrc;let cur='',tgt='',extra='';
+    if(label==='Emergency Fund'){cur=F.chip(F.describe('emergencyFund',c));tgt=F.chip(F.describeTarget('efTarget',c));}
+    else if(label==='Investment Engine Goal'){cur=F.chip(F.describe('investmentValue',c));tgt=F.chip(F.describeTarget('portfolioGoal',c));}
+    else if(label==='Debt Freedom'){cur=F.chip(F.describe('debts',c));tgt=F.chip(F.describeTarget('debtGoal',c));}
+    else if(label==='Machine Income'){
+      cur=F.chip(F.describe('machineIncome',c));tgt=F.chip(F.describeTarget('machineGoal',c));
+      const ym=(typeof currentYM==='function')?currentYM():'';
+      const biz=Object.values(D.engineRevenue||{}).reduce((a,m)=>a+(parseFloat((m||{})[ym])||0),0);
+      const gain=(typeof computeInvestmentEngineGrowth==='function')?computeInvestmentEngineGrowth():0;
+      extra=`<div style="font-size:9px;color:var(--dim);margin-top:3px;line-height:1.5">of which: business revenue ${c.revenueEntries?('$'+Math.round(biz).toLocaleString()+' (typed-in)'):'— (none entered)'} + investment market gain, monthly average, $${Math.round(gain).toLocaleString()} — a market gain, not earned income</div>`;
+    }
+    else if(label==='Runway'){cur=F.chip(Object.assign({},F.describe('availableCash',c),{key:'runway',note:'Calculated from typed-in cash and expenses'}));tgt=F.chip(F.describeTarget('runwayGoal',c));}
+    return `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap"><span style="font-size:8px;color:var(--dim)">current</span>${cur}<span style="font-size:8px;color:var(--dim)">target</span>${tgt}</div>${extra}`;
+  }catch(e){return '';}
+}
+function _finIEPanel(){
+  try{
+    const c=_finCtx();if(!c)return '';const F=window.FinSrc,v=F.describe('investmentValue',c),g=F.describe('investmentGain',c);
+    const stale=(v.ageDays!=null&&v.ageDays>31)?`<span style="font-size:9px;color:#f59e0b;margin-left:6px">last entry ${v.ageDays} days ago — update due</span>`:'';
+    return `<div style="margin-bottom:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px"><div style="font-size:9px;color:var(--dim);margin-bottom:4px;letter-spacing:0.5px">WHERE THESE NUMBERS COME FROM</div>${F.chip(v)}${stale} ${F.chip(g)}<div style="font-size:9px;color:var(--dim);margin-top:4px;line-height:1.5">Investment Engine value and gain are typed in each month. A market gain or loss is reported as investment performance — it is not earned income and is not business revenue.</div></div>`;
+  }catch(e){return '';}
+}
+function _finHistoryNote(){
+  try{
+    const F=window.FinSrc;if(!F||!_finCtx())return '';const pool=(Array.isArray(D.fsnapshots)&&D.fsnapshots.length)?D.fsnapshots:(D.snapshots||[]);const h=F.historyProfile(pool);
+    const rc=h.reconstructed?F.chip({key:'history',kind:'reconstructed',label:F.KINDS.reconstructed.text,color:F.KINDS.reconstructed.color,asOfText:'',note:'Rebuilt from a stored timeline'}):'';
+    return `<div style="margin-top:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:var(--dim);line-height:1.5">${rc} ${escHTML(h.text)}</div>`;
+  }catch(e){return '';}
+}
 function renderGoalsSection(F,isAdmin){
   // Defensive: ensure F has all required fields
   const s = (F && F.emergencyCoverage !== undefined) ? F : computeFinanceState();
@@ -8933,7 +8969,7 @@ function renderGoalsSection(F,isAdmin){
     </div>
     <div class="collapse-body" id="goalsBody" data-expanded="false" style="max-height:0px;margin-top:12px;overflow:hidden">
       ${[
-        {label:'Emergency Fund',current:s.emergencyFund,target:s.efTarget,color:'#22c55e',targetKey:'emergencyFundTarget',sub:`${s.emergencyFundMonths} months covered`},
+        {label:'Emergency Fund',current:s.emergencyFund,target:s.efTarget,color:'#22c55e',targetKey:'emergencyFundTarget',sub:`${(typeof currentUser!=='undefined'&&currentUser&&currentUser.id==='admin')?(s.emergencyCoverage||0):s.emergencyFundMonths} months covered`   /* CEO view: the app's own months-covered figure (emergencyCoverage) — the old line read s.emergencyFundMonths, a field that does not exist (showed "undefined"). Family/VA views are left exactly as they were. */},
         {label:'Investment Engine Goal',current:s.portfolioTotal,target:s.portfolioGoal,color:'#f59e0b',targetKey:'portfolioGoal',sub:`${$k(s.portfolioTotal)} of ${$k(s.portfolioGoal)}`}, // v13.69.46 — was 'Portfolio Goal'
         // v15.0.9 — use sum(originalAmount) as true debt baseline, not debtGoal
         ...((function(){const _orig=(D.debts||[]).reduce(function(acc,d){return acc+(parseFloat(d.originalAmount)||0);},0)||s.debtGoal||1;const _paid=Math.max(0,_orig-(s.debtTotal||0));const _pct=Math.round(_paid/_orig*100);return [{label:'Debt Freedom',current:_paid,displayCurrent:(s.debtTotal||0),target:_orig,color:'#ef4444',targetKey:'debtFreedomGoal',sub:`${$k(_paid)} paid of ${$k(_orig)} total · ${_pct}% paid`}];})()),
@@ -8942,7 +8978,7 @@ function renderGoalsSection(F,isAdmin){
       ].map(g=>`
         <div style="margin-bottom:16px">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-            <div><div style="font-size:13px;font-weight:700">${g.label}</div><div style="font-size:10px;color:var(--dim);margin-top:2px">${g.sub}</div></div>
+            <div><div style="font-size:13px;font-weight:700">${g.label}</div><div style="font-size:10px;color:var(--dim);margin-top:2px">${g.sub}</div>${_finGoalChips(g.label)}</div>
             <div style="text-align:right;flex-shrink:0;margin-left:10px">
               <div style="font-size:13px;font-weight:800;color:${g.color}">${g.isMonths?g.current+'mo':$k(g.displayCurrent!==undefined?g.displayCurrent:g.current)}</div>
               ${isAdmin?`<div style="font-size:10px;color:var(--dim)">Target: <input style="background:transparent;border:none;border-bottom:1px dashed rgba(201,168,76,0.3);color:var(--dim);font-size:10px;width:55px;text-align:right;outline:none;font-family:'JetBrains Mono',monospace" type="number" value="${g.target}" onchange="updateGoalTarget('${g.targetKey}',this.value)"></div>`:`<div style="font-size:10px;color:var(--dim)">Target: ${g.isMonths?g.target+'mo':$k(g.target)}</div>`}
@@ -9243,7 +9279,7 @@ function renderEmergencyFundRow(s){
     : (selectedAcct
         ? `<div style="font-size:10px;color:#22c55e;margin-top:2px;font-family:'JetBrains Mono',monospace">● LIVE · ${escHTML(selectedAcct.institution||'Bank')} ${escHTML(selectedAcct.name)}${selectedAcct.mask?' ··'+selectedAcct.mask:''}</div>`
         : `<div style="font-size:10px;color:#fbbf24;margin-top:2px;font-family:'JetBrains Mono',monospace">⚠️ Selected account no longer connected — falling back to manual value</div>`);
-  return `<div class="row"><div style="flex:1"><div class="row-label">Emergency Fund</div>${sourceTag}<div style="font-size:10px;color:var(--dim);margin-top:2px">Protected reserve — ${coverage}mo coverage</div>${picker}</div>${valueDisplay}</div>`;
+  return `<div class="row"><div style="flex:1"><div class="row-label">Emergency Fund</div>${sourceTag}${_finChip('emergencyFund')}<div style="font-size:10px;color:var(--dim);margin-top:2px">Protected reserve — ${coverage}mo coverage</div>${picker}</div>${valueDisplay}</div>`;
 }
 async function updateEFSource(value){
   // v13.69.46 — guard against bad option values (e.g., "undefined" string from broken account_id era).
@@ -30794,6 +30830,7 @@ function renderFactory(){
 <!-- CEO decision 2026-11-10: the simplified CEO homepage (two businesses, Finance, Analytics) is the DEFAULT Home for the Admin and replaces the legacy
      CEO Headquarters dashboard. No opt-in flag. Loaded synchronously so it hooks the router before the first Home render; it acts for the Admin only
      (Family / VA calls pass straight through). The older opt-in admin shell (public/shell.js, flag mmm_shell_admin_v1) is no longer loaded: one CEO experience. -->
+<script src="/finance/financeSources.js"></script>   <!-- Finance V2 phase 1: source/age labels for financial figures (display only; reads Finance state, writes nothing) -->
 <script src="/home2.js"></script>
 <script src="/avatar-library.js"></script>   <!-- SRV avatar library: loads the library for the CEO and the VA and applies it to the existing Generate/Build/Rebuild avatar lists (CEO order 2026-11-11) -->
 </body>

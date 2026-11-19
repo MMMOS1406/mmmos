@@ -236,21 +236,72 @@
       row('YouTube', esc(f.h[1]), 'ws:' + n + ':analytics') + row('Views (' + f.win + ')', f.views, 'ws:' + n + ':analytics') + row('Subscribers gained (from videos, same window)', f.subs, 'ws:' + n + ':analytics') +
       '<button type="button" class="h2-btn" data-h2="biz:' + esc(n) + '">Open ' + esc(n) + '</button></div>';
   }
+  /* Finance V2 phase 1 — every financial figure on Home carries its source (manual / default / reconstructed / connected / unavailable) and its last known update.
+     Display only: these helpers read the Finance state through window.FinSrc and never write, save or recalculate anything. */
+  function finCtx() { return safe(function () { return window.FinSrc ? window.FinSrc.buildCtx(D, Date.now()) : null; }, null); }
+  function chipOf(key) { return safe(function () { var c = finCtx(); return c ? window.FinSrc.chip(window.FinSrc.describe(key, c), { margin: '3px 0 0 0' }) : ''; }, ''); }
+  function targetChip(gk) { return safe(function () { var c = finCtx(); return c ? window.FinSrc.chip(window.FinSrc.describeTarget(gk, c), { margin: '0' }) : ''; }, ''); }
   function moneyStrip() {
     var F = safe(function () { return computeFinanceState(); }, null);
     if (!F) return '<div class="h2-empty">Finance data unavailable.</div>';
-    var src = safe(function () { return D.plaidConnected ? 'Source: linked bank accounts' : 'Source: entries in Finance'; }, '');
     var lnk = function (inner) { return '<div class="h2-card lnk" data-h2="finance" role="link" tabindex="0">' + inner + '<div class="h2-go">Open Finance →</div></div>'; };
     var an = BIZ.map(function (b, i) { var f = facts(i); return '<div class="h2-kv"><span>' + esc(b[0]) + '</span><b>' + f.views + ' views · ' + f.subs + ' subs</b></div>'; }).join('');
     return '<div class="h2-grid c4">' +
-      lnk('<div class="h2-sm">Monthly income</div><div class="h2-big">' + money(F.incomeTotal) + '</div>') +
-      lnk('<div class="h2-sm">Monthly spend</div><div class="h2-big">' + money(F.expenseTotal) + '</div>') +
-      lnk('<div class="h2-sm">Net per month (income minus spend)</div><div class="h2-big">' + money((F.incomeTotal || 0) - (F.expenseTotal || 0)) + '</div><div class="h2-sm">' + esc(src) + '</div>') +
+      lnk('<div class="h2-sm">Monthly income</div><div class="h2-big">' + money(F.incomeTotal) + '</div>' + chipOf('income')) +
+      lnk('<div class="h2-sm">Monthly spend</div><div class="h2-big">' + money(F.expenseTotal) + '</div>' + chipOf('expenses')) +
+      lnk('<div class="h2-sm">Net per month (income minus spend)</div><div class="h2-big">' + money((F.incomeTotal || 0) - (F.expenseTotal || 0)) + '</div>' + chipOf('cashflow')) +
       '<div class="h2-card lnk" data-h2="analytics" role="link" tabindex="0"><div class="h2-sm" style="margin-bottom:4px">Analytics (latest analytics window)</div>' + an + '<div class="h2-go">Open Analytics →</div></div></div>';
+  }
+  /* Strategic Goals — the same goals and the same numbers as the Finance screen (computeFinanceState), read-only, each with the source of its current value and of its target. */
+  function goalsCard() {
+    var F = safe(function () { return computeFinanceState(); }, null);
+    if (!F) return '<div class="h2-card"><h3>Strategic goals</h3><div class="h2-empty">Finance data unavailable.</div></div>';
+    var bar = function (cur, tgt, col) { var p = Math.max(0, Math.min(100, Math.round(((cur || 0) / Math.max(1, tgt || 1)) * 100))); return '<div style="background:rgba(0,0,0,.3);height:6px;border-radius:3px;overflow:hidden;margin-top:5px"><div style="width:' + p + '%;height:100%;background:' + col + ';border-radius:3px"></div></div>'; };
+    var orig = safe(function () { return (D.debts || []).reduce(function (a, d) { return a + (parseFloat(d.originalAmount) || 0); }, 0); }, 0) || F.debtGoal || 1;
+    var paid = Math.max(0, orig - (F.debtTotal || 0));
+    var ym = safe(function () { return currentYM(); }, '');
+    var biz = safe(function () { return Object.values(D.engineRevenue || {}).reduce(function (a, m) { return a + (parseFloat((m || {})[ym]) || 0); }, 0); }, 0);
+    var gain = safe(function () { return computeInvestmentEngineGrowth(); }, 0);
+    var c = finCtx();
+    var split = '<div class="h2-sm" style="margin-top:3px">of which: business revenue ' + (c && c.revenueEntries ? money(biz) + ' (typed-in)' : '— (none entered)') + ' + investment market gain, monthly average, ' + money(gain) + ' — a market gain, not earned income</div>';
+    var goals = [
+      { l: 'Emergency Fund', cur: F.emergencyFund, tgt: F.efTarget, col: '#22c55e', shown: money(F.emergencyFund) + ' / ' + money(F.efTarget), sub: (F.emergencyCoverage || 0) + ' months covered', cc: chipOf('emergencyFund'), tc: targetChip('efTarget') },
+      { l: 'Investment Engine Goal', cur: F.portfolioTotal, tgt: F.portfolioGoal, col: '#f59e0b', shown: money(F.portfolioTotal) + ' / ' + money(F.portfolioGoal), sub: 'investment value toward the goal', cc: chipOf('investmentValue'), tc: targetChip('portfolioGoal') },
+      { l: 'Debt Freedom', cur: paid, tgt: orig, col: '#ef4444', shown: money(F.debtTotal) + ' remaining of ' + money(orig), sub: 'paid down ' + money(paid), cc: chipOf('debts'), tc: targetChip('debtGoal') },
+      { l: 'Machine Income', cur: F.machineIncome, tgt: F.machineGoal, col: '#c9a84c', shown: money(F.machineIncome) + '/mo / ' + money(F.machineGoal) + '/mo', sub: 'per month across all engines', cc: chipOf('machineIncome'), tc: targetChip('machineGoal'), extra: split }
+    ];
+    return '<div class="h2-card lnk" data-h2="finance" role="link" tabindex="0" id="h2Goals"><h3>Strategic goals</h3>' + goals.map(function (g) {
+      return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:10px"><div><b>' + esc(g.l) + '</b><div class="h2-sm">' + esc(g.sub) + '</div></div><div style="text-align:right;font-weight:800;color:' + g.col + '">' + esc(g.shown) + '</div></div>' + bar(g.cur, g.tgt, g.col) +
+        '<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="h2-sm">current</span>' + g.cc + '<span class="h2-sm">target</span>' + g.tc + '</div>' + (g.extra || '') + '</div>';
+    }).join('') + '<div class="h2-go">Open Finance →</div></div>';
+  }
+  /* Investment Engine — its own card (not a production business): value and gain are typed in monthly; a market gain is investment performance, never revenue. */
+  function investmentCard() {
+    var c = finCtx(), F = window.FinSrc;
+    var value = safe(function () { return computeFinanceState().portfolioTotal; }, null);   // the same figure Net Worth and the goals use
+    var gl = safe(function () { return computeInvestmentEngineGainLoss(); }, null);
+    var d = c && F ? F.describe('investmentValue', c) : null;
+    var updated = safe(function () { return isInvestmentEngineUpdatedThisMonth(); }, false);
+    var dot = !d || d.kind === 'unavailable' ? '#6b7280' : (updated ? '#22c55e' : '#f59e0b');
+    var status = !d || d.kind === 'unavailable' ? 'No Investment Engine entry yet' : (updated ? 'Updated this month' : 'Monthly update overdue' + (d.ageDays != null ? ' — last entry ' + d.ageDays + ' days ago' : ''));
+    var body = d && d.kind !== 'unavailable'
+      ? row('Value', money(value)) + row('Market gain / loss (lifetime, not income)', (gl == null ? '—' : money(gl))) + row('Last entry', esc(d.asOfText))
+      : '<div class="h2-empty">Nothing entered, so no value is shown.</div>';
+    return '<div class="h2-card lnk" data-h2="finance" role="link" tabindex="0" id="h2IE"><h3><span class="h2-dot" style="background:' + dot + '"></span>Investment Engine</h3>' +
+      '<div class="h2-sm">' + esc(status) + '</div>' + body + (d ? '<div style="margin-top:6px">' + chipOf('investmentValue') + ' ' + chipOf('investmentGain') + '</div>' : '') +
+      '<div class="h2-sm" style="margin-top:6px">Not a production business and not connected to a brokerage. A market gain is investment performance, not earned income or business revenue.</div><div class="h2-go">Open Investment Engine →</div></div>';
+  }
+  /* SRV Circle Advisors — placeholder only. No record of this business exists in the system yet, so nothing about it (status, revenue, activity) is shown or invented. */
+  function circleCard() {
+    return '<div class="h2-card" id="h2Circle"><h3><span class="h2-dot" style="background:#6b7280"></span>SRV Circle Advisors</h3>' +
+      '<div class="h2-sm"><b>Unconfigured</b> — the business identity is not confirmed yet.</div>' +
+      '<div class="h2-empty">No status, revenue or activity is shown: nothing is connected and no record exists for this business.</div></div>';
   }
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
       '<div class="h2-lab">Your two businesses</div><div class="h2-grid c2">' + bizCard(0) + bizCard(1) + '</div>' +
+      '<div class="h2-lab">Investment Engine and ventures not yet configured</div><div class="h2-grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">' + investmentCard() + circleCard() + '</div>' +
+      '<div class="h2-lab">Strategic goals</div>' + goalsCard() +
       '<div class="h2-lab">Finance and analytics</div>' + moneyStrip() + '</div>';
   }
   function overviewPage(engine) {
