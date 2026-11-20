@@ -1,6 +1,6 @@
 /* MMMOS Finance — verified-only display rules (Finance V2 phase 3B). PURE and READ-ONLY: reads the Finance context built by FinSrc; never writes, saves, recalculates or deletes anything.
  * CEO directive 2026-11-20: no prototype or invented financial figures in operational views. A number is displayed ONLY when its source, its reporting period and its verification status are known.
- * Today that means a figure read from a CONNECTED provider with a known sync date. Typed-in, default (seeded), reconstructed and legacy values are PRESERVED in the database but never shown as figures:
+ * That means (1) a figure read from a CONNECTED provider with a known sync date, or (2) household income / spending / net from an authorized EXPORT month that the CEO has explicitly compared with the source app and confirmed (reporting period, provenance and freshness stay visible). Typed-in, default (seeded), reconstructed and legacy values are PRESERVED in the database but never shown as figures:
  * the view says "No verified data" (never 0) and explains why. Market gains are never earned income; goals are optional targets and a default target is never shown as CEO-approved.
  * Loaded as a classic script (window.FinVerified) after financeSources.js, and as plain text by the tests (no module syntax on purpose).
  */
@@ -38,16 +38,40 @@
     if (key === 'machineIncome') { var r = status('businessRevenue', ctx); return { key: key, label: LABELS[key], shown: r.shown, kind: r.kind, source: r.source, period: r.period, reason: r.shown ? '' : (r.kind === 'unavailable' ? 'No business revenue source is connected or imported. Investment market gains are never counted as earned income.' : r.reason + ' Investment market gains are never counted as earned income.') }; }
     var d = F.describe(key, ctx); var kind = d.kind, period = isoDay(d.asOf);
     var shown = kind === 'connected' && !!period;
+    if (!shown) { var imp = importFigure(key, ctx); if (imp) return { key: key, label: LABELS[key] || key, shown: true, kind: 'import_verified', source: imp.sourceLabel, period: imp.month, reason: '', fromImport: imp }; }
+    var pend = !shown ? importPending(key, ctx) : null;
+    if (pend) return { key: key, label: LABELS[key] || key, shown: false, kind: kind, source: '', period: null, reason: pend };
     return { key: key, label: LABELS[key] || key, shown: shown, kind: kind, source: shown ? d.label : '', period: period, reason: shown ? '' : (kind === 'connected' ? REASON.noperiod : (REASON[kind] || REASON.unavailable)) };
   }
+  // ── imported months: only a month the CEO has compared with the source app and confirmed can supply income / spending / net ─────────────────────────────────────────────
+  var FROM_IMPORT = { income: 'income', expenses: 'expense', cashflow: 'net' };
+  function srcName(list) { var x = (list || [])[0]; return x === 'rocket_money' ? 'Rocket Money export' : (x ? 'Imported export (' + x + ')' : 'Imported export'); }
+  function importFigure(key, ctx) {
+    var f = FROM_IMPORT[key]; var ms = ctx && ctx.importMonths; if (!f || !Array.isArray(ms)) return null;
+    var v = ms.filter(function (m) { return m && m.verification === 'verified'; }).sort(function (a, b) { return a.month < b.month ? 1 : -1; })[0]; if (!v) return null;
+    return { month: v.month, cents: f === 'net' ? v.net : v[f], verifiedAt: isoDay(v.verified_at), importedAt: isoDay(v.imported_at), freshness: v.freshness || 'unknown', sourceLabel: srcName(v.sources), unclassifiedCents: (v.unclassified_in || 0) + (v.unclassified_out || 0), transfersCents: v.transfer_excluded || 0 };
+  }
+  function importPending(key, ctx) {
+    var ms = ctx && ctx.importMonths; if (!FROM_IMPORT[key] || !Array.isArray(ms) || !ms.length) return null;
+    var p = ms.filter(function (m) { return m && m.verification !== 'verified'; }).sort(function (a, b) { return a.month < b.month ? 1 : -1; })[0]; if (!p) return null;
+    return 'An import for ' + p.month + ' exists but is pending your comparison and confirmation (Finance → Imports).';
+  }
+  function usd(cents) { var v = (cents || 0) / 100; try { return v.toLocaleString('en-US', { style: 'currency', currency: 'USD' }); } catch (e) { return '$' + v.toFixed(2); } }
+  function withImports(ctx, importsStatus) { if (ctx) ctx.importMonths = (importsStatus && Array.isArray(importsStatus.months)) ? importsStatus.months : []; return ctx; }
   function nvHtml(key, ctx, opt) {
     opt = opt || {}; var s = status(key, ctx);
     return '<span class="fin-nv" data-key="' + esc(key) + '" title="' + esc(s.reason) + '" style="color:var(--dim);font-weight:700">No verified data</span>' + (opt.reason === false ? '' : '<div class="fin-nv-why" style="font-size:9px;color:var(--dim);margin-top:2px;line-height:1.4">' + esc(s.reason) + '</div>');
+  }
+  function importLine(s) {
+    var f = s.fromImport, stale = f.freshness === 'stale';
+    return '<div class="fin-vsrc" data-verified-by="ceo-comparison" style="font-size:8px;color:#22c55e;margin-top:2px;letter-spacing:0.5px">VERIFIED · ' + esc(f.sourceLabel) + ' · period ' + esc(f.month) + ' · confirmed by CEO ' + esc(f.verifiedAt || '') + ' · imported ' + esc(f.importedAt || 'date unknown') + ' · <span class="fin-fresh" style="color:' + (stale ? '#f59e0b' : '#22c55e') + '">' + (stale ? 'STALE' : 'FRESH') + '</span></div>' +
+      '<div style="font-size:8px;color:var(--dim);margin-top:1px;line-height:1.4">Classified rows only; transfers' + (f.transfersCents ? ' (' + esc(usd(f.transfersCents)) + ')' : '') + ' and unclassified rows' + (f.unclassifiedCents ? ' (' + esc(usd(f.unclassifiedCents)) + ')' : '') + ' are excluded.</div>';
   }
   function srcLine(s) { return '<div class="fin-vsrc" style="font-size:8px;color:#22c55e;margin-top:2px;letter-spacing:0.5px">VERIFIED · ' + esc(s.source) + ' · as of ' + esc(s.period) + '</div>'; }
   // valueHtml is evaluated by the caller only when needed; pass a function to avoid computing a hidden figure at all
   function show(key, ctx, valueHtml, opt) {
     var s = status(key, ctx); if (!s.shown) return nvHtml(key, ctx, opt);
+    if (s.fromImport) return esc(usd(s.fromImport.cents)) + importLine(s);   // the figure comes from the CEO-confirmed import month itself
     return (typeof valueHtml === 'function' ? valueHtml() : valueHtml) + srcLine(s);
   }
   // ── goals: optional targets, never a default shown as approved ────────────────────────────────────────────────────────────────────────────────────────
@@ -89,12 +113,14 @@
     var ba = bank && ctx.plaidLastSync ? ageDays(ctx.plaidLastSync, now) : null;
     out.push({ id: 'bank', label: 'Bank accounts', state: bank ? (ba != null && ba <= 3 ? 'connected' : 'stale') : 'unavailable', detail: bank ? 'Linked accounts, last sync ' + (isoDay(ctx.plaidLastSync) || 'unknown') : 'No bank is connected. Direct bank connections are not part of the plan.' });
     var list = (imports && imports.imports) || [];
+    var vm = ((imports && imports.months) || []).filter(function (m) { return m.verification === 'verified' && (m.sources || []).indexOf('rocket_money') >= 0; });
+    var vtxt = vm.length ? vm.length + ' month' + (vm.length === 1 ? '' : 's') + ' compared and confirmed by the CEO (latest ' + vm[vm.length - 1].month + ').' : 'Verification pending.';
     var rm = list.filter(function (i) { return i.source === 'rocket_money'; })[0];
-    if (rm) { var ra = ageDays(rm.imported_at, now); out.push({ id: 'rocket_money', label: 'Rocket Money', state: ra != null && ra <= 35 ? 'import_only' : 'stale', detail: 'Imported file, period ' + rm.period.from + ' to ' + rm.period.to + ' (imported ' + isoDay(rm.imported_at) + '). One-time export, not live synchronization. Verification pending.' }); }
+    if (rm) { var ra = ageDays(rm.imported_at, now); out.push({ id: 'rocket_money', label: 'Rocket Money', state: ra != null && ra <= 35 ? 'import_only' : 'stale', detail: 'Imported file, period ' + rm.period.from + ' to ' + rm.period.to + ' (imported ' + isoDay(rm.imported_at) + '). One-time export, not live synchronization. ' + vtxt }); }
     else out.push({ id: 'rocket_money', label: 'Rocket Money', state: 'unavailable', detail: 'Export-only app with no official API. The import adapter stays disabled until a redacted sample export is verified.' });
     out.push({ id: 'robinhood', label: 'Robinhood (read-only, via SnapTrade)', state: 'unavailable', detail: 'Not connected. A CEO-controlled read-only link has not been authorized.' });
     var other = list.filter(function (i) { return i.source !== 'rocket_money'; })[0];
-    if (other) { var oa = ageDays(other.imported_at, now); out.push({ id: 'other_import', label: 'Other import (' + other.source + ')', state: oa != null && oa <= 35 ? 'import_only' : 'stale', detail: 'Period ' + other.period.from + ' to ' + other.period.to + '. Verification pending.' }); }
+    if (other) { var oa = ageDays(other.imported_at, now); out.push({ id: 'other_import', label: 'Other import (' + other.source + ')', state: oa != null && oa <= 35 ? 'import_only' : 'stale', detail: 'Period ' + other.period.from + ' to ' + other.period.to + '. Not live synchronization. Verification pending unless confirmed by the CEO.' }); }
     return out;
   }
   function sourcesHtml(rows) {
@@ -106,7 +132,7 @@
       return '<div class="fin-metric" data-key="' + k + '" style="padding:10px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:8px"><div style="font-size:10px;color:var(--dim);margin-bottom:4px">' + esc(LABELS[k]) + '</div><div style="font-size:14px;font-weight:800">' + nvOrCaller(k, ctx) + '</div></div>'; }).join('') + '</div>';
   }
   // a verified figure needs a number; the caller supplies the formatter through window.FinVerified.valueOf (set by the page), so the library itself never holds a figure
-  function nvOrCaller(k, ctx) { var s = status(k, ctx); if (!s.shown) return nvHtml(k, ctx); return root.FinVerified && typeof root.FinVerified.valueOf === 'function' ? show(k, ctx, function () { return esc(root.FinVerified.valueOf(k)); }) : nvHtml(k, ctx); }
-  var api = { LABELS: LABELS, HOUSEHOLD: HOUSEHOLD, GOALS: GOALS, status: status, nvHtml: nvHtml, show: show, target: target, goalRows: goalRows, preserved: preserved, preservedHtml: preservedHtml, sources: sources, sourcesHtml: sourcesHtml, metricsHtml: metricsHtml, valueOf: null };
+  function nvOrCaller(k, ctx) { var s = status(k, ctx); if (!s.shown) return nvHtml(k, ctx); if (s.fromImport) return show(k, ctx, null); return root.FinVerified && typeof root.FinVerified.valueOf === 'function' ? show(k, ctx, function () { return esc(root.FinVerified.valueOf(k)); }) : nvHtml(k, ctx); }
+  var api = { LABELS: LABELS, HOUSEHOLD: HOUSEHOLD, GOALS: GOALS, status: status, nvHtml: nvHtml, show: show, target: target, goalRows: goalRows, preserved: preserved, preservedHtml: preservedHtml, withImports: withImports, importFigure: importFigure, sources: sources, sourcesHtml: sourcesHtml, metricsHtml: metricsHtml, valueOf: null };
   root.FinVerified = api;
 })(typeof window !== 'undefined' ? window : this);

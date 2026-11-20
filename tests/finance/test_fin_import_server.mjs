@@ -30,13 +30,13 @@ const world = (over = {}) => {
   const names = Object.keys(stubs);
   const f = new Function(...names, (over.src || SRC) + '\nreturn { finImport };')(...names.map((k) => stubs[k]));
   const call = (op) => async (reqOver = {}) => { const res = { code: 200, body: null, headers: {}, status(c) { res.code = c; return res; }, json(x) { res.body = x; return res; }, setHeader(k, v) { res.headers[k] = v; } }; await f.finImport({ method: 'POST', body: {}, query: {}, headers: {}, ...reqOver }, res, op); return res; };
-  w.status = call('status'); w.preview = call('preview'); w.commit = call('commit'); return w;
+  w.status = call('status'); w.preview = call('preview'); w.commit = call('commit'); w.verify = call('verify'); return w;
 };
 const everything = (w) => JSON.stringify([w.writes, w.logs, w.urls]);
 const leaks = (s) => [M1, M2, M3, 'Zorblax', 'Quuxville', 'Plugh', 'Move out', 'Chk,false'].filter((x) => s.includes(x));
 
 // 1. authentication — before any database access
-for (const op of ['status', 'preview', 'commit']) { const w = world({ ceo: false }); const r = await w[op]({ body: { adapter: 'fixture_csv', content: csv(rows) } });
+for (const op of ['status', 'preview', 'commit', 'verify']) { const w = world({ ceo: false }); const r = await w[op]({ body: { adapter: 'fixture_csv', content: csv(rows) } });
   ok(`${op}: no CEO session → 401, and NO database read or write happened`, r.code === 401 && w.reads.length === 0 && w.writes.length === 0); }
 { const w = world(); const r = await w.status({ method: 'GET' }); ok('GET is refused (405) with no database access', r.code === 405 && w.reads.length === 0); }
 
@@ -85,6 +85,28 @@ for (const op of ['status', 'preview', 'commit']) { const w = world({ ceo: false
   const c = await w.commit({ body: { adapter: 'fixture_csv', content: csv(rows), expected_rows_fingerprint: p.body.expected_rows_fingerprint } });
   ok('a database failure → 500 fin_import_failed; the error and logs contain no file content and no database response body', c.code === 500 && c.body.error === 'fin_import_failed' && leaks(everything(w) + JSON.stringify(c.body)).length === 0 && !w.logs.join(' ').includes('boom')); }
 
+// 4b. CEO verification of an imported month
+const CONF = I.VERIFY_CONFIRMATION;
+const imported = async () => { const w = world(); const p = await w.preview({ body: { adapter: 'fixture_csv', content: csv(rows) } }); await w.commit({ body: { adapter: 'fixture_csv', content: csv(rows), expected_rows_fingerprint: p.body.expected_rows_fingerprint } }); w.writes.length = 0; return w; };
+const months = async (w) => (await w.status()).body.months;
+{ const w = await imported(); const ms = await months(w); const m = ms[0]; const bodyOk = (mm, i, e, c = CONF) => ({ month: mm.month, app_income_cents: i, app_expense_cents: e, confirmation: c });
+  const tot = ms.reduce((a, x) => ({ i: a.i + x.income, e: a.e + x.expense }), { i: 0, e: 0 });
+  ok('status shows every imported month as PENDING with source, import date and freshness before any confirmation', ms.every((x) => x.verification === 'pending' && x.sources.join() === 'fixture_csv' && x.freshness === 'fresh' && x.imported_at));
+  const bad = await w.verify({ body: bodyOk(m, m.income + 5000, m.expense) }); ok('a comparison that does not match is refused (422) with the difference, nothing written, month stays pending', bad.code === 422 && bad.body.error === 'mismatch' && bad.body.difference.income === 5000 && w.writes.length === 0 && (await months(w))[0].verification === 'pending');
+  const nc = await w.verify({ body: bodyOk(m, m.income, m.expense, null) }); ok('no typed confirmation → 400, nothing written', nc.code === 400 && nc.body.error === 'confirmation_required' && w.writes.length === 0);
+  const wrong = await w.verify({ body: bodyOk(m, m.income, m.expense, 'yes') }); ok('a wrong confirmation text → 400, nothing written', wrong.code === 400 && w.writes.length === 0);
+  const unk = await w.verify({ body: { ...bodyOk(m, 1, 1), month: '2031-12' } }); ok('unknown month → 400', unk.code === 400 && unk.body.error === 'unknown_month' && w.writes.length === 0);
+  const okv = await w.verify({ body: bodyOk(m, m.income, m.expense) });
+  ok('a matching comparison with the typed confirmation verifies the month (200) and writes ONLY the verification into the one summary row', okv.code === 200 && okv.body.verified === true && okv.body.record.by === 'ceo' && w.writes.length === 1 && w.writes[0].body.key === undefined && /app_settings\?key=eq\.fin_import_household/.test(w.writes[0].url) && w.urls.every((u) => u.includes('/rest/v1/app_settings')), w.writes.map((x) => x.url));
+  const after = await months(w); ok('afterwards the status shows that month VERIFIED (date, compared figures); totals, period and provenance are unchanged', after[0].verification === 'verified' && after[0].verified_at && after[0].income === m.income && after[0].expense === m.expense && after[0].imported_at === m.imported_at && after[0].sources.join() === 'fixture_csv');
+  ok('verification text carries no merchant names or file content (database writes, logs, response)', leaks(everything(w) + JSON.stringify(okv.body)).length === 0);
+  const more = [...rows, `${day(10)},${M1},Groceries,-12.00,Chk,false`]; const p2 = await w.preview({ body: { adapter: 'fixture_csv', content: csv(more) } });
+  await w.commit({ body: { adapter: 'fixture_csv', content: csv(more), expected_rows_fingerprint: p2.body.expected_rows_fingerprint } });
+  ok('a later overlapping import that adds rows to the verified month sends it back to PENDING (the CEO must compare again)', (await months(w)).some((x) => x.verification === 'pending') && !(await months(w)).some((x) => x.verification === 'verified' && x.expense !== m.expense), (await months(w)).map((x) => x.verification)); }
+{ const w = world(); const r = await w.verify({ body: { month: '2031-05', app_income_cents: 1, app_expense_cents: 1, confirmation: CONF } }); ok('verifying with no import summary at all → 400 no_import_summary, nothing written', r.code === 400 && r.body.error === 'no_import_summary' && w.writes.length === 0); }
+{ const w = world(); w.db.set('fin_import_household', { value: '{"entity":"srv_farsi","salt":"x"}', updated_at: 't' }); const r = await w.verify({ body: { month: '2031-05', app_income_cents: 1, app_expense_cents: 1, confirmation: CONF } }); ok('an unreadable / foreign stored summary is never overwritten by verify (500)', r.code === 500 && w.writes.length === 0); }
+{ const w = await imported(); const m = (await months(w))[0]; w.race = true; const r = await w.verify({ body: { month: m.month, app_income_cents: m.income, app_expense_cents: m.expense, confirmation: CONF } }); ok('COMPARE-AND-SET on verify: a concurrent change makes it lose cleanly (409) and the month stays pending', r.code === 409 && (await months(w))[0].verification === 'pending'); }
+{ const w = await imported(); const m = (await months(w))[0]; const hostile = await w.verify({ body: { month: { $ne: 1 }, app_income_cents: m.income, app_expense_cents: m.expense, confirmation: CONF } }); const inj = await w.verify({ body: { month: '2031-05', app_income_cents: '2500', app_expense_cents: m.expense, confirmation: CONF } }); ok('non-string month and string-typed figures are refused', hostile.code === 400 && inj.code === 400 && w.writes.length === 0); }
 // 5. isolation: only the one key, no other tables, no business documents
 const CODE = SRC.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 ok('the handler source touches only app_settings.fin_import_household (no growth_data_*, mmm_finance_v118, plaid_items, youtube tables)', !/growth_data|mmm_finance_v118|plaid_items|youtube_|finance_snapshots/.test(CODE) && (CODE.match(/rest\/v1\/[a-z_]+/g) || []).every((x) => x === 'rest/v1/app_settings'));
@@ -102,4 +124,6 @@ await mut('compare-and-set removed', "&updated_at=${row.updated_at ? 'eq.' + enc
 await mut('unreadable-summary guard removed', "if (row && !doc) return res.status(500)", 'if (false) return res.status(500)', async (w) => { w.db.set('fin_import_household', { value: '{"entity":"srv_farsi","salt":"x"}', updated_at: 't' }); const { p } = await good(w); await w.commit({ body: { adapter: 'fixture_csv', content: csv(rows), expected_rows_fingerprint: p.body.expected_rows_fingerprint } }); return w.writes.length === 0; });
 await mut('preview made to write', "if (op === 'preview') return res.status(200)", "if (op === 'preview') { await _finImportWrite(row, _finImp.emptyDoc('x')); } if (op === 'preview') return res.status(200)", async (w) => { await w.preview({ body: { adapter: 'fixture_csv', content: csv(rows) } }); return w.writes.length === 0; });
 
+await mut('verify: typed confirmation not required', "confirmation: body.confirmation }", "confirmation: 'VERIFY-IMPORT-AGAINST-APP' }", async (w) => { const p = await w.preview({ body: { adapter: 'fixture_csv', content: csv(rows) } }); await w.commit({ body: { adapter: 'fixture_csv', content: csv(rows), expected_rows_fingerprint: p.body.expected_rows_fingerprint } }); const m = (await w.status()).body.months[0]; w.writes.length = 0; const r = await w.verify({ body: { month: m.month, app_income_cents: m.income, app_expense_cents: m.expense } }); return r.code === 400; });
+await mut('verify: write goes to a different key', "return res.status(200).json({ ok: true, verified: true", "await fetch(SUPABASE_URL + '/rest/v1/app_settings', { method: 'POST', headers: {}, body: JSON.stringify({ key: 'mmm_finance_v118', value: '{}' }) }); return res.status(200).json({ ok: true, verified: true", async (w) => { const p = await w.preview({ body: { adapter: 'fixture_csv', content: csv(rows) } }); await w.commit({ body: { adapter: 'fixture_csv', content: csv(rows), expected_rows_fingerprint: p.body.expected_rows_fingerprint } }); const m = (await w.status()).body.months[0]; w.writes.length = 0; await w.verify({ body: { month: m.month, app_income_cents: m.income, app_expense_cents: m.expense, confirmation: CONF } }); return w.writes.every((x) => !x.body || x.body.key !== 'mmm_finance_v118'); });
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

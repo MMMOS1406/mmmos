@@ -25,7 +25,7 @@ try {
   await page.evaluate(() => renderTab('home')); await settle(page, stub.origin, 1800);
   const home = await page.evaluate(() => ({ cards: [...document.querySelectorAll('#mainContent .h2-grid.c3 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.querySelector('span').innerText.trim(), r.querySelector('b').innerText.trim()])) })), strip: (document.querySelector('#mainContent .h2-grid.c4 .h2-card[data-h2="analytics"]') || {}).innerText || '', all: document.getElementById('mainContent').innerText }));
   const vKey = (kv) => Object.keys(kv).find((k) => /^Views \(/.test(k)), sKey = (kv) => Object.keys(kv).find((k) => /^Subscribers gained/.test(k));
-  const cA = home.cards.find((c) => c.name === 'SRV Farsi'), cB = home.cards.find((c) => c.name === 'SRV Studio');
+  const cA = home.cards.find((c) => c.name === 'Silk Road Voices'), cB = home.cards.find((c) => c.name === 'SRV Studio');
   ok('Home: two business cards, each with a labeled analytics window (no "all synced videos")', !!cA && !!cB && /30-day window to /.test(vKey(cA.kv)) && !/all synced videos/.test(home.all), [cA && Object.keys(cA.kv), home.all.slice(0, 200)]);
   ok('Home: each business shows its CORRECTED window total (oracle), not the legacy all-rows sum', cA.kv[vKey(cA.kv)] === L(sumV(dbF)) && cB.kv[vKey(cB.kv)] === L(sumV(dbS)), [cA.kv, sumV(dbF), sumV(dbS)]);
   ok('Home: the legacy sums appear nowhere on the page', !home.all.includes(L(legacyV(dbF))) && !home.all.includes(L(legacyV(dbS))), [legacyV(dbF), legacyV(dbS)]);

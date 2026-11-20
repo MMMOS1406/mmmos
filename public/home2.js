@@ -3,7 +3,7 @@
  * Loaded for every session but acts ONLY for the Admin; Family and VA never see it (this file then only passes every call through).
  * One authoritative destination per function:
  *   Home ................ the two businesses + finance and analytics summaries (every card/row links to its destination)
- *   SRV Farsi / SRV Studio (identifier SRV English) .. ONE workspace per business with five tabs: Overview, Production (tasks), Packages, Analytics, Avatars —
+ *   Silk Road Voices (identifier SRV Farsi) / SRV Studio (identifier SRV English) .. ONE workspace per business with five tabs: Overview, Production (tasks), Packages, Analytics, Avatars —
  *                         each tab is the app's existing screen, scoped to that business only
  *   Investment .......... its own business page (Finance V2 3B): verified data only, isolated from the music businesses
  *   Analytics ........... the cross-business analytics screen        Finance ........ the existing Finance screen
@@ -23,8 +23,8 @@
   var BIZ = [['SRV Farsi', 'srv_farsi'], ['SRV English', 'srv_english']];   // CEO portfolio decision 2026-11-09: two retained businesses
   var CH = { 'SRV Farsi': /SRV Farsi|Silk Road/i, 'SRV English': /SRV English|Studio English/i };   // how each business is named on the analytics screen
   // CEO-facing display names ONLY. Stored identifiers, engine keys, package/task/analytics queries and channel mappings keep their existing values (the music business is still engine 'SRV English' / srv_english).
-  // SRV Farsi display name: unchanged until the CEO confirms the permanent brand spelling (see the Phase 3B report); change it here only, in DISPLAY.
-  var DISPLAY = { 'SRV English': 'SRV Studio' };
+  // CEO decision (PM correction order, Phase 3B): 'Silk Road Voices' is the CEO-facing name for SRV Farsi. Display only — the engine key 'SRV Farsi', srv_farsi, silk_road_voices, channel titles and published text are unchanged.
+  var DISPLAY = { 'SRV Farsi': 'Silk Road Voices', 'SRV English': 'SRV Studio' };
   function dn(name) { return DISPLAY[name] || name; }
   var SIDE = [
     ['home', 'Home'], ['biz:SRV Farsi', dn('SRV Farsi')], ['biz:SRV English', dn('SRV English')], ['invest', 'Investment'],
@@ -174,7 +174,9 @@
       .then(function (r) { return r.ok ? r.json().then(function (rows) { return { ok: true, rows: Array.isArray(rows) ? rows : [] }; }) : { ok: false, rows: [] }; })
       .catch(function () { return { ok: false, rows: [] }; });
   }
-  function load(done) {
+  function load(done0) {
+    // Home also needs the household import status (verified / pending months) — one CEO-only read, once; Home repaints when it arrives
+    var done = function () { var f = window._finImpLoad, st = window._finImp; var p = (typeof f === 'function' && st && !st.loaded && !st.loading) ? f() : null; if (p && p.then) p.then(done0, done0); else done0(); };
     if (S.loading) return;
     if (S.data && Date.now() - S.at < 60000) { done(); return; }
     S.loading = true;
@@ -245,7 +247,7 @@
   }
   /* Finance V2 phase 3B — VERIFIED DATA ONLY. A figure is shown only when its source, reporting period and verification status are known (public/finance/finVerified.js);
      otherwise the tile says "No verified data" with the reason, never 0. Stored entries are preserved in the database and simply not displayed. Display only: nothing here writes, saves or recalculates anything. */
-  function finCtx() { return safe(function () { return window.FinSrc ? window.FinSrc.buildCtx(D, Date.now()) : null; }, null); }
+  function finCtx() { return safe(function () { var c = window.FinSrc ? window.FinSrc.buildCtx(D, Date.now()) : null; if (c && window.FinVerified) window.FinVerified.withImports(c, window._finImp && window._finImp.status); return c; }, null); }   // import months (CEO-verified or pending) travel with the context
   function FV() { return window.FinVerified; }
   function nv(key) { return safe(function () { var c = finCtx(); return c && FV() ? FV().nvHtml(key, c) : '<span>No verified data</span>'; }, '<span>No verified data</span>'); }
   function verifiedFigure(key, fmt) { return safe(function () { var c = finCtx(); if (!c || !FV()) return nv(key); return FV().show(key, c, function () { return esc(fmt()); }); }, nv(key)); }

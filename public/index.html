@@ -1632,7 +1632,9 @@ const _ENGINE_CH={
 function _analyticsScopeEngine(){ return (typeof window!=='undefined'&&window._analyticsScope)||''; }
 function _analyticsChannelInScope(name){ const sc=_analyticsScopeEngine(); return !sc||_ENGINE_CH[sc]===name; }
 function _analyticsEngineInScope(engine,channelTitle){ const sc=_analyticsScopeEngine(); if(!sc)return true; return engine===sc||(!engine&&_ENGINE_CH[sc]===channelTitle); }
-function _analyticsScopeLabel(){ const sc=_analyticsScopeEngine(); return sc?(' — '+(sc==='SRV English'?'SRV STUDIO':sc.toUpperCase())+' ONLY'):' — EACH BUSINESS SHOWN SEPARATELY'; }   // display name only; the scope key stays 'SRV English'
+// CEO-facing display names for the Analytics screen ONLY (admin). The engine keys 'SRV Farsi' / 'SRV English', channel titles and every query keep their stored values.
+function _ceoEngineName(e){ return ({'SRV Farsi':'Silk Road Voices','SRV English':'SRV Studio'})[e]||e; }
+function _analyticsScopeLabel(){ const sc=_analyticsScopeEngine(); return sc?(' — '+_ceoEngineName(sc).toUpperCase()+' ONLY'):' — EACH BUSINESS SHOWN SEPARATELY'; }
 
 function computeContentHealth(){
   const channels=D.channels||[];
@@ -3377,7 +3379,7 @@ async function ytDecisionEngine(){
     const renderChannel = (c) => {
       const sig = c.signals;
       let html = '<div style="border:1px solid rgba(201,168,76,0.30);border-radius:8px;padding:12px;margin-bottom:10px;background:rgba(0,0,0,0.2)">';
-      html += '<div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:8px">'+c.title+' <span style="color:var(--dim);font-size:10px">· '+c.engine+'</span></div>';
+      html += '<div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:8px">'+c.title+' <span style="color:var(--dim);font-size:10px">· '+_ceoEngineName(c.engine)+'</span></div>';
       if (sig.videos > 0) {
         html += '<div style="font-size:10px;color:var(--dim);margin-bottom:8px;font-family:\'JetBrains Mono\',monospace">'
           +'cadence '+sig.cadencePerWeek+'/wk · avg ret '+(sig.avgRet ? Math.round(sig.avgRet)+'%' : '—')+' · top hook: '+(sig.dominantTopPattern||'—')+' · subs/video '+sig.subsPerVideo+'</div>';
@@ -3442,7 +3444,7 @@ async function ytFoundationReport(){
         : '';
       return '<div style="border:1px solid '+verdict.color+'40;border-radius:8px;padding:12px;margin-bottom:10px;background:rgba(0,0,0,0.2)">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-          + '<div style="font-size:13px;font-weight:700;color:#fff">'+c.title+' <span style="color:var(--dim);font-size:10px">· '+c.engine+'</span></div>'
+          + '<div style="font-size:13px;font-weight:700;color:#fff">'+c.title+' <span style="color:var(--dim);font-size:10px">· '+_ceoEngineName(c.engine)+'</span></div>'
           + '<div style="font-size:11px;font-weight:700;color:'+verdict.color+';background:'+verdict.color+'15;padding:3px 8px;border-radius:6px">'+verdict.label+'</div>'
         + '</div>'
         + '<div style="font-size:10px;color:var(--dim);margin-bottom:6px">'+verdict.why+'</div>'
@@ -4472,10 +4474,10 @@ function renderEnginesShell(){
   const subNav = _renderSubNav(ENGINES_SUBTABS, sub, 'setEnginesSub');
   let body = '';
   try {
-    if(sub==='overview' && typeof renderEngines==='function') body = renderEngines();
+    if(sub==='overview' && typeof renderEngines==='function') body = _finRoleBanner() + renderEngines();   // Family: unverified-figure banner (labels only)
     else if(sub==='analytics' && typeof renderEngineAnalytics==='function') body = renderEngineAnalytics();
     else if(sub==='packages' && typeof renderPackagesPage==='function') body = renderPackagesPage();
-    else body = (typeof renderEngines==='function') ? renderEngines() : '';
+    else body = (typeof renderEngines==='function') ? _finRoleBanner() + renderEngines() : '';
   } catch(e){ body = `<div style="color:#ef4444;padding:12px">Render error in ${sub}: ${e.message}</div>`; }
   return subNav + body;
 }
@@ -7397,6 +7399,7 @@ function _renderHomeOperatorDashboard(){
   const _companyLabel = _companyWorst==='red' ? 'Needs attention' : _companyWorst==='yellow' ? 'Stable — minor items open' : 'Healthy';
   return `
     <div style="max-width:520px;margin:0 auto;padding:8px 4px 28px">
+      ${_finRoleBanner()}
       <!-- 1. COMPANY HEALTH — v16.14.0: single executive signal (CEO Phase 4 approval note),
            no sub-stats. Detail per department lives on each department's own page. -->
       <div style="background:${_companyWorst==='red'?'rgba(239,68,68,0.06)':_companyWorst==='yellow'?'rgba(245,158,11,0.06)':'rgba(34,197,94,0.06)'};border:1px solid ${trafficColor[_companyWorst]}45;border-radius:14px;padding:14px 16px;margin-bottom:12px">
@@ -7405,7 +7408,7 @@ function _renderHomeOperatorDashboard(){
       </div>
       <!-- 2. NET WORTH (rolls up into Balance Sheet Summary below) -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px">
-        <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">NET WORTH</div>
+        <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;font-family:'JetBrains Mono',monospace">NET WORTH${_finChip('netWorth',true)}</div>
         <div style="font-size:28px;font-weight:800;color:#fff;line-height:1.1">${$fmt(endNet)}</div>
         <div style="font-size:12px;font-weight:700;color:${trendColor};margin-top:4px;font-family:'JetBrains Mono',monospace">${deltaPct!==null?(trendSign+' '+Math.abs(deltaPct).toFixed(2)+'%'):(trendSign+' '+$fmt(Math.abs(deltaAmt))+' change')} <span style="color:var(--dim);font-weight:400">${filter}</span></div>
         <div style="margin:14px -4px 8px">${chartSvg}</div>
@@ -7420,7 +7423,7 @@ function _renderHomeOperatorDashboard(){
       <div style="margin-bottom:12px">${(typeof renderOperatorConsole==='function')?renderOperatorConsole():''}</div>
       <!-- 4. BALANCE SHEET SUMMARY -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px">
-        <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">BALANCE SHEET SUMMARY</div>
+        <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">BALANCE SHEET SUMMARY${_finChip('netWorth',true)}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
           <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px"><div style="font-size:9px;color:var(--dim);letter-spacing:1px">ASSETS</div><div style="font-size:15px;font-weight:800;color:#fff;margin-top:2px">${$fmt(F.netWorth+F.debtTotal)}</div></div>
           <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px"><div style="font-size:9px;color:var(--dim);letter-spacing:1px">LIABILITIES</div><div style="font-size:15px;font-weight:800;color:#ef4444;margin-top:2px">${$fmt(F.debtTotal)}</div></div>
@@ -7429,7 +7432,7 @@ function _renderHomeOperatorDashboard(){
       </div>
       <!-- 5. MONTHLY P&L -->
       <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px">
-        <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">MONTHLY P&amp;L</div>
+        <div style="font-size:10px;font-weight:700;color:var(--dim);letter-spacing:1.5px;margin-bottom:10px;font-family:'JetBrains Mono',monospace">MONTHLY P&amp;L${_finChip('cashflow',true)}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
           <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px"><div style="font-size:9px;color:var(--dim);letter-spacing:1px">INCOME</div><div style="font-size:15px;font-weight:800;color:#22c55e;margin-top:2px">${$fmt(F.incomeTotal)}</div></div>
           <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px"><div style="font-size:9px;color:var(--dim);letter-spacing:1px">EXPENSES</div><div style="font-size:15px;font-weight:800;color:#ef4444;margin-top:2px">${$fmt(F.expenseTotal)}</div></div>
@@ -7481,7 +7484,7 @@ function _renderHomeOperatorDashboard(){
               <div style="display:flex;justify-content:space-between;align-items:baseline">
                 <div>
                   <div style="font-size:12px;font-weight:700;color:#fff">${g.label}</div>
-                  <div style="font-size:10px;color:var(--dim);margin-top:1px">${g.sub()}</div>
+                  <div style="font-size:10px;color:var(--dim);margin-top:1px">${g.sub()}</div>${_finGoalChips(g.label)}
                 </div>
                 <div style="text-align:right;flex-shrink:0;margin-left:10px">
                   <div style="font-size:13px;font-weight:800;color:${g.color}">${g.isMonths?(g.cur+'mo'):$k(g.displayCur!==undefined?g.displayCur:(g.cur||0))}</div>
@@ -7491,7 +7494,7 @@ function _renderHomeOperatorDashboard(){
               ${_bar(g.cur||0,g.tgt||1,g.color)}
             </div>`).join('')
           + `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-top:1px solid rgba(255,255,255,0.06);margin-top:2px">
-              <div style="font-size:12px;color:var(--dim)">Savings Rate</div>
+              <div style="font-size:12px;color:var(--dim)">Savings Rate${_finChip('savingsRate',true)}</div>
               <div style="font-size:13px;font-weight:800;color:#22c55e">${F.savingsRate||0}%</div>
             </div>`;
         })()}
@@ -8786,7 +8789,7 @@ function renderFinance(){
     const savings = _findSavingsAccount();
     if(savings && savings.account_id) D.efSourceAccountId = savings.account_id;
   }
-  return `
+  return `${_finRoleBanner()}
     ${/* v13.69.46 — Finance Phase 3: banner is now a runtime check on D.plaidConnected + D.plaidEnv. */ ''}
     ${isFinanceLive() ? `
     <div style="margin-bottom:14px;padding:16px 18px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.40);border-radius:12px">
@@ -8946,8 +8949,12 @@ async function _finSetGoalTarget(key,val){
   if(typeof renderTab==='function')renderTab(currentTab);
 }
 // ── Finance V2 phase 1 — source transparency (display only). Reads Finance state through public/finance/financeSources.js; never writes, saves or recalculates anything. ──
-function _finCtx(){try{if(typeof currentUser==='undefined'||!currentUser||currentUser.id!=='admin')return null;   // labels are shown to the CEO only; the Family / VA Finance views are unchanged
-    return (window.FinSrc&&window.FinSrc.buildCtx(D,Date.now()))||null;}catch(e){return null;}}
+function _finCtx(){try{if(typeof currentUser==='undefined'||!currentUser||(currentUser.id!=='admin'&&currentUser.id!=='family'))return null;if(currentUser.id==='family'&&window.__finNoRoleLabels)return null;   /* test hook: renders Family without labels to prove labels never change a value */   // source labels for the CEO and for Family (the VA has no financial view); labels only — no value, permission or stored record changes
+    const c=(window.FinSrc&&window.FinSrc.buildCtx(D,Date.now()))||null;if(c&&window.FinVerified)window.FinVerified.withImports(c,(window._finImp&&window._finImp.status)||null);return c;}catch(e){return null;}}   // import months (verified / pending) let CEO-confirmed exports supply income, spending and net
+// Family: every financial figure is labelled with its source; unverified (typed-in / default / reconstructed / legacy) values are never presented as verified. Values and permissions are unchanged.
+function _finRoleBanner(){try{if(typeof currentUser==='undefined'||!currentUser||currentUser.id!=='family')return '';const c=_finCtx();if(!c)return '';const live=c.plaidConnected&&c.plaidItems>0;
+  return `<div class="fin-role-banner" style="margin:0 0 12px;padding:10px 12px;border:1px dashed rgba(251,191,36,0.45);border-radius:10px;font-size:11px;line-height:1.5;color:var(--dim)"><b style="color:#fbbf24;letter-spacing:0.5px">${live?'SOURCE LABELS':'FIGURES NOT VERIFIED'}</b> — ${live?'figures labelled CONNECTED come from a linked bank; anything labelled MANUAL, DEFAULT, RECONSTRUCTED or LEGACY is not verified.':'amounts on this screen are typed-in or default values. None has been verified against a bank, brokerage or export. The label beside each figure shows where it comes from.'}</div>`;}catch(e){return '';}}
+function _finManualChip(key,note,live){try{const c=_finCtx();if(!c||!window.FinSrc)return '';const K=window.FinSrc.KINDS[live?'connected':'manual'];return window.FinSrc.chip({key:key,kind:live?'connected':'manual',label:K.text,color:K.color,asOfText:'',note:note||''},{margin:'0'});}catch(e){return '';}}
 function _finChip(key,inline){try{const c=_finCtx();if(!c)return '';return window.FinSrc.chip(window.FinSrc.describe(key,c),inline?{margin:'0 0 0 8px'}:undefined);}catch(e){return '';}}
 // Per-goal chips: where the CURRENT value comes from and whether the TARGET is a default. Machine Income is split into business revenue vs investment market gain (display only — the stored/calculated total is unchanged).
 function _finGoalChips(label){
@@ -8961,24 +8968,24 @@ function _finGoalChips(label){
       const ym=(typeof currentYM==='function')?currentYM():'';
       const biz=Object.values(D.engineRevenue||{}).reduce((a,m)=>a+(parseFloat((m||{})[ym])||0),0);
       const gain=(typeof computeInvestmentEngineGrowth==='function')?computeInvestmentEngineGrowth():0;
-      extra=`<div style="font-size:9px;color:var(--dim);margin-top:3px;line-height:1.5">of which: business revenue ${c.revenueEntries?('$'+Math.round(biz).toLocaleString()+' (typed-in)'):'— (none entered)'} + investment market gain, monthly average, $${Math.round(gain).toLocaleString()} — a market gain, not earned income</div>`;
+      extra=`<div class="fin-label" style="font-size:9px;color:var(--dim);margin-top:3px;line-height:1.5">of which: business revenue ${c.revenueEntries?('$'+Math.round(biz).toLocaleString()+' (typed-in)'):'— (none entered)'} + investment market gain, monthly average, $${Math.round(gain).toLocaleString()} — a market gain, not earned income</div>`;
     }
     else if(label==='Runway'){cur=F.chip(Object.assign({},F.describe('availableCash',c),{key:'runway',note:'Calculated from typed-in cash and expenses'}));tgt=F.chip(F.describeTarget('runwayGoal',c));}
-    return `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap"><span style="font-size:8px;color:var(--dim)">current</span>${cur}<span style="font-size:8px;color:var(--dim)">target</span>${tgt}</div>${extra}`;
+    return `<div class="fin-label" style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap"><span style="font-size:8px;color:var(--dim)">current</span>${cur}<span style="font-size:8px;color:var(--dim)">target</span>${tgt}</div>${extra}`;
   }catch(e){return '';}
 }
 function _finIEPanel(){
   try{
     const c=_finCtx();if(!c)return '';const F=window.FinSrc,v=F.describe('investmentValue',c),g=F.describe('investmentGain',c);
     const stale=(v.ageDays!=null&&v.ageDays>31)?`<span style="font-size:9px;color:#f59e0b;margin-left:6px">last entry ${v.ageDays} days ago — update due</span>`:'';
-    return `<div style="margin-bottom:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px"><div style="font-size:9px;color:var(--dim);margin-bottom:4px;letter-spacing:0.5px">WHERE THESE NUMBERS COME FROM</div>${F.chip(v)}${stale} ${F.chip(g)}<div style="font-size:9px;color:var(--dim);margin-top:4px;line-height:1.5">Investment Engine value and gain are typed in each month. A market gain or loss is reported as investment performance — it is not earned income and is not business revenue.</div></div>`;
+    return `<div class="fin-label" style="margin-bottom:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px"><div style="font-size:9px;color:var(--dim);margin-bottom:4px;letter-spacing:0.5px">WHERE THESE NUMBERS COME FROM</div>${F.chip(v)}${stale} ${F.chip(g)}<div style="font-size:9px;color:var(--dim);margin-top:4px;line-height:1.5">Investment Engine value and gain are typed in each month. A market gain or loss is reported as investment performance — it is not earned income and is not business revenue.</div></div>`;
   }catch(e){return '';}
 }
 function _finHistoryNote(){
   try{
     const F=window.FinSrc;if(!F||!_finCtx())return '';const pool=(Array.isArray(D.fsnapshots)&&D.fsnapshots.length)?D.fsnapshots:(D.snapshots||[]);const h=F.historyProfile(pool);
     const rc=h.reconstructed?F.chip({key:'history',kind:'reconstructed',label:F.KINDS.reconstructed.text,color:F.KINDS.reconstructed.color,asOfText:'',note:'Rebuilt from a stored timeline'}):'';
-    return `<div style="margin-top:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:var(--dim);line-height:1.5">${rc} ${escHTML(h.text)}</div>`;
+    return `<div class="fin-label" style="margin-top:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:var(--dim);line-height:1.5">${rc} ${escHTML(h.text)}</div>`;
   }catch(e){return '';}
 }
 // ── Finance V2 3A — Imports from financial apps (CEO/admin only; read-only; household). The file is read in this browser tab, sent once to the server for checking, and never stored. Nothing here changes
@@ -8996,7 +9003,7 @@ function _finImpSection(){
 }
 function _finImpRefresh(){ var el=document.getElementById('finImpBody'); if(el) el.innerHTML=_finImpBody(); try{ var sp=document.querySelector('.fin-sources'),c=_finCtx(); if(sp&&c&&window.FinVerified) sp.outerHTML=window.FinVerified.sourcesHtml(window.FinVerified.sources(c,_finImp.status,Date.now())); }catch(e){} }   // keeps the Data sources panel in step with the import status
 async function _finImpLoad(){
-  if(_finImp.loading) return; _finImp.loading=true;
+  if(_finImp.loading) return; _finImp.loading=true;   // (returns when the status has been read)
   try{
     var r=await _ceoAuthedFetch('/api/ops?action=fin_import_status',{}); var d=await r.json().catch(function(){return null;});
     if(r.status===401){ _finImp.msg='Sign in as CEO to use imports.'; _finImp.msgTone='warn'; }
@@ -9004,6 +9011,7 @@ async function _finImpLoad(){
     else { _finImp.msg='Could not load import status.'; _finImp.msgTone='warn'; }
   }catch(e){ _finImp.msg='Could not load import status.'; _finImp.msgTone='warn'; }
   _finImp.loading=false; _finImpRefresh();
+  try{ if(_finImp.status&&_finImp.status.verified_months&&_finImp.status.verified_months.length&&typeof currentTab!=='undefined'&&currentTab==='finance'&&typeof renderTab==='function'&&!_finImp.rerendered){ _finImp.rerendered=true; renderTab('finance'); } }catch(e){}   // household figures can now include a CEO-confirmed month
 }
 function _finImpPick(input){
   var f=input&&input.files&&input.files[0]; _finImp.preview=null; _finImp.content=null; _finImp.fileName=''; _finImp.msg=''; if(!f){ _finImpRefresh(); return; }
@@ -9030,6 +9038,21 @@ async function _finImpCommit(){
   }catch(e){ _finImp.msg='Nothing was saved.'; _finImp.msgTone='warn'; }
   _finImp.busy=false; _finImpRefresh();
 }
+function _finImpVForm(m){ var g=function(id){var e=document.getElementById(id);return e?e:null;}; var i=g('finImpVI_'+m),e=g('finImpVE_'+m),c=g('finImpVC_'+m); _finImp.vform=_finImp.vform||{}; _finImp.vform[m]={income:i?i.value:'',expense:e?e.value:'',ok:!!(c&&c.checked)}; }
+async function _finImpVerify(m){
+  if(_finImp.busy) return; _finImpVForm(m); var f=_finImp.vform[m]||{}; _finImp.vmsg=_finImp.vmsg||{};
+  var inc=Math.round(parseFloat(f.income)*100), exp=Math.round(parseFloat(f.expense)*100);
+  if(!(inc>=0)||!(exp>=0)){ _finImp.vmsg[m]={tone:'warn',text:'Type both figures exactly as your app shows them.'}; _finImpRefresh(); return; }
+  if(!f.ok){ _finImp.vmsg[m]={tone:'warn',text:'Tick the box to confirm that you compared these figures with your app.'}; _finImpRefresh(); return; }
+  _finImp.busy=true; _finImp.vmsg[m]={tone:'',text:'Comparing…'}; _finImpRefresh();
+  try{
+    var r=await _ceoAuthedFetch('/api/ops?action=fin_import_verify',{month:m,app_income_cents:inc,app_expense_cents:exp,confirmation:'VERIFY-IMPORT-AGAINST-APP'}); var d=await r.json().catch(function(){return null;});
+    if(r.ok&&d&&d.verified){ _finImp.status=Object.assign({},_finImp.status||{},d.status,{ok:true}); _finImp.vmsg[m]={tone:'ok',text:'Verified. This month can now supply household income, spending and net.'}; delete _finImp.vform[m]; _finImp.busy=false; _finImpRefresh(); try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined'&&currentTab==='finance') renderTab('finance'); }catch(e){} return; }
+    if(d&&d.error==='mismatch'){ var di=d.difference||{}; _finImp.vmsg[m]={tone:'warn',text:'Not verified: your figures differ from the import (income by '+_finImpMoney(di.income||0)+', spending by '+_finImpMoney(di.expense||0)+'; tolerance $1.00). Check the file and the app, then try again.'}; }
+    else _finImp.vmsg[m]={tone:'warn',text:'Not verified: '+((d&&d.error)||r.status)+'.'};
+  }catch(e){ _finImp.vmsg[m]={tone:'warn',text:'Not verified.'}; }
+  _finImp.busy=false; _finImpRefresh();
+}
 function _finImpDiscard(){ _finImp.preview=null; _finImp.content=null; _finImp.fileName=''; _finImp.msg=''; _finImpRefresh(); }
 function _finImpSetAdapter(v){ _finImp.adapter=v; _finImp.preview=null; _finImpRefresh(); }
 function _finImpBody(){
@@ -9054,8 +9077,22 @@ function _finImpBody(){
     var rj=Object.keys(r.rejected||{}); rj.forEach(function(k){ var o=r.rejected[k]; h.push('<div>Rejected — '+escHTML(_FINIMP_REJ[k]||k)+': '+o.count+' row'+(o.count===1?'':'s')+' (lines '+o.lines.map(Number).join(', ')+(o.count>o.lines.length?'…':'')+')</div>'); });
     var ms=Object.keys(r.months||{}).sort(); if(ms.length){ h.push('<table style="width:100%;margin-top:6px;border-collapse:collapse;font-size:10px"><tr style="color:var(--dim);text-align:right"><th style="text-align:left">Month</th><th>Income</th><th>Expenses</th><th>Refunds</th><th>Transfers (excluded)</th><th>Unclassified (excluded)</th></tr>'+ms.map(function(m){ var t=r.months[m]; return '<tr style="text-align:right"><td style="text-align:left">'+escHTML(m)+'</td><td>'+_finImpMoney(t.income)+'</td><td>'+_finImpMoney(t.expense)+'</td><td>'+_finImpMoney(t.refund)+'</td><td>'+_finImpMoney(t.transfer)+'</td><td>'+_finImpMoney(t.unclassified_in+t.unclassified_out)+'</td></tr>'; }).join('')+'</table>'); }
     h.push('<div style="margin-top:8px;display:flex;gap:8px"><button class="fin-add-btn" id="finImpCommit" onclick="_finImpCommit()"'+((pv.commit_ready&&!_finImp.busy)?'':' disabled')+' style="width:auto;padding:6px 12px;font-size:11px">Import this summary</button><button class="fin-add-btn" onclick="_finImpDiscard()" style="width:auto;padding:6px 12px;font-size:11px">Discard</button></div></div>'); }
-  // imported months (verification pending)
-  if(st&&st.has_data){ h.push('<div style="'+box+'"><b style="color:var(--text)">Imported (verification pending — not used in Finance figures)</b>'+(st.months||[]).map(function(m){ return '<div>'+escHTML(m.month)+' · income '+_finImpMoney(m.income)+' · expenses '+_finImpMoney(m.expense)+' · net '+_finImpMoney(m.net)+(m.refund?' · refunds '+_finImpMoney(m.refund):'')+(m.transfer_excluded?' · transfers excluded '+_finImpMoney(m.transfer_excluded):'')+((m.unclassified_in||m.unclassified_out)?' · unclassified excluded '+_finImpMoney(m.unclassified_in+m.unclassified_out):'')+'</div>'; }).join('')+'<div style="margin-top:4px">Months not listed have no imported data (unavailable, not zero).</div></div>'); }
+  // imported months: PENDING verification until the CEO compares them with the source app and confirms; a verified month can feed household income / spending / net (with period, provenance and freshness shown)
+  if(st&&st.has_data){
+    h.push('<div id="finImpMonths" style="'+box+'"><b style="color:var(--text)">Imported months</b><div style="margin:2px 0 6px">Pending months are not used in Finance figures. To verify a month, type the income and spending your source app shows for it, then confirm.</div>'+(st.months||[]).map(function(m){
+      var fresh=m.freshness==='stale'?'<span style="color:#f59e0b">STALE</span>':'<span style="color:#22c55e">FRESH</span>', src=escHTML((m.sources&&m.sources[0])||'import');
+      var line='<div class="finImpMonth" data-month="'+escHTML(m.month)+'" data-verification="'+escHTML(m.verification)+'" style="padding:6px 0;border-top:1px solid rgba(255,255,255,0.06)"><div>'+escHTML(m.month)+' · income '+_finImpMoney(m.income)+' · spending '+_finImpMoney(m.expense)+' · net '+_finImpMoney(m.net)+(m.transfer_excluded?' · transfers excluded '+_finImpMoney(m.transfer_excluded):'')+((m.unclassified_in||m.unclassified_out)?' · unclassified excluded '+_finImpMoney(m.unclassified_in+m.unclassified_out):'')+'</div>';
+      line+='<div style="margin-top:2px">'+src+' · imported '+escHTML(String(m.imported_at||'').slice(0,10))+' · '+fresh+' · ';
+      if(m.verification==='verified'){ line+='<b style="color:#22c55e">VERIFIED by CEO '+escHTML(String(m.verified_at||'').slice(0,10))+'</b> (you entered '+_finImpMoney(m.compared.income)+' income / '+_finImpMoney(m.compared.expense)+' spending)</div>'; }
+      else {
+        var f=(_finImp.vform&&_finImp.vform[m.month])||{}, k=escHTML(m.month);
+        line+='<b style="color:#fbbf24">VERIFICATION PENDING</b></div><div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'+
+          '<label>Income in the app $ <input id="finImpVI_'+k+'" type="number" step="0.01" min="0" value="'+escHTML(f.income||'')+'" oninput="_finImpVForm(\''+k+'\')" style="width:90px;background:transparent;color:var(--text);border:none;border-bottom:1px dashed rgba(201,168,76,0.4)"></label>'+
+          '<label>Spending in the app $ <input id="finImpVE_'+k+'" type="number" step="0.01" min="0" value="'+escHTML(f.expense||'')+'" oninput="_finImpVForm(\''+k+'\')" style="width:90px;background:transparent;color:var(--text);border:none;border-bottom:1px dashed rgba(201,168,76,0.4)"></label>'+
+          '<label><input id="finImpVC_'+k+'" type="checkbox"'+(f.ok?' checked':'')+' onchange="_finImpVForm(\''+k+'\')"> I compared these with my '+src+' app and confirm</label>'+
+          '<button class="fin-add-btn" id="finImpVB_'+k+'" onclick="_finImpVerify(\''+k+'\')" style="width:auto;padding:5px 10px;font-size:11px">Confirm month</button></div>'; }
+      if(_finImp.vmsg&&_finImp.vmsg[m.month]) line+='<div class="finImpVMsg" style="margin-top:3px;color:'+(_finImp.vmsg[m.month].tone==='ok'?'#10b981':'#f59e0b')+'">'+escHTML(_finImp.vmsg[m.month].text)+'</div>';
+      return line+'</div>'; }).join('')+'<div style="margin-top:4px">Months not listed have no imported data (unavailable, not zero). Tolerance: each figure may differ by at most $1.00 (app rounding).</div></div>'); }
   return h.join('');
 }
 function renderGoalsSection(F,isAdmin){
@@ -10525,7 +10562,7 @@ function renderEngines(){
         ${_uberSrc.live?'<span style="font-size:9px;color:#22c55e;padding:2px 6px;background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.30);border-radius:4px;font-weight:700;letter-spacing:0.5px;font-family:\'JetBrains Mono\',monospace">LIVE · PLAID</span>':'<span style="font-size:9px;color:#f59e0b;padding:2px 6px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.30);border-radius:4px;font-weight:700;letter-spacing:0.5px;font-family:\'JetBrains Mono\',monospace">MANUAL</span>'}
       </div>
     </div>
-    <div style="font-size:13px;font-weight:800;color:#22c55e;margin-bottom:3px">Uber Engine</div>
+    <div style="font-size:13px;font-weight:800;color:#22c55e;margin-bottom:3px">Uber Engine</div>${_finManualChip('uberEngine',_uberSrc.live?'Read from a connected source':'Typed-in figures; not verified',!!_uberSrc.live)}
     <div style="font-size:11px;color:var(--dim);margin-bottom:8px">Active Income · Funds MMMOS Operations</div>
     <div style="display:grid;grid-template-columns:1fr auto;gap:5px 8px;font-size:11px;font-family:'JetBrains Mono',monospace">
       ${_dataRow('Weekly Est.','$'+_uberWeekly.toLocaleString(),'#fff')}
@@ -10553,7 +10590,7 @@ function renderEngines(){
         ${badge(_ieFresh?'updated':'needs update',_iePC)}
       </div>
     </div>
-    <div style="font-size:13px;font-weight:800;color:#f59e0b;margin-bottom:3px">Investment Engine</div>
+    <div style="font-size:13px;font-weight:800;color:#f59e0b;margin-bottom:3px">Investment Engine</div>${_finChip('investmentValue',true)}${_finChip('investmentGain',true)}
     <div style="font-size:11px;color:var(--dim);margin-bottom:8px">Long-Term Wealth · Monthly DCA Active</div>
     <div style="display:grid;grid-template-columns:1fr auto;gap:5px 8px;font-size:11px;font-family:'JetBrains Mono',monospace">
       ${_dataRow('Portfolio Value',$k(_ieVal),'#fff')}
