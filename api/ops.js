@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import * as _finImp from '../lib/finImport.mjs'; // Finance V2 3A: read-only financial-app CSV import (household only; summary document; original file never stored; Rocket Money adapter UNMAPPED until a verified header is supplied)
 import { vaultFromEnv as _finVaultFromEnv, plaidAad as _plaidAad, planDisconnect as _planDisconnect, safeDbError as _safeDbError } from '../lib/finCrypto.mjs'; // Finance V2 2A: AES-256-GCM credential vault (keys from environment only; DEFAULT OFF — with no keys configured behaviour is unchanged)
 import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BUSINESSES as _yppBusinesses, YPP_STORE_KEY as _yppStoreKey, YPP_FRESH_DAYS as _yppFreshDays } from '../lib/yppCard.mjs'; // R-C1 B: Revenue/YPP card from OFFICIAL dated Studio Earn captures only (read-only)
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
@@ -7700,6 +7701,67 @@ Return STRICT JSON only, wrapped in <metadata> tags. Schema:
     stage_error: stageErr,
   });
 }
+
+// ── fin-import:begin ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Finance V2 3A — fin_import_status / fin_import_preview / fin_import_commit. POST only, CEO session only. The CSV text arrives in the request body, is parsed IN MEMORY and is never stored or logged;
+// the only write is ONE app_settings row (fin_import_household: counts, fingerprints, month and category totals, salted row hashes). No table, no migration. Family/VA/anonymous callers are refused before any
+// database read. The entity is fixed to "household": nothing here can touch a business document (growth_data_*, mmm_finance_v118, plaid_items).
+const _FIN_IMPORT_KEY = 'fin_import_household';
+const _FIN_ADAPTERS = _finImp.ADAPTERS;   // production registry: Rocket Money is UNMAPPED; no fixture adapter
+async function _finImportLoad() {
+  const rows = await sbGet(`app_settings?key=eq.${_FIN_IMPORT_KEY}&select=value,updated_at&limit=1`);
+  const row = Array.isArray(rows) && rows[0] ? rows[0] : null;
+  return { row, doc: row ? _finImp.parseDoc(row.value) : null };
+}
+async function _finImportWrite(row, doc) {
+  const headers = { 'Content-Type': 'application/json', 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY, 'Prefer': 'return=representation' };
+  const value = JSON.stringify(doc), now = new Date().toISOString();
+  if (!row) {   // first import: insert only if the key is still absent
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, { method: 'POST', headers, body: JSON.stringify({ key: _FIN_IMPORT_KEY, value, updated_at: now }) });
+    if (r.status === 409) return false;
+    if (!r.ok) throw new Error(_safeDbError('app_settings', 'insert', r.status, ''));
+    return true;
+  }
+  // compare-and-set on the row's updated_at: a concurrent import loses cleanly instead of overwriting
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${_FIN_IMPORT_KEY}&updated_at=${row.updated_at ? 'eq.' + encodeURIComponent(row.updated_at) : 'is.null'}`, { method: 'PATCH', headers, body: JSON.stringify({ value, updated_at: now }) });
+  if (!r.ok) throw new Error(_safeDbError('app_settings', 'update', r.status, ''));
+  const out = await r.json().catch(() => []);
+  return Array.isArray(out) && out.length === 1;
+}
+async function finImport(req, res, op) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUPABASE_SERVICE_KEY) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+  try { res.setHeader('Cache-Control', 'no-store'); } catch (_) { /* ignore */ }
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const adapters = Object.values(_FIN_ADAPTERS).map((a) => ({ id: a.id, label: a.label, status: a.status }));
+  try {
+    const { row, doc } = await _finImportLoad();
+    if (row && !doc) return res.status(500).json({ ok: false, error: 'stored_summary_unreadable' });   // never overwrite a summary this code cannot read
+    if (op === 'status') return res.status(200).json({ ok: true, entity: _finImp.ENTITY, adapters, ..._finImp.statusView(doc), raw_files_retained: false });
+    const adapterId = typeof body.adapter === 'string' ? body.adapter.slice(0, 40) : '';
+    const content = body.content;
+    if (typeof content !== 'string') return res.status(400).json({ ok: false, error: 'missing_content' });
+    if (content.length > _finImp.LIMITS.maxBytes + 4096) return res.status(413).json({ ok: false, error: 'too_large', limit_bytes: _finImp.LIMITS.maxBytes });
+    const salt = _fin3aSalt();
+    const r = _finImp.analyzeImport({ content, adapterId, doc, adapters: _FIN_ADAPTERS, now: Date.now(), salt });
+    if (op === 'preview') return res.status(200).json({ ok: true, preview: true, commit_ready: r.ok, expected_rows_fingerprint: r.ok ? r.rows_fingerprint : null, result: _finImp.publicResult(r) });
+    // commit: re-validate from scratch (the browser's earlier preview is never trusted), require the same rows, refuse on any blocking error
+    if (!r.ok) return res.status(422).json({ ok: false, error: 'import_blocked', blocking: r.blocking.map((b) => b.code) });
+    if (typeof body.expected_rows_fingerprint !== 'string' || body.expected_rows_fingerprint !== r.rows_fingerprint) return res.status(409).json({ ok: false, error: 'preview_mismatch' });
+    const id = 'imp_' + createHash('sha256').update(r.file.sha256 + ':' + Date.now()).digest('hex').slice(0, 10);
+    const merged = _finImp.mergeImport(doc, r, { nowIso: new Date().toISOString(), id });
+    const wrote = await _finImportWrite(row, merged);
+    if (!wrote) return res.status(409).json({ ok: false, error: 'concurrent_import_retry' });
+    return res.status(200).json({ ok: true, committed: true, import_id: id, rows_new: r.counts.new_rows, rows_already_imported: r.counts.already_imported, period: r.period, status: _finImp.statusView(merged) });
+  } catch (e) {
+    console.warn('[fin_import] ' + op + ' failed: ' + String((e && e.message) || e).slice(0, 80));   // message only: never file content
+    return res.status(500).json({ ok: false, error: 'fin_import_failed' });
+  }
+}
+// first-import salt: derived from the service key already in the environment (no new credential); stored inside the document on first commit, so every later import reuses it
+function _fin3aSalt() { return createHash('sha256').update('fin_import_salt:' + SUPABASE_SERVICE_KEY).digest('hex').slice(0, 16); }
+// ── fin-import:end ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async function plaidRemoveItem(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
@@ -21464,6 +21526,9 @@ export default async function handler(req, res) {
     if (action === 'plaid_exchange')             return await plaidExchange(req, res);
     if (action === 'plaid_pull')                 return await plaidPull(req, res);
     if (action === 'plaid_remove_item')          return await plaidRemoveItem(req, res); // v13.65.1 — Finance Phase 3 hotfix
+    if (action === 'fin_import_status')          return await finImport(req, res, 'status');  // Finance V2 3A: household app-import summary (CEO session)
+    if (action === 'fin_import_preview')         return await finImport(req, res, 'preview'); // Finance V2 3A: validate + classify in memory, writes nothing
+    if (action === 'fin_import_commit')          return await finImport(req, res, 'commit');  // Finance V2 3A: re-validate, then write ONE summary row (app_settings.fin_import_household)
     if (action === 'srv_build_package')          return await srvBuildPackage(req, res); // v13.69.0 — SRV Automation Phase 1
     // v13.51.0 — P1 HeyGen integration
     // v13.52.0 — P2A Submagic integration
