@@ -3,8 +3,9 @@
  * Loaded for every session but acts ONLY for the Admin; Family and VA never see it (this file then only passes every call through).
  * One authoritative destination per function:
  *   Home ................ the two businesses + finance and analytics summaries (every card/row links to its destination)
- *   SRV Farsi / SRV English .. ONE workspace per business with five tabs: Overview, Production (tasks), Packages, Analytics, Avatars —
+ *   Silk Road Voices (identifier SRV Farsi) / SRV Studio (identifier SRV English) .. ONE workspace per business with five tabs: Overview, Production (tasks), Packages, Analytics, Avatars —
  *                         each tab is the app's existing screen, scoped to that business only
+ *   Investment .......... its own business page (Finance V2 3B): verified data only, isolated from the music businesses
  *   Analytics ........... the cross-business analytics screen        Finance ........ the existing Finance screen
  *   Brain / Engineering / Integrations / Access-Settings ... the existing screens, shown on their own (no department-dashboard filler, no chip row that duplicates the sidebar)
  * It READS only (one packages read and one analytics read per business), writes nothing, calls no write action, and sends no credential.
@@ -21,8 +22,12 @@
 
   var BIZ = [['SRV Farsi', 'srv_farsi'], ['SRV English', 'srv_english']];   // CEO portfolio decision 2026-11-09: two retained businesses
   var CH = { 'SRV Farsi': /SRV Farsi|Silk Road/i, 'SRV English': /SRV English|Studio English/i };   // how each business is named on the analytics screen
+  // CEO-facing display names ONLY. Stored identifiers, engine keys, package/task/analytics queries and channel mappings keep their existing values (the music business is still engine 'SRV English' / srv_english).
+  // CEO decision (PM correction order, Phase 3B): 'Silk Road Voices' is the CEO-facing name for SRV Farsi. Display only — the engine key 'SRV Farsi', srv_farsi, silk_road_voices, channel titles and published text are unchanged.
+  var DISPLAY = { 'SRV Farsi': 'Silk Road Voices', 'SRV English': 'SRV Studio' };
+  function dn(name) { return DISPLAY[name] || name; }
   var SIDE = [
-    ['home', 'Home'], ['biz:SRV Farsi', 'SRV Farsi'], ['biz:SRV English', 'SRV English'],
+    ['home', 'Home'], ['biz:SRV Farsi', dn('SRV Farsi')], ['biz:SRV English', dn('SRV English')], ['invest', 'Investment'],
     ['analytics', 'Analytics'], ['finance', 'Finance'], ['engineering', 'Engineering'], ['integrations', 'Integrations'], ['settings', 'Access / Settings']
   ];
   var TABS = [['overview', 'Overview'], ['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics'], ['avatars', 'Avatars']];
@@ -100,8 +105,8 @@
 
   /* ------------------------------------------------------------ business workspaces */
   function wsHeader(engine, tab) {
-    return '<div class="h2-ws" id="h2Ws"><div class="h2-crumb"><a data-h2="home" role="link" tabindex="0">← Home</a> › ' + esc(engine) + ' › ' + esc((TABS.filter(function (t) { return t[0] === tab; })[0] || ['', ''])[1]) + '</div>' +
-      '<div class="h2-title" style="margin-bottom:6px">' + esc(engine) + '</div>' +
+    return '<div class="h2-ws" id="h2Ws"><div class="h2-crumb"><a data-h2="home" role="link" tabindex="0">← Home</a> › ' + esc(dn(engine)) + ' › ' + esc((TABS.filter(function (t) { return t[0] === tab; })[0] || ['', ''])[1]) + '</div>' +
+      '<div class="h2-title" style="margin-bottom:6px">' + esc(dn(engine)) + '</div>' +
       '<div class="h2-tabs" role="tablist">' + TABS.map(function (t) { return '<button type="button" role="tab" data-h2="ws:' + esc(engine) + ':' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '"' + (t[0] === tab ? ' aria-selected="true"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div></div>';
   }
   function openWs(engine, tab) {
@@ -151,6 +156,8 @@
   /* ------------------------------------------------------------ navigation */
   function go(id) {
     if (id === 'home') { S.biz = null; window.renderTab('home'); return; }
+    if (id === 'invest') return openInvest('overview');
+    if (id.indexOf('inv:') === 0) return openInvest(id.slice(4));
     if (id.indexOf('biz:') === 0) return openWs(id.slice(4), 'overview');
     if (id.indexOf('ws:') === 0) { var p = id.split(':'); return openWs(p[1], p[2]); }
     S.biz = null; try { window.pkgFilterEngine = ''; } catch (e) { /* ignore */ }
@@ -167,7 +174,9 @@
       .then(function (r) { return r.ok ? r.json().then(function (rows) { return { ok: true, rows: Array.isArray(rows) ? rows : [] }; }) : { ok: false, rows: [] }; })
       .catch(function () { return { ok: false, rows: [] }; });
   }
-  function load(done) {
+  function load(done0) {
+    // Home also needs the household import status (verified / pending months) — one CEO-only read, once; Home repaints when it arrives
+    var done = function () { var f = window._finImpLoad, st = window._finImp; var p = (typeof f === 'function' && st && !st.loaded && !st.loading) ? f() : null; if (p && p.then) p.then(done0, done0); else done0(); };
     if (S.loading) return;
     if (S.data && Date.now() - S.at < 60000) { done(); return; }
     S.loading = true;
@@ -231,65 +240,40 @@
   function row(label, value, dest) { return '<div class="h2-kv"' + (dest ? ' data-h2="' + esc(dest) + '" role="link" tabindex="0"' : '') + '><span>' + esc(label) + '</span><b>' + value + '</b></div>'; }
   function bizCard(i) {
     var f = facts(i), n = f.b[0];
-    return '<div class="h2-card"><h3><span class="h2-dot" style="background:' + f.h[0] + '"></span>' + esc(n) + '</h3>' +
+    return '<div class="h2-card"><h3><span class="h2-dot" style="background:' + f.h[0] + '"></span>' + esc(dn(n)) + '</h3>' +
       row('Last package', f.last, 'ws:' + n + ':packages') + row('Stage', esc(stage(f.px)), 'ws:' + n + ':packages') + row('Next action', f.next, 'ws:' + n + ':production') +
       row('YouTube', esc(f.h[1]), 'ws:' + n + ':analytics') + row('Views (' + f.win + ')', f.views, 'ws:' + n + ':analytics') + row('Subscribers gained (from videos, same window)', f.subs, 'ws:' + n + ':analytics') +
-      '<button type="button" class="h2-btn" data-h2="biz:' + esc(n) + '">Open ' + esc(n) + '</button></div>';
+      '<button type="button" class="h2-btn" data-h2="biz:' + esc(n) + '">Open ' + esc(dn(n)) + '</button></div>';
   }
-  /* Finance V2 phase 1 — every financial figure on Home carries its source (manual / default / reconstructed / connected / unavailable) and its last known update.
-     Display only: these helpers read the Finance state through window.FinSrc and never write, save or recalculate anything. */
-  function finCtx() { return safe(function () { return window.FinSrc ? window.FinSrc.buildCtx(D, Date.now()) : null; }, null); }
-  function chipOf(key) { return safe(function () { var c = finCtx(); return c ? window.FinSrc.chip(window.FinSrc.describe(key, c), { margin: '3px 0 0 0' }) : ''; }, ''); }
-  function targetChip(gk) { return safe(function () { var c = finCtx(); return c ? window.FinSrc.chip(window.FinSrc.describeTarget(gk, c), { margin: '0' }) : ''; }, ''); }
+  /* Finance V2 phase 3B — VERIFIED DATA ONLY. A figure is shown only when its source, reporting period and verification status are known (public/finance/finVerified.js);
+     otherwise the tile says "No verified data" with the reason, never 0. Stored entries are preserved in the database and simply not displayed. Display only: nothing here writes, saves or recalculates anything. */
+  function finCtx() { return safe(function () { var c = window.FinSrc ? window.FinSrc.buildCtx(D, Date.now()) : null; if (c && window.FinVerified) window.FinVerified.withImports(c, window._finImp && window._finImp.status); return c; }, null); }   // import months (CEO-verified or pending) travel with the context
+  function FV() { return window.FinVerified; }
+  function nv(key) { return safe(function () { var c = finCtx(); return c && FV() ? FV().nvHtml(key, c) : '<span>No verified data</span>'; }, '<span>No verified data</span>'); }
+  function verifiedFigure(key, fmt) { return safe(function () { var c = finCtx(); if (!c || !FV()) return nv(key); return FV().show(key, c, function () { return esc(fmt()); }); }, nv(key)); }
   function moneyStrip() {
-    var F = safe(function () { return computeFinanceState(); }, null);
-    if (!F) return '<div class="h2-empty">Finance data unavailable.</div>';
     var lnk = function (inner) { return '<div class="h2-card lnk" data-h2="finance" role="link" tabindex="0">' + inner + '<div class="h2-go">Open Finance →</div></div>'; };
-    var an = BIZ.map(function (b, i) { var f = facts(i); return '<div class="h2-kv"><span>' + esc(b[0]) + '</span><b>' + f.views + ' views · ' + f.subs + ' subs</b></div>'; }).join('');
+    var an = BIZ.map(function (b, i) { var f = facts(i); return '<div class="h2-kv"><span>' + esc(dn(b[0])) + '</span><b>' + f.views + ' views · ' + f.subs + ' subs</b></div>'; }).join('');
+    var F = function () { return computeFinanceState(); };
     return '<div class="h2-grid c4">' +
-      lnk('<div class="h2-sm">Monthly income</div><div class="h2-big">' + money(F.incomeTotal) + '</div>' + chipOf('income')) +
-      lnk('<div class="h2-sm">Monthly spend</div><div class="h2-big">' + money(F.expenseTotal) + '</div>' + chipOf('expenses')) +
-      lnk('<div class="h2-sm">Net per month (income minus spend)</div><div class="h2-big">' + money((F.incomeTotal || 0) - (F.expenseTotal || 0)) + '</div>' + chipOf('cashflow')) +
+      lnk('<div class="h2-sm">Household income</div><div class="h2-big">' + verifiedFigure('income', function () { return money(F().incomeTotal); }) + '</div>') +
+      lnk('<div class="h2-sm">Household spending</div><div class="h2-big">' + verifiedFigure('expenses', function () { return money(F().expenseTotal); }) + '</div>') +
+      lnk('<div class="h2-sm">Net (income minus spending)</div><div class="h2-big">' + verifiedFigure('cashflow', function () { return money(F().cashflow); }) + '</div>') +
       '<div class="h2-card lnk" data-h2="analytics" role="link" tabindex="0"><div class="h2-sm" style="margin-bottom:4px">Analytics (latest analytics window)</div>' + an + '<div class="h2-go">Open Analytics →</div></div></div>';
   }
-  /* Strategic Goals — the same goals and the same numbers as the Finance screen (computeFinanceState), read-only, each with the source of its current value and of its target. */
+  /* Goals are OPTIONAL targets. A target appears only after the CEO has set it; a default that shipped with the app is never shown as approved. Current values follow the same verified-only rule. */
   function goalsCard() {
-    var F = safe(function () { return computeFinanceState(); }, null);
-    if (!F) return '<div class="h2-card"><h3>Strategic goals</h3><div class="h2-empty">Finance data unavailable.</div></div>';
-    var bar = function (cur, tgt, col) { var p = Math.max(0, Math.min(100, Math.round(((cur || 0) / Math.max(1, tgt || 1)) * 100))); return '<div style="background:rgba(0,0,0,.3);height:6px;border-radius:3px;overflow:hidden;margin-top:5px"><div style="width:' + p + '%;height:100%;background:' + col + ';border-radius:3px"></div></div>'; };
-    var orig = safe(function () { return (D.debts || []).reduce(function (a, d) { return a + (parseFloat(d.originalAmount) || 0); }, 0); }, 0) || F.debtGoal || 1;
-    var paid = Math.max(0, orig - (F.debtTotal || 0));
-    var ym = safe(function () { return currentYM(); }, '');
-    var biz = safe(function () { return Object.values(D.engineRevenue || {}).reduce(function (a, m) { return a + (parseFloat((m || {})[ym]) || 0); }, 0); }, 0);
-    var gain = safe(function () { return computeInvestmentEngineGrowth(); }, 0);
     var c = finCtx();
-    var split = '<div class="h2-sm" style="margin-top:3px">of which: business revenue ' + (c && c.revenueEntries ? money(biz) + ' (typed-in)' : '— (none entered)') + ' + investment market gain, monthly average, ' + money(gain) + ' — a market gain, not earned income</div>';
-    var goals = [
-      { l: 'Emergency Fund', cur: F.emergencyFund, tgt: F.efTarget, col: '#22c55e', shown: money(F.emergencyFund) + ' / ' + money(F.efTarget), sub: (F.emergencyCoverage || 0) + ' months covered', cc: chipOf('emergencyFund'), tc: targetChip('efTarget') },
-      { l: 'Investment Engine Goal', cur: F.portfolioTotal, tgt: F.portfolioGoal, col: '#f59e0b', shown: money(F.portfolioTotal) + ' / ' + money(F.portfolioGoal), sub: 'investment value toward the goal', cc: chipOf('investmentValue'), tc: targetChip('portfolioGoal') },
-      { l: 'Debt Freedom', cur: paid, tgt: orig, col: '#ef4444', shown: money(F.debtTotal) + ' remaining of ' + money(orig), sub: 'paid down ' + money(paid), cc: chipOf('debts'), tc: targetChip('debtGoal') },
-      { l: 'Machine Income', cur: F.machineIncome, tgt: F.machineGoal, col: '#c9a84c', shown: money(F.machineIncome) + '/mo / ' + money(F.machineGoal) + '/mo', sub: 'per month across all engines', cc: chipOf('machineIncome'), tc: targetChip('machineGoal'), extra: split }
-    ];
-    return '<div class="h2-card lnk" data-h2="finance" role="link" tabindex="0" id="h2Goals"><h3>Strategic goals</h3>' + goals.map(function (g) {
-      return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:10px"><div><b>' + esc(g.l) + '</b><div class="h2-sm">' + esc(g.sub) + '</div></div><div style="text-align:right;font-weight:800;color:' + g.col + '">' + esc(g.shown) + '</div></div>' + bar(g.cur, g.tgt, g.col) +
-        '<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="h2-sm">current</span>' + g.cc + '<span class="h2-sm">target</span>' + g.tc + '</div>' + (g.extra || '') + '</div>';
-    }).join('') + '<div class="h2-go">Open Finance →</div></div>';
+    if (!c || !FV()) return '<div class="h2-card" id="h2Goals"><h3>Goals — optional targets</h3><div class="h2-empty">No verified data.</div></div>';
+    return '<div class="h2-card lnk" data-h2="finance" role="link" tabindex="0" id="h2Goals"><h3>Goals — optional targets</h3>' + FV().goalRows(c, {}) + '<div class="h2-go">Open Finance →</div></div>';
   }
-  /* Investment Engine — its own card (not a production business): value and gain are typed in monthly; a market gain is investment performance, never revenue. */
-  function investmentCard() {
-    var c = finCtx(), F = window.FinSrc;
-    var value = safe(function () { return computeFinanceState().portfolioTotal; }, null);   // the same figure Net Worth and the goals use
-    var gl = safe(function () { return computeInvestmentEngineGainLoss(); }, null);
-    var d = c && F ? F.describe('investmentValue', c) : null;
-    var updated = safe(function () { return isInvestmentEngineUpdatedThisMonth(); }, false);
-    var dot = !d || d.kind === 'unavailable' ? '#6b7280' : (updated ? '#22c55e' : '#f59e0b');
-    var status = !d || d.kind === 'unavailable' ? 'No Investment Engine entry yet' : (updated ? 'Updated this month' : 'Monthly update overdue' + (d.ageDays != null ? ' — last entry ' + d.ageDays + ' days ago' : ''));
-    var body = d && d.kind !== 'unavailable'
-      ? row('Value', money(value)) + row('Market gain / loss (lifetime, not income)', (gl == null ? '—' : money(gl))) + row('Last entry', esc(d.asOfText))
-      : '<div class="h2-empty">Nothing entered, so no value is shown.</div>';
-    return '<div class="h2-card lnk" data-h2="finance" role="link" tabindex="0" id="h2IE"><h3><span class="h2-dot" style="background:' + dot + '"></span>Investment Engine</h3>' +
-      '<div class="h2-sm">' + esc(status) + '</div>' + body + (d ? '<div style="margin-top:6px">' + chipOf('investmentValue') + ' ' + chipOf('investmentGain') + '</div>' : '') +
-      '<div class="h2-sm" style="margin-top:6px">Not a production business and not connected to a brokerage. A market gain is investment performance, not earned income or business revenue.</div><div class="h2-go">Open Investment Engine →</div></div>';
+  /* Investment — its own business (sidebar and page); on Home it is a card beside the two music businesses. Value and performance follow the verified-only rule; nothing is typed-in or reconstructed. */
+  function investCard() {
+    var c = finCtx(), src = c && FV() ? FV().sources(c, null, Date.now()).filter(function (r) { return r.id === 'robinhood'; })[0] : null;
+    return '<div class="h2-card" id="h2Invest"><h3><span class="h2-dot" style="background:#6b7280"></span>Investment</h3>' +
+      row('Value', nv('investmentValue').split('<div')[0]) + row('Market gain / loss (not income)', nv('investmentGain').split('<div')[0]) + row('Data source', esc(src ? src.state === 'unavailable' ? 'Not connected' : src.state : 'Not connected'), 'inv:connection') +
+      '<div class="h2-sm" style="margin-top:6px">Separate from the music businesses. Performance is never business revenue or household income.</div>' +
+      '<button type="button" class="h2-btn" data-h2="invest">Open Investment</button></div>';
   }
   /* SRV Circle Advisors — placeholder only. No record of this business exists in the system yet, so nothing about it (status, revenue, activity) is shown or invented. */
   function circleCard() {
@@ -299,28 +283,72 @@
   }
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
-      '<div class="h2-lab">Your two businesses</div><div class="h2-grid c2">' + bizCard(0) + bizCard(1) + '</div>' +
-      '<div class="h2-lab">Investment Engine and ventures not yet configured</div><div class="h2-grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">' + investmentCard() + circleCard() + '</div>' +
-      '<div class="h2-lab">Strategic goals</div>' + goalsCard() +
+      '<div class="h2-lab">Your businesses</div><div class="h2-grid c3">' + bizCard(0) + bizCard(1) + investCard() + '</div>' +
+      '<div class="h2-lab">Ventures not yet configured</div><div class="h2-grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">' + circleCard() + '</div>' +
+      '<div class="h2-lab">Goals — optional targets</div>' + goalsCard() +
       '<div class="h2-lab">Finance and analytics</div>' + moneyStrip() + '</div>';
   }
   function overviewPage(engine) {
     var i = bizIndex(engine), f = facts(i), n = engine;
     var lnk = function (title, line, dest) { return '<div class="h2-card lnk" data-h2="' + esc(dest) + '" role="link" tabindex="0"><h3>' + esc(title) + '</h3><div class="h2-sm">' + line + '</div><div class="h2-go">Open ' + esc(title) + ' →</div></div>'; };
-    return '<div class="h2-wrap"><div class="h2-grid c2"><div class="h2-card"><h3><span class="h2-dot" style="background:' + f.h[0] + '"></span>' + esc(n) + ' — status</h3>' +
+    return '<div class="h2-wrap"><div class="h2-grid c2"><div class="h2-card"><h3><span class="h2-dot" style="background:' + f.h[0] + '"></span>' + esc(dn(n)) + ' — status</h3>' +
       row('Last package', f.last) + row('Stage', esc(stage(f.px))) + row('Next action', f.next) + row('YouTube', esc(f.h[1])) + row('Views (' + f.win + ')', f.views) + row('Subscribers gained (from videos, same window)', f.subs) + '</div>' +
       '<div class="h2-grid" style="grid-template-columns:minmax(0,1fr)">' +
       lnk('Production', f.t.length ? f.t.length + ' open task' + (f.t.length > 1 ? 's' : '') + ' · next: ' + f.next : 'No open tasks', 'ws:' + n + ':production') +
-      lnk('Packages', 'Package history for ' + esc(n) + ' only', 'ws:' + n + ':packages') +
-      lnk('Analytics', esc(n) + ' channel only · ' + f.views + ' views', 'ws:' + n + ':analytics') +
-      lnk('Avatars', 'Add, upload, replace or remove ' + esc(n) + ' avatar photos', 'ws:' + n + ':avatars') + '</div></div></div>';
+      lnk('Packages', 'Package history for ' + esc(dn(n)) + ' only', 'ws:' + n + ':packages') +
+      lnk('Analytics', esc(dn(n)) + ' channel only · ' + f.views + ' views', 'ws:' + n + ':analytics') +
+      lnk('Avatars', 'Add, upload, replace or remove ' + esc(dn(n)) + ' avatar photos', 'ws:' + n + ':avatars') + '</div></div></div>';
+  }
+
+  /* ------------------------------------------------------------ Investment business page (Finance V2 3B) */
+  var INV_TABS = [['overview', 'Overview'], ['holdings', 'Holdings & balances'], ['performance', 'Performance'], ['connection', 'Connection']];
+  function invHeader(tab) {
+    return '<div class="h2-ws" id="h2Ws"><div class="h2-crumb"><a data-h2="home" role="link" tabindex="0">← Home</a> › Investment › ' + esc((INV_TABS.filter(function (t) { return t[0] === tab; })[0] || ['', ''])[1]) + '</div>' +
+      '<div class="h2-title" style="margin-bottom:6px">Investment</div>' +
+      '<div class="h2-tabs" role="tablist">' + INV_TABS.map(function (t) { return '<button type="button" role="tab" data-h2="inv:' + t[0] + '" class="' + (t[0] === tab ? 'on' : '') + '"' + (t[0] === tab ? ' aria-selected="true"' : '') + '>' + t[1] + '</button>'; }).join('') + '</div></div>';
+  }
+  function invNote(t) { return '<div class="h2-sm" style="margin-top:8px;line-height:1.5">' + t + '</div>'; }
+  function invFigure(key, fmt) { return verifiedFigure(key, fmt); }
+  function invPage(tab) {
+    var c = finCtx(), V = FV(); var F = function () { return computeFinanceState(); };
+    var srcs = c && V ? V.sources(c, null, Date.now()) : [];
+    var rh = srcs.filter(function (r) { return r.id === 'robinhood'; })[0];
+    var preserved = c && V ? V.preservedHtml(c) : '';
+    var iso = '<div class="h2-card"><h3>Isolation</h3><div class="h2-sm" style="line-height:1.5">Investment is a separate business. No music-business task, package, channel or analytics figure appears here, and investment performance is never counted as business revenue or household income.</div></div>';
+    if (tab === 'holdings') {
+      return '<div class="h2-wrap"><div class="h2-card" id="h2InvHold"><h3>Holdings and balances</h3>' + row('Total value', invFigure('investmentValue', function () { return money(F().portfolioTotal); })) +
+        invNote('Holdings and balances appear only from a connected read-only source with a known sync date. Nothing typed in, reconstructed or defaulted is shown. Nothing is connected today.') + preserved + '</div></div>';
+    }
+    if (tab === 'performance') {
+      return '<div class="h2-wrap"><div class="h2-card" id="h2InvPerf"><h3>Performance</h3>' + row('Market gain / loss (not income)', nv('investmentGain').split('<div')[0]) +
+        invNote('Market gain or loss is investment performance. It is <b>not</b> earned income, not household income and not business revenue, and it is never added to machine income. Performance appears only from verified source data with a stated reporting period.') + '</div>' + iso + '</div>';
+    }
+    if (tab === 'connection') {
+      return '<div class="h2-wrap"><div class="h2-card" id="h2InvConn"><h3>Connection — CEO-controlled, read-only</h3>' +
+        '<div class="h2-sm" style="margin-bottom:8px"><b>Status: ' + esc(rh && rh.state !== 'unavailable' ? rh.state : 'Not connected') + '.</b> No account has been connected and no vendor account has been created.</div>' +
+        '<div class="h2-sm" style="line-height:1.6"><b>Planned route:</b> SnapTrade Personal, Robinhood by OAuth. SnapTrade lists Robinhood as read-only: it cannot place trades. The connection is requested as <b>read</b> only; trading is never requested.<br>' +
+        '<b>Steps (each needs your explicit go-ahead):</b> 1) authorize creating the SnapTrade account and confirm the written cost terms; 2) engineering prepares the read-only link page; 3) <b>you</b> open the link and approve on Robinhood\'s own screen; 4) engineering verifies holdings, balances and the sync date, then you decide whether to keep it.<br>' +
+        '<b>Stop rules:</b> abort if any screen asks for a Robinhood password, a trading permission, or a payment method.<br>' +
+        '<b>Freshness:</b> SnapTrade documents holdings once per day on daily plans and transactions once per day, so this is a daily snapshot, not live. <b>Cost:</b> Personal is listed as free for your own accounts, but SnapTrade also says personal access is free "for a limited time" with no end date, so written confirmation of the terms is required before connecting.</div></div>' + iso + '</div>';
+    }
+    return '<div class="h2-wrap"><div class="h2-grid c2"><div class="h2-card" id="h2InvOv"><h3>Investment — status</h3>' +
+      row('Value', invFigure('investmentValue', function () { return money(F().portfolioTotal); })) + row('Market gain / loss (not income)', nv('investmentGain').split('<div')[0]) + row('Data source', esc(rh ? (rh.state === 'unavailable' ? 'Not connected' : rh.state) : 'Not connected'), 'inv:connection') +
+      invNote('No value is shown until a read-only source is connected and verified.') + preserved + '</div>' + iso + '</div></div>';
+  }
+  function openInvest(tab) {
+    tab = INV_TABS.some(function (t) { return t[0] === tab; }) ? tab : 'overview';
+    S.biz = null; S.cur = 'invest'; S.invTab = tab;
+    try { window.pkgFilterEngine = ''; window._analyticsScope = ''; } catch (e) { /* ignore */ }
+    if (typeof currentTab !== 'undefined') currentTab = 'investment';
+    style(); paintSide(); paintMain(invHeader(tab) + invPage(tab));
   }
 
   /* ------------------------------------------------------------ router hook */
-  var KNOWN = ['home', 'finance', 'tasks', 'engines', 'marketing', 'human_resources', 'legal_compliance', 'system', 'analytics', 'content', 'packages', 'integrations', 'factory', 'continuity', 'settings'];
+  var KNOWN = ['home', 'investment', 'finance', 'tasks', 'engines', 'marketing', 'human_resources', 'legal_compliance', 'system', 'analytics', 'content', 'packages', 'integrations', 'factory', 'continuity', 'settings'];
   window.renderTab = function (tab) {
     if (active() && KNOWN.indexOf(tab) < 0) tab = 'home';
     if (!active()) { var r0 = _renderTab.apply(this, arguments); if (!authorized()) scrub(); return r0; }
+    if (tab === 'investment') return openInvest(S.invTab || 'overview');
     if (tab === 'home') {
       if (typeof currentTab !== 'undefined') currentTab = 'home';
       S.biz = null; S.cur = 'home'; style(); paintSide(); paintMain(homePage()); load(function () { if (S.cur === 'home' && active()) paintMain(homePage()); });

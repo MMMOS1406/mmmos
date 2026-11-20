@@ -19,12 +19,12 @@ try {
     await o.page.evaluateOnNewDocument(() => localStorage.removeItem('mmm_home_v2'));
     await o.page.reload(); await login(o.page, stub.origin, 'admin'); await settle(o.page, stub.origin, 1200);
     await o.page.evaluate(() => renderTab('home')); await settle(o.page, stub.origin, 1200);
-    const cards = await o.page.evaluate(() => [...document.querySelectorAll('#mainContent .h2-grid.c2 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.children[0].innerText, r.children[1].innerText])), dot: c.querySelector('.h2-dot').style.background })));
+    const cards = await o.page.evaluate(() => [...document.querySelectorAll('#mainContent .h2-grid.c3 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.children[0].innerText, r.children[1].innerText])), dot: c.querySelector('.h2-dot').style.background })));
     if (tag === 'desktop') {
-      check('two business cards rendered', cards.length === 2 && cards.map((c) => c.name).join() === BIZ.join(), cards.map((c) => c.name).join());
+      check('two music-business cards plus the Investment card rendered (CEO-facing names Silk Road Voices / SRV Studio)', cards.length === 3 && cards.map((c) => c.name).join() === ['Silk Road Voices', 'SRV Studio', 'Investment'].join(), cards.map((c) => c.name).join());
       const text = JSON.stringify(cards);
       check('no card says "No packages yet", "No analytics yet", "Could not load" or "Loading…"', !/No packages yet|No analytics yet|Could not load|Loading/.test(text), (text.match(/No packages yet|No analytics yet|Could not load|Loading/g) || []).join());
-      for (const [i, b] of BIZ.entries()) {
+      for (const [i, b] of BIZ.entries()) {   // cards[0..1] are the two music businesses (Investment is cards[2])
         const c = cards[i].kv;
         const pk = real.packages.filter((p) => p.engine === b).sort((x, y) => (x.created_at < y.created_at ? 1 : -1))[0];
         check(`${b}: last package = newest package row (#${pk.id})`, trunc(pk.title || '#' + pk.id, 48).trim() === String(c['Last package']).trim(), c['Last package']);
@@ -54,13 +54,12 @@ try {
       const money = await o.page.evaluate(() => { const g = [...document.querySelectorAll('#mainContent .h2-grid.c4 .h2-card')]; const F = computeFinanceState(); return { cards: g.map((c) => c.innerText.replace(/\n+/g, ' | ')), income: F.incomeTotal, spend: F.expenseTotal, plaid: !!D.plaidConnected }; });
       const expInc = st.plaidConnected ? parseFloat(st.plaidMonthlyIncome) || 0 : (st.income || []).reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
       const expSp = st.plaidConnected ? parseFloat(st.plaidMonthlyBurn) || 0 : (st.expenses || []).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+      // Finance V2 3B: Home shows a household figure ONLY when it comes from a verified (connected) source; the real data here is typed-in, so every tile must say "No verified data" and the typed-in amounts must not appear
       const f = (n) => (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('en-US');
-      check(`monthly income ${f(expInc)} equals the app's finance data (${st.plaidConnected ? 'bank-linked' : 'manual entries'})`, money.income === expInc && money.cards[0].includes(f(expInc)), money.cards[0]);
-      check(`monthly spend ${f(expSp)} equals the app's finance data`, money.spend === expSp && money.cards[1].includes(f(expSp)), money.cards[1]);
-      check(`net ${f(expInc - expSp)} = income minus spend, labelled`, money.cards[2].includes(f(expInc - expSp)) && /income minus spend/.test(money.cards[2]), money.cards[2]);
-      check('source of the figures is stated', /Source: (linked bank accounts|entries in Finance)/.test(money.cards[2]) && (money.plaid ? /linked bank/.test(money.cards[2]) : /entries in Finance/.test(money.cards[2])));
+      check('Home finance tiles: income, spending and net say "No verified data" (the real stored entries are manual, not verified)', money.plaid ? true : money.cards.slice(0, 3).every((c) => /No verified data/.test(c) && !/\$\s?\d/.test(c)), money.cards.slice(0, 3));
+      check(`the stored manual income ${f(expInc)} and spend ${f(expSp)} are not displayed on Home`, money.plaid ? true : !money.cards.slice(0, 3).join(' ').includes(Math.round(expInc).toLocaleString('en-US')) || expInc === 0, money.cards[0]);
       const fin = await o.page.evaluate(() => { renderTab('finance'); return document.getElementById('mainContent').innerText; });
-      check('the same income and spend appear on the existing Finance screen', fin.includes(f(expInc).replace('$', '')) || fin.includes(Math.round(expInc).toLocaleString()), 'looked for ' + f(expInc));
+      check('the CEO Finance screen shows no typed-in income or spending figure either (verified data only)', money.plaid ? true : /VERIFIED DATA ONLY/i.test(fin) && /No verified data/.test(fin) && (expInc === 0 || !fin.includes(Math.round(expInc).toLocaleString('en-US'))), 'looked for ' + f(expInc));
     }
     check(`${tag}: no horizontal overflow`, !(await o.page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)));
     check(`${tag}: no page errors`, o.pageErrors.length === 0, o.pageErrors.join(' | '));

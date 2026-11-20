@@ -25,6 +25,7 @@ async function session(role, viewport) {
 const W = (p, ms = 500) => settle(p, stub.origin, ms);
 const text = (p) => p.evaluate(() => document.getElementById('mainContent').innerText);
 const hl = (p) => p.evaluate(() => { const b = document.querySelector('#h2Side button.on'); return b ? b.getAttribute('data-h2') : null; });
+const DN = { 'SRV Farsi': 'Silk Road Voices', 'SRV English': 'SRV Studio' };   // CEO-facing names (identifiers unchanged)
 const clickSel = async (p, sel) => { const ok = await p.evaluate((s) => { const e = document.querySelector(s); if (!e) return false; e.click(); return true; }, sel); await W(p, 650); return ok; };
 const header = (p) => p.evaluate(() => { const w = document.getElementById('h2Ws'); return w ? { crumb: w.querySelector('.h2-crumb').innerText, on: (w.querySelector('.h2-tabs button.on') || {}).innerText || null, tabs: [...w.querySelectorAll('.h2-tabs button')].map((b) => b.innerText) } : null; });
 const visibleBefore = (p, marker) => p.evaluate((m) => { const t = document.getElementById('mainContent').innerText; const i = t.indexOf(m); return i < 0 ? t : t.slice(0, i); }, marker);
@@ -33,8 +34,8 @@ try {
 
   // ---- 1 sidebar: every item opens its own section, highlights itself, shows no filler or retired content
   const side = await p.evaluate(() => [...document.querySelectorAll('#h2Side button')].map((b) => ({ id: b.getAttribute('data-h2'), label: b.innerText })));
-  check('sidebar has exactly the eight sections in order (Brain retired)', JSON.stringify(side.map((s) => s.label)) === JSON.stringify(['Home', 'SRV Farsi', 'SRV English', 'Analytics', 'Finance', 'Engineering', 'Integrations', 'Access / Settings']), side.map((s) => s.label).join(' | '));
-  const expect = { home: /Your two businesses/i, 'biz:SRV Farsi': /SRV Farsi/, 'biz:SRV English': /SRV English/, analytics: /YOUTUBE ANALYTICS/i, finance: /Income|Expenses|Debt/i, engineering: /Engineering|Brain/i, integrations: /YouTube|Integration/i, settings: /Profile|PIN|Settings/i };
+  check('sidebar has exactly the nine sections in order (Brain retired; Investment added; SRV English displays as SRV Studio)', JSON.stringify(side.map((s) => s.label)) === JSON.stringify(['Home', 'Silk Road Voices', 'SRV Studio', 'Investment', 'Analytics', 'Finance', 'Engineering', 'Integrations', 'Access / Settings']), side.map((s) => s.label).join(' | '));
+  const expect = { home: /Your businesses/i, 'biz:SRV Farsi': /Silk Road Voices/, 'biz:SRV English': /SRV Studio/, invest: /Investment/, analytics: /YOUTUBE ANALYTICS/i, finance: /Income|Expenses|Debt/i, engineering: /Engineering|Brain/i, integrations: /YouTube|Integration/i, settings: /Profile|PIN|Settings/i };
   for (const s of side) {
     await clickSel(p, `#h2Side button[data-h2="${s.id}"]`); const t = await text(p), h = await hl(p);
     check(`sidebar "${s.label}" opens its section and highlights itself`, h === s.id && expect[s.id].test(t) && t.length > 40, `highlight=${h}`);
@@ -44,7 +45,7 @@ try {
   // ---- 2 Home: every card, row and button goes to the right place, and Home is one click away from everywhere
   const homeTargets = async () => { await clickSel(p, '#h2Side button[data-h2="home"]'); return p.evaluate(() => [...document.querySelectorAll('#mainContent [data-h2]')].map((e, i) => ({ i, id: e.getAttribute('data-h2'), label: (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) }))); };
   const targets = await homeTargets();
-  check('Home offers links only to destinations that exist (no dead or double-labelled links)', targets.length >= 14 && targets.every((t) => /^(finance|analytics|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics|avatars))$/.test(t.id)), targets.map((t) => t.id).join(','));
+  check('Home offers links only to destinations that exist (no dead or double-labelled links)', targets.length >= 14 && targets.every((t) => /^(finance|analytics|invest|inv:(overview|holdings|performance|connection)|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics|avatars))$/.test(t.id)), targets.map((t) => t.id).join(','));
   for (const t of targets) {
     await clickSel(p, '#h2Side button[data-h2="home"]');
     await p.evaluate((i) => document.querySelectorAll('#mainContent [data-h2]')[i].click(), t.i); await W(p, 700);
@@ -52,7 +53,8 @@ try {
     let ok, d = `${t.id} → highlight=${h}`;
     if (t.id === 'finance') ok = h === 'finance' && /Income|Expenses|Debt/i.test(tx);
     else if (t.id === 'analytics') ok = h === 'analytics' && /YOUTUBE ANALYTICS/i.test(tx) && !hd;
-    else { const m = /^(?:biz:|ws:)(SRV (?:Farsi|English))(?::(\w+))?$/.exec(t.id); const tab = { overview: 'Overview', production: 'Production', packages: 'Packages', analytics: 'Analytics' }[m[2] || 'overview']; ok = h === 'biz:' + m[1] && !!hd && hd.on === tab && hd.crumb.includes(m[1]); d += ` header=${hd && hd.on}`; }
+    else if (t.id === 'invest' || t.id.startsWith('inv:')) { const tabN = { invest: 'Overview', 'inv:connection': 'Connection', 'inv:holdings': 'Holdings & balances', 'inv:performance': 'Performance', 'inv:overview': 'Overview' }[t.id]; ok = h === 'invest' && !!hd && hd.on === tabN && hd.crumb.includes('Investment'); d += ` header=${hd && hd.on}`; }
+    else { const m = /^(?:biz:|ws:)(SRV (?:Farsi|English))(?::(\w+))?$/.exec(t.id); const tab = { overview: 'Overview', production: 'Production', packages: 'Packages', analytics: 'Analytics' }[m[2] || 'overview']; ok = h === 'biz:' + m[1] && !!hd && hd.on === tab && hd.crumb.includes(DN[m[1]]); d += ` header=${hd && hd.on}`; }
     check(`Home control "${t.label}" (${t.id}) opens the right destination`, ok, d);
   }
 
@@ -64,7 +66,7 @@ try {
     for (const [tab, label] of [['overview', 'Overview'], ['production', 'Production'], ['packages', 'Packages'], ['analytics', 'Analytics'], ['avatars', 'Avatars']]) {
       await clickSel(p, `#h2Ws button[data-h2="ws:${biz}:${tab}"]`);
       hd = await header(p); const h = await hl(p);
-      check(`${biz} › ${label}: tab and sidebar both highlight correctly`, hd && hd.on === label && h === 'biz:' + biz && hd.crumb.includes(biz), `tab=${hd && hd.on} side=${h}`);
+      check(`${biz} › ${label}: tab and sidebar both highlight correctly`, hd && hd.on === label && h === 'biz:' + biz && hd.crumb.includes(DN[biz]), `tab=${hd && hd.on} side=${h}`);
       const t = tab === 'production' ? await visibleBefore(p, 'SHARED PLANNER') : await text(p);
       check(`${biz} › ${label}: no ${other} content, no retired business, no filler`, !NAMED[other].test(t) && !RETIRED.test(t) && !FILLER.test(t), (t.match(NAMED[other]) || t.match(RETIRED) || t.match(FILLER) || [''])[0]);
       if (tab === 'production' && fixture) check(`${biz} › Production (real data): no retired business anywhere, including the shared planner`, !RETIRED.test(await text(p)), (await text(p)).match(RETIRED)?.[0] || '');
@@ -72,7 +74,7 @@ try {
       if (tab === 'packages') check(`${biz} › Packages: the engine filter is not offered (it would let ${other} back in)`, await p.evaluate(() => { const s = document.querySelector('#pkgList select'); return !s || getComputedStyle(s).display === 'none'; }));
     }
     await clickSel(p, '#h2Ws a[data-h2="home"]');
-    check(`${biz}: "← Home" returns to Home`, (await hl(p)) === 'home' && /Your two businesses/i.test(await text(p)));
+    check(`${biz}: "← Home" returns to Home`, (await hl(p)) === 'home' && /Your businesses/i.test(await text(p)));
   }
   // overview cards inside a workspace lead to that business's own tabs
   await clickSel(p, `#h2Side button[data-h2="biz:${FARSI}"]`);

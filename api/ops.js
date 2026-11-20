@@ -7739,6 +7739,13 @@ async function finImport(req, res, op) {
     const { row, doc } = await _finImportLoad();
     if (row && !doc) return res.status(500).json({ ok: false, error: 'stored_summary_unreadable' });   // never overwrite a summary this code cannot read
     if (op === 'status') return res.status(200).json({ ok: true, entity: _finImp.ENTITY, adapters, ..._finImp.statusView(doc), raw_files_retained: false });
+    if (op === 'verify') {   // CEO comparison + typed confirmation for ONE imported month; writes only the verification record into the same summary row
+      const ver = _finImp.verifyMonth(doc, typeof body.month === 'string' ? body.month.slice(0, 7) : '', { income: body.app_income_cents, expense: body.app_expense_cents }, { nowIso: new Date().toISOString(), adapters: _FIN_ADAPTERS, confirmation: body.confirmation });
+      if (!ver.ok) return res.status(ver.error === 'mismatch' ? 422 : 400).json({ ok: false, error: ver.error, difference: ver.difference || null, tolerance_cents: ver.tolerance_cents || null });
+      const okw = await _finImportWrite(row, ver.doc);
+      if (!okw) return res.status(409).json({ ok: false, error: 'concurrent_import_retry' });
+      return res.status(200).json({ ok: true, verified: true, month: body.month.slice(0, 7), record: ver.record, status: _finImp.statusView(ver.doc) });
+    }
     const adapterId = typeof body.adapter === 'string' ? body.adapter.slice(0, 40) : '';
     const content = body.content;
     if (typeof content !== 'string') return res.status(400).json({ ok: false, error: 'missing_content' });
@@ -21528,6 +21535,7 @@ export default async function handler(req, res) {
     if (action === 'plaid_remove_item')          return await plaidRemoveItem(req, res); // v13.65.1 — Finance Phase 3 hotfix
     if (action === 'fin_import_status')          return await finImport(req, res, 'status');  // Finance V2 3A: household app-import summary (CEO session)
     if (action === 'fin_import_preview')         return await finImport(req, res, 'preview'); // Finance V2 3A: validate + classify in memory, writes nothing
+    if (action === 'fin_import_verify')          return await finImport(req, res, 'verify');  // Finance V2 3B: CEO comparison + confirmation of one imported month (writes only the verification record in app_settings.fin_import_household)
     if (action === 'fin_import_commit')          return await finImport(req, res, 'commit');  // Finance V2 3A: re-validate, then write ONE summary row (app_settings.fin_import_household)
     if (action === 'srv_build_package')          return await srvBuildPackage(req, res); // v13.69.0 — SRV Automation Phase 1
     // v13.51.0 — P1 HeyGen integration
