@@ -6,7 +6,7 @@ import * as V from '../../lib/finCrypto.mjs';
 let pass = 0, fail = 0; const ok = (n, c, d) => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, d !== undefined ? JSON.stringify(d).slice(0, 400) : ''); } };
 const ops = fs.readFileSync(new URL('../../api/ops.js', import.meta.url), 'utf8');
 const a0 = ops.indexOf('const _PLAID_ENV'), a1 = ops.indexOf('async function plaidPull(req, res) {');
-const src = ops.slice(a0, a1);
+const src = ops.slice(a0, a1).replace(/\/\/ ── fin-import:begin[\s\S]*?\/\/ ── fin-import:end[^\n]*\n/, '');   // the phase-3A import handlers sit inside this range; they are tested in test_fin_import_server.mjs
 const key = () => randomBytes(32).toString('base64'); const K1 = key(), K2 = key();
 const fakeToken = () => ['access', 'sandbox', randomBytes(10).toString('hex')].join('-');
 const world = (env = {}, over = {}) => {

@@ -8872,7 +8872,7 @@ function renderFinance(){
       <div class="row"><span style="font-weight:800">Net Worth${_finChip('netWorth',true)}</span><span class="row-val" style="color:${getValueColor(s.netWorth)}">${$k(s.netWorth)}</span></div>
     </div>`:''}
     ${/* v13.69.46 — Bank Connections wrapped in collapsible (default closed) per operator directive. */ ''}
-    ${isAdmin?section('Bank Connections', renderBankConnectionsCard(true), {defaultClosed:true}):''}
+    ${isAdmin?section('Bank Connections', renderBankConnectionsCard(true), {defaultClosed:true})+_finImpSection():''}
     ${/* v13.69.46 — Finance Phase 2: Income now sourced from Plaid 90d deposits when connected; manual list shown only as legacy fallback when no bank linked. */ ''}
     ${section('Income',renderIncomeSection(isAdmin,s),{defaultClosed:true})}
     ${/* v13.69.46 — Finance Phase 2: Expenses now sourced from Plaid 90d outflows grouped by category. */ ''}
@@ -8958,6 +8958,83 @@ function _finHistoryNote(){
     const rc=h.reconstructed?F.chip({key:'history',kind:'reconstructed',label:F.KINDS.reconstructed.text,color:F.KINDS.reconstructed.color,asOfText:'',note:'Rebuilt from a stored timeline'}):'';
     return `<div style="margin-top:10px;padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px;font-size:10px;color:var(--dim);line-height:1.5">${rc} ${escHTML(h.text)}</div>`;
   }catch(e){return '';}
+}
+// ── Finance V2 3A — Imports from financial apps (CEO/admin only; read-only; household). The file is read in this browser tab, sent once to the server for checking, and never stored. Nothing here changes
+// any existing Finance figure: imported values live in their own summary and are shown separately until they are verified and the CEO decides to use them.
+var _finImp = window._finImp = window._finImp || { loaded:false, loading:false, status:null, adapters:[], preview:null, previewFor:null, content:null, fileName:'', busy:false, msg:'', msgTone:'', adapter:'' };
+function _finImpMoney(c){ try{ return (c/100).toLocaleString('en-US',{style:'currency',currency:'USD'}); }catch(e){ return String(c/100); } }
+var _FINIMP_TEXT = { adapter_unmapped:'This app\'s file format has not been verified yet, so nothing was read. Provide a redacted sample export (header row and three rows, no names or account numbers) and the mapping will be enabled.', unknown_adapter:'Unknown source.', empty_file:'The file is empty.', header_only:'The file has a header but no rows.', too_large:'The file is larger than 2 MB.', not_csv_archive:'This looks like a spreadsheet/zip file, not a CSV export.', binary_content:'The file contains binary data.', not_csv_markup_or_json:'This is not a CSV file.', bad_encoding:'The file is not valid UTF-8 text.', control_characters:'The file contains control characters.', unterminated_quote:'A quoted field is not closed.', too_many_rows:'The file has more than 20,000 rows.', too_many_columns:'The file has too many columns.', missing_columns:'Required columns are missing from the header row.', no_valid_rows:'No valid rows were found.', too_many_rejected:'Too many rows were malformed, so the whole file is refused.', same_file_already_imported:'This exact file (or an identical export) has already been imported.', no_new_rows:'Every row in this file was already imported — nothing new to add.' };
+var _FINIMP_WARN = { overlapping_period:'This file overlaps a period you already imported. Only the new rows will be added; existing rows are not counted twice.', unclassified_rows_excluded:'Some rows could not be classified from the evidence in the file. They are listed separately and are NOT counted as income or expense.', formula_like_cells_neutralized:'Some cells looked like spreadsheet formulas. They were neutralized and nothing was stored from them.', paired_transfers_reclassified:'Matching opposite amounts between your own accounts were treated as transfers (excluded from income and expense).' };
+var _FINIMP_REJ = { ragged_row:'wrong number of columns', bad_date:'unreadable date', missing_date:'missing date', bad_amount:'unreadable amount', missing_amount:'missing amount', future_date:'date in the future', cell_too_long:'cell too long' };
+function _finImpSection(){
+  try{
+    if(!_finImp.loaded && !_finImp.loading) setTimeout(_finImpLoad,0);
+    return section('Imports — financial apps', '<div id="finImpBody">'+_finImpBody()+'</div>', {defaultClosed:false});
+  }catch(e){ return ''; }
+}
+function _finImpRefresh(){ var el=document.getElementById('finImpBody'); if(el) el.innerHTML=_finImpBody(); }
+async function _finImpLoad(){
+  if(_finImp.loading) return; _finImp.loading=true;
+  try{
+    var r=await _ceoAuthedFetch('/api/ops?action=fin_import_status',{}); var d=await r.json().catch(function(){return null;});
+    if(r.status===401){ _finImp.msg='Sign in as CEO to use imports.'; _finImp.msgTone='warn'; }
+    else if(r.ok&&d&&d.ok){ _finImp.status=d; _finImp.adapters=d.adapters||[]; if(!_finImp.adapter&&_finImp.adapters.length) _finImp.adapter=_finImp.adapters[0].id; _finImp.loaded=true; _finImp.msg=''; }
+    else { _finImp.msg='Could not load import status.'; _finImp.msgTone='warn'; }
+  }catch(e){ _finImp.msg='Could not load import status.'; _finImp.msgTone='warn'; }
+  _finImp.loading=false; _finImpRefresh();
+}
+function _finImpPick(input){
+  var f=input&&input.files&&input.files[0]; _finImp.preview=null; _finImp.content=null; _finImp.fileName=''; _finImp.msg=''; if(!f){ _finImpRefresh(); return; }
+  if(f.size>2000000){ _finImp.msg='That file is larger than 2 MB, so it was not read.'; _finImp.msgTone='warn'; _finImpRefresh(); return; }
+  var rd=new FileReader(); rd.onload=function(){ _finImp.content=String(rd.result||''); _finImp.fileName=f.name.replace(/[^\w.\- ]/g,'').slice(0,60); _finImpRefresh(); };
+  rd.onerror=function(){ _finImp.msg='The file could not be read.'; _finImp.msgTone='warn'; _finImpRefresh(); }; rd.readAsText(f);
+}
+async function _finImpCheck(){
+  if(_finImp.busy||_finImp.content==null) return; _finImp.busy=true; _finImp.msg='Checking the file…'; _finImp.msgTone=''; _finImpRefresh();
+  try{
+    var r=await _ceoAuthedFetch('/api/ops?action=fin_import_preview',{adapter:_finImp.adapter,content:_finImp.content}); var d=await r.json().catch(function(){return null;});
+    if(r.status===401){ _finImp.msg='Sign in as CEO to use imports.'; _finImp.msgTone='warn'; _finImp.preview=null; }
+    else if(r.ok&&d&&d.result){ _finImp.preview=d; _finImp.msg=''; }
+    else { _finImp.msg='The file could not be checked ('+((d&&d.error)||r.status)+').'; _finImp.msgTone='warn'; _finImp.preview=null; }
+  }catch(e){ _finImp.msg='The file could not be checked.'; _finImp.msgTone='warn'; }
+  _finImp.busy=false; _finImpRefresh();
+}
+async function _finImpCommit(){
+  var p=_finImp.preview; if(_finImp.busy||!p||!p.commit_ready||_finImp.content==null) return; _finImp.busy=true; _finImp.msg='Saving the summary…'; _finImp.msgTone=''; _finImpRefresh();
+  try{
+    var r=await _ceoAuthedFetch('/api/ops?action=fin_import_commit',{adapter:_finImp.adapter,content:_finImp.content,expected_rows_fingerprint:p.expected_rows_fingerprint}); var d=await r.json().catch(function(){return null;});
+    if(r.ok&&d&&d.committed){ _finImp.msg='Imported '+d.rows_new+' new row'+(d.rows_new===1?'':'s')+(d.rows_already_imported?' ('+d.rows_already_imported+' already imported were not counted again)':'')+'. The original file was not kept.'; _finImp.msgTone='ok'; _finImp.preview=null; _finImp.content=null; _finImp.fileName=''; _finImp.status=Object.assign({},_finImp.status||{},d.status,{ok:true}); }
+    else { _finImp.msg='Nothing was saved: '+((d&&d.error)||r.status)+'.'; _finImp.msgTone='warn'; }
+  }catch(e){ _finImp.msg='Nothing was saved.'; _finImp.msgTone='warn'; }
+  _finImp.busy=false; _finImpRefresh();
+}
+function _finImpDiscard(){ _finImp.preview=null; _finImp.content=null; _finImp.fileName=''; _finImp.msg=''; _finImpRefresh(); }
+function _finImpSetAdapter(v){ _finImp.adapter=v; _finImp.preview=null; _finImpRefresh(); }
+function _finImpBody(){
+  var h=[], st=_finImp.status, box='padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px;margin-top:8px;font-size:10px;line-height:1.5;color:var(--dim)';
+  h.push('<div style="font-size:10px;color:var(--dim);line-height:1.5">Read-only. Choose an export file from a finance app you already use. It is checked first; nothing is saved until you confirm. The original file is never kept, only totals and counts. Your existing Finance numbers are not changed by this section.</div>');
+  if(!_finImp.loaded){ h.push('<div style="'+box+'">'+escHTML(_finImp.msg||'Loading…')+'</div>'); return h.join(''); }
+  // last import
+  if(st&&st.has_data&&st.last_import){ var li=st.last_import; h.push('<div style="'+box+'"><b style="color:var(--text)">Last successful import</b> · '+escHTML(li.source)+' · period '+escHTML(li.period.from)+' to '+escHTML(li.period.to)+' · imported '+escHTML(String(li.imported_at||'').slice(0,10))+' · '+li.rows_new+' new rows</div>'); }
+  else h.push('<div style="'+box+'">No import yet. Values stay <b style="color:var(--text)">unavailable</b> until a file is imported and checked.</div>');
+  // chooser
+  var ad=_finImp.adapters.map(function(a){ return '<option value="'+escHTML(a.id)+'"'+(a.id===_finImp.adapter?' selected':'')+'>'+escHTML(a.label)+(a.status==='unmapped'?' — format not verified yet':'')+'</option>'; }).join('');
+  h.push('<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="finImpAdapter" onchange="_finImpSetAdapter(this.value)" style="font-size:11px;background:var(--card2,#1a1a2e);color:var(--text);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:5px 8px">'+ad+'</select><input id="finImpFile" type="file" accept=".csv,text/csv" onchange="_finImpPick(this)" style="font-size:11px;max-width:230px"><button class="fin-add-btn" id="finImpCheck" onclick="_finImpCheck()"'+((_finImp.content==null||_finImp.busy)?' disabled':'')+' style="width:auto;padding:6px 12px;font-size:11px">Check file</button></div>');
+  if(_finImp.fileName) h.push('<div style="font-size:10px;color:var(--dim);margin-top:4px">Selected: '+escHTML(_finImp.fileName)+'</div>');
+  if(_finImp.msg) h.push('<div id="finImpMsg" style="margin-top:8px;font-size:11px;color:'+(_finImp.msgTone==='warn'?'#f59e0b':_finImp.msgTone==='ok'?'#10b981':'var(--dim)')+'">'+escHTML(_finImp.msg)+'</div>');
+  // validation result BEFORE commit
+  var pv=_finImp.preview; if(pv&&pv.result){ var r=pv.result, c=r.counts, tone=pv.commit_ready?'#10b981':'#ef4444';
+    h.push('<div id="finImpPreview" style="'+box+';border-style:solid;border-color:'+tone+'55"><div style="font-size:11px;color:'+tone+';font-weight:700;margin-bottom:4px">'+(pv.commit_ready?'File checked — ready to import':'File cannot be imported')+'</div>');
+    h.push('<div>Source: '+escHTML(r.adapter?r.adapter.label:'')+(r.period?' · period '+escHTML(r.period.from)+' to '+escHTML(r.period.to):'')+(r.file?' · file fingerprint '+escHTML(r.file.sha256.slice(0,12)):'')+'</div>');
+    if(r.counts&&c.data_rows) h.push('<div>Rows: '+c.data_rows+' read · '+c.accepted+' accepted · '+c.rejected+' rejected · '+c.pending_skipped+' pending skipped · '+c.new_rows+' new · '+c.already_imported+' already imported</div>');
+    r.blocking.forEach(function(b){ h.push('<div style="color:#ef4444">• '+escHTML(_FINIMP_TEXT[b.code]||b.code)+(b.missing?' Missing: '+escHTML(b.missing.join(', '))+'.':'')+'</div>'); });
+    r.warnings.forEach(function(w){ h.push('<div style="color:#f59e0b">• '+escHTML(_FINIMP_WARN[w.code]||w.code)+(w.count?' ('+w.count+')':'')+'</div>'); });
+    var rj=Object.keys(r.rejected||{}); rj.forEach(function(k){ var o=r.rejected[k]; h.push('<div>Rejected — '+escHTML(_FINIMP_REJ[k]||k)+': '+o.count+' row'+(o.count===1?'':'s')+' (lines '+o.lines.map(Number).join(', ')+(o.count>o.lines.length?'…':'')+')</div>'); });
+    var ms=Object.keys(r.months||{}).sort(); if(ms.length){ h.push('<table style="width:100%;margin-top:6px;border-collapse:collapse;font-size:10px"><tr style="color:var(--dim);text-align:right"><th style="text-align:left">Month</th><th>Income</th><th>Expenses</th><th>Refunds</th><th>Transfers (excluded)</th><th>Unclassified (excluded)</th></tr>'+ms.map(function(m){ var t=r.months[m]; return '<tr style="text-align:right"><td style="text-align:left">'+escHTML(m)+'</td><td>'+_finImpMoney(t.income)+'</td><td>'+_finImpMoney(t.expense)+'</td><td>'+_finImpMoney(t.refund)+'</td><td>'+_finImpMoney(t.transfer)+'</td><td>'+_finImpMoney(t.unclassified_in+t.unclassified_out)+'</td></tr>'; }).join('')+'</table>'); }
+    h.push('<div style="margin-top:8px;display:flex;gap:8px"><button class="fin-add-btn" id="finImpCommit" onclick="_finImpCommit()"'+((pv.commit_ready&&!_finImp.busy)?'':' disabled')+' style="width:auto;padding:6px 12px;font-size:11px">Import this summary</button><button class="fin-add-btn" onclick="_finImpDiscard()" style="width:auto;padding:6px 12px;font-size:11px">Discard</button></div></div>'); }
+  // imported months (verification pending)
+  if(st&&st.has_data){ h.push('<div style="'+box+'"><b style="color:var(--text)">Imported (verification pending — not used in Finance figures)</b>'+(st.months||[]).map(function(m){ return '<div>'+escHTML(m.month)+' · income '+_finImpMoney(m.income)+' · expenses '+_finImpMoney(m.expense)+' · net '+_finImpMoney(m.net)+(m.refund?' · refunds '+_finImpMoney(m.refund):'')+(m.transfer_excluded?' · transfers excluded '+_finImpMoney(m.transfer_excluded):'')+((m.unclassified_in||m.unclassified_out)?' · unclassified excluded '+_finImpMoney(m.unclassified_in+m.unclassified_out):'')+'</div>'; }).join('')+'<div style="margin-top:4px">Months not listed have no imported data (unavailable, not zero).</div></div>'); }
+  return h.join('');
 }
 function renderGoalsSection(F,isAdmin){
   // Defensive: ensure F has all required fields
