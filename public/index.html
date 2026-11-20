@@ -8936,6 +8936,7 @@ function _finAdminView(){
   return `<div id="finVerifiedBanner" style="margin-bottom:14px;padding:14px 16px;background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.35);border-radius:12px"><div style="font-size:13px;font-weight:800;color:#60a5fa;font-family:'JetBrains Mono',monospace;letter-spacing:1.5px">FINANCE — VERIFIED DATA ONLY</div><div style="font-size:11px;color:var(--dim);margin-top:6px;line-height:1.6">A number is shown only when its source, reporting period and verification status are known. Anything else says "No verified data". Nothing is shown as zero when the real value is unknown.</div></div>
     ${section('Data sources',V.sourcesHtml(V.sources(ctx,imp,Date.now())),{defaultClosed:false})}
     ${section('Household figures',V.metricsHtml(ctx)+V.preservedHtml(ctx),{defaultClosed:false})}
+    ${_finSnapSection()}
     ${section('Bank Connections',renderBankConnectionsCard(true),{defaultClosed:true})}${_finImpSection()}
     ${section('Goals — optional targets',V.goalRows(ctx,{editable:true})+'<div style="font-size:10px;color:var(--dim);line-height:1.5">A target is shown only after you set it here. Default targets that shipped with the app are not shown as your goals.</div>',{defaultClosed:true})}`;
 }
@@ -8950,7 +8951,7 @@ async function _finSetGoalTarget(key,val){
 }
 // ── Finance V2 phase 1 — source transparency (display only). Reads Finance state through public/finance/financeSources.js; never writes, saves or recalculates anything. ──
 function _finCtx(){try{if(typeof currentUser==='undefined'||!currentUser||(currentUser.id!=='admin'&&currentUser.id!=='family'))return null;if(currentUser.id==='family'&&window.__finNoRoleLabels)return null;   /* test hook: renders Family without labels to prove labels never change a value */   // source labels for the CEO and for Family (the VA has no financial view); labels only — no value, permission or stored record changes
-    const c=(window.FinSrc&&window.FinSrc.buildCtx(D,Date.now()))||null;if(c&&window.FinVerified)window.FinVerified.withImports(c,(window._finImp&&window._finImp.status)||null);return c;}catch(e){return null;}}   // import months (verified / pending) let CEO-confirmed exports supply income, spending and net
+    const c=(window.FinSrc&&window.FinSrc.buildCtx(D,Date.now()))||null;if(c&&window.FinVerified)window.FinVerified.withImports(c,(window._finImp&&window._finImp.status)||null),window.FinVerified.withSnapshots(c,(window._finSnap&&window._finSnap.status)||null);return c;}catch(e){return null;}}   // import months (verified / pending) let CEO-confirmed exports supply income, spending and net
 // Family: every financial figure is labelled with its source; unverified (typed-in / default / reconstructed / legacy) values are never presented as verified. Values and permissions are unchanged.
 function _finRoleBanner(){try{if(typeof currentUser==='undefined'||!currentUser||currentUser.id!=='family')return '';const c=_finCtx();if(!c)return '';const live=c.plaidConnected&&c.plaidItems>0;
   return `<div class="fin-role-banner" style="margin:0 0 12px;padding:10px 12px;border:1px dashed rgba(251,191,36,0.45);border-radius:10px;font-size:11px;line-height:1.5;color:var(--dim)"><b style="color:#fbbf24;letter-spacing:0.5px">${live?'SOURCE LABELS':'FIGURES NOT VERIFIED'}</b> — ${live?'figures labelled CONNECTED come from a linked bank; anything labelled MANUAL, DEFAULT, RECONSTRUCTED or LEGACY is not verified.':'amounts on this screen are typed-in or default values. None has been verified against a bank, brokerage or export. The label beside each figure shows where it comes from.'}</div>`;}catch(e){return '';}}
@@ -8992,7 +8993,7 @@ function _finHistoryNote(){
 // any existing Finance figure: imported values live in their own summary and are shown separately until they are verified and the CEO decides to use them.
 var _finImp = window._finImp = window._finImp || { loaded:false, loading:false, status:null, adapters:[], preview:null, previewFor:null, content:null, fileName:'', busy:false, msg:'', msgTone:'', adapter:'' };
 function _finImpMoney(c){ try{ return (c/100).toLocaleString('en-US',{style:'currency',currency:'USD'}); }catch(e){ return String(c/100); } }
-var _FINIMP_TEXT = { adapter_unmapped:'This app\'s file format has not been verified yet, so nothing was read. Provide a redacted sample export (header row and three rows, no names or account numbers) and the mapping will be enabled.', unknown_adapter:'Unknown source.', empty_file:'The file is empty.', header_only:'The file has a header but no rows.', too_large:'The file is larger than 2 MB.', not_csv_archive:'This looks like a spreadsheet/zip file, not a CSV export.', binary_content:'The file contains binary data.', not_csv_markup_or_json:'This is not a CSV file.', bad_encoding:'The file is not valid UTF-8 text.', control_characters:'The file contains control characters.', unterminated_quote:'A quoted field is not closed.', too_many_rows:'The file has more than 20,000 rows.', too_many_columns:'The file has too many columns.', missing_columns:'Required columns are missing from the header row.', no_valid_rows:'No valid rows were found.', too_many_rejected:'Too many rows were malformed, so the whole file is refused.', same_file_already_imported:'This exact file (or an identical export) has already been imported.', no_new_rows:'Every row in this file was already imported — nothing new to add.' };
+var _FINIMP_TEXT = { adapter_invalid:'This source\'s mapping is incomplete or not backed by a real export, so nothing was read.', adapter_unverified:'This source is not enabled, so nothing was read.', header_changed:'The file\'s columns differ from the export this mapping was verified against, so nothing was read.', adapter_unmapped:'This app\'s file format has not been verified yet, so nothing was read. Provide a redacted sample export (header row and three rows, no names or account numbers) and the mapping will be enabled.', unknown_adapter:'Unknown source.', empty_file:'The file is empty.', header_only:'The file has a header but no rows.', too_large:'The file is larger than 2 MB.', not_csv_archive:'This looks like a spreadsheet/zip file, not a CSV export.', binary_content:'The file contains binary data.', not_csv_markup_or_json:'This is not a CSV file.', bad_encoding:'The file is not valid UTF-8 text.', control_characters:'The file contains control characters.', unterminated_quote:'A quoted field is not closed.', too_many_rows:'The file has more than 20,000 rows.', too_many_columns:'The file has too many columns.', missing_columns:'Required columns are missing from the header row.', no_valid_rows:'No valid rows were found.', too_many_rejected:'Too many rows were malformed, so the whole file is refused.', same_file_already_imported:'This exact file (or an identical export) has already been imported.', no_new_rows:'Every row in this file was already imported — nothing new to add.' };
 var _FINIMP_WARN = { overlapping_period:'This file overlaps a period you already imported. Only the new rows will be added; existing rows are not counted twice.', unclassified_rows_excluded:'Some rows could not be classified from the evidence in the file. They are listed separately and are NOT counted as income or expense.', formula_like_cells_neutralized:'Some cells looked like spreadsheet formulas. They were neutralized and nothing was stored from them.', paired_transfers_reclassified:'Matching opposite amounts between your own accounts were treated as transfers (excluded from income and expense).' };
 var _FINIMP_REJ = { ragged_row:'wrong number of columns', bad_date:'unreadable date', missing_date:'missing date', bad_amount:'unreadable amount', missing_amount:'missing amount', future_date:'date in the future', cell_too_long:'cell too long' };
 function _finImpSection(){
@@ -9071,6 +9072,7 @@ function _finImpBody(){
   var pv=_finImp.preview; if(pv&&pv.result){ var r=pv.result, c=r.counts, tone=pv.commit_ready?'#10b981':'#ef4444';
     h.push('<div id="finImpPreview" style="'+box+';border-style:solid;border-color:'+tone+'55"><div style="font-size:11px;color:'+tone+';font-weight:700;margin-bottom:4px">'+(pv.commit_ready?'File checked — ready to import':'File cannot be imported')+'</div>');
     h.push('<div>Source: '+escHTML(r.adapter?r.adapter.label:'')+(r.period?' · period '+escHTML(r.period.from)+' to '+escHTML(r.period.to):'')+(r.file?' · file fingerprint '+escHTML(r.file.sha256.slice(0,12)):'')+'</div>');
+    if(r.capabilities) h.push('<div>Evidence in this file for: categories '+(r.capabilities.categories?'yes':'no')+' · income '+(r.capabilities.income?'yes':'no')+' · spending '+(r.capabilities.spending?'yes':'no')+' · transfers '+(r.capabilities.transfers?'yes':'no')+'. Anything without evidence stays unclassified.</div>');
     if(r.counts&&c.data_rows) h.push('<div>Rows: '+c.data_rows+' read · '+c.accepted+' accepted · '+c.rejected+' rejected · '+c.pending_skipped+' pending skipped · '+c.new_rows+' new · '+c.already_imported+' already imported</div>');
     r.blocking.forEach(function(b){ h.push('<div style="color:#ef4444">• '+escHTML(_FINIMP_TEXT[b.code]||b.code)+(b.missing?' Missing: '+escHTML(b.missing.join(', '))+'.':'')+'</div>'); });
     r.warnings.forEach(function(w){ h.push('<div style="color:#f59e0b">• '+escHTML(_FINIMP_WARN[w.code]||w.code)+(w.count?' ('+w.count+')':'')+'</div>'); });
@@ -9093,6 +9095,69 @@ function _finImpBody(){
           '<button class="fin-add-btn" id="finImpVB_'+k+'" onclick="_finImpVerify(\''+k+'\')" style="width:auto;padding:5px 10px;font-size:11px">Confirm month</button></div>'; }
       if(_finImp.vmsg&&_finImp.vmsg[m.month]) line+='<div class="finImpVMsg" style="margin-top:3px;color:'+(_finImp.vmsg[m.month].tone==='ok'?'#10b981':'#f59e0b')+'">'+escHTML(_finImp.vmsg[m.month].text)+'</div>';
       return line+'</div>'; }).join('')+'<div style="margin-top:4px">Months not listed have no imported data (unavailable, not zero). Tolerance: each figure may differ by at most $1.00 (app rounding).</div></div>'); }
+  return h.join('');
+}
+// ── Finance V2 phase 3C — Rocket Money headline figures TYPED BY THE CEO (CEO/admin only). Rocket Money has no supported API, so these figures exist in MMMOS only because the CEO read them in Rocket Money and typed them here
+// with the as-of date, the reporting definition and an explicit confirmation. They are displayed as "Rocket Money — CEO-attested": never live, never provider-verified. Nothing existing is overwritten (own record).
+var _finSnap = window._finSnap = window._finSnap || { loaded:false, loading:false, status:null, form:{}, msg:'', msgTone:'', busy:false };
+var _FINSNAP_FIELDS = [['net_worth','Net worth','Rocket Money Net Worth page: Total net worth (can be negative)'],['assets','Assets','Net Worth page: Assets total'],['liabilities','Liabilities','Net Worth page: Debts total used in net worth (Assets − Debts)'],['cash','Cash','Cash accounts total'],['savings','Savings','Savings accounts total'],['debt','Debt (all balances listed)','Total of every balance on the Debt tab, including credit cards']];
+var _FINSNAP_ERR = { confirmation_required:'Tick the confirmation box.', bad_as_of:'Choose a valid as-of date.', future_as_of:'The as-of date cannot be in the future.', as_of_too_old:'The as-of date is more than 400 days old.', no_figures:'Type at least one figure.', unknown_figure:'That figure is not supported.', bad_figure:'A figure is not a valid amount.', negative_figure:'Only net worth can be negative.', bad_definition:'Answer both definition questions.', net_worth_mismatch:'Net worth should equal assets minus liabilities (within $1.00).', cash_savings_exceed_assets:'Cash plus savings cannot be more than assets.' };
+function _finSnapSection(){
+  try{
+    if(!_finSnap.loaded && !_finSnap.loading) setTimeout(_finSnapLoad,0);
+    return section('Rocket Money headline figures — typed by the CEO', '<div id="finSnapBody">'+_finSnapBody()+'</div>', {defaultClosed:true});
+  }catch(e){ return ''; }
+}
+function _finSnapRefresh(){ var el=document.getElementById('finSnapBody'); if(el) el.innerHTML=_finSnapBody(); }
+async function _finSnapLoad(){
+  if(_finSnap.loading) return; _finSnap.loading=true;
+  try{
+    var r=await _ceoAuthedFetch('/api/ops?action=fin_snapshot_status',{}); var d=await r.json().catch(function(){return null;});
+    if(r.status===401){ _finSnap.msg='Sign in as CEO to use snapshots.'; _finSnap.msgTone='warn'; }
+    else if(r.ok&&d&&d.ok){ _finSnap.status=d; _finSnap.loaded=true; _finSnap.msg=''; }
+    else { _finSnap.msg='Could not load the snapshot status.'; _finSnap.msgTone='warn'; }
+  }catch(e){ _finSnap.msg='Could not load the snapshot status.'; _finSnap.msgTone='warn'; }
+  _finSnap.loading=false; _finSnapRefresh();
+  try{ if(_finSnap.status&&_finSnap.status.has_data&&typeof currentTab!=='undefined'&&currentTab==='finance'&&typeof renderTab==='function'&&!_finSnap.rerendered){ _finSnap.rerendered=true; renderTab('finance'); } }catch(e){}   // household figures can now include the attested snapshot
+}
+function _finSnapForm(){
+  var f=_finSnap.form=_finSnap.form||{}, g=function(id){var e=document.getElementById(id);return e;};
+  _FINSNAP_FIELDS.forEach(function(x){ var e=g('finSnapF_'+x[0]); if(e) f[x[0]]=e.value; });
+  var a=g('finSnapAsOf'); if(a) f.as_of=a.value; var d1=g('finSnapD1'); if(d1) f.d1=d1.value; var d2=g('finSnapD2'); if(d2) f.d2=d2.value; var c=g('finSnapC'); if(c) f.ok=!!c.checked;
+}
+function _finSnapMoney(c){ try{ return (c/100).toLocaleString('en-US',{style:'currency',currency:'USD'}); }catch(e){ return String(c/100); } }
+async function _finSnapSave(){
+  if(_finSnap.busy) return; _finSnapForm(); var f=_finSnap.form;
+  var figs={}, bad=false; _FINSNAP_FIELDS.forEach(function(x){ var v=String(f[x[0]]==null?'':f[x[0]]).trim(); if(v===''){ figs[x[0]]=null; return; } var n=Math.round(parseFloat(v)*100); if(!isFinite(n)){ bad=true; return; } figs[x[0]]=n; });
+  if(bad){ _finSnap.msg='A figure is not a valid amount.'; _finSnap.msgTone='warn'; _finSnapRefresh(); return; }
+  if(!f.ok){ _finSnap.msg='Tick the confirmation box to attest the figures.'; _finSnap.msgTone='warn'; _finSnapRefresh(); return; }
+  _finSnap.busy=true; _finSnap.msg='Checking and saving…'; _finSnap.msgTone=''; _finSnapRefresh();
+  try{
+    var r=await _ceoAuthedFetch('/api/ops?action=fin_snapshot_commit',{as_of:f.as_of||'',figures:figs,definition:{assets_include_investments:f.d1||'',liabilities_include_credit_cards:f.d2||''},confirmation:'ATTEST-FROM-ROCKET-MONEY'}); var d=await r.json().catch(function(){return null;});
+    if(r.ok&&d&&d.committed){ _finSnap.status=Object.assign({},_finSnap.status||{},d.status,{ok:true}); _finSnap.form={}; _finSnap.msg='Saved as "Rocket Money — CEO-attested". It is shown as typed by you, not live and not verified by Rocket Money.'; _finSnap.msgTone='ok'; _finSnap.busy=false; _finSnapRefresh(); try{ if(typeof renderTab==='function'&&typeof currentTab!=='undefined'&&currentTab==='finance') renderTab('finance'); }catch(e){} return; }
+    if(d&&d.errors){ _finSnap.msg='Not saved: '+d.errors.map(function(e){ var t=_FINSNAP_ERR[e.code]||e.code; if(e.code==='net_worth_mismatch'&&e.expected!=null) t+=' Expected '+_finSnapMoney(e.expected)+' from your assets and liabilities.'; return t; }).join(' '); }
+    else _finSnap.msg='Not saved: '+((d&&d.error)||r.status)+'.';
+    _finSnap.msgTone='warn';
+  }catch(e){ _finSnap.msg='Not saved.'; _finSnap.msgTone='warn'; }
+  _finSnap.busy=false; _finSnapRefresh();
+}
+function _finSnapBody(){
+  var st=_finSnap.status, f=_finSnap.form||{}, h=[], box='padding:8px 10px;border:1px dashed rgba(255,255,255,0.12);border-radius:8px;margin-top:8px;font-size:10px;line-height:1.5;color:var(--dim)';
+  h.push('<div style="font-size:10px;color:var(--dim);line-height:1.5">Rocket Money has no supported connection. Read these figures in Rocket Money (Net Worth page) and type them here. They are shown as <b style="color:#a78bfa">Rocket Money — CEO-attested</b>: typed by you, <b>not live</b> and <b>not verified by Rocket Money</b>. Leave a figure blank if you do not have it; it stays "No verified data". Freshness: fresh up to 35 days after the as-of date, <b>stale</b> from 36 to 120 days (still shown, flagged), and <b>not shown</b> after 120 days.</div>');
+  if(!_finSnap.loaded){ h.push('<div style="'+box+'">'+escHTML(_finSnap.msg||'Loading…')+'</div>'); return h.join(''); }
+  if(st&&st.has_data&&st.latest){ var l=st.latest, tone=l.state==='fresh'?'#22c55e':(l.state==='stale'?'#f59e0b':'#ef4444');
+    h.push('<div id="finSnapLatest" style="'+box+'"><b style="color:var(--text)">Latest snapshot</b> · as of '+escHTML(l.as_of)+' · <b style="color:'+tone+'">'+(l.state==='fresh'?'FRESH':(l.state==='stale'?'STALE ('+l.age_days+' days)':'EXPIRED — no longer shown'))+'</b> · entered '+escHTML(String(l.entered_at||'').slice(0,10))+' · Rocket Money — CEO-attested</div>'); }
+  else h.push('<div id="finSnapLatest" style="'+box+'">No snapshot yet. Household net worth, assets, liabilities, cash, savings and debt say "No verified data".</div>');
+  h.push('<div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">'+_FINSNAP_FIELDS.map(function(x){ return '<label style="font-size:10px;color:var(--dim)">'+escHTML(x[1])+' $<input id="finSnapF_'+x[0]+'" type="number" step="0.01" value="'+escHTML(f[x[0]]||'')+'" oninput="_finSnapForm()" title="'+escHTML(x[2])+'" style="display:block;width:100%;background:transparent;color:var(--text);border:none;border-bottom:1px dashed rgba(201,168,76,0.4);font-size:12px;padding:3px 0"><span style="font-size:8px">'+escHTML(x[2])+'</span></label>'; }).join('')+'</div>');
+  var d1=f.d1||'', d2=f.d2||'', sel=function(id,val,opts){ return '<select id="'+id+'" onchange="_finSnapForm()" style="background:var(--card2,#1a1a2e);color:var(--text);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:4px 6px;font-size:11px;max-width:100%">'+opts.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+escHTML(o[1])+'</option>'; }).join('')+'</select>'; };
+  h.push('<div style="margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end"><label style="font-size:10px;color:var(--dim)">As-of date (the day you read the figures)<input id="finSnapAsOf" type="date" value="'+escHTML(f.as_of||new Date().toISOString().slice(0,10))+'" oninput="_finSnapForm()" style="display:block;background:transparent;color:var(--text);border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:3px 6px"></label>'+
+    '<label style="font-size:10px;color:var(--dim)">Investments inside Rocket Money\'s assets<br>'+sel('finSnapD1',d1,[['','— choose —'],['yes_manual','Included, entered by hand in Rocket Money'],['yes_linked','Included, a linked account in Rocket Money'],['no','Not included']])+'</label>'+
+    '<label style="font-size:10px;color:var(--dim)">Credit cards inside Rocket Money\'s debts total<br>'+sel('finSnapD2',d2,[['','— choose —'],['yes','Included'],['no','Not included'],['unknown','I do not know']])+'</label></div>');
+  h.push('<div style="margin-top:8px;font-size:10px;color:var(--dim);line-height:1.5">Investment values are never typed here: the Investment page does not use or add Rocket Money\'s investment figure (it is already inside Assets when included).</div>');
+  h.push('<label style="display:block;margin-top:8px;font-size:11px"><input id="finSnapC" type="checkbox"'+(f.ok?' checked':'')+' onchange="_finSnapForm()"> I read these figures in Rocket Money on the as-of date and confirm they are accurate. I understand they are typed by me, not live and not verified by Rocket Money.</label>');
+  h.push('<div style="margin-top:8px"><button class="fin-add-btn" id="finSnapSave" onclick="_finSnapSave()"'+(_finSnap.busy?' disabled':'')+' style="width:auto;padding:6px 12px;font-size:11px">Save attested snapshot</button></div>');
+  if(_finSnap.msg) h.push('<div id="finSnapMsg" style="margin-top:8px;font-size:11px;color:'+(_finSnap.msgTone==='warn'?'#f59e0b':_finSnap.msgTone==='ok'?'#10b981':'var(--dim)')+'">'+escHTML(_finSnap.msg)+'</div>');
+  if(st&&st.history&&st.history.length>1) h.push('<div style="'+box+'"><b style="color:var(--text)">Earlier snapshots (history; only the latest is displayed)</b>'+st.history.slice(1,7).map(function(x){ var n=Object.keys(x.figures||{}).filter(function(k){return x.figures[k]!==null;}).length; return '<div>as of '+escHTML(x.as_of)+' · '+n+' figure'+(n===1?'':'s')+' · '+(x.state==='fresh'?'fresh':(x.state==='stale'?'stale':'expired'))+'</div>'; }).join('')+'</div>');
   return h.join('');
 }
 function renderGoalsSection(F,isAdmin){
