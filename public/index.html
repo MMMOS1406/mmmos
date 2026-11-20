@@ -1632,7 +1632,7 @@ const _ENGINE_CH={
 function _analyticsScopeEngine(){ return (typeof window!=='undefined'&&window._analyticsScope)||''; }
 function _analyticsChannelInScope(name){ const sc=_analyticsScopeEngine(); return !sc||_ENGINE_CH[sc]===name; }
 function _analyticsEngineInScope(engine,channelTitle){ const sc=_analyticsScopeEngine(); if(!sc)return true; return engine===sc||(!engine&&_ENGINE_CH[sc]===channelTitle); }
-function _analyticsScopeLabel(){ const sc=_analyticsScopeEngine(); return sc?(' — '+sc.toUpperCase()+' ONLY'):' — EACH BUSINESS SHOWN SEPARATELY'; }
+function _analyticsScopeLabel(){ const sc=_analyticsScopeEngine(); return sc?(' — '+(sc==='SRV English'?'SRV STUDIO':sc.toUpperCase())+' ONLY'):' — EACH BUSINESS SHOWN SEPARATELY'; }   // display name only; the scope key stays 'SRV English'
 
 function computeContentHealth(){
   const channels=D.channels||[];
@@ -8777,6 +8777,7 @@ function renderFinance(){
   const F=computeFinanceState();
   const s=F; // alias for backward compat with template strings
   const isAdmin=currentUser.id==='admin';
+  if(isAdmin&&window.FinVerified&&window.FinSrc)return _finAdminView();   // Finance V2 3B: the CEO view shows verified data only (Family/VA keep the view below, unchanged)
   // v13.69.46 — CRITICAL FIX: removed render-time afterFinanceSave call. afterFinanceSave triggers renderTab('finance')
   // which immediately re-runs renderFinance() — re-collapsing every section the user just expanded AND looping.
   // Auto-bind now lives in: applyFinanceState (page load) + refreshPlaidData (manual refresh). NEVER in render path.
@@ -8923,6 +8924,27 @@ function renderFinance(){
   `;
 }
 
+// ── Finance V2 phase 3B — CEO Finance view: VERIFIED DATA ONLY. A figure appears only with a known source, reporting period and verification status; otherwise "No verified data" (never 0).
+// Stored entries (income, expenses, debts, Investment entries, holdings, revenue, history) are preserved in the database and are not displayed as figures. Family/VA keep the previous view.
+function _finAdminView(){
+  const ctx=_finCtx(),V=window.FinVerified;
+  V.valueOf=function(k){try{const F=computeFinanceState(),m={income:F.incomeTotal,expenses:F.expenseTotal,cashflow:F.cashflow,availableCash:computeAvailableCash(),debts:F.debtTotal,emergencyFund:F.emergencyFund,netWorth:F.netWorth};return m[k]==null?'':$k(m[k]);}catch(e){return '';}};
+  const imp=(window._finImp&&window._finImp.status)||null;
+  return `<div id="finVerifiedBanner" style="margin-bottom:14px;padding:14px 16px;background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.35);border-radius:12px"><div style="font-size:13px;font-weight:800;color:#60a5fa;font-family:'JetBrains Mono',monospace;letter-spacing:1.5px">FINANCE — VERIFIED DATA ONLY</div><div style="font-size:11px;color:var(--dim);margin-top:6px;line-height:1.6">A number is shown only when its source, reporting period and verification status are known. Anything else says "No verified data". Nothing is shown as zero when the real value is unknown.</div></div>
+    ${section('Data sources',V.sourcesHtml(V.sources(ctx,imp,Date.now())),{defaultClosed:false})}
+    ${section('Household figures',V.metricsHtml(ctx)+V.preservedHtml(ctx),{defaultClosed:false})}
+    ${section('Bank Connections',renderBankConnectionsCard(true),{defaultClosed:true})}${_finImpSection()}
+    ${section('Goals — optional targets',V.goalRows(ctx,{editable:true})+'<div style="font-size:10px;color:var(--dim);line-height:1.5">A target is shown only after you set it here. Default targets that shipped with the app are not shown as your goals.</div>',{defaultClosed:true})}`;
+}
+async function _finSetGoalTarget(key,val){
+  if(typeof currentUser==='undefined'||!currentUser||currentUser.id!=='admin')return;
+  if(!D.finGoals)D.finGoals={};
+  const v=parseFloat(val),conf=Object.assign({},D.finGoals._confirmed);
+  if(v>0){D.finGoals[key]=v;conf[key]=true;}else{delete conf[key];}   // clearing removes only the confirmation; the stored number is preserved
+  D.finGoals._confirmed=conf;
+  await saveData();await saveFinanceToSupabase();
+  if(typeof renderTab==='function')renderTab(currentTab);
+}
 // ── Finance V2 phase 1 — source transparency (display only). Reads Finance state through public/finance/financeSources.js; never writes, saves or recalculates anything. ──
 function _finCtx(){try{if(typeof currentUser==='undefined'||!currentUser||currentUser.id!=='admin')return null;   // labels are shown to the CEO only; the Family / VA Finance views are unchanged
     return (window.FinSrc&&window.FinSrc.buildCtx(D,Date.now()))||null;}catch(e){return null;}}
@@ -8972,7 +8994,7 @@ function _finImpSection(){
     return section('Imports — financial apps', '<div id="finImpBody">'+_finImpBody()+'</div>', {defaultClosed:false});
   }catch(e){ return ''; }
 }
-function _finImpRefresh(){ var el=document.getElementById('finImpBody'); if(el) el.innerHTML=_finImpBody(); }
+function _finImpRefresh(){ var el=document.getElementById('finImpBody'); if(el) el.innerHTML=_finImpBody(); try{ var sp=document.querySelector('.fin-sources'),c=_finCtx(); if(sp&&c&&window.FinVerified) sp.outerHTML=window.FinVerified.sourcesHtml(window.FinVerified.sources(c,_finImp.status,Date.now())); }catch(e){} }   // keeps the Data sources panel in step with the import status
 async function _finImpLoad(){
   if(_finImp.loading) return; _finImp.loading=true;
   try{
@@ -30911,7 +30933,7 @@ function renderFactory(){
 <!-- CEO decision 2026-11-10: the simplified CEO homepage (two businesses, Finance, Analytics) is the DEFAULT Home for the Admin and replaces the legacy
      CEO Headquarters dashboard. No opt-in flag. Loaded synchronously so it hooks the router before the first Home render; it acts for the Admin only
      (Family / VA calls pass straight through). The older opt-in admin shell (public/shell.js, flag mmm_shell_admin_v1) is no longer loaded: one CEO experience. -->
-<script src="/finance/financeSources.js"></script>   <!-- Finance V2 phase 1: source/age labels for financial figures (display only; reads Finance state, writes nothing) -->
+<script src="/finance/financeSources.js"></script><script src="/finance/finVerified.js"></script>   <!-- Finance V2 phase 3B: verified-only display rules (a figure is shown only with a known source, period and verification; otherwise "No verified data") -->   <!-- Finance V2 phase 1: source/age labels for financial figures (display only; reads Finance state, writes nothing) -->
 <script src="/home2.js"></script>
 <script src="/avatar-library.js"></script>   <!-- SRV avatar library: loads the library for the CEO and the VA and applies it to the existing Generate/Build/Rebuild avatar lists (CEO order 2026-11-11) -->
 </body>

@@ -1,0 +1,59 @@
+// Finance V2 phase 3B — verified-only display rules (pure). SYNTHETIC state only. node tests/finance/test_fin_verified.mjs
+import fs from 'node:fs'; import vm from 'node:vm';
+let pass = 0, fail = 0; const ok = (n, c, d) => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, d !== undefined ? JSON.stringify(d).slice(0, 300) : ''); } };
+const dir = new URL('../../public/finance/', import.meta.url);
+const SRC = { fin: fs.readFileSync(new URL('financeSources.js', dir), 'utf8'), ver: fs.readFileSync(new URL('finVerified.js', dir), 'utf8') };
+const load = (verSrc = SRC.ver) => { const win = {}; const g = { window: win, Date, Object, Array, isFinite, parseFloat, String, Math }; vm.runInNewContext(SRC.fin, g); vm.runInNewContext(verSrc, g); return { S: win.FinSrc, V: win.FinVerified }; };
+const { S, V } = load(); const NOW = Date.parse('2030-03-20T12:00:00Z');
+const base = (o = {}) => ({ plaidConnected: false, plaidItems: [], plaidLastSync: null, plaidInvestments: 0, plaidLiabilities: [], efSourceAccountId: null, finGoals: { emergencyFundCurrent: 1800, emergencyFundTarget: 12000, portfolioGoal: 100000, debtFreedomGoal: 13500, machineIncomeGoal: 10000, runwayGoal: 6 }, portfolio: { holdings: [] }, investmentEngine: { monthly: {} }, engineRevenue: {}, debts: [], income: [], expenses: [], ...o });
+const ctx = (o) => S.buildCtx(base(o), NOW);
+const connected = { plaidConnected: true, plaidItems: [{}], plaidLastSync: '2030-03-19T08:00:00Z' };
+const KEYS = ['income', 'expenses', 'cashflow', 'availableCash', 'debts', 'emergencyFund', 'netWorth', 'investmentValue', 'investmentGain', 'businessRevenue', 'machineIncome', 'savingsRate', 'runway'];
+// ── nothing is verified without a connected source
+{ const c = ctx({ income: [{ amount: 5 }], expenses: [{ amount: 3 }], debts: [{ balance: 9 }], investmentEngine: { monthly: { '2030-02': { value: 1, recordedAt: '2030-02-10' } } }, engineRevenue: { X: { '2030-02': 9 } } });
+  ok('with only typed-in / default / reconstructed data NO metric is shown', KEYS.every((k) => V.status(k, c).shown === false), KEYS.filter((k) => V.status(k, c).shown)); }
+ok('an empty system shows nothing either (income has no typed-in entries, so the reason is manual-or-none, never a number)', KEYS.every((k) => !V.status(k, ctx()).shown) && !/\d/.test(V.status('income', ctx()).reason));
+ok('manual entries are described as typed-in but not verified (not "no source")', /Typed-in entries exist but are not verified/.test(V.status('income', ctx({ income: [{ amount: 1 }] })).reason));
+ok('the default emergency fund (1,800) is described as a shipped default', /default value shipped/.test(V.status('emergencyFund', ctx()).reason));
+// ── a connected provider WITH a sync date is the only thing that produces a number
+{ const c = ctx(connected); const s = V.status('income', c);
+  ok('connected bank + sync date: income / expenses / cashflow are shown with source and reporting period', ['income', 'expenses', 'cashflow'].every((k) => V.status(k, c).shown) && s.period === '2030-03-19' && /CONNECTED/.test(s.source)); }
+ok('connected but NO sync date: not shown (reporting period unknown)', (() => { const s = V.status('income', ctx({ plaidConnected: true, plaidItems: [{}], plaidLastSync: null })); return !s.shown && /reporting period is unknown/.test(s.reason); })());
+ok('plaidConnected with zero linked items is not a source', !V.status('income', ctx({ plaidConnected: true, plaidItems: [], plaidLastSync: '2030-03-19T00:00:00Z' })).shown);
+ok('a connected bank does NOT verify other metrics (investment value, business revenue, debts without liabilities)', (() => { const c = ctx(connected); return !V.status('investmentValue', c).shown && !V.status('businessRevenue', c).shown && !V.status('debts', c).shown; })());
+// ── never zero, never a hidden number
+{ const h = V.nvHtml('income', ctx()); ok('"No verified data" is displayed (never 0, no currency) with the reason', /No verified data/.test(h) && !/\$|\b0\b/.test(h.replace(/data-key="[^"]*"/, ''))); }
+{ let called = 0; const out = V.show('income', ctx({ income: [{ amount: 1 }] }), () => { called++; return '$99'; }); ok('an unverified figure is never even computed (the value callback is not called) and never appears', called === 0 && !/99/.test(out) && /No verified data/.test(out)); }
+{ let called = 0; const out = V.show('income', ctx(connected), () => { called++; return '$99'; }); ok('a verified figure is shown with a VERIFIED line naming source and as-of date', called === 1 && /\$99/.test(out) && /VERIFIED · .*CONNECTED.* · as of 2030-03-19/.test(out)); }
+// ── market gains are never earned income
+ok('machine income = business revenue only: even with connected investments and a stored market gain it is NOT shown', (() => { const c = ctx({ ...connected, plaidInvestments: 5000, investmentEngine: { monthly: { '2030-02': { value: 5000, gainLoss: 400, recordedAt: '2030-02-10' } } } }); const s = V.status('machineIncome', c); return !s.shown && /market gains are never counted as earned income/i.test(s.reason); })());
+ok('the investment gain metric is labelled "not income"', /not income/i.test(V.LABELS.investmentGain) && !/income/i.test(V.LABELS.investmentValue));
+ok('runway needs BOTH verified cash and verified spending', (() => { const c = ctx(connected); return V.status('runway', c).shown === (V.status('availableCash', c).shown && V.status('expenses', c).shown); })());
+// ── goals: optional targets; defaults never shown as approved
+{ const c = ctx(); const rows = V.goalRows(c, {}); ok('default targets shown as "No target set" / "Optional target" and no number', (rows.match(/No target set/g) || []).length === 5 && !/\$\d|\d{3,}/.test(rows.replace(/data-goal="\w+"/g, '')), rows.slice(0, 200)); }
+ok('a stored non-default number WITHOUT the CEO marker is still not shown as a goal', (() => { const c = ctx({ finGoals: { ...base().finGoals, emergencyFundTarget: 9000 } }); return V.target(V.GOALS[0], c).confirmed === false; })());
+ok('with the explicit marker the target is shown as "TARGET SET BY YOU"', (() => { const c = ctx({ finGoals: { ...base().finGoals, emergencyFundTarget: 9000, _confirmed: { emergencyFundTarget: true } } }); const r = V.goalRows(c, {}); return V.target(V.GOALS[0], c).confirmed && /Target \$9,000/.test(r) && /TARGET SET BY YOU/.test(r); })());
+ok('the marker on a zero / missing target does not create a goal; the marker on a default-equal value (explicitly confirmed) does', (() => { const z = ctx({ finGoals: { ...base().finGoals, emergencyFundTarget: 0, _confirmed: { emergencyFundTarget: true } } }); const d = ctx({ finGoals: { ...base().finGoals, _confirmed: { emergencyFundTarget: true } } }); return !V.target(V.GOALS[0], z).confirmed && V.target(V.GOALS[0], d).confirmed; })());
+ok('the current value of each goal follows the verified rule (not shown while unverified)', /Current: <span>No verified data/.test(V.goalRows(ctx(), {})));
+ok('editable goal rows offer an input wired to _finSetGoalTarget with the stored key', /onchange="_finSetGoalTarget\('emergencyFundTarget',this.value\)"/.test(V.goalRows(ctx(), { editable: true })) && !/_finSetGoalTarget/.test(V.goalRows(ctx(), {})));
+// ── source-status panel
+{ const rows = (c, imp, now = NOW) => Object.fromEntries(V.sources(c, imp, now).map((r) => [r.id, r.state]));
+  ok('no connections, no imports: bank / Rocket Money / Robinhood are all UNAVAILABLE', JSON.stringify(rows(ctx(), null)) === JSON.stringify({ bank: 'unavailable', rocket_money: 'unavailable', robinhood: 'unavailable' }));
+  ok('a recently synced bank is CONNECTED; a bank not synced for more than 3 days is STALE', rows(ctx(connected), null).bank === 'connected' && rows(ctx({ ...connected, plaidLastSync: '2030-03-10T00:00:00Z' }), null).bank === 'stale');
+  const imp = (src, at) => ({ imports: [{ source: src, imported_at: at, period: { from: '2030-02-01', to: '2030-02-28' } }] });
+  ok('a Rocket Money import is IMPORT ONLY (never "connected"); older than 35 days it is STALE', rows(ctx(), imp('rocket_money', '2030-03-15T00:00:00Z')).rocket_money === 'import_only' && rows(ctx(), imp('rocket_money', '2030-01-01T00:00:00Z')).rocket_money === 'stale');
+  ok('an import never makes a source "connected" and never makes a figure verified', V.sources(ctx(), imp('rocket_money', '2030-03-15T00:00:00Z'), NOW).every((r) => r.state !== 'connected') && KEYS.every((k) => !V.status(k, ctx()).shown));
+  ok('import details state "not live synchronization" and "verification pending"', /not live synchronization/.test(V.sources(ctx(), imp('rocket_money', '2030-03-15T00:00:00Z'), NOW)[1].detail) && /Verification pending/.test(V.sources(ctx(), imp('rocket_money', '2030-03-15T00:00:00Z'), NOW)[1].detail));
+  const evil = V.sourcesHtml(V.sources(ctx(), imp('<script>alert(1)</script>', '2030-03-15T00:00:00Z'), NOW)); ok('hostile source names are escaped in the panel', !/<script>/.test(evil) && /&lt;script&gt;/.test(evil)); }
+// ── preserved records
+ok('preserved-records note lists counts only (no amounts) and says nothing is deleted', (() => { const h = V.preservedHtml(ctx({ income: [{ amount: 12345 }], debts: [{ balance: 6789 }, { balance: 1 }] })); return /1 income entries/.test(h) && /2 debt entries/.test(h) && !/12345|6789/.test(h) && /not deleted/.test(h); })());
+// ── MUTATION CHECKS
+const mut = (name, from, to, probe) => { const src = SRC.ver.replace(from, to); if (src === SRC.ver) { ok('mutation anchor present: ' + name, false); return; } let m; try { m = load(src); } catch (e) { ok('mutation loads: ' + name, false, String(e)); return; } ok('MUTATION caught — ' + name, probe(m.V, m.S) === false); };
+mut('manual entries treated as verified', "var shown = kind === 'connected' && !!period;", "var shown = (kind === 'connected' || kind === 'manual') && true;", (V2) => KEYS.every((k) => !V2.status(k, ctx({ income: [{ amount: 1 }] })).shown) );
+mut('reporting period no longer required', "var shown = kind === 'connected' && !!period;", "var shown = kind === 'connected';", (V2) => !V2.status('income', ctx({ plaidConnected: true, plaidItems: [{}], plaidLastSync: null })).shown);
+mut('default targets treated as confirmed', "var confirmed = !!(ctx.goalsConfirmed && ctx.goalsConfirmed[g.stored]) && v != null && isFinite(v) && v > 0;", "var confirmed = v != null && isFinite(v) && v > 0;", (V2) => !V2.target(V2.GOALS[0], ctx()).confirmed);
+mut('machine income uses the investment gain', "var r = status('businessRevenue', ctx);", "var r = status('investmentGain', ctx);", (V2) => !V2.status('machineIncome', ctx({ ...connected, plaidInvestments: 5000, investmentEngine: { monthly: { '2030-02': { value: 5000, gainLoss: 400, recordedAt: '2030-02-10' } } } })).shown);
+mut('hidden figure is still computed', "var s = status(key, ctx); if (!s.shown) return nvHtml(key, ctx, opt);\n    return (typeof valueHtml === 'function' ? valueHtml() : valueHtml) + srcLine(s);", "var s = status(key, ctx); var v = (typeof valueHtml === 'function' ? valueHtml() : valueHtml); if (!s.shown) return nvHtml(key, ctx, opt);\n    return v + srcLine(s);", (V2) => { let n = 0; V2.show('income', ctx(), () => { n++; return 'x'; }); return n === 0; });
+mut('an import makes the source CONNECTED', "state: ra != null && ra <= 35 ? 'import_only' : 'stale', detail: 'Imported file", "state: 'connected', detail: 'Imported file", (V2) => V2.sources(ctx(), { imports: [{ source: 'rocket_money', imported_at: '2030-03-15T00:00:00Z', period: { from: 'a', to: 'b' } }] }, NOW).every((r) => r.state !== 'connected'));
+mut('zero displayed instead of "No verified data"', "'<span class=\"fin-nv\" data-key=\"' + esc(key) + '\" title=\"' + esc(s.reason) + '\" style=\"color:var(--dim);font-weight:700\">No verified data</span>'", "'<span class=\"fin-nv\">$0</span>'", (V2) => /No verified data/.test(V2.nvHtml('income', ctx())));
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

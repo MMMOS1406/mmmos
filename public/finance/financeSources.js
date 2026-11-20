@@ -29,7 +29,7 @@
     var rev = D.engineRevenue || {}, revEntries = 0; Object.keys(rev).forEach(function (e) { var m = rev[e] || {}; Object.keys(m).forEach(function (k) { if (n(m[k]) !== null) revEntries++; }); });
     return {
       now: nowMs || Date.now(), plaidConnected: !!D.plaidConnected, plaidItems: arr(D.plaidItems).length, plaidLastSync: D.plaidLastSync || null, plaidInvestments: n(D.plaidInvestments) || 0, plaidLiabilities: arr(D.plaidLiabilities).length,
-      efSource: D.efSourceAccountId || null, efCurrent: n(g.emergencyFundCurrent), goals: { efTarget: n(g.emergencyFundTarget), portfolioGoal: n(g.portfolioGoal), debtGoal: n(g.debtFreedomGoal), machineGoal: n(g.machineIncomeGoal), runwayGoal: n(g.runwayGoal) },
+      efSource: D.efSourceAccountId || null, efCurrent: n(g.emergencyFundCurrent), goals: { efTarget: n(g.emergencyFundTarget), portfolioGoal: n(g.portfolioGoal), debtGoal: n(g.debtFreedomGoal), machineGoal: n(g.machineIncomeGoal), runwayGoal: n(g.runwayGoal) }, goalsConfirmed: (g._confirmed && typeof g._confirmed === 'object') ? g._confirmed : {},
       ie: { entries: Object.keys(monthly).length, holdings: hold.length, lastRecordedAt: lastIEAny, mode: D.portfolioMode || null }, revenueEntries: revEntries,
       snaps: arr(D.fsnapshots && D.fsnapshots.length ? D.fsnapshots : D.snapshots), debts: arr(D.debts).length, income: arr(D.income).length, expenses: arr(D.expenses).length, ym: ym
     };
@@ -69,8 +69,9 @@
     }
   }
   function describeTarget(goalKey, c) {   // goalKey: efTarget | portfolioGoal | debtGoal | machineGoal | runwayGoal
-    var v = c.goals[goalKey], seed = SEEDS[goalKey];
-    return v === seed ? mk('target:' + goalKey, 'seeded', { label: 'DEFAULT TARGET — NOT CONFIRMED', note: 'The default target shipped with the app' }) : mk('target:' + goalKey, 'manual', { label: 'TARGET SET BY YOU', note: 'Typed-in target' });
+    var v = c.goals[goalKey], seed = SEEDS[goalKey], stored = { efTarget: 'emergencyFundTarget', portfolioGoal: 'portfolioGoal', debtGoal: 'debtFreedomGoal', machineGoal: 'machineIncomeGoal', runwayGoal: 'runwayGoal' }[goalKey];
+    var confirmed = !!(c.goalsConfirmed && stored && c.goalsConfirmed[stored]);   // phase 3B: a target the CEO explicitly set (even if it equals the old default) is confirmed
+    return (v === seed && !confirmed) ? mk('target:' + goalKey, 'seeded', { label: 'DEFAULT TARGET — NOT CONFIRMED', note: 'The default target shipped with the app' }) : mk('target:' + goalKey, 'manual', { label: 'TARGET SET BY YOU', note: 'Typed-in target' });
   }
   // Net-worth chart history: which points are reconstructed, which are computed from manual entries, which are connected.
   function historyProfile(snaps) {

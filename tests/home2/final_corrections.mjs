@@ -43,7 +43,7 @@ try {
   check('SRV Farsi workspace: its own TikTok account is kept, English and unassigned are not', /FARSI-TIKTOK/.test(fa) && !/ENGLISH-TIKTOK/.test(fa) && !/UNASSIGNED-TIKTOK/.test(fa));
   check('SRV English workspace: YouTube channel card and detailed row are English only', /Studio English/.test(en) && !/Silk Road/.test(en) && /2,000/.test(en) && !/\b1,000\b/.test(en));
   check('SRV Farsi workspace: YouTube channel card and detailed row are Farsi only', /Silk Road/.test(fa) && !/Studio English/.test(fa) && /1,000/.test(fa) && !/\b2,000\b/.test(fa));
-  check('workspace analytics headings name their business', /YOUTUBE ANALYTICS — SRV ENGLISH ONLY/i.test(en) && /TIKTOK ANALYTICS — SRV FARSI ONLY/i.test(fa));
+  check('workspace analytics headings name their business', /YOUTUBE ANALYTICS — SRV STUDIO ONLY/i.test(en) && /TIKTOK ANALYTICS — SRV FARSI ONLY/i.test(fa));
   check('aggregate Analytics shows every account, each labelled with its business (Unassigned when none)', /FARSI-TIKTOK/.test(agg) && /ENGLISH-TIKTOK/.test(agg) && /UNASSIGNED-TIKTOK/.test(agg) && /SRV Farsi/.test(agg) && /SRV English/.test(agg) && /Unassigned/.test(agg));
   check('aggregate Analytics headings say each business is shown separately', /EACH BUSINESS SHOWN SEPARATELY/i.test(agg));
   check('the business scope is cleared after leaving a workspace (aggregate shows both channels)', /Silk Road/.test(agg) && /Studio English/.test(agg));
@@ -51,10 +51,10 @@ try {
 
   // ---------------- 2 Brain retired ----------------
   const sideLabels = await p.evaluate(() => [...document.querySelectorAll('#h2Side button')].map((b) => b.innerText));
-  check('sidebar: Brain is gone, the other eight sections remain', !sideLabels.includes('Brain') && JSON.stringify(sideLabels) === JSON.stringify(['Home', 'SRV Farsi', 'SRV English', 'Analytics', 'Finance', 'Engineering', 'Integrations', 'Access / Settings']), sideLabels.join(' | '));
+  check('sidebar: Brain is gone, the other eight sections remain and Investment is added', !sideLabels.includes('Brain') && JSON.stringify(sideLabels) === JSON.stringify(['Home', 'SRV Farsi', 'SRV Studio', 'Investment', 'Analytics', 'Finance', 'Engineering', 'Integrations', 'Access / Settings']), sideLabels.join(' | '));
   check('top bar has no Brain button', await p.evaluate(() => ![...document.querySelectorAll('.topbar button, .notif-bell')].some((b) => /🧠/.test(b.innerText) || /goToBrain/.test(b.getAttribute('onclick') || ''))));
   check('Brain code is retired: renderConstitution and goToBrain no longer exist', await p.evaluate(() => typeof renderConstitution === 'undefined' && typeof goToBrain === 'undefined'));
-  check('the retired Constitution route lands on Home (no broken page)', await p.evaluate(async () => { renderTab('constitution'); await new Promise((r) => setTimeout(r, 400)); return /Your two businesses/i.test(document.getElementById('mainContent').innerText); }));
+  check('the retired Constitution route lands on Home (no broken page)', await p.evaluate(async () => { renderTab('constitution'); await new Promise((r) => setTimeout(r, 400)); return /Your businesses/i.test(document.getElementById('mainContent').innerText); }));
   check('Engineering is intact: opens, and its own Constitution tab still works', await p.evaluate(async () => { Home2.go('engineering'); await new Promise((r) => setTimeout(r, 600)); const a = document.getElementById('mainContent').innerText.length > 200; if (typeof _ebSetSub === 'function') { _ebSetSub('constitution'); await new Promise((r) => setTimeout(r, 500)); } return a && document.getElementById('mainContent').innerText.length > 200 && (await (async () => document.querySelector('#h2Side button.on').getAttribute('data-h2') === 'engineering')()); }));
 
   // ---------------- 3 HeyGen / Submagic UI retired ----------------
