@@ -176,7 +176,12 @@
   }
   function load(done0) {
     // Home also needs the household import status (verified / pending months) — one CEO-only read, once; Home repaints when it arrives
-    var done = function () { var f = window._finImpLoad, st = window._finImp; var p = (typeof f === 'function' && st && !st.loaded && !st.loading) ? f() : null; if (p && p.then) p.then(done0, done0); else done0(); };
+    var done = function () {
+      var f = window._finImpLoad, st = window._finImp, g = window._finSnapLoad, sn = window._finSnap, ps = [];
+      if (typeof f === 'function' && st && !st.loaded && !st.loading) ps.push(f());
+      if (typeof g === 'function' && sn && !sn.loaded && !sn.loading) ps.push(g());   // CEO-attested Rocket Money figures (one CEO-only read)
+      if (ps.length) Promise.all(ps.map(function (x) { return Promise.resolve(x).catch(function () { return null; }); })).then(function () { done0(); }); else done0();
+    };
     if (S.loading) return;
     if (S.data && Date.now() - S.at < 60000) { done(); return; }
     S.loading = true;
@@ -247,7 +252,7 @@
   }
   /* Finance V2 phase 3B — VERIFIED DATA ONLY. A figure is shown only when its source, reporting period and verification status are known (public/finance/finVerified.js);
      otherwise the tile says "No verified data" with the reason, never 0. Stored entries are preserved in the database and simply not displayed. Display only: nothing here writes, saves or recalculates anything. */
-  function finCtx() { return safe(function () { var c = window.FinSrc ? window.FinSrc.buildCtx(D, Date.now()) : null; if (c && window.FinVerified) window.FinVerified.withImports(c, window._finImp && window._finImp.status); return c; }, null); }   // import months (CEO-verified or pending) travel with the context
+  function finCtx() { return safe(function () { var c = window.FinSrc ? window.FinSrc.buildCtx(D, Date.now()) : null; if (c && window.FinVerified) { window.FinVerified.withImports(c, window._finImp && window._finImp.status); window.FinVerified.withSnapshots(c, window._finSnap && window._finSnap.status); } return c; }, null); }   // import months (CEO-verified or pending) travel with the context
   function FV() { return window.FinVerified; }
   function nv(key) { return safe(function () { var c = finCtx(); return c && FV() ? FV().nvHtml(key, c) : '<span>No verified data</span>'; }, '<span>No verified data</span>'); }
   function verifiedFigure(key, fmt) { return safe(function () { var c = finCtx(); if (!c || !FV()) return nv(key); return FV().show(key, c, function () { return esc(fmt()); }); }, nv(key)); }
@@ -314,7 +319,7 @@
     var srcs = c && V ? V.sources(c, null, Date.now()) : [];
     var rh = srcs.filter(function (r) { return r.id === 'robinhood'; })[0];
     var preserved = c && V ? V.preservedHtml(c) : '';
-    var iso = '<div class="h2-card"><h3>Isolation</h3><div class="h2-sm" style="line-height:1.5">Investment is a separate business. No music-business task, package, channel or analytics figure appears here, and investment performance is never counted as business revenue or household income.</div></div>';
+    var iso = '<div class="h2-card"><h3>Isolation</h3><div class="h2-sm" style="line-height:1.5">Investment is a separate business. No music-business task, package, channel or analytics figure appears here, and investment performance is never counted as business revenue or household income. Household figures typed from Rocket Money (Finance) are never used or added here, and nothing here is added to them.</div></div>';
     if (tab === 'holdings') {
       return '<div class="h2-wrap"><div class="h2-card" id="h2InvHold"><h3>Holdings and balances</h3>' + row('Total value', invFigure('investmentValue', function () { return money(F().portfolioTotal); })) +
         invNote('Holdings and balances appear only from a connected read-only source with a known sync date. Nothing typed in, reconstructed or defaulted is shown. Nothing is connected today.') + preserved + '</div></div>';
@@ -329,6 +334,7 @@
         '<div class="h2-sm" style="line-height:1.6"><b>Planned route:</b> SnapTrade Personal, Robinhood by OAuth. SnapTrade lists Robinhood as read-only: it cannot place trades. The connection is requested as <b>read</b> only; trading is never requested.<br>' +
         '<b>Steps (each needs your explicit go-ahead):</b> 1) authorize creating the SnapTrade account and confirm the written cost terms; 2) engineering prepares the read-only link page; 3) <b>you</b> open the link and approve on Robinhood\'s own screen; 4) engineering verifies holdings, balances and the sync date, then you decide whether to keep it.<br>' +
         '<b>Stop rules:</b> abort if any screen asks for a Robinhood password, a trading permission, or a payment method.<br>' +
+        '<b>Requirements before any connection (none is done):</b> (1) you authorize creating the SnapTrade account and obtain written Personal-plan terms; (2) the existing encrypted credential vault seals SnapTrade\'s per-user secret — no new secret store; (3) the link is requested as read-only (connection type read) with no trade permission; (4) you open the link and approve on Robinhood\'s own screen; (5) you compare the first holdings, balances and sync date with the Robinhood app before any figure is shown. Until then every Investment figure says "No verified data".<br>' +
         '<b>Freshness:</b> SnapTrade documents holdings once per day on daily plans and transactions once per day, so this is a daily snapshot, not live. <b>Cost:</b> Personal is listed as free for your own accounts, but SnapTrade also says personal access is free "for a limited time" with no end date, so written confirmation of the terms is required before connecting.</div></div>' + iso + '</div>';
     }
     return '<div class="h2-wrap"><div class="h2-grid c2"><div class="h2-card" id="h2InvOv"><h3>Investment — status</h3>' +

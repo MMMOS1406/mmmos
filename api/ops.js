@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash, createHmac, timingSafeEqual, createCipheriv, createDecipheriv, createSign } from 'node:crypto'; // v16.28.1 — business_brain_create server-side ID generation; v16.30.0 — CEO session auth (Phase 2C)
 import { Script } from 'node:vm'; // v16.37.0 — Phase 4E: syntax-only validation (compile, never execute) — no shell.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import * as _finSnap from '../lib/finSnapshot.mjs'; // Finance V2 3C: CEO-attested Rocket Money headline figures (household; typed by the CEO, never live or provider-verified)
 import * as _finImp from '../lib/finImport.mjs'; // Finance V2 3A: read-only financial-app CSV import (household only; summary document; original file never stored; Rocket Money adapter UNMAPPED until a verified header is supplied)
 import { vaultFromEnv as _finVaultFromEnv, plaidAad as _plaidAad, planDisconnect as _planDisconnect, safeDbError as _safeDbError } from '../lib/finCrypto.mjs'; // Finance V2 2A: AES-256-GCM credential vault (keys from environment only; DEFAULT OFF — with no keys configured behaviour is unchanged)
 import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BUSINESSES as _yppBusinesses, YPP_STORE_KEY as _yppStoreKey, YPP_FRESH_DAYS as _yppFreshDays } from '../lib/yppCard.mjs'; // R-C1 B: Revenue/YPP card from OFFICIAL dated Studio Earn captures only (read-only)
@@ -7769,6 +7770,51 @@ async function finImport(req, res, op) {
 // first-import salt: derived from the service key already in the environment (no new credential); stored inside the document on first commit, so every later import reuses it
 function _fin3aSalt() { return createHash('sha256').update('fin_import_salt:' + SUPABASE_SERVICE_KEY).digest('hex').slice(0, 16); }
 // ── fin-import:end ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── fin-snapshot:begin ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Finance V2 3C — fin_snapshot_status / fin_snapshot_commit. POST only, CEO session only (checked before any database access). The CEO types Rocket Money's headline figures (net worth, assets, liabilities, cash,
+// savings, debt) with the as-of date, the reporting definition and a typed confirmation; the only write is ONE app_settings row (fin_rm_snapshots, household). No table, no migration; no other Finance row is touched.
+const _FIN_SNAP_KEY = 'fin_rm_snapshots';
+async function _finSnapLoad() {
+  const rows = await sbGet(`app_settings?key=eq.${_FIN_SNAP_KEY}&select=value,updated_at&limit=1`);
+  const row = Array.isArray(rows) && rows[0] ? rows[0] : null;
+  return { row, doc: row ? _finSnap.parseDoc(row.value) : null };
+}
+async function _finSnapWrite(row, doc) {
+  const headers = { 'Content-Type': 'application/json', 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + SUPABASE_SERVICE_KEY, 'Prefer': 'return=representation' };
+  const value = JSON.stringify(doc), now = new Date().toISOString();
+  if (!row) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, { method: 'POST', headers, body: JSON.stringify({ key: _FIN_SNAP_KEY, value, updated_at: now }) });
+    if (r.status === 409) return false;
+    if (!r.ok) throw new Error(_safeDbError('app_settings', 'insert', r.status, ''));
+    return true;
+  }
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?key=eq.${_FIN_SNAP_KEY}&updated_at=${row.updated_at ? 'eq.' + encodeURIComponent(row.updated_at) : 'is.null'}`, { method: 'PATCH', headers, body: JSON.stringify({ value, updated_at: now }) });
+  if (!r.ok) throw new Error(_safeDbError('app_settings', 'update', r.status, ''));
+  const out = await r.json().catch(() => []);
+  return Array.isArray(out) && out.length === 1;
+}
+async function finSnapshot(req, res, op) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  if (!SUPABASE_SERVICE_KEY) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+  try { res.setHeader('Cache-Control', 'no-store'); } catch (_) { /* ignore */ }
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  try {
+    const { row, doc } = await _finSnapLoad();
+    if (row && !doc) return res.status(500).json({ ok: false, error: 'stored_snapshots_unreadable' });   // never overwrite a document this code cannot read
+    if (op === 'status') return res.status(200).json({ ok: true, entity: _finSnap.ENTITY, ..._finSnap.statusView(doc) });
+    const v = _finSnap.validateSnapshot(body, { now: Date.now() });
+    if (!v.ok) return res.status(422).json({ ok: false, error: 'snapshot_invalid', errors: v.errors });
+    const id = _finSnap.newId(Date.now() + ':' + JSON.stringify(v.clean));
+    const merged = _finSnap.addSnapshot(doc, v.clean, { nowIso: new Date().toISOString(), id });
+    if (!(await _finSnapWrite(row, merged))) return res.status(409).json({ ok: false, error: 'concurrent_snapshot_retry' });
+    return res.status(200).json({ ok: true, committed: true, id, status: _finSnap.statusView(merged) });
+  } catch (e) {
+    console.warn('[fin_snapshot] ' + op + ' failed: ' + String((e && e.message) || e).slice(0, 80));   // message only: never the typed figures
+    return res.status(500).json({ ok: false, error: 'fin_snapshot_failed' });
+  }
+}
+// ── fin-snapshot:end ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async function plaidRemoveItem(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
@@ -21535,6 +21581,8 @@ export default async function handler(req, res) {
     if (action === 'plaid_remove_item')          return await plaidRemoveItem(req, res); // v13.65.1 — Finance Phase 3 hotfix
     if (action === 'fin_import_status')          return await finImport(req, res, 'status');  // Finance V2 3A: household app-import summary (CEO session)
     if (action === 'fin_import_preview')         return await finImport(req, res, 'preview'); // Finance V2 3A: validate + classify in memory, writes nothing
+    if (action === 'fin_snapshot_status')        return await finSnapshot(req, res, 'status');  // Finance V2 3C: CEO-attested Rocket Money snapshot (CEO session)
+    if (action === 'fin_snapshot_commit')        return await finSnapshot(req, res, 'commit');  // Finance V2 3C: validate + store ONE attested snapshot (app_settings.fin_rm_snapshots)
     if (action === 'fin_import_verify')          return await finImport(req, res, 'verify');  // Finance V2 3B: CEO comparison + confirmation of one imported month (writes only the verification record in app_settings.fin_import_household)
     if (action === 'fin_import_commit')          return await finImport(req, res, 'commit');  // Finance V2 3A: re-validate, then write ONE summary row (app_settings.fin_import_household)
     if (action === 'srv_build_package')          return await srvBuildPackage(req, res); // v13.69.0 — SRV Automation Phase 1
