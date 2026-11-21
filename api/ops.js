@@ -32,6 +32,7 @@ import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
+import { stripLearningInputs as _stripLearningInputs } from '../lib/generationInputs.mjs'; // G0/C4 — legacy learning inputs (directives, auto rules, stale strategy, retention-ranked winners) never reach SRV music generation
 import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProductionUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
 import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
 import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer.mjs'; // SRV-STUDIO-V2-033 Monthly Mix (off unless app_settings.srv_studio_v2_mix is enabled)
@@ -279,6 +280,8 @@ const SESSION_GATED_ACTIONS = new Set([
   'approve', // operator approvals
   'reject', // operator approvals
 ]);
+// G0/C5 — mutating legacy optimization actions: refused unless a valid CEO session is presented (header or body/query token).
+const CEO_ONLY_MUTATING_ACTIONS = new Set(['optimization_apply_recs', 'optimization_toggle_auto', 'strategy_recompute']);
 const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
 const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const PUBLISH_AUTH_CACHE_MS = 30 * 1000;
@@ -3801,7 +3804,8 @@ async function updateUploadStatus(req, res) {
 
 async function generatePackage(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'POST only' });
-  const { engineId, mode, existingMemory, contentFormat } = req.body || {};
+  const { engineId, mode, existingMemory: _existingMemoryRaw, contentFormat } = req.body || {};
+  const existingMemory = _stripLearningInputs(_existingMemoryRaw, engineId); // G0/C4 — SRV engines only; anti-repetition entries are kept
   if (!engineId || !mode) return res.status(400).json({ success: false, error: 'engineId and mode required' });
   // CEO-017: AI Creation Studio is retired — fail closed instead of falling through to the generic prompt.
   if (engineId === 'ai_studio') return res.status(410).json({ success: false, error: 'engine_retired', engine: 'ai_studio' });
@@ -9433,8 +9437,9 @@ async function optimizationApplyRecommendations(req, res) {
         const exArr = Array.isArray(existing) ? existing : [];
         const dupExists = exArr.some(e => JSON.stringify(e.rule_data) === JSON.stringify(rule.rule_data));
         if (dupExists) continue;
-        // Supersede older active rules of same type
-        if (exArr.length) {
+        // Supersede older active rules of same type — ONLY when auto-apply is ON for this engine (G0/C3): with auto-apply OFF the new rule is
+        // queued inactive and existing rules are never touched by this job.
+        if (exArr.length && autoOn) {
           const ids = exArr.map(e => e.id);
           await fetch(SUPABASE_URL + '/rest/v1/optimization_rules?id=in.(' + ids.join(',') + ')', {
             method:'PATCH', headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_KEY, 'Content-Type':'application/json', Prefer:'return=minimal' },
@@ -9482,7 +9487,10 @@ async function optimizationToggleAutoApply(req, res) {
 async function optimizationGetState(req, res) {
   try {
     const settings = await sbGet('optimization_settings?select=engine,auto_apply,updated_at');
-    const rules = await sbGet('optimization_rules?active=eq.true&select=id,engine,rule_type,rule_data,priority,source_detail,created_at,expires_at&order=created_at.desc');
+    const rulesRaw = await sbGet('optimization_rules?active=eq.true&select=id,engine,rule_type,rule_data,priority,source_detail,created_at,expires_at&order=created_at.desc');
+    // G0/C2 — an expired rule is not in force. Rows are kept and still listed, but flagged so the screen and any consumer can tell.
+    const _nowMs = Date.now();
+    const rules = (Array.isArray(rulesRaw) ? rulesRaw : rulesRaw || []).map(r => ({ ...r, expired: !!(r.expires_at && Date.parse(r.expires_at) <= _nowMs) }));
     const audit = await sbGet('optimization_audit_log?select=ts,engine,action,rule_type,detail,source,after_state&order=ts.desc&limit=50');
     return res.status(200).json({ ok: true, settings: settings || [], activeRules: rules || [], auditLog: audit || [] });
   } catch(e) { return res.status(500).json({ ok:false, error: e.message }); }
@@ -21414,6 +21422,11 @@ export default async function handler(req, res) {
       const gate = await _publishGate(req, action);
       if (!gate.ok) return res.status(401).json({ ok: false, error: 'publisher_session_required', message: 'Sign in to MMMOS again, then retry.' });
       req._publisher = gate.who;
+    }
+    // G0/C5 — optimization/strategy maintenance actions change rules, settings or strategy rows: CEO session only (no VA, no observe-mode pass-through).
+    // The daily job calls optimizationApplyRecommendations in-process (analyticsAutoRun) and never passes through this router.
+    if (CEO_ONLY_MUTATING_ACTIONS.has(action) && !(await requireCeoSession(req))) {
+      return res.status(401).json({ ok: false, error: 'ceo_authorization_required', message: 'Sign in as CEO to use this action.' });
     }
     if (action === 'list_tasks')           return await listTasks(req, res);
     if (action === 'create_task')          return await createTask(req, res);

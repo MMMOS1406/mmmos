@@ -9,6 +9,7 @@ import { generateFactPackets, factPacketToPromptBlock } from '../lib/nextwaveV2F
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, parseSrvStudioV2Reply, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs';
 // SRV Farsi Creative V2 — the one canonical SRV Farsi creative brain; used only when the srv_farsi_creative_v2 flag allows it.
 import { srvfCv2Handle } from '../lib/srvFarsiCreativeV2.mjs';
+import { stripLearningInputs } from '../lib/generationInputs.mjs'; // G0/C4 — legacy learning inputs never reach SRV music generation
 
 // SRV FARSI IDENTITY LAYER v1 — 2026-06-08
 // Mirrors the live api/ops.js inline prompt for the same engine. Kept in sync so any
@@ -757,7 +758,8 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'API key not configured.' });
 
-  const { engine, mood, platform, contentType, contentFormat, taskName, recentPackages } = req.body;
+  const { engine, mood, platform, contentType, contentFormat, taskName } = req.body;
+  const recentPackages = stripLearningInputs(req.body.recentPackages, engine); // G0/C4 — SRV engines only; anti-repetition entries are kept
 
   if (!engine) return res.status(400).json({ error: 'Engine is required.' });
   // SRV Farsi Creative V2: the client asks for V2 only from the SRV Farsi lifecycle; the server re-checks the flag row
