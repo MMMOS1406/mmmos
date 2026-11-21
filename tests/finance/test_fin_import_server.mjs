@@ -25,7 +25,7 @@ const world = (over = {}) => {
       const m = /updated_at=(eq\.|is\.)([^&]*)/.exec(u); const want = m && m[1] === 'eq.' ? decodeURIComponent(m[2]) : null; if (!row || (m && m[1] === 'eq.' && row.updated_at !== want)) return json(200, []);
       row.value = body.value; row.updated_at = stamp(); return json(200, [row]); }
     return json(404, {}); };
-  const lib = { ...I, ADAPTERS: over.production ? I.ADAPTERS : over.rm ? { rocket_money: I.acceptRocketMoneyMapping({ reviewed_by: 'pm', reviewed_on: '2031-06-16' }) } : { ...I.ADAPTERS, fixture_csv: I.FIXTURE_ADAPTER } };
+  const lib = { ...I, ADAPTERS: over.production ? I.ADAPTERS : over.rm ? I.ADAPTERS : { ...I.ADAPTERS, fixture_csv: I.FIXTURE_ADAPTER } };
   const stubs = { _finImp: lib, sbGet, fetch: fetchStub, requireCeoSession: async () => w.ceo, SUPABASE_URL: 'https://db.test', SUPABASE_SERVICE_KEY: 'svc-test-' + Math.random().toString(16).slice(2), createHash, console: { log() {}, warn: (...a) => w.logs.push(a.join(' ')), error: (...a) => w.logs.push(a.join(' ')) }, _safeDbError: (t, op, st) => `db ${t} ${op} ${st}` };
   const names = Object.keys(stubs);
   const f = new Function(...names, (over.src || SRC) + '\nreturn { finImport };')(...names.map((k) => stubs[k]));
@@ -41,9 +41,9 @@ for (const op of ['status', 'preview', 'commit', 'verify']) { const w = world({ 
 { const w = world(); const r = await w.status({ method: 'GET' }); ok('GET is refused (405) with no database access', r.code === 405 && w.reads.length === 0); }
 
 // 2. production registry
-{ const w = world({ production: true }); const s = await w.status(); ok('production registry lists ONLY Rocket Money, marked unmapped (no fixture adapter)', s.body.adapters.length === 1 && s.body.adapters[0].id === 'rocket_money' && s.body.adapters[0].status === 'unmapped');
-  const p = await w.preview({ body: { adapter: 'rocket_money', content: csv(rows) } }); ok('previewing with Rocket Money is refused as unmapped: nothing parsed, nothing written', p.body.commit_ready === false && p.body.result.blocking[0].code === 'adapter_unmapped' && p.body.result.counts.data_rows === 0 && w.writes.length === 0);
-  const c = await w.commit({ body: { adapter: 'rocket_money', content: csv(rows), expected_rows_fingerprint: 'x' } }); ok('committing with Rocket Money is refused (422) and writes nothing', c.code === 422 && w.writes.length === 0);
+{ const w = world({ production: true }); const s = await w.status(); ok('production registry lists ONLY Rocket Money, registered with the accepted (mapped) mapping — no fixture adapter', s.body.adapters.length === 1 && s.body.adapters[0].id === 'rocket_money' && s.body.adapters[0].status === 'mapped');
+  const p = await w.preview({ body: { adapter: 'rocket_money', content: csv(rows) } }); ok('a file that is NOT in the verified Rocket Money format (header differs) is refused (header_changed): nothing parsed, nothing written', p.body.commit_ready === false && p.body.result.blocking[0].code === 'header_changed' && p.body.result.counts.data_rows === 0 && w.writes.length === 0);
+  const c = await w.commit({ body: { adapter: 'rocket_money', content: csv(rows), expected_rows_fingerprint: 'x' } }); ok('committing a wrong-format file with Rocket Money is refused (422) and writes nothing', c.code === 422 && w.writes.length === 0);
   const f = await w.preview({ body: { adapter: 'fixture_csv', content: csv(rows) } }); ok('the synthetic fixture adapter does NOT exist in production', f.body.commit_ready === false && f.body.result.blocking[0].code === 'unknown_adapter'); }
 
 // 3. preview writes nothing; commit writes one household row
@@ -112,7 +112,7 @@ const months = async (w) => (await w.status()).body.months;
   const rmRow = (date, amt, cat, name = 'Synth Merchant', acct = ['Cash', 'Checking Synth', '1111', 'Bank Synth']) => [date, date, acct[0], acct[1], acct[2], acct[3], name, '', amt, 'DESC ' + name, cat, '', '', '', ''].map(q).join(',');
   const rmFile = [I.ROCKET_MONEY_V1_HEADER.join(','), rmRow(day(20), '-2500.00', 'Income', 'Synth Payroll'), rmRow(day(19), '1200.00', 'Bills & Utilities', 'Synth Landlord'), rmRow(day(18), '80.40', 'Groceries', 'Synth Grocer'), rmRow(day(17), '-3.50', 'Fees', 'Synth Fee Co'), rmRow(day(17), '12.00', 'Fees', 'Synth Fee Co'), rmRow(day(16), '300.00', 'Internal Transfers', 'To savings'), rmRow(day(16), '-300.00', 'Internal Transfers', 'To savings', ['Cash', 'Savings Synth', '3333', 'Bank Synth'])].join('\n') + '\n';
   const wp = world({ production: true }); const pp = await wp.preview({ body: { adapter: 'rocket_money', content: rmFile } });
-  ok('PRODUCTION REGISTRY: a Rocket-Money-shaped file is refused (adapter_unmapped) — nothing parsed, nothing written', pp.body.commit_ready === false && pp.body.result.blocking[0].code === 'adapter_unmapped' && pp.body.result.counts.data_rows === 0 && wp.writes.length === 0);
+  ok('PRODUCTION REGISTRY: a Rocket-Money-shaped file is ACCEPTED by the registered mapping (preview ready, nothing written by the preview)', pp.body.commit_ready === true && pp.body.result.adapter.status === 'mapped' && pp.body.result.counts.accepted === 7 && wp.writes.length === 0);
   const w = world({ rm: true }); const st = await w.status(); ok('with an ACCEPTED mapping the source list shows Rocket Money as mapped (import only: no connection exists)', st.body.adapters.length === 1 && st.body.adapters[0].id === 'rocket_money' && st.body.adapters[0].status === 'mapped');
   const pv = await w.preview({ body: { adapter: 'rocket_money', content: rmFile } }); const res = pv.body.result;
   ok('preview: 7 rows accepted, spending net of the refund, income, 2 transfer rows excluded; capabilities and the refund-netting flag reported; nothing written', pv.body.commit_ready && res.counts.accepted === 7 && res.classification.income === 1 && res.classification.expense === 3 && res.classification.refund === 1 && res.classification.transfer === 2 && res.adapter.nets_refunds === true && res.capabilities.refunds === true && w.writes.length === 0, res.classification);
