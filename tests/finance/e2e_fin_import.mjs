@@ -35,10 +35,10 @@ try {
   await page.evaluate(() => { currentTab = 'finance'; renderTab('finance'); }); await sleep(600);
   let t = await waitText(page, /No import yet/);
   ok('ENTRY POINT: the admin Finance screen has an "Imports — financial apps" section, read-only, saying no import yet and that values are unavailable (not zero)', /Imports — financial apps/i.test(await page.evaluate(() => document.getElementById('mainContent').innerText)) && /No import yet/.test(t) && /unavailable/.test(t) && /Read-only/.test(t), t);
-  ok('the source list shows Rocket Money as "format not verified yet" (nothing guessed) next to the synthetic fixture source', /Rocket Money \(transactions CSV\) — format not verified yet/.test(await page.evaluate(() => document.getElementById('finImpAdapter').innerText)));
-  // ── Rocket Money unmapped
+  ok('the source list shows the registered Rocket Money adapter next to the synthetic fixture source', /Rocket Money \(transactions CSV export\)/.test(await page.evaluate(() => document.getElementById('finImpAdapter').innerText)) && !/format not verified yet/.test(await page.evaluate(() => document.getElementById('finImpAdapter').innerText)));
+  // ── Rocket Money registered mapping vs a wrong-format file
   await page.select('#finImpAdapter', 'rocket_money'); const inp = await page.$('#finImpFile'); await inp.uploadFile(f1); await waitText(page, /Selected: export-1/); await page.click('#finImpCheck'); t = await waitText(page, /cannot be imported/);
-  ok('Rocket Money (unmapped): the file is NOT read; the screen explains a redacted sample is needed; the import button is disabled', /File cannot be imported/.test(t) && /format has not been verified/.test(t) && /redacted sample/.test(t) && await page.evaluate(() => document.getElementById('finImpCommit').disabled === true), t);
+  ok('Rocket Money selected with a file that is NOT in the verified Rocket Money format: the file is NOT read; the screen says the columns differ from the verified export; the import button is disabled', /File cannot be imported/.test(t) && /columns differ from the export this mapping was verified against/.test(t) && await page.evaluate(() => document.getElementById('finImpCommit').disabled === true), t);
   // ── malformed file
   await page.select('#finImpAdapter', 'fixture_csv'); await (await page.$('#finImpFile')).uploadFile(f2); await waitText(page, /Selected: bad/); await page.click('#finImpCheck'); t = await waitText(page, /cannot be imported/);
   ok('a malformed (HTML) file is refused with a plain message and cannot be committed', /not a CSV file/.test(t) && await page.evaluate(() => document.getElementById('finImpCommit').disabled === true), t);
