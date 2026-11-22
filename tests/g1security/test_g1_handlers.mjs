@@ -158,6 +158,18 @@ try {
       const libOk = await ceoSessionOk({ method: 'GET', headers: { 'x-mmm-ceo-session': t }, query: {} }, { fetchImpl: fetch, supabaseUrl: 'https://supabase.test', serviceKey: KEY }); if (opsOk !== libOk) disagree.push(`${n}: ops=${opsOk} lib=${libOk}`); }
     check('the ops gate and the standalone-endpoint check accept and refuse exactly the same ' + Object.keys(T).length + ' tokens', disagree.length === 0, disagree.join(' ; ')); }
 
+  /* ───────── existing CEO and VA operations remain functional ───────── */
+  { const opSecret = createHmac('sha256', SECRET).update('mmmos-operator-session-v1').digest('base64url'); const payload = Buffer.from(JSON.stringify({ sub: 'operator', exp: Date.now() + 3600e3, pv: 'f'.repeat(12) })).toString('base64url');
+    const VA = payload + '.' + createHmac('sha256', opSecret).update(payload).digest('base64url');
+    const gen = (extra) => OPS({ action: 'generate_package', method: 'POST', body: { engineId: 'srv_farsi', mode: 'Female Voice — Romantic', contentFormat: 'short', existingMemory: [], ...extra } });
+    seed(); const va = await gen({ operator_session_token: VA }); const vaCalls = world.anthropic.length;
+    seed(); const ceo = await OPS({ action: 'generate_package', method: 'POST', ceo: true, body: { engineId: 'srv_farsi', mode: 'Female Voice — Romantic', contentFormat: 'short', existingMemory: [] } }); const none = await OPS({ action: 'generate_package', method: 'POST', body: { engineId: 'srv_farsi', mode: 'x', contentFormat: 'short' } });
+    check('VA (operator) session: Factory generation (generate_package, the VA\'s real operation) still works — gate passes, the model request is made', va.code === 200 && vaCalls >= 1, `${va.code} calls=${vaCalls}`);
+    check('CEO session: generate_package still works; no session is still refused (unchanged)', ceo.code === 200 && none.code === 401);
+    const refused = []; for (const [a, m, h] of [['youtube_snapshot_now', 'GET', {}], ['youtube_analytics_pull', 'GET', {}], ['analytics_auto_run', 'GET', {}], ['optimization_apply_recs', 'GET', {}]]) { seed(); const r = await OPS({ action: a, method: m, query: { operator_session_token: VA }, headers: h }); const r2 = await OPS({ action: a, method: 'POST', body: { operator_session_token: VA } }); refused.push(r.code === 401 && r2.code === 401 && noWork()); }
+    const syncRefused = []; for (const M of [yts, tts]) { seed(); const r = await call(M.cur, { body: { channelId: 'UC_A', openId: 'O', operator_session_token: VA } }); syncRefused.push(r.code === 401 && noWork()); }
+    check('a VA token is not a credential for the CEO-only analytics/sync/optimization actions (they are CEO screens; the VA role is confined to Tasks and Factory — see the report)', refused.every(Boolean) && syncRefused.every(Boolean)); }
+
   /* ───────── client: the four buttons send the CEO session ───────── */
   { loud(); const html = fs.readFileSync(new URL('../../public/index.html', import.meta.url), 'utf8');
     for (const [name, re] of [['youtube sync', /fetch\('\/api\/youtube\/sync',\{\s*method:'POST',\s*headers:\{'Content-Type':'application\/json','X-MMM-CEO-Session'/], ['tiktok sync', /fetch\('\/api\/tiktok\/sync',\{\s*method:'POST',\s*headers:\{'Content-Type':'application\/json','X-MMM-CEO-Session'/], ['analytics pull', /action=youtube_analytics_pull[^\n]*X-MMM-CEO-Session/], ['snapshot now', /action=youtube_snapshot_now',\{headers:\{'X-MMM-CEO-Session'/]])
