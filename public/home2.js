@@ -76,6 +76,7 @@
       '.h2-tabs button.on{background:rgba(201,168,76,.15);border-color:rgba(201,168,76,.45);color:var(--gold);font-weight:800}',
       '.h2-div{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--dim);font-family:"JetBrains Mono",monospace;text-transform:uppercase;margin:22px 0 10px;padding-top:14px;border-top:1px solid var(--border)}',
       '.h2d-stack{display:grid;gap:16px;grid-template-columns:minmax(0,1fr)}',
+      '.h2dx{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--radius);padding:16px;min-width:0;font-family:"Syne",sans-serif;color:var(--text)}.h2dx .h2d-h h3{margin:0 0 6px;font-size:17px;color:#fff}.h2dx .h2d-dx{margin-top:2px}',
       '.h2d{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:var(--radius);padding:16px;min-width:0;font-family:"Syne",sans-serif;color:var(--text)}',
       '.h2d-h{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.h2d-h h3{margin:0;font-size:19px;color:#fff}',
       '.h2d-pill{border:1px solid;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:800;letter-spacing:.5px}',
@@ -106,7 +107,13 @@
       '.h2d-k{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--gold);font-weight:800;min-width:92px;font-family:"JetBrains Mono",monospace}.h2d-adv{font-size:10px;color:var(--dim)}',
       '.h2d-obs{font-size:11px;color:#9aa4bd;line-height:1.45;margin:2px 0}.h2d-obs b{color:#c3cde6}.h2d-cav{font-size:11px;color:#fbbf24;margin:3px 0}',
       '.h2d-meta{display:flex;gap:4px 16px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:6px 0 4px}.h2d-meta b{color:#fff}.h2d-stale{color:#fbbf24;font-weight:700}',
-      '.h2d-more{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}.h2d-more>summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}'
+      '.h2d-more{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}.h2d-more>summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}',
+      '.h2d-dx{margin:12px 0 4px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:rgba(255,255,255,.02)}.h2d-dxh{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px;color:#fff;font-size:14px}',
+      '.h2d-rc{font-size:11px;font-weight:800;border-radius:6px;padding:3px 8px;letter-spacing:.4px}.h2d-rc.no{background:rgba(239,68,68,.12);color:#f87171;border:1px solid #ef4444}.h2d-rc.ok{background:rgba(34,197,94,.12);color:#4ade80;border:1px solid #22c55e}',
+      '.h2d-dr{display:grid;grid-template-columns:20px 150px minmax(0,1fr);gap:6px;padding:5px 0;border-top:1px solid var(--border);font-size:12px;color:#e5e9f7;line-height:1.45}@media(max-width:640px){.h2d-dr{grid-template-columns:18px minmax(0,1fr)}.h2d-dr>div{grid-column:2}}.h2d-dn{color:var(--gold);font-weight:800}.h2d-dl{color:var(--dim);font-weight:700}.h2d-dr ul{margin:0;padding-left:16px}.h2d-dr b{color:#fff}',
+      '.h2d-dpol{margin-top:6px}.h2d-dd{margin-top:8px}.h2d-dd>summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}',
+      '.h2d-cat{margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:#e5e9f7}.h2d-ch{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;align-items:center;margin-bottom:4px}.h2d-cat ul{margin:4px 0;padding-left:16px;line-height:1.5}.h2d-hy{color:#fbbf24;margin:4px 0}.h2d-ex{margin-top:4px;padding:6px 8px;border-left:3px solid var(--gold);background:rgba(201,168,76,.05)}.h2d-ex span{color:var(--dim);font-size:11px}',
+      '.h2d-plan{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}.h2d-plan th,.h2d-plan td{border:1px solid var(--border);padding:4px 6px;vertical-align:top;text-align:left;color:#c3cde6}.h2d-plan th{color:var(--dim)}'
     ].join('\n');
     document.head.appendChild(s);
   }
@@ -369,6 +376,36 @@
       '<details><summary>Evidence and how we will know</summary><div class="h2d-ev">Evidence (' + esc(r.evidence_period || 'period n/a') + '): ' + esc(r.evidence) + '<br>' + esc(r.diagnosis) + '<br>Success: ' + esc(r.success) + '<br>Confidence: ' + esc(r.confidence) + ' · Owner: ' + esc(r.owner) + ' · Review by ' + esc(dShort(r.review_by)) + ' · Advisory only: nothing changes automatically.</div></details></li>';
   }
   function navBtns(engine) { var nm = dn(engine); return '<div class="h2d-btns"><button type="button" class="h2-btn" data-h2="biz:' + esc(engine) + '">Open ' + esc(nm) + '</button><button type="button" class="h2-btn" data-h2="ws:' + esc(engine) + ':analytics">Detailed analytics</button><button type="button" class="h2-btn" data-h2="ws:' + esc(engine) + ':production">Production tasks</button></div>'; }
+
+  var DXST = { problem_observed: ['#ef4444', 'Problem observed'], insufficient_evidence: ['#eab308', 'Insufficient evidence'], no_problem_observed: ['#22c55e', 'No problem observed'] };
+  function diagBlock(c) {
+    var d = c.diagnosis; if (!d || d.state !== 'ok') return '';
+    var nt = d.next_test, why = d.hypotheses && d.hypotheses.length ? d.hypotheses.map(function (h) { return '<b>Hypothesis (not tested):</b> ' + esc(h.text); }).join('<br>') : '';
+    var miss = d.cause_or_missing && d.cause_or_missing.length ? '<b>Evidence missing:</b> ' + d.cause_or_missing.map(esc).join('; ') + '.' : '';
+    var row = function (n, l, v) { return '<div class="h2d-dr"><span class="h2d-dn">' + n + '</span><span class="h2d-dl">' + l + '</span><div>' + v + '</div></div>'; };
+    var cats = d.categories.map(function (k) {
+      var st = DXST[k.status] || DXST.insufficient_evidence;
+      return '<div class="h2d-cat"><div class="h2d-ch"><b>' + esc(k.label) + '</b><span class="h2d-chip" style="border-color:' + st[0] + ';color:' + st[0] + '">' + st[1] + ' · confidence ' + esc(k.confidence) + '</span></div>' +
+        '<ul>' + k.confirmed.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+        (k.hypothesis ? '<div class="h2d-hy"><b>Hypothesis (not tested):</b> ' + esc(k.hypothesis) + '</div>' : '') +
+        (k.missing && k.missing.length ? '<div class="h2d-sm"><b>Missing evidence:</b> ' + k.missing.map(esc).join('; ') + '</div>' : '') +
+        (k.experiment ? '<div class="h2d-ex"><b>Experiment:</b> ' + esc(k.experiment.text) + '<br><span>Owner: ' + esc(k.experiment.owner) + ' · Review by ' + esc(dShort(k.experiment.review_by)) + ' · Success: ' + esc(k.experiment.success) + ' · Needs: ' + esc(k.experiment.needs) + '</span></div>' : '') + '</div>';
+    }).join('');
+    var plan = '<table class="h2d-plan"><thead><tr><th>Metric</th><th>Today</th><th>Change</th><th>Authorization</th></tr></thead><tbody>' + d.data_plan.map(function (p0) { return '<tr><td><b>' + esc(p0.id) + '</b> ' + esc(p0.metric) + '</td><td>' + esc(p0.now) + '</td><td>' + esc(p0.change) + '</td><td>' + esc(p0.auth) + '</td></tr>'; }).join('') + '</tbody></table>';
+    return '<section class="h2d-dx" aria-label="Diagnosis"><div class="h2d-dxh"><b>Diagnosis</b><span class="h2d-rc ' + (d.established ? 'ok' : 'no') + '">' + esc(d.root_cause_label) + '</span></div>' +
+      row(1, 'What is wrong?', esc(d.what_is_wrong)) +
+      row(2, 'Evidence', '<ul>' + d.evidence.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>') +
+      row(3, d.established ? 'Likely cause' : 'Likely cause / missing evidence', (why || '') + (why && miss ? '<br>' : '') + miss) +
+      row(4, 'Test next', nt ? esc(nt.short || nt.text) : 'No test is proposed until more evidence exists.') +
+      row(5, 'Owner', nt ? esc(nt.owner) : '—') + row(6, 'Review', nt ? esc(dShort(nt.review_by)) + ' (' + nt.review_days + ' days)' : '—') + row(7, 'Success', nt ? esc(nt.success) : '—') +
+      '<div class="h2d-sm h2d-dpol">Advisory only. ' + esc(d.policy || '') + '</div>' +
+      '<details class="h2d-dd"><summary>Diagnosis by cause — distribution, retention, packaging, audience (confirmed facts vs hypotheses)</summary><div class="h2d-sm">' + esc(d.classification.note) + ' ' + esc(d.classification.basis) + '</div>' + cats + '</details>' +
+      '<details class="h2d-dd"><summary>Missing data and the collection plan (what needs your authorization)</summary>' + plan + '</details></section>';
+  }
+  function diagSection(key) {
+    var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key]; if (!c || c.state !== 'ok') return '';
+    return '<section class="h2dx" data-biz="' + key + '" aria-label="' + esc(nm) + ' diagnosis"><div class="h2d-h"><h3>' + esc(nm) + ' — diagnosis</h3></div>' + diagBlock(c) + '</section>';
+  }
   function dashCard(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key];
     var head = function (pill, sub) { return '<div class="h2d-h"><h3>' + esc(nm) + '</h3>' + (pill || '') + '</div>' + (sub || ''); };
@@ -387,7 +424,7 @@
     var t4 = '<div class="h2d-t"><div class="h2d-l">All views incl. paid · 28 d</div><div class="h2d-v h2d-mute">' + n0(k.total.value) + '</div><div class="h2d-s"><span class="h2d-sm">' + n0(k.watch_hours.value) + ' watch hours' + (k.watch_hours.value !== null ? '' : '') + '</span></div><div class="h2d-sm">Total, not organic.' + (f.since_through ? ' Since ' + esc(dShort(f.since_through.from)) + ': ' + sgn(f.since_through.views) + ' views, ' + sgn(f.since_through.subs) + ' subs (public counters, incl. paid).' : '') + '</div></div>';
     var cont = '<div class="h2d-cols"><div><div class="h2d-sec">Top content · last 28 d</div>' + vlist(co.top, 'top') + (c.policy ? '<div class="h2d-sm">Includes historical Shorts. ' + esc(c.policy.note) + '</div>' : '') + '</div><div><div class="h2d-sec">Lowest recent performers · early signals</div>' + vlist(co.attention, 'attn') +
       '<div class="h2d-sm">' + esc(co.attention_basis) + '. ' + (co.zero_view_uploads ? co.zero_view_uploads + ' recent upload' + (co.zero_view_uploads > 1 ? 's have' : ' has') + ' no views recorded. ' : '') + 'Uploads: ' + co.uploads.last28 + ' in the last 28 d vs ' + co.uploads.prev28 + ' before.</div></div></div>';
-    var ret = '<div class="h2d-sec">Retention and engagement</div><div class="h2d-ret"><span>Avg view duration <b>' + dur(rt.avd_sec) + '</b>' + (rt.avd_prev_sec !== null ? ' <i>(was ' + dur(rt.avd_prev_sec) + ')</i>' : '') + '</span><span>Avg % viewed <b>' + (rt.avg_pct !== null ? rt.avg_pct + '%' : '—') + '</b></span><span>Watch ratio at 25% <b>' + (rt.median_at25 !== null ? rt.median_at25 : '—') + '</b> <i>(' + rt.curves + ' videos; ' + rt.early_loss + ' lose half early)</i></span><span>Views from subscribers <b>' + (rt.subscriber_view_share_pct !== null ? rt.subscriber_view_share_pct + '%' : '—') + '</b></span><span class="h2d-na">Likes, comments, shares: not available</span></div>';
+    var ret = '<div class="h2d-sec">Retention and engagement</div><div class="h2d-ret"><span>Avg view duration <b>' + dur(rt.avd_sec) + '</b>' + (rt.avd_prev_sec !== null ? ' <i>(was ' + dur(rt.avd_prev_sec) + ')</i>' : '') + '</span><span>Avg % viewed <b>' + (rt.avg_pct !== null ? rt.avg_pct + '%' : '—') + '</b></span><span>Watch ratio at 25% <b>' + (rt.median_at25 !== null ? rt.median_at25 : '—') + '</b> <i>(' + rt.curves + ' videos; ' + rt.early_loss + ' lose half early)</i></span><span>Views from subscribers <b>' + (rt.subscriber_view_share_pct !== null ? rt.subscriber_view_share_pct + '%' : '—') + '</b></span>' + (c.engagement ? '<span>Likes <b>' + c.engagement.likes_per_1000 + '</b> and comments <b>' + c.engagement.comments_per_1000 + '</b> per 1,000 views <i>(lifetime, incl. paid)</i></span>' : '<span class="h2d-na">Likes and comments: not available</span>') + '<span class="h2d-na">Shares: not collected</span></div>';
     var money = '<div class="h2d-sec">Revenue and expenses</div><div class="h2d-money">' + c.money.map(function (m) { return '<div><b>' + esc(m.label) + ': Not available</b><div class="h2d-sm">' + esc(m.reason) + '<br><u>Needed:</u> ' + esc(m.needed) + '</div></div>'; }).join('') + '</div>';
     var recs = '<div class="h2d-sec">Top 3 recommended actions</div>' + (c.recommendations.length ? '<ol class="h2d-recs">' + c.recommendations.map(recItem).join('') + '</ol>' : '<div class="h2d-na">No recommendation has enough evidence yet.</div>');
     var lim = '<details class="h2d-lim"><summary>Not measured yet (' + c.limitations.length + ') and the work required</summary><ul>' + c.limitations.map(function (l) { return '<li><b>' + esc(l.label) + '</b> — ' + esc(l.reason) + ' <u>Work:</u> ' + esc(l.work) + '</li>'; }).join('') + '</ul></details>';
@@ -417,6 +454,7 @@
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
       '<div class="h2-lab">Your businesses — growth, content and next actions</div><div class="h2d-stack">' + dashCard('silk_road_voices') + dashCard('srv_studio') + '</div>' +
+      '<div class="h2-lab">Diagnosis — what is wrong, the evidence, and what to test next</div><div class="h2d-stack">' + diagSection('silk_road_voices') + diagSection('srv_studio') + '</div>' +
       '<div class="h2-lab">Other businesses</div><div class="h2-grid c2">' + investCard() + circleCard() + '</div>' +
       '<div class="h2-lab">Goals — optional targets</div>' + goalsCard() +
       '<div class="h2-lab">Finance and analytics</div>' + moneyStrip() + '</div>';

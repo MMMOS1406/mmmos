@@ -29,6 +29,15 @@ try {
   check('summary shows one primary action with its owner and "advisory" wording', closed.every((t) => /Main problem/i.test(t) && /Next action/i.test(t) && /Owner/i.test(t) && /advisory/i.test(t)) && (await o.page.evaluate(() => [...document.querySelectorAll('section.h2d .h2d-act')].every((a) => a.querySelectorAll('b').length >= 3))));
   check('summary shows organic views, advertising share and subscriber growth', closed.every((t) => /Organic views/i.test(t) && /Advertising share/i.test(t) && /Subscriber growth/i.test(t)));
   check('SRV Studio policy: the Shorts recommendation in the data never appears on Home (Long-only)', !closed[1].includes('Produce three more Shorts') && !/SHORTS WIN/.test(closed[1]));
+  const dx = await o.page.evaluate(() => [...document.querySelectorAll('section.h2dx')].map((c) => ({ biz: c.dataset.biz, text: c.innerText.replace(/\s+/g, ' '), rows: c.querySelectorAll('.h2d-dr').length, open: [...c.querySelectorAll('details')].some((d) => d.open), label: (c.querySelector('.h2d-rc') || {}).innerText || '', top: Math.round(c.getBoundingClientRect().top + window.scrollY) })));
+  check('diagnosis section per business, after both summaries, with the seven numbered items', dx.length === 2 && dx.every((d) => d.rows === 7) && dx[0].biz === 'silk_road_voices' && dx[1].biz === 'srv_studio');
+  check('diagnosis says ROOT CAUSE NOT YET ESTABLISHED when evidence is missing and names the missing evidence', dx.every((d) => /ROOT CAUSE NOT YET ESTABLISHED/.test(d.label) && /Evidence missing|Likely cause/.test(d.text)));
+  check('diagnosis separates hypotheses (labelled "not tested") from confirmed evidence; test, owner, review, success all present', dx.every((d) => /What is wrong\?/.test(d.text) && /Evidence/.test(d.text) && /Test next/.test(d.text) && /Owner/.test(d.text) && /Review/.test(d.text) && /Success/.test(d.text)) && dx.some((d) => /Hypothesis \(not tested\)/.test(d.text)));
+  check('diagnosis by cause and the collection plan are collapsed by default', dx.every((d) => !d.open));
+  check('SRV Studio diagnosis never proposes producing Shorts (Long-only)', !/Produce three more Shorts/.test(dx[1].text));
+  await o.page.evaluate(() => document.querySelectorAll('section.h2dx details').forEach((d) => { d.open = true; }));
+  const dx2 = await o.page.evaluate(() => [...document.querySelectorAll('section.h2dx')].map((c) => c.innerText.replace(/\s+/g, ' ')));
+  check('expanded diagnosis shows packaging = insufficient evidence and the authorization column of the collection plan', dx2.every((t) => /Packaging/.test(t) && /Insufficient evidence/.test(t) && /Authorization/.test(t) && /CEO authorization/.test(t)));
   await o.page.evaluate(() => document.querySelectorAll('details.h2d-more').forEach((d) => { d.open = true; }));
   const cards = await txt(o.page, 'section.h2d');
   check('SRV Studio policy (expanded): no Shorts-producing recommendation in the detail either; Long evaluation shown', !cards[1].includes('Produce three more Shorts') && /Long videos drew 400 views/.test(cards[1]) && /too small to judge/.test(cards[1]));
@@ -40,7 +49,7 @@ try {
   check('card B: only B content (isolation)', /BETA SONG ONE/.test(cards[1]) && !/ALPHA/.test(cards[1]));
   check('card B shows the paid/organic split and labels total views as "incl. paid" (never organic)', /75% paid/.test(cards[1]) && /2,000 organic/.test(cards[1]) && /All views incl\. paid · 28 d 8,000/i.test(cards[1]));
   check('revenue and expenses read "Not available" with a reason and the work needed', cards.every((t) => /Revenue: Not available/.test(t) && /Expenses: Not available/.test(t) && /Needed:/.test(t)) && !cards.some((t) => /\$\s?\d/.test(t)));
-  check('"Likes, comments, shares: not available" states the missing metric', cards.every((t) => /Likes, comments, shares: not available/.test(t)));
+  check('engagement: likes/comments availability and shares-not-collected are stated (no false "not collected" for likes)', cards.every((t) => /Likes and comments: not available|per 1,000 views/.test(t) && /Shares: not collected/.test(t)));
   check('stale banner shown (data 5 days old)', cards.every((t) => /Detailed analytics end on/.test(t)));
   const lab = await txt(o.page, 'section.h2d .h2d-l'); check('no tile label calls total views organic', !lab.some((l) => /organic/i.test(l) && /all views|total/i.test(l)));
   const rec = await txt(o.page, 'section.h2d[data-biz="silk_road_voices"] li.h2d-rec'); check('recommendations rendered as ≤3 items with "Do next"', rec.length >= 1 && rec.length <= 3 && rec.every((r) => /Do next:/.test(r)));
