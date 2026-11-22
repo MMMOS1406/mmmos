@@ -44,6 +44,7 @@ try {
   mode = 'fail'; const o2 = await openPage(browser, stub.origin, { viewport: { width: 1440, height: 900 }, realClock: true }); await login(o2.page, stub.origin, 'admin'); await settle(o2.page, stub.origin, 1200);
   await o2.page.evaluate(() => renderTab('home')); await settle(o2.page, stub.origin, 1500);
   const c2 = await txt(o2.page, 'section.h2d'); check('report failure: both cards state the report could not be loaded (no invented numbers)', c2.length === 2 && c2.every((t) => /could not be loaded/.test(t) && !/\d{3,}/.test(t.replace(/\(.*?\)/g, ''))));
+  check('report failure: every card still offers Open / Detailed analytics / Production tasks', await o2.page.evaluate(() => [...document.querySelectorAll('section.h2d')].every((c) => c.querySelectorAll('button[data-h2]').length === 3)));
   check('report failure: Investment and finance sections still render', await o2.page.evaluate(() => !!document.getElementById('h2Invest') && !!document.querySelector('.h2-grid.c4')));
   await o2.page.close();
   // non-admin sessions: homepage is not active and growth_report is never requested

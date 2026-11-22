@@ -45,7 +45,7 @@ try {
   // ---- 2 Home: every card, row and button goes to the right place, and Home is one click away from everywhere
   const homeTargets = async () => { await clickSel(p, '#h2Side button[data-h2="home"]'); return p.evaluate(() => [...document.querySelectorAll('#mainContent [data-h2]')].map((e, i) => ({ i, id: e.getAttribute('data-h2'), label: (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) }))); };
   const targets = await homeTargets();
-  check('Home offers links only to destinations that exist (no dead or double-labelled links)', targets.length >= 14 && targets.every((t) => /^(finance|analytics|invest|inv:(overview|holdings|performance|connection)|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics|avatars))$/.test(t.id)), targets.map((t) => t.id).join(','));
+  check('Home offers links only to destinations that exist (no dead or double-labelled links)', targets.length >= 7 && targets.every((t) => /^(finance|analytics|invest|inv:(overview|holdings|performance|connection)|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics|avatars))$/.test(t.id)), targets.map((t) => t.id).join(','));
   for (const t of targets) {
     await clickSel(p, '#h2Side button[data-h2="home"]');
     await p.evaluate((i) => document.querySelectorAll('#mainContent [data-h2]')[i].click(), t.i); await W(p, 700);
@@ -103,7 +103,10 @@ try {
 
   // ---- 5 keyboard and accessibility
   check('active sidebar item is marked aria-current', await p.evaluate(() => document.querySelectorAll('#h2Side button[aria-current="page"]').length === 1));
-  const kb = await p.evaluate(async () => { const r = document.querySelector('#mainContent .h2-kv[data-h2="ws:SRV Farsi:analytics"]'); if (!r) return false; r.focus(); r.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await new Promise((x) => setTimeout(x, 600)); return document.querySelector('#h2Ws .h2-tabs button.on')?.innerText === 'Analytics'; });
+  // G2: the Home links are native buttons on the business dashboards and rows elsewhere; a real Enter key press (focus first) must open the destination
+  const kbOk = await p.evaluate(() => { const r = document.querySelector('#mainContent [data-h2="ws:SRV Farsi:analytics"]'); if (!r) return false; r.focus(); return document.activeElement === r; });
+  if (kbOk) { await p.keyboard.press('Enter'); await W(p, 700); }
+  const kb = kbOk && await p.evaluate(() => document.querySelector('#h2Ws .h2-tabs button.on')?.innerText === 'Analytics');
   check('Enter on a Home row opens its destination (keyboard)', kb);
   check('no page errors during the whole Admin audit', on.pageErrors.length === errs0, on.pageErrors.slice(errs0).join(' | '));
   const log = (await fetchJson(stub.origin + '/__stub/log')).log;

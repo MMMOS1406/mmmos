@@ -361,11 +361,12 @@
       '<div class="h2d-ra"><span>Do next:</span> ' + esc(r.action) + '</div>' +
       '<details><summary>Evidence and how we will know</summary><div class="h2d-ev">Evidence (' + esc(r.evidence_period || 'period n/a') + '): ' + esc(r.evidence) + '<br>' + esc(r.diagnosis) + '<br>Success: ' + esc(r.success) + '<br>Confidence: ' + esc(r.confidence) + ' · Owner: ' + esc(r.owner) + ' · Review by ' + esc(dShort(r.review_by)) + ' · Advisory only: nothing changes automatically.</div></details></li>';
   }
+  function navBtns(engine) { var nm = dn(engine); return '<div class="h2d-btns"><button type="button" class="h2-btn" data-h2="biz:' + esc(engine) + '">Open ' + esc(nm) + '</button><button type="button" class="h2-btn" data-h2="ws:' + esc(engine) + ':analytics">Detailed analytics</button><button type="button" class="h2-btn" data-h2="ws:' + esc(engine) + ':production">Production tasks</button></div>'; }
   function dashCard(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key];
     var head = function (pill, sub) { return '<div class="h2d-h"><h3>' + esc(nm) + '</h3>' + (pill || '') + '</div>' + (sub || ''); };
-    if (!c) return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head('', '<div class="h2d-na">' + (H.err ? 'The analytics report could not be loaded (' + esc(H.err) + '). The business pages below still work.' : 'Loading analytics…') + '</div>') + '</section>';
-    if (c.state !== 'ok') return '<section class="h2d" data-biz="' + key + '">' + head('', '<div class="h2d-na">' + esc(c.reason || 'No analytics are available for this business.') + '</div>') + '</section>';
+    if (!c) return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head('', '<div class="h2d-na">' + (H.err ? 'The analytics report could not be loaded (' + esc(H.err) + '). The business pages below still work.' : 'Loading analytics…') + '</div>') + navBtns(engine) + '</section>';
+    if (c.state !== 'ok') return '<section class="h2d" data-biz="' + key + '">' + head('', '<div class="h2d-na">' + esc(c.reason || 'No analytics are available for this business.') + '</div>') + navBtns(engine) + '</section>';
     var s = c.status, pc = PILL[s.code] || PILL.unknown, f = c.freshness, k = c.kpis, sp = c.split, rt = c.retention, co = c.content;
     var pill = '<span class="h2d-pill" style="background:' + pc[0] + '22;border-color:' + pc[0] + ';color:' + pc[0] + '">' + pc[1] + ' ' + esc(s.label) + '</span>';
     var fresh = '<div class="h2d-fresh"><span>Data through <b>' + esc(dShort(f.data_through)) + '</b>' + (f.age_days !== null ? ' (' + f.age_days + ' d ago)' : '') + '</span><span>Last successful sync <b>' + esc(dTime(f.last_ok_sync)) + '</b></span><span class="h2d-sm">Channel counters synced ' + esc(dTime(f.counters_synced_at)) + '</span></div>';
@@ -385,7 +386,7 @@
     var lim = '<details class="h2d-lim"><summary>Not measured yet (' + c.limitations.length + ') and the work required</summary><ul>' + c.limitations.map(function (l) { return '<li><b>' + esc(l.label) + '</b> — ' + esc(l.reason) + ' <u>Work:</u> ' + esc(l.work) + '</li>'; }).join('') + '</ul></details>';
     var ix = bizIndex(engine), ff = ix >= 0 ? facts(ix) : null;
     var ops = ff ? '<div class="h2d-ops"><span>Production: next action <b>' + ff.next + '</b></span><span>Stage <b>' + esc(stage(ff.px)) + '</b></span></div>' : '';
-    var btns = '<div class="h2d-btns"><button type="button" class="h2-btn" data-h2="biz:' + esc(engine) + '">Open ' + esc(nm) + '</button><button type="button" class="h2-btn" data-h2="ws:' + esc(engine) + ':analytics">Detailed analytics</button><button type="button" class="h2-btn" data-h2="ws:' + esc(engine) + ':production">Production tasks</button></div>';
+    var btns = navBtns(engine);
     return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(pill, fresh) + why + stale + '<div class="h2d-tiles">' + t1 + t2 + t3 + t4 + '</div>' +
       '<div class="h2d-sec">Weekly views · <i style="color:#34d399">■</i> organic <i style="color:#f59e0b">■</i> paid</div>' + spark(c.trend) + cont + ret + money + recs + ops + lim + btns + '</section>';
   }

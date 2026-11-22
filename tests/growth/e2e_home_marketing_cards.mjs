@@ -24,6 +24,9 @@ try {
   await login(page, stub.origin, 'admin'); await settle(page, stub.origin, 1500);
   await page.evaluate(() => renderTab('home')); await settle(page, stub.origin, 1800);
   const home = await page.evaluate(() => ({ cards: [...document.querySelectorAll('#mainContent .h2-grid.c3 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.querySelector('span').innerText.trim(), r.querySelector('b').innerText.trim()])) })), strip: (document.querySelector('#mainContent .h2-grid.c4 .h2-card[data-h2="analytics"]') || {}).innerText || '', all: document.getElementById('mainContent').innerText }));
+  // G2: the Home top is the business dashboard (own tests); the per-business corrected-window rows live on each workspace Overview (unchanged code), so they are read there.
+  home.cards = [];
+  for (const [eng, nm] of [['SRV Farsi', 'Silk Road Voices'], ['SRV English', 'SRV Studio']]) { await page.evaluate((x) => Home2.go('biz:' + x), eng); await settle(page, stub.origin, 1200); home.cards.push(await page.evaluate((n) => { const c = document.querySelector('#mainContent .h2-grid.c2 > .h2-card'); return { name: n, kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.querySelector('span').innerText.trim(), r.querySelector('b').innerText.trim()])) }; }, nm)); }
   const vKey = (kv) => Object.keys(kv).find((k) => /^Views \(/.test(k)), sKey = (kv) => Object.keys(kv).find((k) => /^Subscribers gained/.test(k));
   const cA = home.cards.find((c) => c.name === 'Silk Road Voices'), cB = home.cards.find((c) => c.name === 'SRV Studio');
   ok('Home: two business cards, each with a labeled analytics window (no "all synced videos")', !!cA && !!cB && /30-day window to /.test(vKey(cA.kv)) && !/all synced videos/.test(home.all), [cA && Object.keys(cA.kv), home.all.slice(0, 200)]);
