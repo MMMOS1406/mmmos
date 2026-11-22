@@ -19,7 +19,7 @@ try {
     await o.page.evaluateOnNewDocument(() => localStorage.removeItem('mmm_home_v2'));
     await o.page.reload(); await login(o.page, stub.origin, 'admin'); await settle(o.page, stub.origin, 1200);
     await o.page.evaluate(() => renderTab('home')); await settle(o.page, stub.origin, 1200);
-    const cards = await o.page.evaluate(() => [...document.querySelectorAll('#mainContent .h2-grid.c3 .h2-card')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.children[0].innerText, r.children[1].innerText])), dot: c.querySelector('.h2-dot').style.background })));
+    const cards = await o.page.evaluate(() => [...document.querySelectorAll('#mainContent section.h2d, #mainContent #h2Invest')].map((c) => ({ name: c.querySelector('h3').innerText.trim(), kv: Object.fromEntries([...c.querySelectorAll('.h2-kv')].map((r) => [r.children[0].innerText, r.children[1].innerText])), dot: c.querySelector('.h2-dot').style.background })));
     if (tag === 'desktop') {
       check('two music-business cards plus the Investment card rendered (CEO-facing names Silk Road Voices / SRV Studio)', cards.length === 3 && cards.map((c) => c.name).join() === ['Silk Road Voices', 'SRV Studio', 'Investment'].join(), cards.map((c) => c.name).join());
       const text = JSON.stringify(cards);
