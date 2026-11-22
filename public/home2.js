@@ -99,7 +99,14 @@
       '.h2d details summary{cursor:pointer;font-size:11px;color:var(--dim)}.h2d-ev{font-size:11px;color:#9aa4bd;line-height:1.5;margin-top:4px}',
       '.h2d-ops{display:flex;gap:6px 20px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:14px;padding-top:10px;border-top:1px solid var(--border)}.h2d-ops b{color:#fff}',
       '.h2d-lim{margin-top:10px}.h2d-lim ul{margin:6px 0 0;padding-left:18px;font-size:11px;color:#9aa4bd;line-height:1.5}',
-      '.h2d-btns{display:flex;gap:8px;flex-wrap:wrap}.h2d .h2d-tt{unicode-bidi:plaintext;text-align:left}'
+      '.h2d-btns{display:flex;gap:8px;flex-wrap:wrap}.h2d .h2d-tt{unicode-bidi:plaintext;text-align:left}',
+      '.h2d-sum{display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr));margin:10px 0 8px}@media(max-width:640px){.h2d-act>div{flex-direction:column;gap:2px;align-items:flex-start}.h2d-k{min-width:0}.h2d-sum{grid-template-columns:repeat(2,minmax(0,1fr))}.h2d-sum .h2d-st:first-child{grid-column:1/-1}}',
+      '.h2d-st{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:9px 11px;min-width:0}.h2d-st .h2d-v{font-size:26px;line-height:1.1}.h2d-st .h2d-v small{font-size:11px;color:var(--dim);font-weight:600}.h2d-st .h2d-s{font-size:11px;color:#c3cde6;display:flex;flex-direction:column;gap:2px}',
+      '.h2d-act{display:grid;gap:5px;margin:8px 0;padding:10px 12px;border:1px solid rgba(201,168,76,.35);border-left:3px solid var(--gold);border-radius:8px;background:rgba(201,168,76,.05)}.h2d-act>div{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:14px;color:#fff}.h2d-act b{font-weight:700}',
+      '.h2d-k{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--gold);font-weight:800;min-width:92px;font-family:"JetBrains Mono",monospace}.h2d-adv{font-size:10px;color:var(--dim)}',
+      '.h2d-obs{font-size:11px;color:#9aa4bd;line-height:1.45;margin:2px 0}.h2d-obs b{color:#c3cde6}.h2d-cav{font-size:11px;color:#fbbf24;margin:3px 0}',
+      '.h2d-meta{display:flex;gap:4px 16px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:6px 0 4px}.h2d-meta b{color:#fff}.h2d-stale{color:#fbbf24;font-weight:700}',
+      '.h2d-more{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}.h2d-more>summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}'
     ].join('\n');
     document.head.appendChild(s);
   }
@@ -350,7 +357,7 @@
   function vlist(items, kind) {
     if (!items || !items.length) return '<div class="h2d-na">' + (kind === 'attn' ? 'Not enough recent uploads with views to rank.' : 'No video data.') + '</div>';
     return items.map(function (v) {
-      var meta = kind === 'attn' ? n0(v.total_views) + (v.total_views === 1 ? ' view in ' : ' views in ') + Math.max(1, Math.round((Date.now() - Date.parse(v.published)) / 86400000)) + ' days (' + (v.per_day === null ? '—' : v.per_day) + '/day)' + (v.avg_pct !== null && v.avg_pct !== undefined ? ' · ' + v.avg_pct + '% viewed' : '')
+      var meta = kind === 'attn' ? n0(v.total_views) + (v.total_views === 1 ? ' view in ' : ' views in ') + Math.max(1, Math.round((Date.now() - Date.parse(v.published)) / 86400000)) + ' days (' + (v.per_day === null ? '—' : v.per_day) + '/day)' + (v.avg_pct !== null && v.avg_pct !== undefined ? ' · ' + v.avg_pct + '% viewed' : '') + (v.sample === 'insufficient' ? ' · too early to judge (under 100 views)' : '')
         : n0(v.views) + ' views (28 d)' + (v.avg_pct !== null && v.avg_pct !== undefined ? ' · ' + v.avg_pct + '% viewed' : '') + (v.subs ? ' · +' + v.subs + ' subs' : '');
       return '<div class="h2d-li"><span dir="auto" class="h2d-tt">' + esc(v.title) + '</span><em>' + esc(meta) + '</em></div>';
     }).join('');
@@ -378,7 +385,7 @@
       : '<div class="h2d-t"><div class="h2d-l">Paid vs organic</div><div class="h2d-v">Not available</div><div class="h2d-sm">' + esc(sp.note) + '</div></div>';
     var t3 = '<div class="h2d-t"><div class="h2d-l">Subscribers</div><div class="h2d-v">' + n0(k.subscribers.total) + '</div><div class="h2d-s"><b>' + sgn(k.subscribers.net_28d) + '</b> net from videos (28 d)' + (k.subscribers.prev_net_28d !== null ? ' vs ' + sgn(k.subscribers.prev_net_28d) + ' before' : '') + '</div><div class="h2d-sm">' + (k.subscribers.per_1000_organic !== null ? k.subscribers.per_1000_organic + ' per 1,000 organic views' + (k.subscribers.prev_per_1000_organic !== null ? ' (was ' + k.subscribers.prev_per_1000_organic + ')' : '') : 'Conversion not available') + '</div></div>';
     var t4 = '<div class="h2d-t"><div class="h2d-l">All views incl. paid · 28 d</div><div class="h2d-v h2d-mute">' + n0(k.total.value) + '</div><div class="h2d-s"><span class="h2d-sm">' + n0(k.watch_hours.value) + ' watch hours' + (k.watch_hours.value !== null ? '' : '') + '</span></div><div class="h2d-sm">Total, not organic.' + (f.since_through ? ' Since ' + esc(dShort(f.since_through.from)) + ': ' + sgn(f.since_through.views) + ' views, ' + sgn(f.since_through.subs) + ' subs (public counters, incl. paid).' : '') + '</div></div>';
-    var cont = '<div class="h2d-cols"><div><div class="h2d-sec">Top content · last 28 d</div>' + vlist(co.top, 'top') + '</div><div><div class="h2d-sec">Needs attention · recent uploads</div>' + vlist(co.attention, 'attn') +
+    var cont = '<div class="h2d-cols"><div><div class="h2d-sec">Top content · last 28 d</div>' + vlist(co.top, 'top') + (c.policy ? '<div class="h2d-sm">Includes historical Shorts. ' + esc(c.policy.note) + '</div>' : '') + '</div><div><div class="h2d-sec">Lowest recent performers · early signals</div>' + vlist(co.attention, 'attn') +
       '<div class="h2d-sm">' + esc(co.attention_basis) + '. ' + (co.zero_view_uploads ? co.zero_view_uploads + ' recent upload' + (co.zero_view_uploads > 1 ? 's have' : ' has') + ' no views recorded. ' : '') + 'Uploads: ' + co.uploads.last28 + ' in the last 28 d vs ' + co.uploads.prev28 + ' before.</div></div></div>';
     var ret = '<div class="h2d-sec">Retention and engagement</div><div class="h2d-ret"><span>Avg view duration <b>' + dur(rt.avd_sec) + '</b>' + (rt.avd_prev_sec !== null ? ' <i>(was ' + dur(rt.avd_prev_sec) + ')</i>' : '') + '</span><span>Avg % viewed <b>' + (rt.avg_pct !== null ? rt.avg_pct + '%' : '—') + '</b></span><span>Watch ratio at 25% <b>' + (rt.median_at25 !== null ? rt.median_at25 : '—') + '</b> <i>(' + rt.curves + ' videos; ' + rt.early_loss + ' lose half early)</i></span><span>Views from subscribers <b>' + (rt.subscriber_view_share_pct !== null ? rt.subscriber_view_share_pct + '%' : '—') + '</b></span><span class="h2d-na">Likes, comments, shares: not available</span></div>';
     var money = '<div class="h2d-sec">Revenue and expenses</div><div class="h2d-money">' + c.money.map(function (m) { return '<div><b>' + esc(m.label) + ': Not available</b><div class="h2d-sm">' + esc(m.reason) + '<br><u>Needed:</u> ' + esc(m.needed) + '</div></div>'; }).join('') + '</div>';
@@ -387,8 +394,25 @@
     var ix = bizIndex(engine), ff = ix >= 0 ? facts(ix) : null;
     var ops = ff ? '<div class="h2d-ops"><span>Production: next action <b>' + ff.next + '</b></span><span>Stage <b>' + esc(stage(ff.px)) + '</b></span></div>' : '';
     var btns = navBtns(engine);
-    return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(pill, fresh) + why + stale + '<div class="h2d-tiles">' + t1 + t2 + t3 + t4 + '</div>' +
-      '<div class="h2d-sec">Weekly views · <i style="color:#34d399">■</i> organic <i style="color:#f59e0b">■</i> paid</div>' + spark(c.trend) + cont + ret + money + recs + ops + lim + btns + '</section>';
+    var sm = c.summary || { problem: '—', action: '—', owner: '—', observed: '', hypothesis: null, caveats: [] };
+    var orgBig = k.organic.value === null ? 'Not available' : n0(k.organic.value);
+    var orgSub = k.organic.comparable && k.organic.delta_pct !== null ? '<span class="h2d-d ' + (k.organic.delta_pct >= 0 ? 'up' : 'dn') + '">' + (k.organic.delta_pct >= 0 ? '▲ ' : '▼ ') + Math.abs(k.organic.delta_pct) + '%' + '</span> vs previous 28 days (' + n0(k.organic.prev) + ')' : 'Previous 28 days not comparable (' + n0(k.organic.prev) + ' views)';
+    var paidBig = sp.verifiable ? sp.paid_share_pct + '%' : 'Not available';
+    var paidSub = sp.verifiable ? '<div class="h2d-bar" aria-hidden="true"><i style="width:' + (100 - (sp.paid_share_pct || 0)) + '%"></i><b style="width:' + (sp.paid_share_pct || 0) + '%"></b></div><span>' + n0(sp.organic) + ' organic · ' + n0(sp.paid) + ' paid</span>' : '<span>Paid and organic cannot be separated for the whole period</span>';
+    var subBig = (k.subscribers.net_28d === null ? '—' : sgn(k.subscribers.net_28d)) + ' <small>net, 28 d</small>';
+    var subSub = n0(k.subscribers.total) + ' subscribers' + (k.subscribers.per_1000_organic !== null ? ' · ' + k.subscribers.per_1000_organic + ' per 1,000 organic views' : '');
+    var stat = function (l, b, sub) { return '<div class="h2d-st"><div class="h2d-l">' + l + '</div><div class="h2d-v">' + b + '</div><div class="h2d-s">' + sub + '</div></div>'; };
+    var staleFlag = f.stale ? '<span class="h2d-stale">⚠ Data is ' + f.age_days + ' days old</span>' : '';
+    var summary = '<div class="h2d-sum">' + stat('Organic views · last 28 d', orgBig, orgSub) + stat('Advertising share of views', paidBig, paidSub) + stat('Subscriber growth', subBig, subSub) + '</div>' +
+      '<div class="h2d-act"><div><span class="h2d-k">Main problem</span><b dir="auto" class="h2d-tt">' + esc(sm.problem) + '</b></div>' +
+      '<div><span class="h2d-k">Next action</span><b dir="auto" class="h2d-tt">' + esc(sm.action) + '</b></div>' +
+      '<div><span class="h2d-k">Owner</span><b>' + esc(sm.owner) + '</b> <span class="h2d-adv">advisory — nothing changes automatically</span></div></div>' +
+      '<div class="h2d-obs"><b>Observed:</b> ' + esc(sm.observed) + (sm.hypothesis ? ' <b>' + esc(sm.hypothesis.replace(/: .*/, '')) + ':</b> ' + esc(sm.hypothesis.replace(/^[^:]*: /, '')) : '') + '</div>' +
+      (sm.caveats && sm.caveats.length ? '<div class="h2d-cav">' + sm.caveats.map(esc).join(' ') + '</div>' : '') +
+      '<div class="h2d-meta"><span>Data through <b>' + esc(dShort(f.data_through)) + '</b></span><span>Last successful sync <b>' + esc(dTime(f.last_ok_sync)) + '</b></span>' + staleFlag + '<span>Revenue and expenses: not available (see details)</span></div>';
+    var more = '<details class="h2d-more"><summary>Detailed view — trend, content, retention, all recommendations, data notes</summary>' + fresh + why + stale + '<div class="h2d-tiles">' + t1 + t2 + t3 + t4 + '</div>' +
+      '<div class="h2d-sec">Weekly views · <i style="color:#34d399">■</i> organic <i style="color:#f59e0b">■</i> paid</div>' + spark(c.trend) + cont + ret + money + recs + ops + lim + '</details>';
+    return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(pill, '') + summary + btns + more + '</section>';
   }
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +

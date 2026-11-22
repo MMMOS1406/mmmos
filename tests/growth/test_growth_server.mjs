@@ -88,6 +88,9 @@ const readOnlyHost = (u) => /^https:\/\/(www\.googleapis\.com\/youtube\/v3\/chan
   ok('VA role: same analytics, but NO collection controls/state and NO monetization statement; the capture store and the switch are not read', vd.collection === null && !vd.recommendations.some((x) => x.id === 'monetization') && vd.windows.d28.views === d.windows.d28.views && !w.reads.slice(mark).some((q) => /ypp_earn_capture|growth_collect&/.test(q)) && w.reads.length > mark);
   ok('the report contains no token, key or secret', !/AT-|RT-|Bearer|SERVICE-KEY/.test(JSON.stringify(r.body))); }
 { const w = world(); const r = await w.report({ body: { business: 'other' } }); ok('unknown business → 400', r.code === 400); }
+{ const w = world({ switch: switchRec() }); await w.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); await w.collect({ body: { business: B2, confirm: C.COLLECT_CONFIRMATION } });
+  const r = await w.report(); const fa = r.body.reports.find((x) => x.business === B1).recommendations.find((x) => x.id === 'format'), fb = r.body.reports.find((x) => x.business === B2).recommendations.find((x) => x.id === 'format');
+  ok('POLICY: the SRV Studio format recommendation is Long-only (never "keep producing all three formats"); Silk Road Voices keeps the original text', !!fa && !!fb && /Long-only/.test(fb.action) && /Do not resume Shorts/.test(fb.action) && !/all three formats/.test(fb.action) && /all three formats/.test(fa.action), [fa && fa.action, fb && fb.action]); }
 // 3b. CEO homepage card (home:true): CEO only, additive, read-only, each business's own channel only
 { const w = world({ switch: switchRec() }); await w.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); await w.collect({ body: { business: B2, confirm: C.COLLECT_CONFIRMATION } });
   const mark = w.reads.length, wr = w.writes.length, g = w.google.length; const r = await w.report({ body: { home: true } });

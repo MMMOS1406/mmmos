@@ -1,5 +1,5 @@
 // Unit tests for lib/homeInsights.mjs (CEO homepage business card). Synthetic data only. Run: node tests/home2/test_home_insights.mjs
-import { buildHomeCard, findReset, pickRecommendations, MIN } from '../../lib/homeInsights.mjs';
+import { buildHomeCard, findReset, pickRecommendations, MIN, POLICY } from '../../lib/homeInsights.mjs';
 const R = []; const check = (n, ok, d = '') => { R.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); };
 const NOW = Date.parse('2026-11-22T12:00:00Z');
 const win = (o) => ({ views: 1000, non_ad_views: 1000, paid_views: 0, paid_share_pct: 0, watch_hours: 10, net_subs: 5, from: '2026-10-21', to: '2026-11-17', status: 'complete', ...o });
@@ -41,4 +41,32 @@ check('unavailable on error dash', buildHomeCard({ business: 'b', name: 'B', das
 const A = card(mk({ channel_id: 'UC_A', videos: { top: [{ id: 'va', title: 'ALPHA only', views: 500 }], total_views: 2000 } })), B = card(mk({ channel_id: 'UC_B', videos: { top: [{ id: 'vb', title: 'BETA only', views: 500 }], total_views: 2000 } }));
 check('business isolation: each card carries only its own channel and content', A.isolation.channel_id === 'UC_A' && B.isolation.channel_id === 'UC_B' && !JSON.stringify(A).includes('BETA') && !JSON.stringify(B).includes('ALPHA'));
 check('pure: same input → same output', JSON.stringify(card(mk())) === JSON.stringify(card(mk())));
+
+// ── executive summary + policy + low-sample (PM revision) ──
+const SUB = (c) => c.summary;
+let d = mk({ windows: { ...mk().windows, d28: win({ non_ad_views: 700, views: 3000, paid_views: 2300, paid_share_pct: 76.7 }), d28_prev: win({ non_ad_views: 1000, views: 1000 }) },
+  retention: { curves: [{ video_id: 'a', title: 'A', views: 500, all: { at25: 0.3 } }, { video_id: 'b', title: 'B', views: 500, all: { at25: 0.9 } }, { video_id: 'c', title: 'C', views: 500, all: { at25: 0.35 } }] } });
+c = card(d); let sm = SUB(c);
+check('summary: declining + early loss → problem names discovery and retention; one primary action; owner Growth & Creative Quality', /Organic discovery and early viewer retention/.test(sm.problem) && /^Investigate traffic sources and test stronger openings\.$/.test(sm.action) && sm.owner === 'Growth & Creative Quality', JSON.stringify([sm.problem, sm.action, sm.owner]));
+check('summary: observed evidence states organic change and the paid share; never calls paid views organic', /Organic views fell 30%/.test(sm.observed) && /paid advertising supplied 76.7%/.test(sm.observed) && !/organic[^.;]*paid advertising supplied/i.test(sm.observed.replace('Organic views fell 30% against the previous 28 days; ', '')));
+check('summary: advisory flag set; hypothesis (if any) is labelled as such', sm.advisory === true && (sm.hypothesis === null || /^Hypothesis/.test(sm.hypothesis)));
+c = card(mk(), { counters: { subscribers: 18, history: hist } });
+check('summary: catalog reset → status label "GROWTH UNPROVEN · NEW CATALOG", no percentage', /GROWTH UNPROVEN/.test(c.status.label) && c.status.delta_pct === null && /after the catalog reset/.test(c.summary.problem));
+// Long-only policy
+const studioDash = (extra) => mk({ business: 'srv_studio', formats: { window: { from: '2026-10-22', to: '2026-11-18' }, rows: [{ type: 'long', views: 237, watch_hours: 5.2, avg_view_duration_sec: 92, views_share_pct: 5.6 }, { type: 'short', views: 3995, watch_hours: 7.6, avg_view_duration_sec: 18, views_share_pct: 94.4 }] },
+  recommendations: [{ id: 'format', finding: 'Format split', priority: 'Medium', outcome: 'CONTINUE', evidence: { metric: 'm', value: 'v', volume_ok: false }, diagnosis: { kind: 'confirmed', text: 't' }, action: 'Keep producing all three formats.', success: 's' },
+    { id: 'x_shorts', finding: 'f', priority: 'High', outcome: 'TEST', evidence: { metric: 'm', value: 'v', volume_ok: true }, diagnosis: { kind: 'hypothesis', text: 't' }, action: 'Post three more Shorts this week.', success: 's' }], ...extra });
+c = buildHomeCard({ business: 'srv_studio', name: 'SRV Studio', dash: studioDash(), rows: [], counters: { subscribers: 18, history: [] }, pipeline: null, nowMs: NOW });
+const allText = JSON.stringify([c.recommendations, c.summary]);
+check('Long-only: no recommendation or summary tells SRV Studio to produce / post / resume Shorts', !/(produc|post|resum|upload|publish)\w*[^."]*\bShorts?\b/i.test(c.recommendations.map((r) => r.action).join(' ') + c.summary.action), c.recommendations.map((r) => r.id).join());
+check('Long-only: the "format" and "shorts_to_long" recommendations never reach the card for SRV Studio', !c.recommendations.some((r) => r.id === 'format' || r.id === 'shorts_to_long' || r.id === 'x_shorts'));
+check('Long-only: a Long-video evaluation recommendation is offered, labelled insufficient sample (237 views < 1,000)', c.recommendations.some((r) => r.id === 'long_eval' && r.sample === 'insufficient' && r.outcome === 'WAIT FOR DATA'), c.recommendations.map((r) => r.id + ':' + r.sample).join());
+check('Long-only: the card carries the policy note and the unproven-sample caveat; Short figures stay as historical evidence', c.policy && c.policy.long_only && c.summary.caveats.some((x) => /Long-only/.test(x)) && c.summary.caveats.some((x) => /unproven, not failed/.test(x)));
+const F = buildHomeCard({ business: 'silk_road_voices', name: 'F', dash: studioDash(), rows: [], counters: { subscribers: 18, history: [] }, pipeline: null, nowMs: NOW });
+check('Long-only applies to SRV Studio only (policy table)', Object.keys(POLICY).join() === 'srv_studio' && F.policy === null && F.recommendations.some((r) => r.id === 'x_shorts' || r.id === 'format' || r.id === 'long_eval') === (F.recommendations.some((r) => r.id === 'x_shorts' || r.id === 'format')));
+// low-sample handling
+const rows = [{ video_id: 'v1', title: 'One view', published_at: '2026-11-01T00:00:00Z', view_count: 1 }, { video_id: 'v2', title: 'Two', published_at: '2026-11-02T00:00:00Z', view_count: 2 }, { video_id: 'v3', title: 'Three', published_at: '2026-11-03T00:00:00Z', view_count: 3 }, { video_id: 'v4', title: 'Big', published_at: '2026-11-01T00:00:00Z', view_count: 900 }];
+c = buildHomeCard({ business: 'b', name: 'B', dash: mk(), rows, counters: { subscribers: 1, history: [] }, pipeline: null, nowMs: NOW });
+check('one-view uploads are labelled "insufficient" sample, never failures; no recommendation is made from them', c.content.attention.length > 0 && c.content.attention.filter((x) => x.total_views < 100).every((x) => x.sample === 'insufficient') && c.recommendations.length === 0 && /not treated as failures/.test(c.content.attention_basis));
+check('summary without any problem says so (no invented problem) and keeps the owner', (() => { const g = card(mk()).summary; return /No major problem/.test(g.problem) && g.owner === 'Growth & Analytics'; })());
 console.log(`\n${R.filter(Boolean).length}/${R.length} passed`); process.exit(R.every(Boolean) ? 0 : 1);
