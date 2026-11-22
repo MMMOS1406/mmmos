@@ -25,7 +25,9 @@ const WORLD = () => ({
   tt: [{ open_id: 'T-SRV', mmm_engine: 'SRV Farsi' }, { open_id: 'T-AI', mmm_engine: 'AI Studio' }],
   cfg: null, videos: [{ video_id: 'v1', channel_id: 'FA' }, { video_id: 'v2', channel_id: 'NW' }, { video_id: 'v3', channel_id: 'AI' }, { video_id: 'v4', channel_id: 'EN' }], cfgFail: false,
 });
+import { lockFetch, lockRows } from '../g1security/lockFake.mjs';   // G1: the single-flight lock's own database calls are answered by a faithful model
 globalThis.fetch = async (url, init = {}) => {
+  const _lk = lockFetch(url, init); if (_lk) { calls.push((init.method || 'GET') + ' ' + String(url).replace(/^https?:\/\/[^/]+/, '') + (init.body ? ' ' + String(init.body).slice(0, 400) : '')); return _lk; }
   const u = String(url); const method = init.method || 'GET'; calls.push(method + ' ' + u.replace(/^https?:\/\/[^/]+/, '') + (init.body && method !== 'GET' ? ' ' + String(init.body).slice(0, 4000) : ''));
   if (u.includes('/rest/v1/app_settings?key=eq.sync_disabled_channels')) return world.cfgFail ? json({ message: 'boom' }, 500) : json(world.cfg == null ? [] : [{ value: world.cfg }]);
   if (u.includes('/rest/v1/youtube_connections?status=eq.connected')) return json(world.conns);
@@ -40,14 +42,14 @@ globalThis.fetch = async (url, init = {}) => {
 };
 process.env.SUPABASE_URL = 'https://s.test'; process.env.SUPABASE_SERVICE_KEY = 'k'; process.env.APP_URL = 'https://app.test'; delete process.env.CRON_SECRET;
 const patchedAuto = await import(pathToFileURL(path.join(repo, 'api/youtube/autosync.js')).href); const mainAuto = await import(pathToFileURL(baseAuto).href);
-const run = async (mod, cfg, extra = {}) => { world = { ...WORLD(), cfg, ...extra }; calls.length = 0; const r = { code: 200, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } }; await mod.default({ method: 'GET', headers: { host: 'x' } }, r); return { body: r.body, calls: [...calls] }; };
+const run = async (mod, cfg, extra = {}) => { for (const k of Object.keys(lockRows)) delete lockRows[k]; world = { ...WORLD(), cfg, ...extra }; calls.length = 0; const r = { code: 200, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } }; await mod.default({ method: 'GET', headers: { host: 'x' } }, r); return { body: r.body, calls: [...calls] }; };
 const synced = (c) => c.filter((x) => x.startsWith('POST') && x.includes('/api/youtube/sync')).map((x) => /"channelId":"([^"]+)"/.exec(x)[1]).join(',');
 const ttSynced = (c) => c.filter((x) => x.includes('/api/tiktok/sync')).map((x) => /"openId":"([^"]+)"/.exec(x)[1]).join(',');
 const stripCfg = (c) => c.filter((x) => !x.includes('sync_disabled_channels') && !x.includes('action=growth_collect_scheduled') && !x.includes('cron_lock_'))   /* G1: the single-flight lock's own database calls are not part of the comparison */.map((x) => x.replace('select=open_id,mmm_engine', 'select=open_id').replace(/"synced_at":"[^"]+"/g, '"synced_at":"<ts>"'));   // the only other difference: the TikTok read also selects the engine tag
 const norm = (c) => c.map((x) => x.replace(/"synced_at":"[^"]+"/g, '"synced_at":"<ts>"'));
 const a0r = await run(mainAuto, null), b0 = await run(patchedAuto, null); const a0 = { ...a0r, calls: norm(a0r.calls) };
 if (JSON.stringify(stripCfg(b0.calls)) !== JSON.stringify(a0.calls)) { const A = a0.calls, B = stripCfg(b0.calls); for (let i = 0; i < Math.max(A.length, B.length); i++) if (A[i] !== B[i]) { console.log('first difference at', i, '\n main   :', A[i], '\n patched:', B[i]); break; } }
-check('growth hook: the ONLY additional call in the patched cron is ONE growth_collect_scheduled request, made after everything else', b0.calls.filter((x) => x.includes('action=growth_collect_scheduled')).length === 1 && b0.calls[b0.calls.length - 1].includes('action=growth_collect_scheduled'));
+check('growth hook: the ONLY additional call in the patched cron is ONE growth_collect_scheduled request, made after everything else', b0.calls.filter((x) => x.includes('action=growth_collect_scheduled')).length === 1 && b0.calls.filter((x) => !x.includes('cron_lock_'))[b0.calls.filter((x) => !x.includes('cron_lock_')).length - 1].includes('action=growth_collect_scheduled'));
 check('DEFAULT (no config row): the patched autosync makes exactly the same calls as main (apart from reading the switch)', JSON.stringify(stripCfg(b0.calls)) === JSON.stringify(a0.calls) && synced(b0.calls) === 'FA,EN,NW,AI' && ttSynced(b0.calls) === 'T-SRV,T-AI');
 const b1 = await run(patchedAuto, JSON.stringify({ youtube: ['NW', 'AI'], tiktok: ['T-AI'] }));
 check('retired NextWave + AI Studio channels and the AI Studio TikTok account are skipped', synced(b1.calls) === 'FA,EN' && ttSynced(b1.calls) === 'T-SRV', `${synced(b1.calls)} | ${ttSynced(b1.calls)}`);

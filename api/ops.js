@@ -34,7 +34,7 @@ import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
 import { stripLearningInputs as _stripLearningInputs } from '../lib/generationInputs.mjs'; // G0/C4 — legacy learning inputs (directives, auto rules, stale strategy, retention-ranked winners) never reach SRV music generation
 import { verifyCronSignature as _verifyCronSignature } from '../lib/cronAuth.mjs'; // G1/S-A — the cron entry point's derived signature for the internal analytics hop
-import { acquire as _cronLockAcquire, release as _cronLockRelease } from '../lib/cronLock.mjs'; // G1/S-B — database-backed single-flight + cooldown (no schema change)
+import { acquire as _cronLockAcquire, release as _cronLockRelease, captureOutcome as _captureOutcome, runSucceeded as _runSucceeded } from '../lib/cronLock.mjs'; // G1/S-B — database-backed single-flight + short cooldown (no schema change)
 import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProductionUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
 import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
 import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer.mjs'; // SRV-STUDIO-V2-033 Monthly Mix (off unless app_settings.srv_studio_v2_mix is enabled)
@@ -9244,16 +9244,16 @@ async function _callInline(name, fn, req, steps, partial) {
   }
 }
 async function analyticsAutoRun(req, res) {
-  // G1/S-B — single-flight + cooldown. Of N simultaneous callers exactly one proceeds; repeats inside the cooldown are refused (429) before ANY Google call or write.
-  // A CEO session may force a run (still never overlapping a run that began < 2 minutes ago). If the lock mechanism itself is unavailable (database error) the run proceeds
-  // with a warning — the lock limits abuse, it is not a correctness requirement, and a database outage would stop the run anyway.
+  // G1/S-B — single-flight + short duplicate-fire cooldown. Authentication already happened in the router (signature or CEO session), so an unauthorized request never reaches the lock.
+  // Of N simultaneous callers exactly one proceeds. FAIL CLOSED: if the lock cannot be taken because of an infrastructure error the run does not start (503).
+  // A CEO session may force a run (still never overlapping a run that began < 2 minutes ago).
   const _lockCfg = { fetchImpl: fetch, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY };
   const _force = String((req.query && req.query.force) || '') === 'true' && await _requireCeoSessionStrict(req);
   const _lock = await _cronLockAcquire({ name: 'analytics', force: _force, ..._lockCfg });
-  if (!_lock.ok && _lock.reason !== 'lock_unavailable') return res.status(429).json({ ok: false, status: 'skipped', error: _lock.reason, retryAfterMs: _lock.retryAfterMs || null });
-  if (!_lock.ok) console.warn('[analytics_auto_run] lock unavailable — running without it');
-  let _lockOk = false;
-  try { await _analyticsAutoRunInner(req, res); _lockOk = true; } finally { await _cronLockRelease({ lock: _lock, success: _lockOk, ..._lockCfg }); }
+  if (!_lock.ok) return _lock.reason === 'lock_unavailable' ? res.status(503).json({ ok: false, status: 'skipped', error: 'lock_unavailable' }) : res.status(429).json({ ok: false, status: 'skipped', error: _lock.reason, retryAfterMs: _lock.retryAfterMs || null });
+  // The lock follows the REAL outcome (the response the pipeline sent): only status "healthy" keeps the cooldown; a partial / failed run frees the lock so a retry is possible.
+  const _cap = _captureOutcome(res); let _threw = true;
+  try { await _analyticsAutoRunInner(req, _cap.res); _threw = false; } finally { await _cronLockRelease({ lock: _lock, success: !_threw && _runSucceeded('analytics', _cap.outcome()), ..._lockCfg }); }
 }
 async function _analyticsAutoRunInner(req, res) {
   // v13.62.7 — write start marker, run inline (no HTTP loopback), update marker, respond.

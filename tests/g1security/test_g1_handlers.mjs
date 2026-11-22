@@ -14,7 +14,8 @@ try {
   const ops = await loadPair('ops.js', REL), auto = await loadPair('youtube/autosync.js', REL), yts = await loadPair('youtube/sync.js', REL), tts = await loadPair('tiktok/sync.js', REL); quiet();
   const OPS = makeCall(ops.cur), OPSB = makeCall(ops.base);
   const call = async (mod, { method = 'POST', headers = {}, body = null, query = {} } = {}) => { const res = mkRes(); await mod.default({ method, headers: { host: 'app.test', ...headers }, query, body }, res); return res; };
-  const seed = () => { resetWorld(); world.connections = CONNS.map((c) => ({ ...c })); delete process.env.CRON_SECRET; };
+  delete process.env.CRON_SECRET; delete process.env.VERCEL_ENV;   // each autosync test sets its own environment with setEnv()
+  const seed = () => { resetWorld(); world.connections = CONNS.map((c) => ({ ...c })); };
   const noWork = () => world.google.length === 0 && world.writes.length === 0;
   // Internal hops (autosync → the project's own endpoints) are dispatched to the REAL handlers of the chosen side ('cur' = this branch, 'base' = the G0 release).
   // The only liberty taken: the sync endpoints answer in MOCK mode here (no YouTube credentials in the test world) and the mock payload has no `success` flag, so the
@@ -45,7 +46,12 @@ try {
     const ceo = await OPS({ action: 'analytics_auto_run', method: 'GET', ceo: true, ceoHeader: true, query: { force: 'true' } });
     check('force=true is honoured only for a CEO session (the signature path cannot force)', noCeo.code === 429 && ceo.code === 200, `${noCeo.code}/${ceo.code}`); }
   { seed(); world.failLocks = true; const r = await OPS({ action: 'analytics_auto_run', method: 'GET', headers: SIG('analytics_auto_run') });
-    check('lock infrastructure failure does not stop an AUTHENTICATED scheduled run (runs with a warning)', r.code === 200); }
+    check('analytics_auto_run: lock infrastructure failure FAILS CLOSED — 503, no Google call, no sync-log row, no rule written', r.code === 503 && r.body.error === 'lock_unavailable' && world.google.length === 0 && !world.writes.some((w) => w.table === 'analytics_sync_log' || w.table === 'optimization_rules'), `${r.code}`); }
+  { seed(); world.connections = []; const a = await OPS({ action: 'analytics_auto_run', method: 'GET', headers: SIG('analytics_auto_run') });
+    const st = JSON.parse(world.locks.cron_lock_analytics.value).state; const b = await OPS({ action: 'analytics_auto_run', method: 'GET', headers: SIG('analytics_auto_run') });
+    check('analytics: a PARTIAL run (no connection → youtube_analytics_pull fails) frees the lock — state "failed", and an immediate retry is allowed (200, not 429)', a.body.status === 'partial' && st === 'failed' && b.code === 200, `${a.body.status}/${st}/${b.code}`); }
+  { seed(); const a = await OPS({ action: 'analytics_auto_run', method: 'GET', headers: SIG('analytics_auto_run') }); const st = JSON.parse(world.locks.cron_lock_analytics.value).state;
+    check('analytics: a HEALTHY run keeps the cooldown (state "done"), so a duplicate delivery is refused 429', a.body.status === 'healthy' && st === 'done' && (await OPS({ action: 'analytics_auto_run', method: 'GET', headers: SIG('analytics_auto_run') })).code === 429); }
   { seed(); const r = await OPSB({ action: 'analytics_auto_run', method: 'GET' }); const rr = await OPSB({ action: 'analytics_auto_run', method: 'GET' }); const g = world.google.length;
     check('BEFORE (G0 release): an anonymous caller runs it, and a repeat runs it again (cost per call = ' + (g / 2) + ' Google requests)', r.code === 200 && rr.code === 200 && g >= 4); }
 
@@ -86,28 +92,54 @@ try {
   /* ───────── api/youtube/autosync.js ───────── */
   const hops = () => world.hopLog || (world.hopLog = []);
   const track = () => { world.hopLog = []; const prev = world.router; world.router = async (url, opts = {}) => { const u = new URL(url); world.hopLog.push({ path: u.pathname + (u.searchParams.get('action') ? '?action=' + u.searchParams.get('action') : ''), headers: Object.fromEntries(Object.entries(opts.headers || {}).map(([k, v]) => [k.toLowerCase(), v])) }); return prev ? prev(url, opts) : json({ success: true }); }; };
-  const ar = (mod, headers = {}, method = 'GET') => call(mod, { method, headers });
-  { seed(); route(); track(); process.env.CRON_SECRET = 'cs-test-secret';
-    for (const [n, h] of [['no bearer', {}], ['wrong bearer', { authorization: 'Bearer nope' }], ['bearer without the word Bearer', { authorization: 'cs-test-secret' }], ['lower-case scheme', { authorization: 'bearer cs-test-secret' }], ['bearer + 1 character', { authorization: 'Bearer cs-test-secrett' }]]) { const r = await ar(auto.cur, h);
-      check(`autosync, CRON_SECRET set, ${n}: 401 and no downstream call, no lock row`, r.code === 401 && hops().length === 0 && Object.keys(world.locks).length === 0 && world.google.length === 0, `${r.code}`); }
-    const r = await ar(auto.cur, { authorization: 'Bearer cs-test-secret' }); const paths = hops().map((h) => h.path);
+  const ar = (mod, headers = {}, method = 'GET', query = {}) => call(mod, { method, headers, query });
+  const BEAR = { authorization: 'Bearer cs-test-secret' };
+  const lockSnapshot = () => JSON.stringify(world.locks);
+  const setEnv = (e) => { for (const k of ['CRON_SECRET', 'VERCEL_ENV']) delete process.env[k]; Object.assign(process.env, e); };
+  { seed(); route(); track(); setEnv({ CRON_SECRET: 'cs-test-secret', VERCEL_ENV: 'production' });
+    for (const [n, h] of [['no bearer', {}], ['wrong bearer', { authorization: 'Bearer nope' }], ['bearer without the word Bearer', { authorization: 'cs-test-secret' }], ['lower-case scheme', { authorization: 'bearer cs-test-secret' }], ['bearer + 1 character', { authorization: 'Bearer cs-test-secrett' }], ['forged CEO session', { 'x-mmm-ceo-session': 'forged.token.value' }]]) { const r = await ar(auto.cur, h);
+      check(`autosync, production, secret set, ${n}: 401, no downstream call, NO lock row touched, no Google call`, r.code === 401 && hops().length === 0 && Object.keys(world.locks).length === 0 && world.google.length === 0, `${r.code}`); }
+    const r = await ar(auto.cur, BEAR); const paths = hops().map((h) => h.path);
     check('autosync, correct bearer: normal scheduled execution — syncs both channels, then analytics, then the growth hook', r.code === 200 && paths.filter((p) => p === '/api/youtube/sync').length === 2 && paths.includes('/api/ops?action=analytics_auto_run') && paths.includes('/api/ops?action=growth_collect_scheduled'), JSON.stringify(paths));
     check('…every sync hop carries a valid "sync" signature and the analytics hop a valid "analytics_auto_run" signature', hops().filter((h) => h.path === '/api/youtube/sync').every((h) => h.headers['x-mmm-cron'] === cronSignature('sync', KEY)) && hops().find((h) => h.path === '/api/ops?action=analytics_auto_run').headers['x-mmm-cron'] === cronSignature('analytics_auto_run', KEY));
-    check('…and the whole chain really worked through the REAL gated endpoints (sync answered 200 mock for both channels; analytics run logged)', r.body.results.length === 2 && world.writes.some((w) => w.table === 'analytics_sync_log'), JSON.stringify(r.body.analyticsAuto && r.body.analyticsAuto.status));
-    check('…the lock row exists and finished (state done)', JSON.parse(world.locks.cron_lock_autosync.value).state === 'done' && JSON.parse(world.locks.cron_lock_analytics.value).state === 'done');
-    const r2 = await ar(auto.cur, { authorization: 'Bearer cs-test-secret' });
-    check('a second authenticated trigger inside the cooldown is refused 429 and does nothing', r2.code === 429 && r2.body.skipped === true, `${r2.code}`);
+    check('…the whole chain worked through the REAL gated endpoints (sync answered 200 for both channels; analytics run logged healthy)', r.body.results.length === 2 && r.body.failed === 0 && world.writes.some((w) => w.table === 'analytics_sync_log') && r.body.analyticsAuto.status === 'healthy', JSON.stringify(r.body.analyticsAuto && r.body.analyticsAuto.status));
+    check('…both lock rows finished (state done) — a successful run keeps the duplicate-fire cooldown', JSON.parse(world.locks.cron_lock_autosync.value).state === 'done' && JSON.parse(world.locks.cron_lock_analytics.value).state === 'done');
+    const r2 = await ar(auto.cur, BEAR); check('a duplicate authenticated delivery inside the cooldown is refused 429 and does nothing', r2.code === 429 && r2.body.skipped === true, `${r2.code}`);
     check('PUT/DELETE are refused 405', (await ar(auto.cur, {}, 'PUT')).code === 405 && (await ar(auto.cur, {}, 'DELETE')).code === 405); }
-  { seed(); route(); track(); delete process.env.CRON_SECRET;
-    const r1 = await ar(auto.cur); const n1 = hops().length; const r2 = await ar(auto.cur);
-    check('autosync, CRON_SECRET not configured (transitional): the scheduled run still works exactly once…', r1.code === 200 && hops().filter((h) => h.path === '/api/youtube/sync').length === 2);
-    check('…and an immediate repeat by anyone is refused 429 with no downstream call (abuse bounded to one run per cooldown)', r2.code === 429 && hops().length === n1);
+  { seed(); route(); track(); setEnv({ VERCEL_ENV: 'production' });   // CRON_SECRET not configured on a production deployment
+    const snap = lockSnapshot(); const r = await ar(auto.cur); const f = await ar(auto.cur, {}, 'GET', { force: 'true' }); const bad = await ar(auto.cur, { 'x-mmm-ceo-session': 'forged.x' });
+    check('PRODUCTION WITHOUT CRON_SECRET: an anonymous request is refused 503 cron_secret_not_configured — no downstream call, no Google call, no lock row (there is no unauthenticated path)', r.code === 503 && r.body.error === 'cron_secret_not_configured' && f.code === 503 && bad.code === 503 && hops().length === 0 && world.google.length === 0 && lockSnapshot() === snap, `${r.code}/${f.code}/${bad.code}`);
+    const ok = await ar(auto.cur, { 'x-mmm-ceo-session': signCeo() });
+    check('…but a signed-in CEO can still start a manual recovery run (200, both channels synced, lock finished)', ok.code === 200 && hops().filter((h) => h.path === '/api/youtube/sync').length === 2 && JSON.parse(world.locks.cron_lock_autosync.value).state === 'done');
+    const dup = await ar(auto.cur, { 'x-mmm-ceo-session': signCeo() }); world.locks.cron_lock_autosync.updated_at -= 3 * 60e3;
+    const frc = await ar(auto.cur, { 'x-mmm-ceo-session': signCeo() }, 'GET', { force: 'true' }); const frcAnon = await ar(auto.cur, {}, 'GET', { force: 'true' });
+    check('…a duplicate CEO run inside the cooldown is refused 429; force=true by the CEO after the 2-minute gap is allowed; force by an anonymous caller is still 503', dup.code === 429 && frc.code === 200 && frcAnon.code === 503, `${dup.code}/${frc.code}/${frcAnon.code}`); }
+  { setEnv({ VERCEL_ENV: 'preview' }); seed(); route(); track(); const p = await ar(auto.cur); setEnv({ VERCEL_ENV: 'development' }); seed(); route(); track(); const d = await ar(auto.cur);
+    check('preview and development deployments without the secret are also refused 503 (the platform sets VERCEL_ENV on every deployment)', p.code === 503 && d.code === 503 && hops().length === 0); }
+  { setEnv({}); seed(); route(); track(); const r1 = await ar(auto.cur); const r2 = await ar(auto.cur);
+    check('outside Vercel (no VERCEL_ENV: local development and these tests) the entry point runs once and a duplicate is refused 429', r1.code === 200 && r2.code === 429 && hops().filter((h) => h.path === '/api/youtube/sync').length === 2);
     seed(); route(); track(); const res = await Promise.all(Array.from({ length: 12 }, () => ar(auto.cur)));
-    check('12 simultaneous anonymous requests → exactly ONE run: sync hops = number of channels (2), not 24', res.filter((r) => r.code === 200).length === 1 && hops().filter((h) => h.path === '/api/youtube/sync').length === 2, `${res.map((r) => r.code).join(',')} hops=${hops().length}`); }
-  { seed(); route(); track(); world.failLocks = true; const r = await ar(auto.cur); check('autosync: lock infrastructure failure does not stop the scheduled run (proceeds with a warning)', r.code === 200 && hops().length > 0); }
-  { seed(); route('base'); track(); const runs = []; for (let i = 0; i < 5; i++) runs.push((await ar(auto.base)).code);
+    check('12 simultaneous requests → exactly ONE run: sync hops = number of channels (2), not 24', res.filter((r) => r.code === 200).length === 1 && res.filter((r) => r.code === 429).length === 11 && hops().filter((h) => h.path === '/api/youtube/sync').length === 2, `${res.map((r) => r.code).join(',')} hops=${hops().length}`); }
+  { setEnv({ CRON_SECRET: 'cs-test-secret', VERCEL_ENV: 'production' }); seed(); route(); track(); world.failLocks = true; const r = await ar(auto.cur, BEAR);
+    check('autosync: lock infrastructure failure FAILS CLOSED — 503 lock_unavailable, no downstream call, no Google call (the run never starts without its lock)', r.code === 503 && r.body.error === 'lock_unavailable' && hops().length === 0 && world.google.length === 0, `${r.code} body=${JSON.stringify(r.body)} hops=${hops().length}`); }
+  { setEnv({ CRON_SECRET: 'cs-test-secret', VERCEL_ENV: 'production' }); seed(); route(); track();
+    const inner = world.router; world.router = async (url, opts) => { const u = new URL(url); if (u.pathname === '/api/youtube/sync' && JSON.parse(opts.body).channelId === 'UC_B') return json({ success: false, message: 'upstream down' }, 502); return inner(url, opts); };
+    const a = await ar(auto.cur, BEAR); const st = JSON.parse(world.locks.cron_lock_autosync.value).state;
+    check('a run in which one channel FAILED (after its retry) is reported (failed 1) and frees the lock: state "failed", cooldown cleared', a.code === 200 && a.body.failed === 1 && st === 'failed' && world.locks.cron_lock_autosync.updated_at === 0, `${a.body && a.body.failed}/${st}`);
+    world.router = inner; const b = await ar(auto.cur, BEAR);
+    check('…so the retry runs immediately (200) instead of being refused as a cooldown, and the fully successful retry then holds the cooldown', b.code === 200 && b.body.failed === 0 && JSON.parse(world.locks.cron_lock_autosync.value).state === 'done' && (await ar(auto.cur, BEAR)).code === 429); }
+  { setEnv({ CRON_SECRET: 'cs-test-secret', VERCEL_ENV: 'production' }); seed(); route(); track();
+    world.connections = []; const a = await ar(auto.cur, BEAR);   // nothing connected: a clean no-op answer
+    check('nothing to sync (no connected channel) is a clean success: 200 "No channels connected" and the lock keeps its cooldown', a.code === 200 && /No channels/.test(a.body.message) && JSON.parse(world.locks.cron_lock_autosync.value).state === 'done'); }
+  { // an unauthorized FLOOD cannot starve the scheduled run
+    setEnv({ CRON_SECRET: 'cs-test-secret', VERCEL_ENV: 'production' }); seed(); route(); track(); const before = lockSnapshot(); let refusedAll = true;
+    for (let i = 0; i < 60; i++) { const a = await ar(auto.cur, i % 3 === 0 ? {} : i % 3 === 1 ? { authorization: 'Bearer wrong' + i } : { 'x-mmm-ceo-session': 'forged.' + i }); const b = await OPS({ action: 'analytics_auto_run', method: 'GET', headers: i % 2 ? {} : { 'x-mmm-cron': 'f'.repeat(64) } }); if (a.code !== 401 || b.code !== 401) refusedAll = false; }
+    check('120 unauthorized requests (60 to the entry point, 60 to analytics_auto_run) are all refused 401, touch NO lock row, make NO Google call and NO write', refusedAll && lockSnapshot() === before && world.google.length === 0 && world.writes.length === 0 && hops().length === 0);
+    const sched = await ar(auto.cur, BEAR);
+    check('…and the legitimate scheduled run that follows is NOT starved: it runs in full (200, both channels, analytics healthy)', sched.code === 200 && sched.body.failed === 0 && sched.body.analyticsAuto.status === 'healthy' && hops().filter((h) => h.path === '/api/youtube/sync').length === 2); }
+  { setEnv({}); seed(); route('base'); track(); const runs = []; for (let i = 0; i < 5; i++) runs.push((await ar(auto.base)).code);
     check('BEFORE (G0 release): five anonymous requests ran five full syncs (' + hops().filter((h) => h.path === '/api/youtube/sync').length + ' channel syncs, ' + world.google.length + ' Google calls)', runs.every((c) => c === 200) && hops().filter((h) => h.path === '/api/youtube/sync').length === 10); }
-  { seed(); route(); track(); const r = await ar(auto.cur, { authorization: 'Bearer x' }); check('control: with no CRON_SECRET a bearer header is not required (transitional) — documented residual until the secret exists', r.code === 200); }
+  setEnv({});
 
   /* ───────── api/youtube/sync.js and api/tiktok/sync.js (POST) ───────── */
   for (const [label, M, base, body] of [['api/youtube/sync', yts, yts.base, { channelId: 'UC_A' }], ['api/tiktok/sync', tts, tts.base, { openId: 'OPEN_A' }]]) {

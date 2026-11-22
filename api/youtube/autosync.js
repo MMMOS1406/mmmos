@@ -7,8 +7,9 @@
 import { createHash } from 'node:crypto';
 import { cronSignatureInput } from '../../lib/growthCollect.mjs'; // Growth system: signature for the scheduled collection hook (no new credential)
 import { loadDisabled, filterEnabled } from '../../lib/channelSyncControl.mjs'; // per-channel sync switch (default: nothing disabled = unchanged behaviour)
-import { cronEntryDecision, cronSignature, CRON_FAIL_CLOSED_WHEN_UNCONFIGURED } from '../../lib/cronAuth.mjs'; // G1/S-A — entry-point policy + the derived signature for the internal hops (no new credential)
-import { acquire as lockAcquire, release as lockRelease } from '../../lib/cronLock.mjs'; // G1/S-B — database-backed single-flight + cooldown
+import { cronEntryDecision, cronSignature } from '../../lib/cronAuth.mjs'; // G1/S-A — entry-point policy (fail closed) + the derived signature for the internal hops (no new credential)
+import { ceoSessionOk, tokenFromRequest } from '../../lib/ceoSession.mjs'; // G1/S-A — manual recovery run by a signed-in CEO
+import { acquire as lockAcquire, release as lockRelease, captureOutcome, runSucceeded } from '../../lib/cronLock.mjs'; // G1/S-B — database-backed single-flight + short duplicate-fire cooldown
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -131,22 +132,24 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // G1/S-A — entry-point policy (lib/cronAuth.mjs). Vercel sends CRON_SECRET as a Bearer token on scheduled runs.
-  //   secret configured      → the bearer must match, otherwise 401 (unchanged from before).
-  //   secret NOT configured  → transitional: allowed as before, but protected by the single-flight lock below. When CRON_FAIL_CLOSED_WHEN_UNCONFIGURED is true (shipped only after
-  //                            the secret is configured and verified) a production deployment without it answers 503.
-  const decision = cronEntryDecision({ env: process.env, headers: req.headers, failClosed: CRON_FAIL_CLOSED_WHEN_UNCONFIGURED });
-  if (!decision.allow) return res.status(decision.status).json({ error: decision.error === 'unauthorized' ? 'Unauthorized' : decision.error });
-  if (decision.warn) console.warn('[cron-auth] ' + decision.warn);
-
-  // G1/S-B — single-flight + cooldown. Of N simultaneous callers exactly one runs; repeats inside the cooldown are refused before any Google/TikTok call.
-  // If the lock mechanism itself is unavailable (database error) the run proceeds with a warning: the lock limits abuse and a database outage would stop the run anyway.
+  // G1/S-A — entry-point policy (lib/cronAuth.mjs), FAIL CLOSED:
+  //   CRON_SECRET configured     → Vercel's scheduled call carries it as a Bearer token; a CEO session may also start a manual recovery run; everyone else gets 401.
+  //   CRON_SECRET not configured → on any Vercel deployment only a CEO session is accepted, everyone else gets 503. (Local development / tests, where VERCEL_ENV is absent, are allowed.)
+  // Authentication ALWAYS happens before the lock: an unauthorized request can never touch the lock, so it can never delay or starve the scheduled run.
   const lockCfg = { fetchImpl: fetch, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY };
-  const lock = await lockAcquire({ name: 'autosync', ...lockCfg });
-  if (!lock.ok && lock.reason !== 'lock_unavailable') return res.status(429).json({ skipped: true, reason: lock.reason, retryAfterMs: lock.retryAfterMs || null });
-  if (!lock.ok) console.warn('[autosync] lock unavailable — running without it');
-  let ok = false;
-  try { await runAutosync(req, res); ok = true; } finally { await lockRelease({ lock, success: ok, ...lockCfg }); }
+  let decision = cronEntryDecision({ env: process.env, headers: req.headers, ceoOk: false });
+  if (!decision.allow && tokenFromRequest(req)) decision = cronEntryDecision({ env: process.env, headers: req.headers, ceoOk: await ceoSessionOk(req, lockCfg) });
+  if (!decision.allow) return res.status(decision.status).json({ error: decision.error === 'unauthorized' ? 'Unauthorized' : decision.error });
+  if (decision.mode === 'local') console.warn('[cron-auth] CRON_SECRET not configured; accepted only because this is not a Vercel deployment');
+
+  // G1/S-B — single-flight + short cooldown (duplicate-fire protection for authenticated callers). Of N simultaneous callers exactly one runs.
+  // FAIL CLOSED: if the lock cannot be taken because of an infrastructure error the run does NOT start (503). A CEO session may force a run (never overlapping one < 2 minutes old).
+  const force = decision.mode === 'ceo' && String((req.query && req.query.force) || '') === 'true';
+  const lock = await lockAcquire({ name: 'autosync', force, ...lockCfg });
+  if (!lock.ok) return lock.reason === 'lock_unavailable' ? res.status(503).json({ error: 'lock_unavailable' }) : res.status(429).json({ skipped: true, reason: lock.reason, retryAfterMs: lock.retryAfterMs || null });
+  // The lock follows the REAL outcome of the run (the response it sent), not merely "no exception": a run that answers 5xx, or in which a channel failed, frees the lock so a retry is possible.
+  const cap = captureOutcome(res); let threw = true;
+  try { await runAutosync(req, cap.res); threw = false; } finally { await lockRelease({ lock, success: !threw && runSucceeded('autosync', cap.outcome()), ...lockCfg }); }
 }
 
 async function runAutosync(req, res) {
