@@ -6,7 +6,7 @@ const { check, done } = reporter(); const repo = path.resolve(path.dirname(new U
 const git = (...a) => execFileSync('git', a, { cwd: repo, maxBuffer: 256 * 1024 * 1024 }).toString();
 const changed = git('diff', '--name-only', BASE).split('\n').filter(Boolean), untracked = git('ls-files', '--others', '--exclude-standard').split('\n').filter(Boolean);
 const all = [...new Set([...changed, ...untracked])].sort();
-const ALLOWED = ['api/ops.js', 'api/youtube/autosync.js', 'api/youtube/sync.js', 'api/tiktok/sync.js', 'public/index.html', 'lib/cronAuth.mjs', 'lib/cronLock.mjs', 'lib/ceoSession.mjs', 'test_youtube_oauth_reliability.mjs'];
+const ALLOWED = ['api/ops.js', 'api/youtube/autosync.js', 'api/youtube/sync.js', 'api/tiktok/sync.js', 'public/index.html', 'lib/cronAuth.mjs', 'lib/cronLock.mjs', 'lib/ceoSession.mjs', 'test_youtube_oauth_reliability.mjs', 'tests/portfolio/test_channel_sync_control.mjs'];
 const allowed = (f) => ALLOWED.includes(f) || /^tests\/g1security\//.test(f) || /^tests\/g0safety\//.test(f);
 check('every changed file is in the authorised set (S-A/S-B/S-C code, 3 new libs, the two sync endpoints, tests)', all.every(allowed), JSON.stringify(all.filter((f) => !allowed(f))));
 check('S-F (paid generation) is blueprint only: api/generate.js and the creative prompt libraries are NOT changed', !all.some((f) => /^api\/generate\.js$|^lib\/(srvFarsiCreativeV2|srvStudioV2Music|generationInputs)\.mjs$/.test(f)));

@@ -1,6 +1,6 @@
 // Per-channel background-sync switch — retired channels can be skipped, retained engines never, default behaviour unchanged. Real handlers, fake world, no network.
 //   node tests/portfolio/test_channel_sync_control.mjs
-import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import { pathToFileURL } from 'node:url'; import { execFileSync } from 'node:child_process';
+import fs from 'node:fs'; import { createHmac } from 'node:crypto'; import path from 'node:path'; import os from 'node:os'; import { pathToFileURL } from 'node:url'; import { execFileSync } from 'node:child_process';
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..'); process.chdir(repo);
 const R = []; const check = (n, ok, d = '') => { R.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); };
 const L = await import(pathToFileURL(path.join(repo, 'lib/channelSyncControl.mjs')).href);
@@ -33,6 +33,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.includes('/rest/v1/tiktok_connections?status=eq.connected')) return json(world.tt);
   if (u.includes('/rest/v1/youtube_channels?')) return json(world.channels);
   if (u.includes('/rest/v1/youtube_videos?')) return json(world.videos);
+  if (u.includes('/rest/v1/ceo_auth_config')) return json([{ key: 'ceo_session_secret_production', value: 'cs-secret' }, { key: 'ceo_pin_hash_production', value: 'e'.repeat(64) }]);   // G1: the two analytics actions need a CEO session
   if (u.includes('/api/youtube/sync') || u.includes('/api/tiktok/sync')) return json({ success: true });
   if (u.includes('analytics_auto_run')) return json({ ok: true, status: 'healthy' });
   return json([], 201);
@@ -42,7 +43,7 @@ const patchedAuto = await import(pathToFileURL(path.join(repo, 'api/youtube/auto
 const run = async (mod, cfg, extra = {}) => { world = { ...WORLD(), cfg, ...extra }; calls.length = 0; const r = { code: 200, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } }; await mod.default({ method: 'GET', headers: { host: 'x' } }, r); return { body: r.body, calls: [...calls] }; };
 const synced = (c) => c.filter((x) => x.startsWith('POST') && x.includes('/api/youtube/sync')).map((x) => /"channelId":"([^"]+)"/.exec(x)[1]).join(',');
 const ttSynced = (c) => c.filter((x) => x.includes('/api/tiktok/sync')).map((x) => /"openId":"([^"]+)"/.exec(x)[1]).join(',');
-const stripCfg = (c) => c.filter((x) => !x.includes('sync_disabled_channels') && !x.includes('action=growth_collect_scheduled')).map((x) => x.replace('select=open_id,mmm_engine', 'select=open_id').replace(/"synced_at":"[^"]+"/g, '"synced_at":"<ts>"'));   // the only other difference: the TikTok read also selects the engine tag
+const stripCfg = (c) => c.filter((x) => !x.includes('sync_disabled_channels') && !x.includes('action=growth_collect_scheduled') && !x.includes('cron_lock_'))   /* G1: the single-flight lock's own database calls are not part of the comparison */.map((x) => x.replace('select=open_id,mmm_engine', 'select=open_id').replace(/"synced_at":"[^"]+"/g, '"synced_at":"<ts>"'));   // the only other difference: the TikTok read also selects the engine tag
 const norm = (c) => c.map((x) => x.replace(/"synced_at":"[^"]+"/g, '"synced_at":"<ts>"'));
 const a0r = await run(mainAuto, null), b0 = await run(patchedAuto, null); const a0 = { ...a0r, calls: norm(a0r.calls) };
 if (JSON.stringify(stripCfg(b0.calls)) !== JSON.stringify(a0.calls)) { const A = a0.calls, B = stripCfg(b0.calls); for (let i = 0; i < Math.max(A.length, B.length); i++) if (A[i] !== B[i]) { console.log('first difference at', i, '\n main   :', A[i], '\n patched:', B[i]); break; } }
@@ -56,10 +57,11 @@ check('listing a RETAINED channel / account has no effect (they still sync)', sy
 const b3 = await run(patchedAuto, '{broken'); check('malformed switch row → everything syncs', synced(b3.calls) === 'FA,EN,NW,AI');
 const b4 = await run(patchedAuto, null, { cfgFail: true }); check('switch row unreadable → everything syncs', synced(b4.calls) === 'FA,EN,NW,AI');
 const b5 = await run(patchedAuto, JSON.stringify({ youtube: ['NW'] }), { channels: [] }); check('engine tags unavailable → nothing is skipped (cannot prove it is retired)', synced(b5.calls) === 'FA,EN,NW,AI');
-check('no credential row is read or written by the switch', !b1.calls.some((x) => /youtube_connections\?.*(PATCH|DELETE)/.test(x)) && !b1.calls.some((x) => x.startsWith('PATCH') || x.startsWith('DELETE')));
+check('no credential row is read or written by the switch', !b1.calls.some((x) => /youtube_connections\?.*(PATCH|DELETE)/.test(x)) && !b1.calls.filter((x) => !x.includes('cron_lock_')).some((x) => x.startsWith('PATCH') || x.startsWith('DELETE')));   // G1: lock rows are app_settings rows, never credentials
 // ---- analytics pull + snapshot inside ops.js
 const ops = await import(pathToFileURL(path.join(repo, 'api/ops.js')).href + '?cs');
-const act = async (action, cfg) => { world = { ...WORLD(), cfg }; calls.length = 0; const r = { code: 200, body: null, setHeader() {}, removeHeader() {}, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, end() { return this; } }; await ops.default({ method: 'GET', url: '/api/ops?action=' + action, query: { action, days: '30' }, headers: { host: 'x' }, body: null }, r); return { r, calls: [...calls] }; };
+const CEO_TOKEN = (() => { const p = Buffer.from(JSON.stringify({ sub: 'ceo', exp: Date.now() + 3600e3 })).toString('base64url'); return p + '.' + createHmac('sha256', 'cs-secret').update(p).digest('base64url'); })();   // G1
+const act = async (action, cfg) => { world = { ...WORLD(), cfg }; calls.length = 0; const r = { code: 200, body: null, setHeader() {}, removeHeader() {}, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, end() { return this; } }; await ops.default({ method: 'GET', url: '/api/ops?action=' + action, query: { action, days: '30' }, headers: { host: 'x', 'x-mmm-ceo-session': CEO_TOKEN }, body: null }, r); return { r, calls: [...calls] }; };
 const snap = async (cfg) => { const x = await act('youtube_snapshot_now', cfg); const bodyOf = (p) => { const c = x.calls.find((k) => k.startsWith('POST') && k.includes(p)); return c ? c.slice(c.indexOf('[')) : ''; }; return { ch: [...new Set([...bodyOf('youtube_channel_snapshots').matchAll(/"channel_id":"([^"]+)"/g)].map((m) => m[1]))].join(','), res: x.r.body }; };
 const s0 = await snap(null), s1 = await snap(JSON.stringify({ youtube: ['NW', 'AI'] })), s2 = await snap(JSON.stringify({ youtube: ['FA'] }));
 check('snapshot, DEFAULT: all four channels', /FA/.test(s0.ch) && /NW/.test(s0.ch) && /AI/.test(s0.ch) && /EN/.test(s0.ch) && s0.res.ok === true, s0.ch);
