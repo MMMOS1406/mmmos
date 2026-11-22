@@ -111,7 +111,7 @@
       '.h2d-dx{margin:12px 0 4px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:rgba(255,255,255,.02)}.h2d-dxh{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px;color:#fff;font-size:14px}',
       '.h2d-rc{font-size:11px;font-weight:800;border-radius:6px;padding:3px 8px;letter-spacing:.4px}.h2d-rc.no{background:rgba(239,68,68,.12);color:#f87171;border:1px solid #ef4444}.h2d-rc.ok{background:rgba(34,197,94,.12);color:#4ade80;border:1px solid #22c55e}',
       '.h2d-dr{display:grid;grid-template-columns:20px 150px minmax(0,1fr);gap:6px;padding:5px 0;border-top:1px solid var(--border);font-size:12px;color:#e5e9f7;line-height:1.45}@media(max-width:640px){.h2d-dr{grid-template-columns:18px minmax(0,1fr)}.h2d-dr>div{grid-column:2}}.h2d-dn{color:var(--gold);font-weight:800}.h2d-dl{color:var(--dim);font-weight:700}.h2d-dr ul{margin:0;padding-left:16px}.h2d-dr b{color:#fff}',
-      '.h2d-dpol{margin-top:6px}.h2d-dd{margin-top:8px}.h2d-dd>summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}',
+      '.h2d-out{font-size:12px;color:#fff;margin:2px 0 6px}.h2d-out span{color:var(--dim)}.h2d-dd ul{margin:4px 0;padding-left:16px}.h2d-dpol{margin-top:6px}.h2d-dd{margin-top:8px}.h2d-dd>summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}',
       '.h2d-cat{margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:#e5e9f7}.h2d-ch{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;align-items:center;margin-bottom:4px}.h2d-cat ul{margin:4px 0;padding-left:16px;line-height:1.5}.h2d-hy{color:#fbbf24;margin:4px 0}.h2d-ex{margin-top:4px;padding:6px 8px;border-left:3px solid var(--gold);background:rgba(201,168,76,.05)}.h2d-ex span{color:var(--dim);font-size:11px}',
       '.h2d-plan{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}.h2d-plan th,.h2d-plan td{border:1px solid var(--border);padding:4px 6px;vertical-align:top;text-align:left;color:#c3cde6}.h2d-plan th{color:var(--dim)}'
     ].join('\n');
@@ -384,15 +384,18 @@
     var miss = d.cause_or_missing && d.cause_or_missing.length ? '<b>Evidence missing:</b> ' + d.cause_or_missing.map(esc).join('; ') + '.' : '';
     var row = function (n, l, v) { return '<div class="h2d-dr"><span class="h2d-dn">' + n + '</span><span class="h2d-dl">' + l + '</span><div>' + v + '</div></div>'; };
     var cats = d.categories.map(function (k) {
-      var st = DXST[k.status] || DXST.insufficient_evidence;
+      var st = (k.status === 'problem_observed' && !k.supported) ? ['#eab308', 'Observed — cause not established'] : (k.status === 'problem_observed' ? ['#ef4444', 'Supported by evidence'] : (DXST[k.status] || DXST.insufficient_evidence));
       return '<div class="h2d-cat"><div class="h2d-ch"><b>' + esc(k.label) + '</b><span class="h2d-chip" style="border-color:' + st[0] + ';color:' + st[0] + '">' + st[1] + ' · confidence ' + esc(k.confidence) + '</span></div>' +
-        '<ul>' + k.confirmed.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+        '<ul>' + k.confirmed.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' + (k.support_note ? '<div class="h2d-sm"><b>Evidence rule:</b> ' + esc(k.support_note) + '</div>' : '') +
         (k.hypothesis ? '<div class="h2d-hy"><b>Hypothesis (not tested):</b> ' + esc(k.hypothesis) + '</div>' : '') +
         (k.missing && k.missing.length ? '<div class="h2d-sm"><b>Missing evidence:</b> ' + k.missing.map(esc).join('; ') + '</div>' : '') +
         (k.experiment ? '<div class="h2d-ex"><b>Experiment:</b> ' + esc(k.experiment.text) + '<br><span>Owner: ' + esc(k.experiment.owner) + ' · Review by ' + esc(dShort(k.experiment.review_by)) + ' · Success: ' + esc(k.experiment.success) + ' · Needs: ' + esc(k.experiment.needs) + '</span></div>' : '') + '</div>';
     }).join('');
     var plan = '<table class="h2d-plan"><thead><tr><th>Metric</th><th>Today</th><th>Change</th><th>Authorization</th></tr></thead><tbody>' + d.data_plan.map(function (p0) { return '<tr><td><b>' + esc(p0.id) + '</b> ' + esc(p0.metric) + '</td><td>' + esc(p0.now) + '</td><td>' + esc(p0.change) + '</td><td>' + esc(p0.auth) + '</td></tr>'; }).join('') + '</tbody></table>';
-    return '<section class="h2d-dx" aria-label="Diagnosis"><div class="h2d-dxh"><b>Diagnosis</b><span class="h2d-rc ' + (d.established ? 'ok' : 'no') + '">' + esc(d.root_cause_label) + '</span></div>' +
+    var q = d.data_quality || {}; var dq = '<div class="h2d-sm"><b>Data quality</b> · traffic-source coverage ' + (q.traffic_coverage_pct === null || q.traffic_coverage_pct === undefined ? '—' : q.traffic_coverage_pct + '%') + ' · reconciliation ' + (q.reconciliation_ok === null || q.reconciliation_ok === undefined ? '—' : q.reconciliation_ok ? 'passes' : 'has a difference') + '<ul>' + (q.flags || []).map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
+    var rules = '<div class="h2d-sm"><b>How confidence is decided</b><ul>' + (d.confidence_rules || []).map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
+    var outline = '<div class="h2d-out"><b>Outcome:</b> ' + esc(d.outcome_label || '') + (d.outcome_caveat ? ' <span>' + esc(d.outcome_caveat) + '</span>' : '') + '</div>';
+    return '<section class="h2d-dx" aria-label="Diagnosis"><div class="h2d-dxh"><b>Diagnosis</b><span class="h2d-rc ' + (d.established ? 'ok' : 'no') + '">' + esc(d.root_cause_label) + '</span></div>' + outline +
       row(1, 'What is wrong?', esc(d.what_is_wrong)) +
       row(2, 'Evidence', '<ul>' + d.evidence.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>') +
       row(3, d.established ? 'Likely cause' : 'Likely cause / missing evidence', (why || '') + (why && miss ? '<br>' : '') + miss) +
@@ -400,7 +403,7 @@
       row(5, 'Owner', nt ? esc(nt.owner) : '—') + row(6, 'Review', nt ? esc(dShort(nt.review_by)) + ' (' + nt.review_days + ' days)' : '—') + row(7, 'Success', nt ? esc(nt.success) : '—') +
       '<div class="h2d-sm h2d-dpol">Advisory only. ' + esc(d.policy || '') + '</div>' +
       '<details class="h2d-dd"><summary>Diagnosis by cause — distribution, retention, packaging, audience (confirmed facts vs hypotheses)</summary><div class="h2d-sm">' + esc(d.classification.note) + ' ' + esc(d.classification.basis) + '</div>' + cats + '</details>' +
-      '<details class="h2d-dd"><summary>Missing data and the collection plan (what needs your authorization)</summary>' + plan + '</details></section>';
+      '<details class="h2d-dd"><summary>Data quality, confidence rules, missing data and the collection plan (what needs your authorization)</summary>' + dq + rules + plan + '</details></section>';
   }
   function diagSection(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key]; if (!c || c.state !== 'ok') return '';

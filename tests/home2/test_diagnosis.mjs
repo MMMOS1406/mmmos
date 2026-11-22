@@ -1,5 +1,5 @@
 // Unit tests for lib/diagnosis.mjs (root-cause diagnostic model). Synthetic data only. Run: node tests/home2/test_diagnosis.mjs
-import { buildDiagnosis, classifyVideos, DATA_PLAN, D_MIN } from '../../lib/diagnosis.mjs';
+import { buildDiagnosis, classifyVideos, DATA_PLAN, D_MIN, CONFIDENCE_RULES, SAMPLE_GRADE } from '../../lib/diagnosis.mjs';
 import { buildHomeCard } from '../../lib/homeInsights.mjs';
 const R = []; const check = (n, ok, d = '') => { R.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); };
 const NOW = Date.parse('2026-11-22T12:00:00Z');
@@ -69,4 +69,52 @@ const B = buildHomeCard({ business: 'srv_studio', name: 'B', dash: studio, rows:
 check('isolation: the diagnosis for one business never carries the other business\'s videos or policy', !JSON.stringify(B.diagnosis).includes('ALPHA') && !JSON.stringify(A.diagnosis).includes('Long only') && B.diagnosis.policy !== A.diagnosis.policy);
 check('purity: same input → same output', JSON.stringify(buildDiagnosis({ business: 'silk_road_voices', dash, status: mkStatus(), videoRows: VR, catalog: cat1, nowMs: NOW, longOnly: false })) === JSON.stringify(D));
 check('missing data → unavailable, no invented diagnosis', buildDiagnosis({ business: 'x', dash: null, nowMs: NOW }).state === 'unavailable');
+
+// ── G3b: outcome rules, supported vs observed, mechanism evidence, confidence rules, data quality, production metadata ──
+const VR3 = [...VR, vr('L3', 900, 68, 29)];   // third Long video
+const curves3 = [curve('L1', 0.3, 0.33), curve('L2', 0.4), curve('L3', 0.38), curve('S1', 0.9)];
+const f3 = { window: { from: '2026-10-22', to: '2026-11-18' }, rows: [{ type: 'long', views: 5200, watch_hours: 60, avg_view_duration_sec: 70, views_share_pct: 88 }, { type: 'short', views: 700, watch_hours: 2, avg_view_duration_sec: 20, views_share_pct: 12 }] };
+const dash3 = base({ formats: f3, retention: { curves: curves3 }, reconciliation: { days_present: 27, days_expected: 28, checks: [{ metric: 'views', channel_total: 5000, ok: true, diff_pct: 0 }] } });
+const D3 = buildDiagnosis({ business: 'silk_road_voices', dash: dash3, status: mkStatus(), videoRows: VR3, catalog: cat1, nowMs: NOW, longOnly: false });
+check('outcome: 3 Long videos ≥300 views with organic-only measured → "Retention issue supported by evidence"', D3.outcome === 'retention' && /Retention issue supported/.test(D3.outcome_label), D3.outcome_label);
+check('outcome caveat: a supported retention issue does NOT claim to explain the unexplained organic decline', /does not establish why organic views fell/.test(D3.outcome_caveat) && D3.observed_not_supported.some((x) => x.key === 'distribution'));
+check('distribution is "observed, not supported" while the previous-window source split is missing', /Observed, not supported as a cause/.test(D3.categories.find((c) => c.key === 'distribution').support_note));
+check('root cause still NOT established (distribution mechanism missing)', D3.established === false && D3.root_cause_label === 'ROOT CAUSE NOT YET ESTABLISHED');
+const D2 = buildDiagnosis({ business: 'silk_road_voices', dash: base({ retention: { curves: [curve('L1', 0.3, 0.33), curve('L2', 0.4)] } }), status: mkStatus(), videoRows: VR, catalog: cat1, nowMs: NOW, longOnly: false });
+check('outcome: only 2 Long curves → retention observed but NOT supported → insufficient evidence', D2.outcome === 'insufficient_evidence' && /Observed, not supported/.test(D2.categories.find((c) => c.key === 'retention').support_note) && /Problems are observed/.test(D2.outcome_caveat), D2.outcome_caveat);
+const lowC = { ...curve('L3', 0.38), views: 150 };
+const Dl = buildDiagnosis({ business: 'silk_road_voices', dash: base({ formats: f3, retention: { curves: [curve('L1', 0.3, 0.33), curve('L2', 0.4), lowC] } }), status: mkStatus(), videoRows: VR3, catalog: cat1, nowMs: NOW, longOnly: false });
+const Lret = Dl.categories.find((c) => c.key === 'retention');
+check('low-sample curve (150 views) is graded "low", flagged as low-confidence, and blocks the supported outcome', Lret.confirmed.some((x) => /Low-confidence: 1 of 3/.test(x)) && Lret.stats.grades.some((g) => g.grade === 'low') && Dl.outcome === 'insufficient_evidence');
+check('sample grades: 1,000+ adequate, 300+ limited, 100+ low, below that insufficient', SAMPLE_GRADE(1200) === 'adequate' && SAMPLE_GRADE(337) === 'limited' && SAMPLE_GRADE(150) === 'low' && SAMPLE_GRADE(40) === 'insufficient');
+// distribution supported only with measured mechanism
+const prevConc = { rows: [{ source: 'ADVERTISING', views: 0, paid: true }, { source: 'RELATED_VIDEO', views: 3500, paid: false }, { source: 'SHORTS', views: 1500, paid: false }, { source: 'YT_SEARCH', views: 1000, paid: false }] };   // previous organic 6,000
+const dMech = base({ formats: f3, traffic_prev: prevConc, windows: { d28: win({ views: 5000, non_ad_views: 4000, paid_views: 1000, net_subs: 15 }), d28_prev: win({ views: 6000, non_ad_views: 6000, net_subs: 10 }), d7: win({ non_ad_views: 300 }), d7_prev: win({ non_ad_views: 500 }) }, retention: { curves: curves3 } });
+const Dm = buildDiagnosis({ business: 'silk_road_voices', dash: dMech, status: mkStatus(), videoRows: VR3, catalog: cat1, nowMs: NOW, longOnly: false });
+const dm = Dm.categories.find((c) => c.key === 'distribution');
+check('distribution SUPPORTED when the lost organic views are concentrated in named sources (related video −1,500)', dm.supported === true && Dm.outcome === 'distribution' && /Supported:/.test(dm.support_note) && dm.confirmed.some((x) => /by source vs the previous 28 days/.test(x)), dm.support_note);
+const prevSpread = { rows: [{ source: 'RELATED_VIDEO', views: 2300, paid: false }, { source: 'SHORTS', views: 1800, paid: false }, { source: 'YT_SEARCH', views: 600, paid: false }, { source: 'PLAYLIST', views: 450, paid: false }, { source: 'SUBSCRIBER', views: 450, paid: false }, { source: 'EXT_URL', views: 400, paid: false }] };
+const dSpread = base({ traffic_prev: prevSpread, traffic: { window: { from: '2026-10-22', to: '2026-11-18' }, rows: [{ source: 'RELATED_VIDEO', views: 1800, paid: false }, { source: 'SHORTS', views: 1400, paid: false }, { source: 'YT_SEARCH', views: 300, paid: false }, { source: 'PLAYLIST', views: 200, paid: false }, { source: 'SUBSCRIBER', views: 200, paid: false }, { source: 'EXT_URL', views: 100, paid: false }] }, windows: dMech.windows });
+const Ds = buildDiagnosis({ business: 'silk_road_voices', dash: dSpread, status: mkStatus(), videoRows: VR3, catalog: cat1, nowMs: NOW, longOnly: false });
+check('distribution NOT supported when the loss is spread across many sources (top two under 50% of the loss)', Ds.categories.find((c) => c.key === 'distribution').supported === false);
+check('the decline alone never supports a distribution cause (no previous-window split → not supported)', D3.categories.find((c) => c.key === 'distribution').supported === false);
+// audience supported with adequate sample and a conversion drop
+const dAud = base({ conversion: { per_1000_non_ad: 3, prev_per_1000_non_ad: 5 }, windows: { d28: win({ views: 5000, non_ad_views: 4000, net_subs: 30 }), d28_prev: win({ views: 6000, non_ad_views: 6000, net_subs: 25 }), d7: win({}), d7_prev: win({}) } });
+const Da = buildDiagnosis({ business: 'x', dash: dAud, status: mkStatus({ code: 'flat', delta_pct: 0, momentum: null }), videoRows: VR, catalog: cat1, nowMs: NOW, longOnly: false });
+check('audience-development issue supported only with an adequate subscriber sample and a ≥15% conversion drop', Da.categories.find((c) => c.key === 'audience').supported === true && Da.outcome === 'audience');
+// packaging with data present still requires the comparison
+const catCtr = cat1.map((c, i) => ({ ...c, ctr: 4 + i * 0.1, impressions: 2000 }));
+const Dp = buildDiagnosis({ business: 'x', dash, status: mkStatus(), videoRows: VR, catalog: catCtr, nowMs: NOW, longOnly: false });
+check('packaging is never "supported" from the mere presence of CTR columns; it says what comparison is required', Dp.categories.find((c) => c.key === 'packaging').supported === false && /not run until/.test(Dp.categories.find((c) => c.key === 'packaging').support_note));
+check('five outcomes only: distribution | packaging | retention | audience | insufficient_evidence', [D3, D2, Dm, Da, SD].every((x) => ['distribution', 'packaging', 'retention', 'audience', 'insufficient_evidence'].includes(x.outcome)));
+check('Studio (Long-only, small samples): insufficient evidence, and the hypothesis is not promoted to a cause', SD.outcome === 'insufficient_evidence' && SD.established === false && SD.hypotheses.every((h) => /Not tested|not tested/i.test(h.text)));
+// confidence rules and data quality
+check('confidence rules are published: confirmed vs hypothesis vs supported, thresholds, High/Medium/Low, five outcomes', CONFIDENCE_RULES.length >= 6 && CONFIDENCE_RULES.some((r) => /Hypothesis/.test(r)) && CONFIDENCE_RULES.some((r) => /High = threshold/.test(r)) && D3.confidence_rules === CONFIDENCE_RULES);
+check('data quality: missing day, window offset, traffic coverage and small-sample videos are reported', D3.data_quality.days_present === 27 && D3.data_quality.flags.some((f) => /27 of 28/.test(f)) && D3.data_quality.traffic_coverage_pct === 100 && D3.data_quality.flags.some((f) => /fewer than 100 views/.test(f)) && D3.data_quality.flags.some((f) => /EXT_URL/.test(f)));
+// production metadata is authoritative where it exists
+const fm = new Map([['L1', 'long'], ['L2', 'mix'], ['S1', 'short'], ['S2', 'short'], ['L3', 'long']]);
+const clp = classifyVideos(VR3, base().formats, fm);
+check('production package metadata overrides the estimate (mix counts as long) and agreement with the estimate is counted', clp.rows.find((r) => r.id === 'L2').type === 'long' && clp.rows.find((r) => r.id === 'L2').source === 'production' && clp.production.compared === 5 && clp.production.agree === 5);
+const fmBad = new Map([['L1', 'short']]);
+check('a production label that contradicts the estimate is surfaced (agreement < compared)', (() => { const c = classifyVideos(VR3, base().formats, fmBad); return c.production.compared === 1 && c.production.agree === 0 && c.rows.find((r) => r.id === 'L1').type === 'short'; })());
 console.log(`\n${R.filter(Boolean).length}/${R.length} passed`); process.exit(R.every(Boolean) ? 0 : 1);

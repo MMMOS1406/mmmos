@@ -33,10 +33,12 @@ try {
   check('diagnosis section per business, after both summaries, with the seven numbered items', dx.length === 2 && dx.every((d) => d.rows === 7) && dx[0].biz === 'silk_road_voices' && dx[1].biz === 'srv_studio');
   check('diagnosis says ROOT CAUSE NOT YET ESTABLISHED when evidence is missing and names the missing evidence', dx.every((d) => /ROOT CAUSE NOT YET ESTABLISHED/.test(d.label) && /Evidence missing|Likely cause/.test(d.text)));
   check('diagnosis separates hypotheses (labelled "not tested") from confirmed evidence; test, owner, review, success all present', dx.every((d) => /What is wrong\?/.test(d.text) && /Evidence/.test(d.text) && /Test next/.test(d.text) && /Owner/.test(d.text) && /Review/.test(d.text) && /Success/.test(d.text)) && dx.some((d) => /Hypothesis \(not tested\)/.test(d.text)));
-  check('diagnosis by cause and the collection plan are collapsed by default', dx.every((d) => !d.open));
+  check('diagnosis shows exactly one outcome line (distribution | packaging | retention | audience | insufficient evidence) with its caveat', dx.every((d) => /Outcome: (Distribution issue supported|Packaging issue supported|Retention issue supported|Audience development issue supported|Insufficient evidence)/.test(d.text)));
+  check('diagnosis by cause, evidence rules, data quality and the collection plan are collapsed by default', dx.every((d) => !d.open));
   check('SRV Studio diagnosis never proposes producing Shorts (Long-only)', !/Produce three more Shorts/.test(dx[1].text));
   await o.page.evaluate(() => document.querySelectorAll('section.h2dx details').forEach((d) => { d.open = true; }));
   const dx2 = await o.page.evaluate(() => [...document.querySelectorAll('section.h2dx')].map((c) => c.innerText.replace(/\s+/g, ' ')));
+  check('expanded diagnosis shows evidence rules ("Observed — cause not established" or "Supported by evidence"), data quality and how confidence is decided', dx2.every((t) => /Evidence rule:/.test(t) && /Data quality/.test(t) && /How confidence is decided/.test(t) && /(Observed — cause not established|Supported by evidence|Insufficient evidence)/.test(t)));
   check('expanded diagnosis shows packaging = insufficient evidence and the authorization column of the collection plan', dx2.every((t) => /Packaging/.test(t) && /Insufficient evidence/.test(t) && /Authorization/.test(t) && /CEO authorization/.test(t)));
   await o.page.evaluate(() => document.querySelectorAll('details.h2d-more').forEach((d) => { d.open = true; }));
   const cards = await txt(o.page, 'section.h2d');
