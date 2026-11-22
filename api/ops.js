@@ -282,6 +282,14 @@ const SESSION_GATED_ACTIONS = new Set([
 ]);
 // G0/C5 — mutating legacy optimization actions: refused unless a valid CEO session is presented (header or body/query token).
 const CEO_ONLY_MUTATING_ACTIONS = new Set(['optimization_apply_recs', 'optimization_toggle_auto', 'strategy_recompute']);
+// G0/C5 — strict CEO check for those actions: the token must be a string of at most 4 KB with exactly two segments (payload.signature) BEFORE the shared HMAC / subject / expiry verification runs.
+// (The shared verifier ignores any extra trailing segments; that is left unchanged here so no other endpoint's behaviour moves.)
+async function _requireCeoSessionStrict(req) {
+  const src = (req.method === 'POST' ? req.body : req.query) || {};
+  const token = src.ceo_session_token || (req.headers && req.headers['x-mmm-ceo-session']);
+  if (typeof token !== 'string' || token.length > 4096 || token.split('.').length !== 2) return false;
+  return await requireCeoSession(req);
+}
 const PUBLISH_ALLOWED_ORIGINS = ['https://mmm-static.vercel.app']; // the project's only domain (Vercel, 2026-10-15)
 const OPERATOR_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const PUBLISH_AUTH_CACHE_MS = 30 * 1000;
@@ -21425,7 +21433,7 @@ export default async function handler(req, res) {
     }
     // G0/C5 — optimization/strategy maintenance actions change rules, settings or strategy rows: CEO session only (no VA, no observe-mode pass-through).
     // The daily job calls optimizationApplyRecommendations in-process (analyticsAutoRun) and never passes through this router.
-    if (CEO_ONLY_MUTATING_ACTIONS.has(action) && !(await requireCeoSession(req))) {
+    if (CEO_ONLY_MUTATING_ACTIONS.has(action) && !(await _requireCeoSessionStrict(req))) {
       return res.status(401).json({ ok: false, error: 'ceo_authorization_required', message: 'Sign in as CEO to use this action.' });
     }
     if (action === 'list_tasks')           return await listTasks(req, res);
