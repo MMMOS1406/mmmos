@@ -7,6 +7,8 @@
 import { createHash } from 'node:crypto';
 import { cronSignatureInput } from '../../lib/growthCollect.mjs'; // Growth system: signature for the scheduled collection hook (no new credential)
 import { loadDisabled, filterEnabled } from '../../lib/channelSyncControl.mjs'; // per-channel sync switch (default: nothing disabled = unchanged behaviour)
+import { cronEntryDecision, cronSignature, CRON_FAIL_CLOSED_WHEN_UNCONFIGURED } from '../../lib/cronAuth.mjs'; // G1/S-A — entry-point policy + the derived signature for the internal hops (no new credential)
+import { acquire as lockAcquire, release as lockRelease } from '../../lib/cronLock.mjs'; // G1/S-B — database-backed single-flight + cooldown
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -42,7 +44,7 @@ async function sbLog(channelId, status, message) {
 async function syncChannel(channelId, appUrl) {
   const res = await fetch(`${appUrl}/api/youtube/sync`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-mmm-cron': cronSignature('sync', SUPABASE_SERVICE_KEY) },   // G1/S-A: the sync endpoint now refuses callers without this
     body: JSON.stringify({ channelId }),
   });
   const data = await res.json();
@@ -87,7 +89,7 @@ async function syncAllTikTokAccounts(appUrl) {
         }
         const res = await fetch(`${appUrl}/api/tiktok/sync`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-mmm-cron': cronSignature('sync', SUPABASE_SERVICE_KEY) },   // G1/S-A
           body: JSON.stringify({ openId }),
         });
         const data = await res.json();
@@ -129,13 +131,25 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Vercel injects CRON_SECRET and sends it as Bearer token on scheduled runs.
-  // If the secret is set, enforce it — allows safe manual POST triggers without the header
-  // only when CRON_SECRET is absent (dev/staging).
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  // G1/S-A — entry-point policy (lib/cronAuth.mjs). Vercel sends CRON_SECRET as a Bearer token on scheduled runs.
+  //   secret configured      → the bearer must match, otherwise 401 (unchanged from before).
+  //   secret NOT configured  → transitional: allowed as before, but protected by the single-flight lock below. When CRON_FAIL_CLOSED_WHEN_UNCONFIGURED is true (shipped only after
+  //                            the secret is configured and verified) a production deployment without it answers 503.
+  const decision = cronEntryDecision({ env: process.env, headers: req.headers, failClosed: CRON_FAIL_CLOSED_WHEN_UNCONFIGURED });
+  if (!decision.allow) return res.status(decision.status).json({ error: decision.error === 'unauthorized' ? 'Unauthorized' : decision.error });
+  if (decision.warn) console.warn('[cron-auth] ' + decision.warn);
+
+  // G1/S-B — single-flight + cooldown. Of N simultaneous callers exactly one runs; repeats inside the cooldown are refused before any Google/TikTok call.
+  // If the lock mechanism itself is unavailable (database error) the run proceeds with a warning: the lock limits abuse and a database outage would stop the run anyway.
+  const lockCfg = { fetchImpl: fetch, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY };
+  const lock = await lockAcquire({ name: 'autosync', ...lockCfg });
+  if (!lock.ok && lock.reason !== 'lock_unavailable') return res.status(429).json({ skipped: true, reason: lock.reason, retryAfterMs: lock.retryAfterMs || null });
+  if (!lock.ok) console.warn('[autosync] lock unavailable — running without it');
+  let ok = false;
+  try { await runAutosync(req, res); ok = true; } finally { await lockRelease({ lock, success: ok, ...lockCfg }); }
+}
+
+async function runAutosync(req, res) {
 
   const appUrl = process.env.APP_URL || `https://${req.headers.host}`;
   const startedAt = new Date().toISOString();
@@ -201,7 +215,7 @@ export default async function handler(req, res) {
   // Pull → Foundation → Decision → Apply → Strategy. Operator never clicks.
   let analyticsAuto = null;
   try {
-    const aRes = await fetch(`${appUrl}/api/ops?action=analytics_auto_run`);
+    const aRes = await fetch(`${appUrl}/api/ops?action=analytics_auto_run`, { headers: { 'x-mmm-cron': cronSignature('analytics_auto_run', SUPABASE_SERVICE_KEY) } });   // G1/S-A
     analyticsAuto = await aRes.json();
     console.log('[A1] analytics_auto_run:', analyticsAuto && analyticsAuto.status);
   } catch (e) {

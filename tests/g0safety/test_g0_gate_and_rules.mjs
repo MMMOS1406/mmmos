@@ -4,6 +4,7 @@
 //   C2: optimization_state flags expired rules.
 // node tests/g0safety/test_g0_gate_and_rules.mjs
 import { world, resetWorld, loadPair, makeCall, cleanup, reporter, signCeo, mkRes } from './world.mjs';
+import { cronSignature } from '../../lib/cronAuth.mjs';   // G1: the daily job's internal hop now carries a derived signature
 const { check, done } = reporter();
 try {
   const { base, cur } = await loadPair('ops.js'); const B = makeCall(base), C = makeCall(cur);
@@ -41,8 +42,8 @@ try {
 
   /* ── the daily job path (analytics_auto_run → in-process optimizationApplyRecommendations) is NOT behind the new gate ── */
   { resetWorld(); world.decision = { ok: true, perChannel: [{ engine: 'SRV Farsi', recommendations: [{ action: 'INCREASE', priority: 'high', detail: 'Top retainers use "alpha" pattern for the next generations.' }] }] };
-    const r = await C({ action: 'analytics_auto_run', method: 'GET' });
-    check('daily job (analytics_auto_run, no session, as the cron calls it) still runs the rule step in-process', r.code === 200 && r.body && r.body.steps && r.body.steps.optimization_apply_recs !== undefined, JSON.stringify(r.body && r.body.steps && r.body.steps.optimization_apply_recs));
+    const r = await C({ action: 'analytics_auto_run', method: 'GET', headers: { 'x-mmm-cron': cronSignature('analytics_auto_run', 'svc-test') } });
+    check('daily job (analytics_auto_run with the cron entry point signature, as the cron calls it since G1) still runs the rule step in-process', r.code === 200 && r.body && r.body.steps && r.body.steps.optimization_apply_recs !== undefined, JSON.stringify(r.body && r.body.steps && r.body.steps.optimization_apply_recs));
     check('…and with auto_apply OFF it queued the rule INACTIVE', world.rules.length === 1 && world.rules[0].active === false && world.rules[0].auto_applied === false && world.audit.some((a) => a.action === 'rule_queued')); }
 
   /* ── C3: supersede ── */

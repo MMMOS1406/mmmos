@@ -4,6 +4,9 @@
 // READ-ONLY — no write operations to TikTok
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
+import { verifyCronSignature } from '../../lib/cronAuth.mjs';   // G1/S-A
+import { ceoSessionOk } from '../../lib/ceoSession.mjs';   // G1/S-A
+
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const TT_TOKEN_URL  = 'https://open.tiktokapis.com/v2/oauth/token/';
@@ -248,6 +251,11 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method === 'GET') return handleStatus(req, res);
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // G1/S-A — this endpoint spends TikTok API quota with a stored refresh token: only the daily job (derived signature, scope "sync") or a signed-in CEO may call it.
+  if (!(verifyCronSignature(req.headers, 'sync', SUPABASE_SERVICE_KEY) || await ceoSessionOk(req, { fetchImpl: fetch, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY }))) {
+    return res.status(401).json({ error: 'ceo_authorization_required' });
+  }
 
   const { openId } = req.body || {};
 

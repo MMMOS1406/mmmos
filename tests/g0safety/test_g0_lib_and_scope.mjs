@@ -1,8 +1,10 @@
 // G0 / C2–C5 — unit proof of lib/generationInputs.mjs and a SCOPE proof that the branch changes nothing outside the corrections.
-// node tests/g0safety/test_g0_lib_and_scope.mjs   (needs a local origin/main ref)
+// node tests/g0safety/test_g0_lib_and_scope.mjs   (needs the two pinned commits in the local history)
+// Scope is checked on the RELEASE RANGE of PR #124 — main before (41af6d7) .. the merge commit (7d3f81a) — so later work on the branch does not change what these tests prove about G0.
 import { execFileSync } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path';
 import * as G from '../../lib/generationInputs.mjs'; import { reporter } from './world.mjs';
 const { check, done } = reporter(); const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+const REL_BASE = '41af6d7', REL_HEAD = '7d3f81a';
 const git = (...a) => execFileSync('git', a, { cwd: repo, maxBuffer: 256 * 1024 * 1024 }).toString();
 
 /* ── lib ── */
@@ -16,18 +18,18 @@ check('input array is not mutated', M.length === 8);
 check('lib is pure: no network / database / file / env access in the module source', !/fetch|process\.env|require\(|readFile|supabase/i.test(fs.readFileSync(path.join(repo, 'lib/generationInputs.mjs'), 'utf8').replace(/\/\/.*$/gm, '')));
 
 /* ── scope: only the intended files changed ── */
-const changed = git('diff', '--name-only', 'origin/main').split('\n').filter(Boolean); const untracked = git('ls-files', '--others', '--exclude-standard').split('\n').filter(Boolean);
+const changed = git('diff', '--name-only', REL_BASE, REL_HEAD).split('\n').filter(Boolean); const untracked = [];
 const all = [...new Set([...changed, ...untracked])].sort(); const allowed = (f) => ['api/ops.js', 'api/generate.js', 'public/index.html', 'lib/generationInputs.mjs'].includes(f) || /^tests\/g0safety\//.test(f) || f === 'test_youtube_oauth_reliability.mjs';
 check('every changed file is in the allowed set (3 code files, 1 new lib, tests/g0safety/*)', all.every(allowed), JSON.stringify(all.filter((f) => !allowed(f))));
 check('vercel.json (cron/schedules), package.json, lib/dataProxy.mjs, Finance, Family, VA, publishing, analytics and growth files are untouched', !all.some((f) => /^(vercel\.json|package\.json|lib\/(dataProxy|fin|growth|yppCard|srv|youtube)|public\/(finance|growth|home2)|api\/youtube\/|projects\/)/.test(f)));
-const lines = (f) => git('diff', '-U0', 'origin/main', '--', f).split('\n').filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l));
+const lines = (f) => git('diff', '-U0', REL_BASE, REL_HEAD, '--', f).split('\n').filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l));
 const OPS_OK = [/const \{ engineId, mode, existingMemory/, /_requireCeoSessionStrict/, /shared verifier ignores any extra/, /const src = \(req\.method === 'POST' \? req\.body : req\.query\) \|\| \{\};/, /const token = src\.ceo_session_token \|\| \(req\.headers/, /typeof token !== 'string' \|\| token\.length > 4096/, /return await requireCeoSession\(req\);/, /G0\//, /_stripLearningInputs/, /_existingMemoryRaw/, /generationInputs\.mjs/, /CEO_ONLY_MUTATING_ACTIONS/, /ceo_authorization_required/, /exArr\.length/, /Supersede older active rules/, /queued inactive and existing rules/, /rulesRaw/, /_nowMs/, /const rules = \(Array\.isArray/, /const rules = await sbGet\('optimization_rules\?active=eq\.true/, /^\+\s*}\s*$/, /^\+\s*\/\/ The daily job calls/, /^\+\s*\/\/ G0/, /^\+\s*$/];
 { const bad = lines('api/ops.js').filter((l) => !OPS_OK.some((re) => re.test(l))); check('api/ops.js: every added/removed line belongs to C2/C3/C4/C5 (' + lines('api/ops.js').length + ' lines in the diff)', bad.length === 0, JSON.stringify(bad.slice(0, 5))); }
 { const bad = lines('api/generate.js').filter((l) => !/generationInputs|G0\/C4|stripLearningInputs|recentPackages|const \{ engine, mood, platform, contentType, contentFormat, taskName/.test(l)); check('api/generate.js: only the C4 import and the recentPackages line changed (' + lines('api/generate.js').length + ' lines)', bad.length === 0, JSON.stringify(bad)); }
 { const L = lines('public/index.html'); const bad = L.filter((l) => !/G0\/C|server strips them again|LEARNING_INPUTS_TO_GENERATION|_learningInputsOn|_learn|expires_at|_nowMs|expiresAt|X-MMM-CEO-Session|rule\.expired|action=(strategy_recompute|optimization_apply_recs|optimization_toggle_auto)|const top=|const directives=|const activeRules=|const strategy=|select=id,rule_type|^\-\s+(return await r\.json\(\);|const top=|const directives=|const activeRules=|const strategy=)|sourceDetail: r\.source_detail|^\+\s*return \(await/.test(l)); check('public/index.html: every added/removed line belongs to C2/C4/C5 (' + L.length + ' lines in the diff)', bad.length === 0, JSON.stringify(bad.slice(0, 6))); }
 { const L = lines('test_youtube_oauth_reliability.mjs'); check('the legacy scope-guard test changed by exactly one line (allowlist extended for the two new G0 paths)', L.length === 2 && /generationInputs|g0safety/.test(L[1]), String(L.length)); }
 /* ── gate registry: the existing session gate list is unchanged; the new set is exactly the three actions ── */
-{ const cur = fs.readFileSync(path.join(repo, 'api/ops.js'), 'utf8'), base = git('show', 'origin/main:api/ops.js'); const reg = (s, n) => (new RegExp('const ' + n + ' = new Set\\(\\[([\\s\\S]*?)\\]\\)').exec(s) || [])[1];
+{ const cur = git('show', REL_HEAD + ':api/ops.js'), base = git('show', REL_BASE + ':api/ops.js'); const reg = (s, n) => (new RegExp('const ' + n + ' = new Set\\(\\[([\\s\\S]*?)\\]\\)').exec(s) || [])[1];
   check('SESSION_GATED_ACTIONS and PUBLISH_GATED_ACTIONS are byte-identical to main', reg(cur, 'SESSION_GATED_ACTIONS') === reg(base, 'SESSION_GATED_ACTIONS') && reg(cur, 'PUBLISH_GATED_ACTIONS') === reg(base, 'PUBLISH_GATED_ACTIONS'));
   check('CEO_ONLY_MUTATING_ACTIONS is exactly the three maintenance actions', /CEO_ONLY_MUTATING_ACTIONS = new Set\(\['optimization_apply_recs', 'optimization_toggle_auto', 'strategy_recompute'\]\)/.test(cur));
   check('no other action name was added to the router', (cur.match(/if \(action === '/g) || []).length === (base.match(/if \(action === '/g) || []).length); }
