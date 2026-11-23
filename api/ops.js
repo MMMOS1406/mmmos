@@ -8985,9 +8985,9 @@ async function _growthRunCollection(business, mode) {
   const want = _gaBiz[business] && _gaBiz[business].channelId; if (!want) return { ok: false, error: 'unknown_business' };
   const { from, to } = _gcPeriod(Date.now(), 28);
   const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2');
-  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to });
+  const prev = await _growthLoadDoc(business);   // read first: videos whose authoritative duration is already stored are not asked for again (C4)
+  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to, knownDurationIds: prev && prev.catalog_meta ? Object.keys(prev.catalog_meta) : [] });
   if (!out.ok) { console.warn('[growth_collect] ' + business + ' ' + mode + ' failed: ' + (out.error || '') + ' ' + (out.detail || '')); return { ok: false, business, error: out.error, detail: out.detail || null, steps: out.run ? out.run.steps : [] }; }
-  const prev = await _growthLoadDoc(business);
   const doc = _gcMerge(prev, out.run, { business, from, to, nowIso: new Date().toISOString() });
   await _growthSaveDoc(business, doc);
   const failed = Object.entries(doc.collections[0].steps).filter(([, v]) => v !== 'ok').map(([k, v]) => k + ':' + v);
@@ -9001,7 +9001,7 @@ async function growthCollect(req, res) {
   try {
     if (!_GROWTH_BUSINESSES.includes(business)) return res.status(400).json({ ok: false, error: 'unknown_business' });
     const auth = _gcAuth(await _growthLoadSwitch(), Date.now(), business, 'manual');
-    if (b.dryRun === true) return res.status(200).json({ ok: true, dryRun: true, business, authorization: auth, period: _gcPeriod(Date.now(), 28), plan: _gcSteps({ to: _gcPeriod(Date.now(), 28).to }).map((s) => ({ id: s.id, url: s.url })), note: 'Plus up to 10 retention-curve requests for the top videos. Nothing was sent to Google.' });
+    if (b.dryRun === true) return res.status(200).json({ ok: true, dryRun: true, business, authorization: auth, period: _gcPeriod(Date.now(), 28), plan: _gcSteps({ to: _gcPeriod(Date.now(), 28).to }).map((s) => ({ id: s.id, url: s.url })), note: 'Plus up to 10 retention-curve requests (Long videos preferred), up to 20 per-video traffic-source requests, and 1 Data API duration request per 50 videos not yet known. Nothing was sent to Google.' });
     if (b.confirm !== _gcConfirm) return res.status(400).json({ ok: false, error: 'collection_confirmation_required' });
     if (!auth.ok) return res.status(403).json({ ok: false, error: auth.reason, detail: auth.detail });
     const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) return res.status(429).json({ ok: false, error: g.reason, retryAfterMs: g.retryAfterMs || null }); began = true;
