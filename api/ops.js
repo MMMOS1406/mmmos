@@ -23,6 +23,8 @@ import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BU
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
 import { collectAuthorization as _gcAuth, collectSteps as _gcSteps, collectForBusiness as _gcCollect, mergeCollection as _gcMerge, parseDoc as _gcParseDoc, dataKey as _gcKey, COLLECT_SWITCH_KEY as _gcSwitchKey, COLLECT_CONFIRMATION as _gcConfirm, collectPeriod as _gcPeriod, cronSignatureInput as _gcCronInput } from '../lib/growthCollect.mjs'; // Growth system: minimum server-side collection (default DISABLED; read-only Google GETs; one JSON document per business in app_settings)
+import { improvementsKey as _impKey, emptyImprovements as _impEmpty, sanitizeImprovements as _impSanitize, startImprovement as _impStart, updateImprovement as _impUpdate, annotatePlan as _impAnnotate, activeSummary as _impSummary } from '../lib/growthImprovements.mjs'; // persistent improvement tracking (records only)
+import { currentMetrics as _gpMetrics, evaluateImprovement as _gpEval } from '../lib/growthPlan.mjs'; // recommendation plan metrics / evaluation (pure)
 import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Growth Decision Center model + recommendations (pure)
 import { buildHomeCard as _hiBuild } from '../lib/homeInsights.mjs'; // CEO homepage business card model (pure)
 import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
@@ -9027,6 +9029,66 @@ async function growthCollectScheduled(req, res) {
     return res.status(200).json({ ok: true, results });
   } catch (e) { return res.status(500).json({ ok: false, error: 'growth_collect_scheduled_failed' }); }
 }
+// ── improvement tracking: one document per business (app_settings key growth_improvements_<business>). RECORDS ONLY — tracking an improvement changes no production setting. CEO session only. ──
+async function _impRead(business) {   // throws when the stored document cannot be read or is not this business's (a write never starts from a guess)
+  const r = await sbGet('app_settings?key=eq.' + _impKey(business) + '&select=value&limit=1');
+  if (!Array.isArray(r) || !r[0]) return { text: null, doc: _impEmpty(business) };
+  const text = r[0].value == null ? '' : (typeof r[0].value === 'string' ? r[0].value : JSON.stringify(r[0].value)); const doc = _impSanitize(text, business); if (!doc) throw new Error('improvements_document_invalid');
+  return { text, doc };
+}
+async function _impWrite(business, oldText, doc) { return await srvStudioV2PilotCas(_impKey(business), oldText, JSON.stringify(doc)); }   // compare-and-set: a concurrent change makes it return false (409), never overwrites
+async function _impContext(business) { const yr = await (async () => { try { const r = await sbGet('app_settings?key=eq.' + _yppStoreKey + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? r[0].value : null; } catch (_) { return null; } })(); return { store: _yppParseStore(yr), sw: await _growthLoadSwitch() }; }
+async function growthImprovementStart(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const b = req.body || {}; const business = String(b.business || ''), key = String(b.key || '');
+  try {
+    if (!_GROWTH_BUSINESSES.includes(business)) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    if (!key.endsWith(':' + business)) return res.status(400).json({ ok: false, error: 'proposal_not_for_this_business' });
+    const { store, sw } = await _impContext(business); const card = await _growthHomeCardFor(business, store, sw);   // the proposal (baseline, target, review date) is rebuilt from live data: the client only names its key
+    const prop = card && card.plan ? card.plan.proposals.find((p) => p.key === key) : null; if (!prop) return res.status(404).json({ ok: false, error: 'proposal_not_found' });
+    const { text, doc } = await _impRead(business); const r = _impStart(doc, prop, { by: 'ceo', nowMs: Date.now(), note: String(b.note || '').slice(0, 200) });
+    if (r.error) return res.status(r.error === 'already_active' || r.error === 'previously_unsuccessful' ? 409 : 400).json({ ok: false, error: r.error, detail: r.detail || null, item_id: r.item_id || null });
+    if (!(await _impWrite(business, text, r.doc))) return res.status(409).json({ ok: false, error: 'conflict', detail: 'the improvement list changed meanwhile; reload and try again' });
+    return res.status(200).json({ ok: true, item: r.item, rev: r.doc.rev });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_improvement_failed' }); }
+}
+async function growthImprovementUpdate(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const b = req.body || {}; const business = String(b.business || ''), id = String(b.id || '');
+  try {
+    if (!_GROWTH_BUSINESSES.includes(business)) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    const { text, doc } = await _impRead(business); if (b.base_rev !== undefined && Number(b.base_rev) !== doc.rev) return res.status(409).json({ ok: false, error: 'conflict', detail: 'the improvement list changed; reload and try again' });
+    const patch = b.patch && typeof b.patch === 'object' ? b.patch : {}; const item = doc.items.find((x) => x.id === id); if (!item) return res.status(404).json({ ok: false, error: 'not_found' });
+    if (patch.status === 'completed') { const { store, sw } = await _impContext(business); const card = await _growthHomeCardFor(business, store, sw); patch.evaluation = _gpEval(item, _gpMetrics(card), Date.now()); }   // the data-based reading is computed here, never taken from the client
+    else delete patch.evaluation;
+    const r = _impUpdate(doc, id, patch, { by: 'ceo', nowMs: Date.now() }); if (r.error) return res.status(r.error === 'not_found' ? 404 : 400).json({ ok: false, error: r.error, detail: r.detail || null });
+    if (!(await _impWrite(business, text, r.doc))) return res.status(409).json({ ok: false, error: 'conflict', detail: 'the improvement list changed meanwhile; reload and try again' });
+    return res.status(200).json({ ok: true, item: r.item, rev: r.doc.rev });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_improvement_failed' }); }
+}
+// One business's CEO homepage card (CEO only: the caller has checked the session). Reads ONLY this business's own rows (channel id filter on every read); read-only.
+async function _growthHomeCardFor(business, store, sw) {
+  const id = _gaBiz[business].channelId; const doc = await _growthLoadDoc(business);
+  const rows = await sbGet('youtube_videos_analytics?select=channel_id,video_id,title,views,view_count,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,analytics_synced_at,synced_at,published_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000');
+  const chs = await sbGet('youtube_channels?select=channel_id,subscribers,total_views,updated_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1'); const ch = Array.isArray(chs) && chs[0] ? chs[0] : {};
+  const norm = (Array.isArray(rows) ? rows : []).map(_gaNorm); const titles = {}; for (const r of Array.isArray(rows) ? rows : []) if (r.video_id && r.title) titles[r.video_id] = r.title;
+  let fallback = null; try { const ws = _gaBuild(norm, { business: _gaBiz[business], channel: { subscribers: ch.subscribers, totalViews: ch.total_views, updatedAt: ch.updated_at } }); fallback = { period: ws.period, metrics: Object.fromEntries(['views_window', 'watch_hours_window', 'avg_view_pct_weighted', 'avg_view_duration', 'subs_attributed_window', 'subscribers_total', 'views_lifetime_channel'].map((k) => [k, { label: ws.metrics[k].label, value: ws.metrics[k].value, unit: ws.metrics[k].unit, status: ws.metrics[k].status }])), top: (ws.top || []).slice(0, 3) }; } catch (_) { fallback = null; }
+  const ypp = _yppBuild({ business, records: store.byChannel[id] || [], nowMs: Date.now(), appCounters: null });
+  const dash = _gdBuild({ business, doc, nowMs: Date.now(), titles, fallback, ypp });
+
+      let hist = [], pipeline = null;
+      try { const sn = await sbGet('youtube_channel_snapshots?select=snapshot_date,subscribers,total_videos,total_views&channel_id=eq.' + encodeURIComponent(id) + '&order=snapshot_date.desc&limit=120'); hist = (Array.isArray(sn) ? sn : []).map((x) => ({ d: String(x.snapshot_date || '').slice(0, 10), subs: x.subscribers, videos: x.total_videos, views: x.total_views })).filter((x) => x.d).reverse(); } catch (_) { hist = []; }
+      try { const lg = await sbGet('analytics_sync_log?select=id,status,ts,steps&order=ts.desc&limit=10'); if (Array.isArray(lg) && lg.length) { const ok = lg.find((x) => x && x.status === 'healthy'); const st = lg[0].steps && typeof lg[0].steps === 'object' ? Object.values(lg[0].steps) : []; pipeline = { last_ok_at: ok ? ok.ts : null, last_status: lg[0].status, last_at: lg[0].ts, steps_ok: st.length ? st.filter((v) => v && v.ok).length + '/' + st.length : null }; } } catch (_) { pipeline = null; }
+      let catalog = []; try { const cg = await sbGet('youtube_videos?select=video_id,title,published_at,view_count,like_count,comment_count,ctr,impressions&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000'); catalog = Array.isArray(cg) ? cg : []; } catch (_) { catalog = []; }
+      let reach = null; try { const RM = await _hrLoad(); if (RM) { const rd = await sbGet('app_settings?key=eq.' + RM.reachDataKey(business) + '&select=value&limit=1'); if (Array.isArray(rd) && rd[0]) { const rdoc = typeof rd[0].value === 'string' ? JSON.parse(rd[0].value) : rd[0].value; if (rdoc && rdoc.business === business && rdoc.channel_id === id) reach = RM.packagingComparison(rdoc, catalog.map((c) => ({ video_id: c.video_id, published_at: c.published_at })), Date.now()); } } } catch (_) { reach = null; }
+      const videoRows = doc && doc.videos && Array.isArray(doc.videos.rows) ? doc.videos.rows.map((v) => ({ id: v.id, views: v.views, avd: v.avg_view_duration_sec, pct: v.avg_view_pct, subs_gained: v.subs_gained })) : [];
+      const home_card = _hiBuild({ business, name: _gaBiz[business].name || business, dash, rows: Array.isArray(rows) ? rows : [], videoRows, catalog, reach, ypp: dash.ypp || null, counters: { subscribers: ch.subscribers, total_views: ch.total_views, updated_at: ch.updated_at, history: hist }, pipeline, collection: { scheduled: _gcAuth(sw, Date.now(), business, 'scheduled').ok === true }, nowMs: Date.now() });
+  try { const impDoc = (await _impRead(business)).doc, now = Date.now(); if (home_card.plan) home_card.plan.proposals = _impAnnotate(home_card.plan, impDoc, now);
+    home_card.improvements = { rev: impDoc.rev, summary: _impSummary(impDoc, now), items: impDoc.items.slice(0, 25), evaluations: Object.fromEntries(impDoc.items.filter((x) => x.status !== 'completed' && x.status !== 'abandoned').map((x) => [x.id, _gpEval(x, _gpMetrics(home_card), now)])) }; } catch (_) { home_card.improvements = { error: 'unavailable' }; }
+  return home_card;
+}
 async function growthReport(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
   const who = await _publisherFromRequest(req); if (!who) return res.status(401).json({ ok: false, error: 'session_required' });
@@ -9036,6 +9098,7 @@ async function growthReport(req, res) {
     const store = who.role === 'ceo' ? _yppParseStore(yraw) : null; const reports = [];
     for (const business of list) {
       try {   // one business failing never hides the other
+      if ((req.body || {}).home === true && who.role === 'ceo') { reports.push({ business, home_card: await _growthHomeCardFor(business, store, sw) }); continue; }   // CEO homepage card (read-only; this business's data only)
       const id = _gaBiz[business].channelId; const doc = await _growthLoadDoc(business);
       const rows = await sbGet('youtube_videos_analytics?select=channel_id,video_id,title,views,view_count,watch_time_min,avg_view_duration_sec,retention_pct,subs_gained,analytics_synced_at,synced_at,published_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000');
       const chs = await sbGet('youtube_channels?select=channel_id,subscribers,total_views,updated_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1'); const ch = Array.isArray(chs) && chs[0] ? chs[0] : {};
@@ -9043,16 +9106,6 @@ async function growthReport(req, res) {
       let fallback = null; try { const ws = _gaBuild(norm, { business: _gaBiz[business], channel: { subscribers: ch.subscribers, totalViews: ch.total_views, updatedAt: ch.updated_at } }); fallback = { period: ws.period, metrics: Object.fromEntries(['views_window', 'watch_hours_window', 'avg_view_pct_weighted', 'avg_view_duration', 'subs_attributed_window', 'subscribers_total', 'views_lifetime_channel'].map((k) => [k, { label: ws.metrics[k].label, value: ws.metrics[k].value, unit: ws.metrics[k].unit, status: ws.metrics[k].status }])), top: (ws.top || []).slice(0, 3) }; } catch (_) { fallback = null; }
       const ypp = who.role === 'ceo' ? _yppBuild({ business, records: store.byChannel[id] || [], nowMs: Date.now(), appCounters: null }) : undefined;
       const dash = _gdBuild({ business, doc, nowMs: Date.now(), titles, fallback, ypp });
-      if ((req.body || {}).home === true && who.role === 'ceo') {   // CEO homepage card: this business's own data only (channel id filter on every read); additive, read-only, no change to the report above
-        let hist = [], pipeline = null;
-        try { const sn = await sbGet('youtube_channel_snapshots?select=snapshot_date,subscribers,total_videos,total_views&channel_id=eq.' + encodeURIComponent(id) + '&order=snapshot_date.desc&limit=120'); hist = (Array.isArray(sn) ? sn : []).map((x) => ({ d: String(x.snapshot_date || '').slice(0, 10), subs: x.subscribers, videos: x.total_videos, views: x.total_views })).filter((x) => x.d).reverse(); } catch (_) { hist = []; }
-        try { const lg = await sbGet('analytics_sync_log?select=id,status,ts,steps&order=ts.desc&limit=10'); if (Array.isArray(lg) && lg.length) { const ok = lg.find((x) => x && x.status === 'healthy'); const st = lg[0].steps && typeof lg[0].steps === 'object' ? Object.values(lg[0].steps) : []; pipeline = { last_ok_at: ok ? ok.ts : null, last_status: lg[0].status, last_at: lg[0].ts, steps_ok: st.length ? st.filter((v) => v && v.ok).length + '/' + st.length : null }; } } catch (_) { pipeline = null; }
-        let catalog = []; try { const cg = await sbGet('youtube_videos?select=video_id,title,published_at,view_count,like_count,comment_count,ctr,impressions&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000'); catalog = Array.isArray(cg) ? cg : []; } catch (_) { catalog = []; }
-        let reach = null; try { const RM = await _hrLoad(); if (RM) { const rd = await sbGet('app_settings?key=eq.' + RM.reachDataKey(business) + '&select=value&limit=1'); if (Array.isArray(rd) && rd[0]) { const rdoc = typeof rd[0].value === 'string' ? JSON.parse(rd[0].value) : rd[0].value; if (rdoc && rdoc.business === business && rdoc.channel_id === id) reach = RM.packagingComparison(rdoc, catalog.map((c) => ({ video_id: c.video_id, published_at: c.published_at })), Date.now()); } } } catch (_) { reach = null; }
-        const videoRows = doc && doc.videos && Array.isArray(doc.videos.rows) ? doc.videos.rows.map((v) => ({ id: v.id, views: v.views, avd: v.avg_view_duration_sec, pct: v.avg_view_pct, subs_gained: v.subs_gained })) : [];
-        const home_card = _hiBuild({ business, name: _gaBiz[business].name || business, dash, rows: Array.isArray(rows) ? rows : [], videoRows, catalog, reach, ypp: dash.ypp || null, counters: { subscribers: ch.subscribers, total_views: ch.total_views, updated_at: ch.updated_at, history: hist }, pipeline, collection: { scheduled: _gcAuth(sw, Date.now(), business, 'scheduled').ok === true }, nowMs: Date.now() });
-        reports.push({ business, home_card }); continue;
-      }
       const a = _gcAuth(sw, Date.now(), business, 'manual'), sch = _gcAuth(sw, Date.now(), business, 'scheduled');
       dash.collection = who.role === 'ceo' ? { manual_authorized: a.ok, manual_until: a.until || null, manual_reason: a.ok ? null : a.reason, scheduled: sch.ok, last: doc && doc.collections && doc.collections[0] ? { at: doc.collections[0].at, steps: doc.collections[0].steps, requests: doc.collections[0].requests, aborted: doc.collections[0].aborted } : null } : null;
       reports.push(dash);
@@ -21633,6 +21686,8 @@ export default async function handler(req, res) {
     if (action === 'growth_probe')               return await growthProbe(req, res); // R-B read-only probe (CEO session; not released)
     if (action === 'growth_collect')             return await growthCollect(req, res); // Growth system: read-only collection (default DISABLED; CEO session + authorization record)
     if (action === 'growth_collect_scheduled')   return await growthCollectScheduled(req, res); // Growth system: daily cron hook (signature; does nothing unless schedule is switched on)
+    if (action === 'growth_improvement_start')   return await growthImprovementStart(req, res); // improvement tracking (CEO session; records only)
+    if (action === 'growth_improvement_update')  return await growthImprovementUpdate(req, res); // improvement tracking (CEO session; records only)
     if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
     if (action === 'decision_engine')            return await decisionEngine(req, res); // v13.58.1
     if (action === 'revenue_dashboard')          return await revenueDashboard(req, res); // v13.58.2

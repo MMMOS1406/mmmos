@@ -101,12 +101,14 @@
       '.h2d-ops{display:flex;gap:6px 20px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:14px;padding-top:10px;border-top:1px solid var(--border)}.h2d-ops b{color:#fff}',
       '.h2d-lim{margin-top:10px}.h2d-lim ul{margin:6px 0 0;padding-left:18px;font-size:11px;color:#9aa4bd;line-height:1.5}',
       '.h2d-btns{display:flex;gap:8px;flex-wrap:wrap}.h2d .h2d-tt{unicode-bidi:plaintext;text-align:left}',
-      '.h2d-sum{display:grid;gap:10px;grid-template-columns:repeat(3,minmax(0,1fr));margin:10px 0 8px}@media(max-width:640px){.h2d-act>div{flex-direction:column;gap:2px;align-items:flex-start}.h2d-k{min-width:0}.h2d-sum{grid-template-columns:repeat(2,minmax(0,1fr))}.h2d-sum .h2d-st:first-child{grid-column:1/-1}}',
+      '.h2d-sum{display:grid;gap:10px;grid-template-columns:repeat(4,minmax(0,1fr));margin:10px 0 8px}@media(max-width:900px){.h2d-sum{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.h2d-act>div{flex-direction:column;gap:2px;align-items:flex-start}.h2d-k{min-width:0}.h2d-sum{grid-template-columns:repeat(2,minmax(0,1fr))}.h2d-sum .h2d-st:first-child{grid-column:1/-1}}',
       '.h2d-st{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:9px 11px;min-width:0}.h2d-st .h2d-v{font-size:26px;line-height:1.1}.h2d-st .h2d-v small{font-size:11px;color:var(--dim);font-weight:600}.h2d-st .h2d-s{font-size:11px;color:#c3cde6;display:flex;flex-direction:column;gap:2px}',
       '.h2d-act{display:grid;gap:5px;margin:8px 0;padding:10px 12px;border:1px solid rgba(201,168,76,.35);border-left:3px solid var(--gold);border-radius:8px;background:rgba(201,168,76,.05)}.h2d-act>div{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:14px;color:#fff}.h2d-act b{font-weight:700}',
       '.h2d-k{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--gold);font-weight:800;min-width:92px;font-family:"JetBrains Mono",monospace}.h2d-adv{font-size:10px;color:var(--dim)}',
       '.h2d-obs{font-size:11px;color:#9aa4bd;line-height:1.45;margin:2px 0}.h2d-obs b{color:#c3cde6}.h2d-cav{font-size:11px;color:#fbbf24;margin:3px 0}',
       '.h2d-meta{display:flex;gap:4px 16px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin:6px 0 4px}.h2d-meta b{color:#fff}.h2d-stale{color:#fbbf24;font-weight:700}',
+      '.h2d-imp{margin-top:14px;border-top:1px solid var(--border);padding-top:10px}.h2d-prs{list-style:none;margin:8px 0;padding:0;display:grid;gap:10px}.h2d-pr{border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:8px;padding:10px;background:rgba(255,255,255,.02);font-size:12px;color:#e5e9f7}.h2d-pm{display:flex;flex-wrap:wrap;gap:4px 16px;margin:6px 0;font-size:12px;color:var(--dim)}.h2d-pm b{color:#fff}.h2d-goal{font-size:12px;color:#fff;margin:6px 0;padding:6px 8px;border:1px dashed var(--border);border-radius:8px}',
+      '.h2d-it{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:12px;color:#e5e9f7}.h2d-it>summary{cursor:pointer}.h2d-form{display:grid;gap:6px;margin:8px 0}.h2d-form label{display:grid;gap:3px;font-size:11px;color:var(--dim)}.h2d-form textarea,.h2d-form input,.h2d-form select{background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:6px;color:#fff;padding:6px;font:inherit;font-size:12px}.h2d-hist{margin:6px 0 0;padding-left:16px;color:var(--dim);font-size:11px}.h2d-imsg{font-size:12px;color:var(--gold);min-height:16px;margin:4px 0}',
       '.h2d-more{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}.h2d-more>summary{cursor:pointer;font-size:12px;color:var(--gold);font-weight:700}',
       '.h2d-dx{margin:12px 0 4px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:rgba(255,255,255,.02)}.h2d-dxh{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px;color:#fff;font-size:14px}',
       '.h2d-rc{font-size:11px;font-weight:800;border-radius:6px;padding:3px 8px;letter-spacing:.4px}.h2d-rc.no{background:rgba(239,68,68,.12);color:#f87171;border:1px solid #ef4444}.h2d-rc.ok{background:rgba(34,197,94,.12);color:#4ade80;border:1px solid #22c55e}',
@@ -329,7 +331,8 @@
   /* ------------------------------------------------------------ CEO business dashboard (G2): one card per music business, built by the server (api/ops.js growth_report {home:true} → lib/homeInsights.mjs).
      Display only. A figure is shown only when it was collected; otherwise the card says "Not available" and names the work required. Total views are never labelled organic. */
   var HBIZ = { silk_road_voices: 'SRV Farsi', srv_studio: 'SRV English' };
-  var H = { at: 0, loading: false, cards: null, err: null };
+  var H = { at: 0, loading: false, cards: null, err: null, msg: '', msgBiz: '' };
+  var HB_KEY = { silk_road_voices: 'silk_road_voices', srv_studio: 'srv_studio' };
   function loadHome(cb) {
     if (H.loading) return; if (H.cards && Date.now() - H.at < 60000) return;
     var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; }
@@ -405,9 +408,71 @@
       '<details class="h2d-dd"><summary>Diagnosis by cause — distribution, retention, packaging, audience (confirmed facts vs hypotheses)</summary><div class="h2d-sm">' + esc(d.classification.note) + ' ' + esc(d.classification.basis) + '</div>' + cats + '</details>' +
       '<details class="h2d-dd"><summary>Data quality, confidence rules, missing data and the collection plan (what needs your authorization)</summary>' + dq + rules + plan + '</details></section>';
   }
+
+  /* ---- recommended improvements + tracking (records only: nothing here changes production; every creative / title / thumbnail / schedule / ad-setting change stays the CEO's own decision) ---- */
+  var IMP_ST = { proposed: 'Proposed — awaiting your approval', approved: 'Approved — not started', in_progress: 'In progress', completed: 'Completed', abandoned: 'Stopped' };
+  var OUTC = { successful: ['#22c55e', 'Successful'], unsuccessful: ['#ef4444', 'Unsuccessful'], inconclusive: ['#eab308', 'Inconclusive'] };
+  function mval(m) { if (!m) return '—'; var v = m.value; if (v === null || v === undefined) return '—'; var u = /pct|share/.test(m.metric || '') ? '%' : ''; return (typeof v === 'number' ? (Math.round(v * 100) / 100).toLocaleString('en-US') : esc(v)) + u; }
+  function mline(b, t) { return '<span>Today <b>' + mval(b) + '</b></span><span>Target <b>' + mval(t) + '</b></span>'; }
+  function propHtml(p, key) {
+    var trk = p.tracking, col = p.evidence_status === 'supported' ? '#ef4444' : p.evidence_status === 'insufficient evidence' ? '#9ca3af' : '#eab308';
+    var chip = '<span class="h2d-chip" style="border-color:' + col + ';color:' + col + '">' + esc(p.evidence_status) + '</span>';
+    var tracked = trk ? '<span class="h2d-sm">Tracked: <b>' + esc(IMP_ST[trk.status] || trk.status) + '</b>' + (trk.outcome ? ' · ' + esc(trk.outcome) : '') + (trk.review_by ? ' · review ' + esc(dShort(trk.review_by)) : '') + '</span>' : '';
+    var startBtn = '<button type="button" class="h2-btn" data-imp-act="start" data-biz="' + esc(key) + '" data-key="' + esc(p.key) + '">' + (trk ? 'Track again' : 'Track this improvement') + '</button>' + (p.requires_approval ? '<span class="h2d-sm"> Needs your approval before anything starts.</span>' : '');
+    var blocked = !p.can_start && p.blocked && p.blocked.reason === 'previously_unsuccessful';
+    var state = blocked ? '<div class="h2d-warn">Not offered again: ' + esc(p.blocked.detail) + (p.blocked.lessons ? ' Lesson recorded: ' + esc(p.blocked.lessons) : '') + '</div>' + tracked
+      : (!p.can_start ? tracked : tracked + (p.can_start ? startBtn : ''));
+    return '<li class="h2d-pr"><div class="h2d-rt">' + chip + '<b dir="auto" class="h2d-tt">' + esc(p.problem) + '</b></div>' +
+      '<div class="h2d-ra"><span>Change or test:</span> ' + esc(p.short) + '</div>' +
+      '<div class="h2d-pm"><span>Owner <b>' + esc(p.owner) + '</b></span>' + mline(p.baseline, p.target) + '<span>Review <b>' + esc(dShort(p.review_by)) + '</b></span></div>' +
+      '<details><summary>Evidence, reasoning and how success is judged</summary><div class="h2d-ev">Evidence: <ul>' + p.evidence.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>Why it might help: ' + esc(p.why) + '<br>Full proposal: ' + esc(p.action) + '<br>Target: ' + esc((p.target && p.target.rule) || '—') + '<br>Success: ' + esc(p.success) + '<br>Failure: ' + esc(p.failure) + '<br>Inconclusive: ' + esc(p.inconclusive) + '<br>Confidence: ' + esc(p.confidence) + (p.requires_approval ? ' · needs CEO approval' : '') + ' · advisory only</div></details>' + state + '</li>';
+  }
+  function itemHtml(it, key, ev) {
+    var o = it.result && OUTC[it.result.outcome], terminal = it.status === 'completed' || it.status === 'abandoned', e = ev && ev[it.id];
+    var evl = e ? '<div class="h2d-sm">Data reading: <b>' + esc(e.state.replace('_', ' ')) + '</b> — ' + esc(e.reason || '') + '</div>' : '';
+    var btn = function (act, label) { return '<button type="button" class="h2-btn" data-imp-act="' + act + '" data-biz="' + esc(key) + '" data-id="' + esc(it.id) + '">' + label + '</button>'; };
+    var acts = '';
+    if (it.status === 'proposed') acts = btn('approve', 'Approve') + btn('decline', 'Decline');
+    else if (it.status === 'approved') acts = btn('progress', 'Mark as started') + btn('abandon', 'Stop');
+    else if (it.status === 'in_progress') acts = btn('abandon', 'Stop');
+    var done = it.status === 'in_progress' ? '<div class="h2d-form"><label>Outcome <select data-f="outcome"><option value="">Use the data reading' + (e && /successful|unsuccessful|inconclusive/.test(e.state) ? ' (' + esc(e.state) + ')' : '') + '</option><option value="successful">Successful</option><option value="unsuccessful">Unsuccessful</option><option value="inconclusive">Inconclusive</option></select></label>' +
+      '<label>Note (needed if it differs from the data reading or the review date has not come) <textarea data-f="note" rows="2"></textarea></label>' + btn('complete', 'Complete and record result') + '</div>' : '';
+    var notes = '<div class="h2d-form"><label>Lessons learned <textarea data-f="lessons" rows="2">' + esc(it.lessons || '') + '</textarea></label><label>Recommended next action <input data-f="next_action" value="' + esc(it.next_action || '') + '"></label>' + btn('notes', 'Save notes') + '</div>';
+    return '<details class="h2d-it" data-id="' + esc(it.id) + '"><summary><span class="h2d-chip" style="border-color:' + (o ? o[0] : '#60a5fa') + ';color:' + (o ? o[0] : '#60a5fa') + '">' + esc(o ? o[1] : IMP_ST[it.status] || it.status) + '</span> <span dir="auto" class="h2d-tt">' + esc(it.problem) + '</span> <span class="h2d-sm">· ' + esc(it.owner) + ' · review ' + esc(dShort(it.review_by)) + '</span></summary>' +
+      '<div class="h2d-pm">' + mline(it.baseline, it.target) + '<span>Status <b>' + esc(IMP_ST[it.status] || it.status) + '</b></span></div>' + evl +
+      (it.result ? '<div class="h2d-sm">Result: <b>' + esc(it.result.outcome) + '</b>' + (it.result.actual && it.result.actual.value !== null ? ' · measured ' + esc(String(it.result.actual.value)) : '') + (it.result.early ? ' · early' : '') + ' · by ' + esc(it.result.evaluated_by) + (it.result.note ? ' — ' + esc(it.result.note) : '') + '</div>' : '') +
+      '<div class="h2d-sm">' + esc(it.action) + '</div>' + (it.lessons || it.next_action ? '<div class="h2d-sm">' + (it.lessons ? 'Lessons: <b>' + esc(it.lessons) + '</b>' : '') + (it.lessons && it.next_action ? '<br>' : '') + (it.next_action ? 'Next action: <b>' + esc(it.next_action) + '</b>' : '') + '</div>' : '') + (acts ? '<div class="h2d-btns">' + acts + '</div>' : '') + done + notes +
+      '<ul class="h2d-hist">' + it.history.slice(-6).map(function (h) { return '<li>' + esc(String(h.at).slice(0, 10)) + ' · ' + esc(h.event.replace(/_/g, ' ')) + (h.detail ? ' — ' + esc(h.detail) : '') + '</li>'; }).join('') + '</ul></details>';
+  }
+  function improveBlock(c, key) {
+    var pl = c.plan, im = c.improvements; if (!pl) return '';
+    var goal = pl.goal ? '<div class="h2d-goal"><b>28-day goal:</b> ' + esc(pl.goal.label) + ' — today <b>' + mval({ metric: pl.goal.metric, value: pl.goal.baseline }) + '</b>' + (pl.goal.target !== null && pl.goal.target !== undefined ? ', target <b>' + mval({ metric: pl.goal.metric, value: pl.goal.target }) + '</b>' : '') + '. ' + esc(pl.goal.rule) + ' Review ' + esc(dShort(pl.goal.review_by)) + '.</div>' : '';
+    var props = pl.proposals.length ? '<ol class="h2d-prs">' + pl.proposals.map(function (p) { return propHtml(p, key); }).join('') + '</ol>' : '<div class="h2d-na">No improvement is proposed: nothing is observed that the data can act on.</div>';
+    var list = im && im.items && im.items.length ? im.items.map(function (it) { return itemHtml(it, key, im.evaluations); }).join('') : '<div class="h2d-na">' + (im && im.error ? 'The improvement list could not be loaded.' : 'No improvement has been tracked yet.') + '</div>';
+    var last = im && im.summary && im.summary.last_result ? '<div class="h2d-sm">Last result: <b>' + esc(im.summary.last_result.outcome) + '</b> — ' + esc(im.summary.last_result.problem) + (im.summary.last_result.lessons ? ' · lesson: ' + esc(im.summary.last_result.lessons) : '') + '</div>' : '';
+    return '<div class="h2d-imp" data-biz="' + key + '"><div class="h2d-dxh"><b>Recommended improvements</b><span class="h2d-sm">advisory — nothing changes unless you decide</span></div>' + goal + props +
+      '<div class="h2d-sec">Improvement history and tracking</div>' + last + '<div class="h2d-imsg" role="status">' + esc(H.msg && H.msgBiz === key ? H.msg : '') + '</div>' + list + '</div>';
+  }
+  function impAction(t) {
+    var biz = t.getAttribute('data-biz'), act = t.getAttribute('data-imp-act'), id = t.getAttribute('data-id'), key = t.getAttribute('data-key'); var box = t.closest('.h2d-it'); var f = function (n) { var e = box && box.querySelector('[data-f="' + n + '"]'); return e ? e.value : ''; };
+    var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; }
+    var req, body;
+    if (act === 'start') { req = 'growth_improvement_start'; body = { business: HB_KEY[biz], key: key }; }
+    else { req = 'growth_improvement_update'; var patch = {}; var card = H.cards && H.cards[biz]; var rev = card && card.improvements ? card.improvements.rev : undefined;
+      if (act === 'approve') patch.approval = { status: 'approved' }; else if (act === 'decline') patch.approval = { status: 'declined' }; else if (act === 'progress') patch.status = 'in_progress'; else if (act === 'abandon') patch.status = 'abandoned';
+      else if (act === 'complete') { patch.status = 'completed'; if (f('outcome') || f('note')) patch.result = { outcome: f('outcome') || undefined, note: f('note') || undefined }; if (f('lessons')) patch.lessons = f('lessons'); if (f('next_action')) patch.next_action = f('next_action'); }
+      else if (act === 'notes') { patch.lessons = f('lessons'); patch.next_action = f('next_action'); }
+      body = { business: HB_KEY[biz], id: id, patch: patch, base_rev: rev }; }
+    if (!tok) { H.msg = 'Sign in again to record this.'; H.msgBiz = biz; paintMain(homePage()); return; }
+    t.disabled = true;
+    fetch('/api/ops?action=' + req, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MMM-CEO-Session': tok }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) { H.msg = x.ok ? 'Saved.' : ('Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); H.msgBiz = biz; H.at = 0; H.cards = H.cards; loadHome(function () { if (S.cur === 'home' && active()) paintMain(homePage()); }); })
+      .catch(function () { H.msg = 'Not saved: network error.'; H.msgBiz = biz; t.disabled = false; paintMain(homePage()); });
+  }
   function diagSection(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key]; if (!c || c.state !== 'ok') return '';
-    return '<section class="h2dx" data-biz="' + key + '" aria-label="' + esc(nm) + ' diagnosis"><div class="h2d-h"><h3>' + esc(nm) + ' — diagnosis</h3></div>' + diagBlock(c) + '</section>';
+    return '<section class="h2dx" data-biz="' + key + '" aria-label="' + esc(nm) + ' diagnosis"><div class="h2d-h"><h3>' + esc(nm) + ' — diagnosis</h3></div>' + diagBlock(c) + improveBlock(c, key) + '</section>';
   }
   function dashCard(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key];
@@ -443,13 +508,19 @@
     var subSub = n0(k.subscribers.total) + ' subscribers' + (k.subscribers.per_1000_organic !== null ? ' · ' + k.subscribers.per_1000_organic + ' per 1,000 organic views' : '');
     var stat = function (l, b, sub) { return '<div class="h2d-st"><div class="h2d-l">' + l + '</div><div class="h2d-v">' + b + '</div><div class="h2d-s">' + sub + '</div></div>'; };
     var staleFlag = f.stale ? '<span class="h2d-stale">⚠ Data is ' + f.age_days + ' days old</span>' : '';
-    var summary = '<div class="h2d-sum">' + stat('Organic views · last 28 d', orgBig, orgSub) + stat('Advertising share of views', paidBig, paidSub) + stat('Subscriber growth', subBig, subSub) + '</div>' +
+    var wo = k.watch_organic || {}; var woBig = wo.value === null || wo.value === undefined ? 'Not available' : n0(wo.value) + ' <small>h</small>';
+    var woSub = wo.value === null || wo.value === undefined ? '<span>' + esc(wo.note || '') + '</span>' : (wo.comparable && wo.delta_pct !== null ? '<span class="h2d-d ' + (wo.delta_pct >= 0 ? 'up' : 'dn') + '">' + (wo.delta_pct >= 0 ? '▲ ' : '▼ ') + Math.abs(wo.delta_pct) + '%</span> vs previous 28 days (' + n0(wo.prev) + ' h)' : '<span>Previous 28 days not comparable</span>') + '<span>Organic only; all views incl. paid: ' + n0(k.watch_hours.value) + ' h</span>';
+    var im = c.improvements && c.improvements.summary ? c.improvements.summary : null;
+    var impLine = !im ? 'not available' : im.active ? esc(IMP_ST[im.active.status] || im.active.status) + ' — ' + esc(im.active.problem) + ' (owner ' + esc(im.active.owner) + ', review ' + esc(dShort(im.active.review_by)) + (im.active.overdue ? ', overdue' : '') + ')' : 'none started' + (im.last_result ? ' · last result: ' + esc(im.last_result.outcome) : '');
+    var mon = c.monetization || {}; var monLine = mon.state && mon.state !== 'not_captured' ? esc(mon.eligibility || mon.state) : 'not known — no Studio Earn capture is stored';
+    var summary = '<div class="h2d-sum">' + stat('Organic views · last 28 d', orgBig, orgSub) + stat('Advertising share of views', paidBig, paidSub) + stat('Subscriber growth', subBig, subSub) + stat('Organic watch time · 28 d', woBig, woSub) + '</div>' +
       '<div class="h2d-act"><div><span class="h2d-k">Main problem</span><b dir="auto" class="h2d-tt">' + esc(sm.problem) + '</b></div>' +
       '<div><span class="h2d-k">Next action</span><b dir="auto" class="h2d-tt">' + esc(sm.action) + '</b></div>' +
-      '<div><span class="h2d-k">Owner</span><b>' + esc(sm.owner) + '</b> <span class="h2d-adv">advisory — nothing changes automatically</span></div></div>' +
+      '<div><span class="h2d-k">Owner</span><b>' + esc(sm.owner) + '</b> <span class="h2d-adv">advisory — nothing changes automatically</span></div>' +
+      '<div><span class="h2d-k">Improvement</span><b>' + impLine + '</b></div></div>' +
       '<div class="h2d-obs"><b>Observed:</b> ' + esc(sm.observed) + (sm.hypothesis ? ' <b>' + esc(sm.hypothesis.replace(/: .*/, '')) + ':</b> ' + esc(sm.hypothesis.replace(/^[^:]*: /, '')) : '') + '</div>' +
       (sm.caveats && sm.caveats.length ? '<div class="h2d-cav">' + sm.caveats.map(esc).join(' ') + '</div>' : '') +
-      '<div class="h2d-meta"><span>Data through <b>' + esc(dShort(f.data_through)) + '</b></span><span>Last successful sync <b>' + esc(dTime(f.last_ok_sync)) + '</b></span>' + staleFlag + '<span>Revenue and expenses: not available (see details)</span></div>';
+      '<div class="h2d-meta"><span>Data through <b>' + esc(dShort(f.data_through)) + '</b></span><span>Last successful sync <b>' + esc(dTime(f.last_ok_sync)) + '</b></span>' + staleFlag + '<span>Monetization: ' + monLine + '</span><span>Revenue and expenses: not available</span></div>';
     var more = '<details class="h2d-more"><summary>Detailed view — trend, content, retention, all recommendations, data notes</summary>' + fresh + why + stale + '<div class="h2d-tiles">' + t1 + t2 + t3 + t4 + '</div>' +
       '<div class="h2d-sec">Weekly views · <i style="color:#34d399">■</i> organic <i style="color:#f59e0b">■</i> paid</div>' + spark(c.trend) + cont + ret + money + recs + ops + lim + '</details>';
     return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(pill, '') + summary + btns + more + '</section>';
@@ -580,7 +651,7 @@
     if (ev) ev.preventDefault();
     go(id);
   }
-  document.addEventListener('click', function (ev) { activate(ev, ev.target && ev.target.closest && ev.target.closest('[data-h2]')); });
+  document.addEventListener('click', function (ev) { var ia = ev.target && ev.target.closest && ev.target.closest('[data-imp-act]'); if (ia) { ev.preventDefault(); impAction(ia); return; } activate(ev, ev.target && ev.target.closest && ev.target.closest('[data-h2]')); });
   document.addEventListener('keydown', function (ev) { if (ev.key !== 'Enter' && ev.key !== ' ') return; var t = ev.target && ev.target.closest && ev.target.closest('[data-h2][role="link"]'); if (t && t.tagName !== 'BUTTON') activate(ev, t); });
   var app = $('appScreen');
   if (app && window.MutationObserver) new MutationObserver(function () { if (!app.classList.contains('show') || !authorized()) { if ($('h2Side') || app.classList.contains('h2-on')) scrub(); } }).observe(app, { attributes: true, attributeFilter: ['class'] });
