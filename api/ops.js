@@ -29,6 +29,7 @@ import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel,
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
+import { parseSessionToken as _splitSessionToken } from '../lib/ceoSession.mjs'; // S-D: one strict token-shape check for the CEO, VA and Family verifiers
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
@@ -41,7 +42,6 @@ import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer
 import { srvfRunMixOp, srvfVerifyAdapter } from '../lib/srvFarsiMixServer.mjs'; // SRV Farsi Mix (CEO order 2026-11-12): integrated private-first chunked YouTube upload; OFF unless app_settings.srv_farsi_mix enables it
 import * as NWFP from '../projects/nextwave-finance-pilot/lib/pilotState.mjs'; // 049 — NextWave Finance Pilot L1 state + L2 CEO status (pure logic in the pilot's own folder)
 import * as NWFP_PLAN from '../projects/nextwave-finance-pilot/lib/contentPlan.mjs'; // 051 — NextWave Finance Pilot L3 content planning (deterministic; no generation, no publishing)
-import { parseSessionToken as _splitSessionToken } from '../lib/ceoSession.mjs'; // S-D: one strict token-shape check for the CEO, VA and Family verifiers
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
