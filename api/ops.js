@@ -22,7 +22,7 @@ import { vaultFromEnv as _finVaultFromEnv, plaidAad as _plaidAad, planDisconnect
 import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BUSINESSES as _yppBusinesses, YPP_STORE_KEY as _yppStoreKey, YPP_FRESH_DAYS as _yppFreshDays } from '../lib/yppCard.mjs'; // R-C1 B: Revenue/YPP card from OFFICIAL dated Studio Earn captures only (read-only)
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
-import { collectAuthorization as _gcAuth, collectSteps as _gcSteps, collectForBusiness as _gcCollect, mergeCollection as _gcMerge, parseDoc as _gcParseDoc, dataKey as _gcKey, COLLECT_SWITCH_KEY as _gcSwitchKey, COLLECT_CONFIRMATION as _gcConfirm, collectPeriod as _gcPeriod, cronSignatureInput as _gcCronInput } from '../lib/growthCollect.mjs'; // Growth system: minimum server-side collection (default DISABLED; read-only Google GETs; one JSON document per business in app_settings)
+import { collectAuthorization as _gcAuth, collectSteps as _gcSteps, collectForBusiness as _gcCollect, mergeCollection as _gcMerge, noteFailure as _gcNoteFailure, parseDoc as _gcParseDoc, dataKey as _gcKey, COLLECT_SWITCH_KEY as _gcSwitchKey, COLLECT_CONFIRMATION as _gcConfirm, collectPeriod as _gcPeriod, cronSignatureInput as _gcCronInput } from '../lib/growthCollect.mjs'; // Growth system: minimum server-side collection (default DISABLED; read-only Google GETs; one JSON document per business in app_settings)
 import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Growth Decision Center model + recommendations (pure)
 import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
 import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
@@ -8984,15 +8984,24 @@ async function _growthSaveDoc(business, doc) {
 async function _growthRunCollection(business, mode, deadlineMs) {
   const want = _gaBiz[business] && _gaBiz[business].channelId; if (!want) return { ok: false, error: 'unknown_business' };
   const { from, to } = _gcPeriod(Date.now(), 28);
+  const prev = await _growthLoadDoc(business);   // read first: durations / completed uploads already stored are not asked for again; also feeds duplicate-run protection
+  // duplicate-run protection for the SCHEDULED path (a second scheduled firing, a retry or an overlapping invocation within 6 h does nothing). Manual runs keep their own 10-minute cooldown.
+  if (mode === 'scheduled' && prev && prev.last_ok_at && Date.now() - Date.parse(prev.last_ok_at) < 6 * 3600 * 1000) return { ok: true, business, skipped: 'recently_collected', last_ok_at: prev.last_ok_at };
   const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2');
-  const prev = await _growthLoadDoc(business);   // read first: videos whose authoritative duration is already stored are not asked for again (C4)
-  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to, deadlineMs, knownDurationIds: prev && prev.catalog_meta ? Object.keys(prev.catalog_meta) : [] });
-  if (!out.ok) { console.warn('[growth_collect] ' + business + ' ' + mode + ' failed: ' + (out.error || '') + ' ' + (out.detail || '')); return { ok: false, business, error: out.error, detail: out.detail || null, steps: out.run ? out.run.steps : [] }; }
+  // this channel's own catalog rows (filtered by channel id): uploads of the last 36 days get day-1/3/7/28 performance until complete
+  let recentUploads = []; try { const cg = await sbGet('youtube_videos?select=video_id,published_at&channel_id=eq.' + encodeURIComponent(want) + '&published_at=gte.' + encodeURIComponent(new Date(Date.now() - 37 * 86400000).toISOString()) + '&order=published_at.desc&limit=60'); recentUploads = (Array.isArray(cg) ? cg : []).filter((x) => x && x.video_id && x.published_at).map((x) => ({ id: x.video_id, published_at: x.published_at })); } catch (_) { recentUploads = []; }
+  const uploadsDone = prev && prev.uploads ? Object.entries(prev.uploads).filter(([, u]) => u && u.d28 !== null && u.d28 !== undefined).map(([id]) => id) : [];
+  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to, deadlineMs, knownDurationIds: prev && prev.catalog_meta ? Object.keys(prev.catalog_meta) : [], recentUploads, uploadsDone });
+  if (!out.ok) {
+    console.warn('[growth_collect] ' + business + ' ' + mode + ' failed: ' + (out.error || '') + ' ' + (out.detail || ''));
+    try { if (prev) await _growthSaveDoc(business, _gcNoteFailure(prev, { business, nowIso: new Date().toISOString(), error: (out.error || 'failed') + (out.detail ? ': ' + out.detail : '') })); } catch (_) { /* recording the attempt is best effort; stored data is untouched either way */ }
+    return { ok: false, business, error: out.error, detail: out.detail || null, steps: out.run ? out.run.steps : [] };
+  }
   const doc = _gcMerge(prev, out.run, { business, from, to, nowIso: new Date().toISOString() });
   await _growthSaveDoc(business, doc);
   const failed = Object.entries(doc.collections[0].steps).filter(([, v]) => v !== 'ok').map(([k, v]) => k + ':' + v);
   if (failed.length) console.warn('[growth_collect] ' + business + ' steps not ok: ' + failed.join(', '));
-  return { ok: true, business, steps: doc.collections[0].steps, requests: out.run.requests, days_stored: Object.keys(doc.days).length, reconciliation: doc.reconciliation ? doc.reconciliation.checks.every((c) => c.ok !== false) : null };
+  return { ok: true, business, steps: doc.collections[0].steps, requests: out.run.requests, days_stored: Object.keys(doc.days).length, reconciliation: doc.reconciliation ? doc.reconciliation.checks.every((c) => c.ok !== false) : null, quality_ok: doc.quality ? doc.quality.ok : null };
 }
 async function growthCollect(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
@@ -9016,7 +9025,8 @@ async function growthCollectScheduled(req, res) {
     const want = createHash('sha256').update(_gcCronInput(SUPABASE_SERVICE_KEY)).digest('hex');
     if (!SUPABASE_SERVICE_KEY || sig.length !== want.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return res.status(401).json({ ok: false, error: 'cron_signature_required' });
     const raw = await _growthLoadSwitch(); const results = []; const t0 = Date.now();   // both businesses run in ONE invocation (maxDuration 180 s): each gets only the time that is left, so the second can never overrun the function limit
-    for (const business of _GROWTH_BUSINESSES) {
+    const only = String((req.query && req.query.business) || ''); if (only && !_GROWTH_BUSINESSES.includes(only)) return res.status(400).json({ ok: false, error: 'unknown_business' });   // optional: ?business=<key> runs ONE business per invocation (isolated design)
+    for (const business of _GROWTH_BUSINESSES.filter((b) => !only || b === only)) {
       const auth = _gcAuth(raw, Date.now(), business, 'scheduled');
       if (!auth.ok) { results.push({ business, skipped: auth.reason }); continue; }
       const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) { results.push({ business, skipped: g.reason }); continue; }
