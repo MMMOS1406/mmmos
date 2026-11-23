@@ -69,4 +69,14 @@ const rows = [{ video_id: 'v1', title: 'One view', published_at: '2026-11-01T00:
 c = buildHomeCard({ business: 'b', name: 'B', dash: mk(), rows, counters: { subscribers: 1, history: [] }, pipeline: null, nowMs: NOW });
 check('one-view uploads are labelled "insufficient" sample, never failures; no recommendation is made from them', c.content.attention.length > 0 && c.content.attention.filter((x) => x.total_views < 100).every((x) => x.sample === 'insufficient') && c.recommendations.length === 0 && /not treated as failures/.test(c.content.attention_basis));
 check('summary without any problem says so (no invented problem) and keeps the owner', (() => { const g = card(mk()).summary; return /No major problem/.test(g.problem) && g.owner === 'Growth & Analytics'; })());
+
+// ── format split, audience, window engagement (collector fields; absent for older documents) ──
+{ const d = mk({ geography: [{ country: 'IR', views: 600, minutes: 1, avd: 60 }, { country: 'US', views: 300 }, { country: 'DE', views: 100 }], demographics: [{ age: 'age18-24', gender: 'female', pct: 20.4 }, { age: 'age25-34', gender: 'male', pct: 31.26 }, { age: 'age25-34', gender: 'female', pct: 15 }],
+    engagement: { window: { from: '2026-10-22', to: '2026-11-18' }, cur: { views: 2000, likes: 40, comments: 4, shares: 6 }, prev: { views: 1000, likes: 10, comments: 1, shares: 1 } },
+    formats: { window: { from: '2026-10-22', to: '2026-11-18' }, rows: [{ type: 'long', views: 1500, avg_view_duration_sec: 70 }, { type: 'short', views: 500, avg_view_duration_sec: 20 }], mix: { videos: 2, views: 120, by: 'title contains "mix"' } } });
+  const c2 = card(d);
+  check('formats: Long/Short shares from the content-type report; Mix (by title) shown separately and counted in Long', c2.formats.long.share_pct === 75 && c2.formats.short.share_pct === 25 && c2.formats.mix.videos === 2 && /count as Long/.test(c2.formats.note));
+  check('audience: top countries as shares of the listed views; largest viewer groups sorted; both carry their caveat', c2.audience.countries[0].country === 'IR' && c2.audience.countries[0].share_pct === 60 && c2.audience.demographics[0].age === '25-34' && c2.audience.demographics[0].pct === 31.3 && /top-25/.test(c2.audience.countries_note) && /Signed-in/.test(c2.audience.demographics_note));
+  check('window engagement: likes/comments/shares per 1,000 views for the window and the previous window', c2.engagement_window.likes_per_1000 === 20 && c2.engagement_window.shares_per_1000 === 3 && c2.engagement_window.prev_likes_per_1000 === 10);
+  const c0 = card(mk()); check('older documents: no audience, no window engagement; the format block is null when the report is missing', c0.audience === null && c0.engagement_window === null && c0.formats === null); }
 console.log(`\n${R.filter(Boolean).length}/${R.length} passed`); process.exit(R.every(Boolean) ? 0 : 1);
