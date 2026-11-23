@@ -23,11 +23,11 @@ import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BU
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
 import { collectAuthorization as _gcAuth, collectSteps as _gcSteps, collectForBusiness as _gcCollect, mergeCollection as _gcMerge, parseDoc as _gcParseDoc, dataKey as _gcKey, COLLECT_SWITCH_KEY as _gcSwitchKey, COLLECT_CONFIRMATION as _gcConfirm, collectPeriod as _gcPeriod, cronSignatureInput as _gcCronInput } from '../lib/growthCollect.mjs'; // Growth system: minimum server-side collection (default DISABLED; read-only Google GETs; one JSON document per business in app_settings)
-import { improvementsKey as _impKey, emptyImprovements as _impEmpty, sanitizeImprovements as _impSanitize, startImprovement as _impStart, updateImprovement as _impUpdate, annotatePlan as _impAnnotate, activeSummary as _impSummary } from '../lib/growthImprovements.mjs'; // persistent improvement tracking (records only)
-import { currentMetrics as _gpMetrics, evaluateImprovement as _gpEval } from '../lib/growthPlan.mjs'; // recommendation plan metrics / evaluation (pure)
 import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Growth Decision Center model + recommendations (pure)
 import { buildHomeCard as _hiBuild } from '../lib/homeInsights.mjs'; // CEO homepage business card model (pure)
 import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
+import { improvementsKey as _impKey, emptyImprovements as _impEmpty, sanitizeImprovements as _impSanitize, startImprovement as _impStart, updateImprovement as _impUpdate, annotatePlan as _impAnnotate, activeSummary as _impSummary } from '../lib/growthImprovements.mjs'; // persistent improvement tracking (records only)
+import { currentMetrics as _gpMetrics, evaluateImprovement as _gpEval } from '../lib/growthPlan.mjs'; // recommendation plan metrics / evaluation (pure)
 import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
@@ -21686,9 +21686,9 @@ export default async function handler(req, res) {
     if (action === 'growth_probe')               return await growthProbe(req, res); // R-B read-only probe (CEO session; not released)
     if (action === 'growth_collect')             return await growthCollect(req, res); // Growth system: read-only collection (default DISABLED; CEO session + authorization record)
     if (action === 'growth_collect_scheduled')   return await growthCollectScheduled(req, res); // Growth system: daily cron hook (signature; does nothing unless schedule is switched on)
+    if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
     if (action === 'growth_improvement_start')   return await growthImprovementStart(req, res); // improvement tracking (CEO session; records only)
     if (action === 'growth_improvement_update')  return await growthImprovementUpdate(req, res); // improvement tracking (CEO session; records only)
-    if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
     if (action === 'decision_engine')            return await decisionEngine(req, res); // v13.58.1
     if (action === 'revenue_dashboard')          return await revenueDashboard(req, res); // v13.58.2
     if (action === 'optimization_apply_recs')    return await optimizationApplyRecommendations(req, res); // v13.59.0
