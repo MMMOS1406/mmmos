@@ -8981,12 +8981,12 @@ async function _growthSaveDoc(business, doc) {
   if (Array.isArray(existing) && existing[0]) await sbPatch('app_settings', 'key=eq.' + key, { value, updated_at: new Date().toISOString() });
   else await sbInsert('app_settings', { key, value, updated_at: new Date().toISOString() });
 }
-async function _growthRunCollection(business, mode) {
+async function _growthRunCollection(business, mode, deadlineMs) {
   const want = _gaBiz[business] && _gaBiz[business].channelId; if (!want) return { ok: false, error: 'unknown_business' };
   const { from, to } = _gcPeriod(Date.now(), 28);
   const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2');
   const prev = await _growthLoadDoc(business);   // read first: videos whose authoritative duration is already stored are not asked for again (C4)
-  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to, knownDurationIds: prev && prev.catalog_meta ? Object.keys(prev.catalog_meta) : [] });
+  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to, deadlineMs, knownDurationIds: prev && prev.catalog_meta ? Object.keys(prev.catalog_meta) : [] });
   if (!out.ok) { console.warn('[growth_collect] ' + business + ' ' + mode + ' failed: ' + (out.error || '') + ' ' + (out.detail || '')); return { ok: false, business, error: out.error, detail: out.detail || null, steps: out.run ? out.run.steps : [] }; }
   const doc = _gcMerge(prev, out.run, { business, from, to, nowIso: new Date().toISOString() });
   await _growthSaveDoc(business, doc);
@@ -9015,12 +9015,12 @@ async function growthCollectScheduled(req, res) {
     const sig = String((req.headers && (req.headers['x-mmm-cron'] || req.headers['X-MMM-Cron'])) || '');
     const want = createHash('sha256').update(_gcCronInput(SUPABASE_SERVICE_KEY)).digest('hex');
     if (!SUPABASE_SERVICE_KEY || sig.length !== want.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return res.status(401).json({ ok: false, error: 'cron_signature_required' });
-    const raw = await _growthLoadSwitch(); const results = [];
+    const raw = await _growthLoadSwitch(); const results = []; const t0 = Date.now();   // both businesses run in ONE invocation (maxDuration 180 s): each gets only the time that is left, so the second can never overrun the function limit
     for (const business of _GROWTH_BUSINESSES) {
       const auth = _gcAuth(raw, Date.now(), business, 'scheduled');
       if (!auth.ok) { results.push({ business, skipped: auth.reason }); continue; }
       const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) { results.push({ business, skipped: g.reason }); continue; }
-      try { results.push(await _growthRunCollection(business, 'scheduled')); } catch (e) { results.push({ business, ok: false, error: 'collection_failed' }); } finally { _growthCollectGuard.end(business); }
+      try { results.push(await _growthRunCollection(business, 'scheduled', Math.max(20000, 160000 - (Date.now() - t0)))); } catch (e) { results.push({ business, ok: false, error: 'collection_failed' }); } finally { _growthCollectGuard.end(business); }
     }
     return res.status(200).json({ ok: true, results });
   } catch (e) { return res.status(500).json({ ok: false, error: 'growth_collect_scheduled_failed' }); }
