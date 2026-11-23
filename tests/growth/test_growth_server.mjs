@@ -26,7 +26,8 @@ const world = (over = {}) => {
     fetch: w.fetch, _refreshYoutubeToken: async (rt) => { if (w.refreshFails) throw new Error('no'); return { accessToken: 'AT-' + (rt === 'RT-one' ? B1 : B2) }; }, console: { log() {}, warn() {}, error() {} }, Date: class extends Date { constructor(...a) { super(...(a.length ? a : [NOW])); } static now() { return NOW; } },
     createHash, timingSafeEqual, Buffer, SUPABASE_SERVICE_KEY: KEY, _growthCreateRunGuard: createRunGuard,
     _gcAuth: C.collectAuthorization, _gcSteps: C.collectSteps, _gcCollect: C.collectForBusiness, _gcMerge: C.mergeCollection, _gcParseDoc: C.parseDoc, _gcKey: C.dataKey, _gcSwitchKey: C.COLLECT_SWITCH_KEY, _gcConfirm: C.COLLECT_CONFIRMATION, _gcPeriod: C.collectPeriod, _gcCronInput: C.cronSignatureInput,
-    _gdBuild: D.buildDashboard, _hiBuild: HI.buildHomeCard, _gaNorm: GA.normaliseRow, _gaBuild: GA.buildWorkspace, _gaBiz: GA.GROWTH_BUSINESSES, _yppParseStore: Y.parseCaptureStore, _yppBuild: Y.buildYppModel, _yppStoreKey: Y.YPP_STORE_KEY };
+    _gdBuild: D.buildDashboard, _gaNorm: GA.normaliseRow, _gaBuild: GA.buildWorkspace, _gaBiz: GA.GROWTH_BUSINESSES, _yppParseStore: Y.parseCaptureStore, _yppBuild: Y.buildYppModel, _yppStoreKey: Y.YPP_STORE_KEY };
+  stubs._hiBuild = HI.buildHomeCard;   // CEO home card builder (added on its own line so it never conflicts with other changes to the stub list)
   const names = Object.keys(stubs); const f = new Function(...names, src + '\nreturn { growthCollect, growthCollectScheduled, growthReport };')(...names.map((k) => stubs[k]));
   const call = (fn) => async ({ method = 'POST', body = {}, headers = {} } = {}) => { const res = { code: 200, body: null, status(c) { res.code = c; return res; }, json(x) { res.body = x; return res; } }; await fn({ method, body, query: {}, headers }, res); return res; };
   w.collect = call(f.growthCollect); w.scheduled = call(f.growthCollectScheduled); w.report = call(f.growthReport);
