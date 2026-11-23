@@ -1,14 +1,16 @@
 // Growth server actions (growth_collect, growth_collect_scheduled, growth_report): the REAL handlers executed with stubs (no network, no database). SYNTHETIC data.
 import fs from 'node:fs'; import { createHash, timingSafeEqual } from 'node:crypto';
 import * as C from '../../lib/growthCollect.mjs'; import * as D from '../../lib/growthDecisions.mjs'; import * as Y from '../../lib/yppCard.mjs'; import * as GA from '../../lib/growthAnalytics.mjs'; import { createRunGuard } from '../../lib/growthProbe.mjs'; import { decide } from '../../lib/dataProxy.mjs';
-import * as HI from '../../lib/homeInsights.mjs'; import * as I from '../../lib/growthImprovements.mjs'; import * as P from '../../lib/growthPlan.mjs';
+import * as HI from '../../lib/homeInsights.mjs';
+import * as I from '../../lib/growthImprovements.mjs'; import * as P from '../../lib/growthPlan.mjs';
 import { makeWorld, addDays } from './collect_fixtures.mjs';
 let pass = 0, fail = 0; const ok = (n, c, d) => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, d !== undefined ? JSON.stringify(d).slice(0, 400) : ''); } };
 const NOW = Date.parse('2030-03-15T18:00:00Z'), B1 = 'silk_road_voices', B2 = 'srv_studio', CH1 = GA.GROWTH_BUSINESSES[B1].channelId, CH2 = GA.GROWTH_BUSINESSES[B2].channelId, KEY = 'SERVICE-KEY-FOR-TEST';
 const ops = fs.readFileSync(new URL('../../api/ops.js', import.meta.url), 'utf8'); const a0 = ops.indexOf('const _growthCollectGuard'), a1 = ops.indexOf('// R-B — read-only YouTube API probe.'), src = ops.slice(a0, a1);
 const switchRec = (o) => JSON.stringify({ enabled: true, businesses: [B1, B2], authorized_until: '2030-03-15T19:00:00Z', ...o });
 const world = (over = {}) => {
-  const w = { imp: {}, casFail: false, role: 'ceo', switch: null, docs: {}, ypp: null, writes: [], reads: [], google: [], accessTokens: [], cfg: { [B1]: {}, [B2]: {} }, conns: [{ channel_id: CH1, refresh_token: 'RT-' + 'one', scope: 'https://www.googleapis.com/auth/yt-analytics.readonly' }, { channel_id: CH2, refresh_token: 'RT-' + 'two', scope: 'https://www.googleapis.com/auth/yt-analytics.readonly' }], rows: { [CH1]: [], [CH2]: [] }, refreshFails: false, ...over };
+  const w = { role: 'ceo', switch: null, docs: {}, ypp: null, writes: [], reads: [], google: [], accessTokens: [], cfg: { [B1]: {}, [B2]: {} }, conns: [{ channel_id: CH1, refresh_token: 'RT-' + 'one', scope: 'https://www.googleapis.com/auth/yt-analytics.readonly' }, { channel_id: CH2, refresh_token: 'RT-' + 'two', scope: 'https://www.googleapis.com/auth/yt-analytics.readonly' }], rows: { [CH1]: [], [CH2]: [] }, refreshFails: false, ...over };
+  w.imp = {}; w.casFail = false;
   const worlds = { [B1]: makeWorld(B1, { end: '2030-03-14' }), [B2]: makeWorld(B2, { end: '2030-03-14', seed: 3 }) }; w.worlds = worlds;
   w.fetch = async (url, init) => { w.google.push({ url, method: (init && init.method) || 'GET', auth: init && init.headers && init.headers.Authorization }); const bz = Object.values(worlds).find((x) => (init.headers.Authorization || '') === 'Bearer AT-' + x.business); const wd = bz || worlds[B1]; if (w.cfg[wd.business].identity) wd.identity = w.cfg[wd.business].identity; const r = await wd.fetchJson(url); return { status: r.status, json: async () => r.json }; };
   const sbGet = async (q) => { w.reads.push(q);
@@ -30,12 +32,13 @@ const world = (over = {}) => {
     createHash, timingSafeEqual, Buffer, SUPABASE_SERVICE_KEY: KEY, _growthCreateRunGuard: createRunGuard,
     _gcAuth: C.collectAuthorization, _gcSteps: C.collectSteps, _gcCollect: C.collectForBusiness, _gcMerge: C.mergeCollection, _gcParseDoc: C.parseDoc, _gcKey: C.dataKey, _gcSwitchKey: C.COLLECT_SWITCH_KEY, _gcConfirm: C.COLLECT_CONFIRMATION, _gcPeriod: C.collectPeriod, _gcCronInput: C.cronSignatureInput,
     _gdBuild: D.buildDashboard, _gaNorm: GA.normaliseRow, _gaBuild: GA.buildWorkspace, _gaBiz: GA.GROWTH_BUSINESSES, _yppParseStore: Y.parseCaptureStore, _yppBuild: Y.buildYppModel, _yppStoreKey: Y.YPP_STORE_KEY };
-  stubs._hiBuild = HI.buildHomeCard;
+  stubs._hiBuild = HI.buildHomeCard; stubs._hrLoad = async () => (w.useReach ? { reachDataKey: (b) => 'growth_reach_' + b, packagingComparison: (doc) => doc.__cmp } : null);   // stand-in for the optional reach library (its own PR); the real module is exercised in the integration tests   // CEO home card builder (added on its own line so it never conflicts with other changes to the stub list)
   stubs._impKey = I.improvementsKey; stubs._impEmpty = I.emptyImprovements; stubs._impSanitize = I.sanitizeImprovements; stubs._impStart = I.startImprovement; stubs._impUpdate = I.updateImprovement; stubs._impAnnotate = I.annotatePlan; stubs._impSummary = I.activeSummary; stubs._gpMetrics = P.currentMetrics; stubs._gpEval = P.evaluateImprovement;
   stubs.srvStudioV2PilotCas = async (key, oldText, newText) => { const b = /growth_improvements_(\w+)$/.exec(key)[1]; if (w.casFail) return false; const cur = w.imp[b] === undefined ? null : w.imp[b]; if (cur !== oldText) return false; w.imp[b] = newText; w.writes.push(['cas', 'app_settings', key]); return true; }; stubs._hrLoad = async () => (w.useReach ? { reachDataKey: (b) => 'growth_reach_' + b, packagingComparison: (doc) => doc.__cmp } : null);   // stand-in for the optional reach library (its own PR); the real module is exercised in the integration tests   // CEO home card builder (added on its own line so it never conflicts with other changes to the stub list)
-  const names = Object.keys(stubs); const f = new Function(...names, src + '\nreturn { growthCollect, growthCollectScheduled, growthReport, growthImprovementStart, growthImprovementUpdate };')(...names.map((k) => stubs[k]));
+  const names = Object.keys(stubs); const f = new Function(...names, src + '\nreturn { growthCollect, growthCollectScheduled, growthReport };')(...names.map((k) => stubs[k]));
   const call = (fn) => async ({ method = 'POST', body = {}, headers = {} } = {}) => { const res = { code: 200, body: null, status(c) { res.code = c; return res; }, json(x) { res.body = x; return res; } }; await fn({ method, body, query: {}, headers }, res); return res; };
-  w.collect = call(f.growthCollect); w.scheduled = call(f.growthCollectScheduled); w.report = call(f.growthReport); w.impStart = call(f.growthImprovementStart); w.impUpdate = call(f.growthImprovementUpdate);
+  w.collect = call(f.growthCollect); w.scheduled = call(f.growthCollectScheduled); w.report = call(f.growthReport);
+  { const f2 = new Function(...names, src + '\nreturn { growthImprovementStart, growthImprovementUpdate };')(...names.map((k) => stubs[k])); w.impStart = call(f2.growthImprovementStart); w.impUpdate = call(f2.growthImprovementUpdate); }   // improvement handlers (separate instance: the shared lines above stay untouched)
   return w; };
 const cronHeader = { 'x-mmm-cron': createHash('sha256').update(C.cronSignatureInput(KEY)).digest('hex') };
 const readOnlyHost = (u) => /^https:\/\/(www\.googleapis\.com\/youtube\/v3\/channels\?|youtubeanalytics\.googleapis\.com\/v2\/reports\?)/.test(u);
