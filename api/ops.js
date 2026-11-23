@@ -23,7 +23,6 @@ import { parseCaptureStore as _yppParseStore, buildYppModel as _yppBuild, YPP_BU
 import { decide as dataProxyDecide } from '../lib/dataProxy.mjs'; // CEO-017F stage 1 — least-privilege policy for the authenticated data proxy
 import { runProbeForBusiness as _growthRunProbe, probeSteps as _growthProbeSteps, capabilityMatrix as _growthCapabilities, defaultPeriod as _growthDefaultPeriod, liveAuthorization as _growthLiveAuth, createRunGuard as _growthCreateRunGuard } from '../lib/growthProbe.mjs'; // R-B: read-only YouTube API probe (CEO session only; reads ONE business's own connection; no writes)
 import { collectAuthorization as _gcAuth, collectSteps as _gcSteps, collectForBusiness as _gcCollect, mergeCollection as _gcMerge, parseDoc as _gcParseDoc, dataKey as _gcKey, COLLECT_SWITCH_KEY as _gcSwitchKey, COLLECT_CONFIRMATION as _gcConfirm, collectPeriod as _gcPeriod, cronSignatureInput as _gcCronInput } from '../lib/growthCollect.mjs'; // Growth system: minimum server-side collection (default DISABLED; read-only Google GETs; one JSON document per business in app_settings)
-import { runReachSync as _grRun, reachAuthorization as _grAuth, reachDataKey as _grDataKey, REACH_SWITCH_KEY as _grSwitchKey, REACH_CONFIRMATION as _grConfirm, REACH_TYPES as _grTypes } from '../lib/growthReach.mjs'; // C3 reach reports (DISABLED by default; separate authorization record)
 import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Growth Decision Center model + recommendations (pure)
 import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
 import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
@@ -40,6 +39,7 @@ import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer
 import { srvfRunMixOp, srvfVerifyAdapter } from '../lib/srvFarsiMixServer.mjs'; // SRV Farsi Mix (CEO order 2026-11-12): integrated private-first chunked YouTube upload; OFF unless app_settings.srv_farsi_mix enables it
 import * as NWFP from '../projects/nextwave-finance-pilot/lib/pilotState.mjs'; // 049 — NextWave Finance Pilot L1 state + L2 CEO status (pure logic in the pilot's own folder)
 import * as NWFP_PLAN from '../projects/nextwave-finance-pilot/lib/contentPlan.mjs'; // 051 — NextWave Finance Pilot L3 content planning (deterministic; no generation, no publishing)
+import { runReachSync as _grRun, reachAuthorization as _grAuth, reachDataKey as _grDataKey, REACH_SWITCH_KEY as _grSwitchKey, REACH_CONFIRMATION as _grConfirm, REACH_TYPES as _grTypes } from '../lib/growthReach.mjs'; // C3 reach reports (DISABLED by default; separate authorization record)
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
