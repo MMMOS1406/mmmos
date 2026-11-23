@@ -117,4 +117,15 @@ const clp = classifyVideos(VR3, base().formats, fm);
 check('production package metadata overrides the estimate (mix counts as long) and agreement with the estimate is counted', clp.rows.find((r) => r.id === 'L2').type === 'long' && clp.rows.find((r) => r.id === 'L2').source === 'production' && clp.production.compared === 5 && clp.production.agree === 5);
 const fmBad = new Map([['L1', 'short']]);
 check('a production label that contradicts the estimate is surfaced (agreement < compared)', (() => { const c = classifyVideos(VR3, base().formats, fmBad); return c.production.compared === 1 && c.production.agree === 0 && c.rows.find((r) => r.id === 'L1').type === 'short'; })());
+
+// ── G3c: sample concentration ──
+const VRc = [vr('L1', 12000, 70, 30), vr('L2', 1000, 66, 28), vr('L3', 500, 68, 29), vr('S1', 400, 20, 62)];
+const fc = { window: { from: '2026-10-22', to: '2026-11-18' }, rows: [{ type: 'long', views: 13500, watch_hours: 60, avg_view_duration_sec: 70 }, { type: 'short', views: 400, watch_hours: 1, avg_view_duration_sec: 20 }] };
+const Dc = buildDiagnosis({ business: 'silk_road_voices', dash: base({ formats: fc, retention: { curves: [{ ...curve('L1', 0.3, 0.33), views: 12000 }, { ...curve('L2', 0.4), views: 1000 }, { ...curve('L3', 0.38), views: 500 }] } }), status: mkStatus(), videoRows: VRc, catalog: cat1, nowMs: NOW, longOnly: false });
+const rc = Dc.categories.find((c) => c.key === 'retention');
+check('concentration: one video = 88% of Long views → flagged, confidence capped at Low, qualification stated', rc.stats.concentration.concentrated === true && rc.stats.concentration.top_share_pct >= 85 && rc.confidence === 'Low' && /Sample concentration/.test(rc.qualification));
+check('concentration: still supported when TWO other Long videos (300+ views) show the same pattern — but labelled qualified / low confidence', rc.supported === true && /qualified, low confidence/.test(Dc.outcome_label) && Dc.outcome_qualification);
+const Dc2 = buildDiagnosis({ business: 'silk_road_voices', dash: base({ formats: fc, retention: { curves: [{ ...curve('L1', 0.3, 0.33), views: 12000 }, { ...curve('L2', 0.4), views: 1000 }, { ...curve('L3', 0.7), views: 500 }] } }), status: mkStatus(), videoRows: VRc, catalog: cat1, nowMs: NOW, longOnly: false });
+check('concentration: NOT supported when only one other Long video shows the pattern', Dc2.categories.find((c) => c.key === 'retention').supported === false && Dc2.outcome === 'insufficient_evidence');
+check('no concentration → no qualification and no confidence cap', D3.categories.find((c) => c.key === 'retention').stats.concentration.concentrated === false && !D3.categories.find((c) => c.key === 'retention').qualification);
 console.log(`\n${R.filter(Boolean).length}/${R.length} passed`); process.exit(R.every(Boolean) ? 0 : 1);
