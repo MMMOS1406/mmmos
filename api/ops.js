@@ -41,6 +41,7 @@ import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer
 import { srvfRunMixOp, srvfVerifyAdapter } from '../lib/srvFarsiMixServer.mjs'; // SRV Farsi Mix (CEO order 2026-11-12): integrated private-first chunked YouTube upload; OFF unless app_settings.srv_farsi_mix enables it
 import * as NWFP from '../projects/nextwave-finance-pilot/lib/pilotState.mjs'; // 049 — NextWave Finance Pilot L1 state + L2 CEO status (pure logic in the pilot's own folder)
 import * as NWFP_PLAN from '../projects/nextwave-finance-pilot/lib/contentPlan.mjs'; // 051 — NextWave Finance Pilot L3 content planning (deterministic; no generation, no publishing)
+import { parseSessionToken as _splitSessionToken } from '../lib/ceoSession.mjs'; // S-D: one strict token-shape check for the CEO, VA and Family verifiers
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -148,9 +149,9 @@ function _ceoSignSession(payloadObj, secret) {
 }
 
 function _ceoVerifySession(token, secret) {
-  if (typeof token !== 'string' || !token.includes('.')) return null;
-  const [payload, sig] = token.split('.');
-  if (!payload || !sig) return null;
+  if (typeof token !== 'string') return null;
+  const _tok = _splitSessionToken(token); if (!_tok) return null;   // S-D: strict token shape (string, <= 4096 chars, exactly two non-empty base64url segments) for every role
+  const payload = _tok.payload, sig = _tok.sig;
   const expected = createHmac('sha256', secret).update(payload).digest('base64url');
   const sigBuf = Buffer.from(sig, 'utf8');
   const expBuf = Buffer.from(expected, 'utf8');
@@ -301,9 +302,9 @@ function _operatorSecret(ceoSecret) {
   return createHmac('sha256', String(ceoSecret)).update('mmmos-operator-session-v1').digest('base64url');
 }
 function _operatorVerifySession(token, secret, pinFingerprint) {
-  if (typeof token !== 'string' || !token.includes('.') || !pinFingerprint) return null;
-  const [payload, sig] = token.split('.');
-  if (!payload || !sig) return null;
+  if (typeof token !== 'string' || !pinFingerprint) return null;
+  const _tok = _splitSessionToken(token); if (!_tok) return null;   // S-D: strict token shape (string, <= 4096 chars, exactly two non-empty base64url segments) for every role
+  const payload = _tok.payload, sig = _tok.sig;
   const expected = createHmac('sha256', secret).update(payload).digest('base64url');
   const sigBuf = Buffer.from(sig, 'utf8');
   const expBuf = Buffer.from(expected, 'utf8');
@@ -468,9 +469,9 @@ function _familySecret(ceoSecret) {
   return createHmac('sha256', String(ceoSecret)).update('mmmos-family-session-v1').digest('base64url');
 }
 function _familyVerifySession(token, secret, pinFingerprint) {
-  if (typeof token !== 'string' || !token.includes('.') || !pinFingerprint) return null;
-  const [payload, sig] = token.split('.');
-  if (!payload || !sig) return null;
+  if (typeof token !== 'string' || !pinFingerprint) return null;
+  const _tok = _splitSessionToken(token); if (!_tok) return null;   // S-D: strict token shape (string, <= 4096 chars, exactly two non-empty base64url segments) for every role
+  const payload = _tok.payload, sig = _tok.sig;
   const expected = createHmac('sha256', secret).update(payload).digest('base64url');
   const sigBuf = Buffer.from(sig, 'utf8'); const expBuf = Buffer.from(expected, 'utf8');
   if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
