@@ -4624,7 +4624,7 @@ async function generateWeeklyReport(){
   if(btn){btn.textContent='Generating…';btn.disabled=true;}
   if(el&&!btn)el.innerHTML='<div style="color:var(--dim);font-size:11px;padding:8px 0;text-align:center">Generating report…</div>';
   try{
-    const res=await fetch('/api/reports/weekly?gen=1');
+    const res=await fetch('/api/reports/weekly?gen=1',{headers:{'X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''}});
     const data=await res.json();
     if(data.report){
       latestWeeklyReport=data.report;
