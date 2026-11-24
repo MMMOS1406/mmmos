@@ -24,7 +24,10 @@ globalThis.fetch = async (url, opts = {}) => {
   if (method !== 'GET') world.writes.push({ method, table, q, body }); else world.reads.push(table + '?' + q);
   if (table === 'youtube_connections' && method === 'GET') return json(world.connections.map((c) => ({ ...c })));
   if (table === 'youtube_channels' && method === 'GET') return json(world.connections.map((c, i) => ({ channel_id: c.channel_id, title: 'Chan ' + i, mmm_engine: i ? 'SRV English' : 'SRV Farsi' })));
-  if (table === 'ceo_auth_config') return json(/operator_pin_hash/.test(q) ? [{ key: 'operator_pin_hash_production', value: 'f'.repeat(64) }] : [{ key: 'ceo_session_secret_production', value: SECRET }, { key: 'ceo_pin_hash_production', value: 'e'.repeat(64) }]);
+  if (table === 'ceo_auth_config') {   // S-F: a query may ask for several keys at once (the paid-endpoint gate reads CEO and VA rows in one call)
+    const all = [{ key: 'ceo_session_secret_production', value: SECRET }, { key: 'ceo_pin_hash_production', value: 'e'.repeat(64) }, { key: 'operator_pin_hash_production', value: 'f'.repeat(64) }];
+    return json(all.filter((r) => q.includes(r.key)));
+  }
   if (table === 'app_settings' && /^cron_lock_/.test(eq(q, 'key') || '') || (table === 'app_settings' && method === 'POST' && body && [].concat(body).every((r) => /^cron_lock_/.test(r.key || '')))) {
     if (world.failLocks) return json({ message: 'boom' }, 500);
     if (method === 'POST') { for (const r of [].concat(body)) if (!world.locks[r.key]) world.locks[r.key] = { value: r.value, updated_at: Date.parse(r.updated_at) }; return json([]); }

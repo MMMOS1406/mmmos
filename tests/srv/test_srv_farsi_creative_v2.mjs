@@ -5,6 +5,11 @@ import path from 'node:path';
 import os from 'node:os';
 import vm from 'node:vm';
 import { execSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
+// S-F: api/generate.js now requires a signed-in CEO or VA — the tests sign a throw-away session against a synthetic secret
+const _SFSEC = 'sf-test-secret', _sfTok = (() => { const p = Buffer.from(JSON.stringify({ sub: 'ceo', exp: Date.now() + 3600e3 })).toString('base64url'); return p + '.' + createHmac('sha256', _SFSEC).update(p).digest('base64url'); })();
+const _sfAuthRows = [{ key: 'ceo_session_secret_production', value: _SFSEC }, { key: 'ceo_pin_hash_production', value: 'e'.repeat(64) }, { key: 'operator_pin_hash_production', value: 'f'.repeat(64) }];
+
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as V2 from '../../lib/srvFarsiCreativeV2.mjs';
 
@@ -316,12 +321,13 @@ const BODY = { engine: 'SRV Farsi', srvFarsiCreativeV2: true, artist: 'Female', 
     globalThis.fetch = async (url, opt = {}) => {
       calls.push({ url: String(url), body: opt.body || null });
       const j = o => ({ ok: true, status: 200, json: async () => o, text: async () => JSON.stringify(o) });
+      if (String(url).includes('ceo_auth_config')) return j(_sfAuthRows);
       if (String(url).includes('app_settings')) return j([]);
       if (String(url).includes('anthropic')) return j({ content: [{ type: 'text', text: JSON.stringify({ title: 'تست', lyrics: 'تست', script: 'one two three. four five.' }) }] });
       return j([]);
     };
     let out = null; const res = { setHeader() {}, status(s) { this.s = s; return this; }, json(o) { out = { s: this.s, o }; return this; }, end() { out = { s: this.s }; return this; } };
-    await handler({ method: 'POST', body }, res);
+    await handler({ method: 'POST', headers: { 'x-mmm-ceo-session': _sfTok }, body }, res);
     return { calls, out };
   };
   const cases = [
@@ -426,6 +432,7 @@ function fnText(src, name) {
       saveMemoryItem: async (t, v, e) => { log.memory.push([t, v, e]); },
       generatePackage: async () => { log.legacy++; ctx.D.packages.push({ id: 'legacy', engine: 'SRV Farsi', taskId: task.id, generatedAt: new Date().toISOString(), title: 'عنوان', lyrics: 'متن' }); },
       fetch: async (url, opt) => { const body = JSON.parse(opt.body); log.fetches.push(body); const r = replies.shift(); return { ok: true, status: 200, json: async () => r }; },
+      _gfetch: (url, opt) => ctx.fetch(url, opt),   // S-F: the client's session-carrying wrapper (the real one is tested in tests/g1security/test_sf_paid_gate.mjs)
     };
     vm.createContext(ctx); vm.runInContext(code, ctx);
     return { ctx, log };

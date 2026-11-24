@@ -29,6 +29,7 @@ import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel,
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
+import { parseSessionToken as _splitSessionToken } from '../lib/ceoSession.mjs'; // S-D: one strict token-shape check for the CEO, VA and Family verifiers
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
@@ -148,9 +149,9 @@ function _ceoSignSession(payloadObj, secret) {
 }
 
 function _ceoVerifySession(token, secret) {
-  if (typeof token !== 'string' || !token.includes('.')) return null;
-  const [payload, sig] = token.split('.');
-  if (!payload || !sig) return null;
+  if (typeof token !== 'string') return null;
+  const _tok = _splitSessionToken(token); if (!_tok) return null;   // S-D: strict token shape (string, <= 4096 chars, exactly two non-empty base64url segments) for every role
+  const payload = _tok.payload, sig = _tok.sig;
   const expected = createHmac('sha256', secret).update(payload).digest('base64url');
   const sigBuf = Buffer.from(sig, 'utf8');
   const expBuf = Buffer.from(expected, 'utf8');
@@ -281,6 +282,9 @@ const SESSION_GATED_ACTIONS = new Set([
   'delete_asset', // production pipeline and assets
   'approve', // operator approvals
   'reject', // operator approvals
+  // S-F — paid model entry points (provider credit). Same gate as the rows above: a signed-in CEO or VA; fails closed unless the publish mode row is explicitly 'observe'.
+  'srv_build_package', 'farsi_regen_caption', 'srv_english_regen_caption', 'srv_english_build', 'srv_english_render_status',
+  'sm_va_task_generate_package', 'va_task_queue_generate', 'nextwave_v2_debug_storyboard',
 ]);
 // G0/C5 — mutating legacy optimization actions: refused unless a valid CEO session is presented (header or body/query token).
 const CEO_ONLY_MUTATING_ACTIONS = new Set(['optimization_apply_recs', 'optimization_toggle_auto', 'strategy_recompute', 'youtube_analytics_pull', 'youtube_snapshot_now']);   // G1/S-A adds the two analytics twins (the daily job calls them in-process)
@@ -301,9 +305,9 @@ function _operatorSecret(ceoSecret) {
   return createHmac('sha256', String(ceoSecret)).update('mmmos-operator-session-v1').digest('base64url');
 }
 function _operatorVerifySession(token, secret, pinFingerprint) {
-  if (typeof token !== 'string' || !token.includes('.') || !pinFingerprint) return null;
-  const [payload, sig] = token.split('.');
-  if (!payload || !sig) return null;
+  if (typeof token !== 'string' || !pinFingerprint) return null;
+  const _tok = _splitSessionToken(token); if (!_tok) return null;   // S-D: strict token shape (string, <= 4096 chars, exactly two non-empty base64url segments) for every role
+  const payload = _tok.payload, sig = _tok.sig;
   const expected = createHmac('sha256', secret).update(payload).digest('base64url');
   const sigBuf = Buffer.from(sig, 'utf8');
   const expBuf = Buffer.from(expected, 'utf8');
@@ -328,7 +332,7 @@ function _publishAuthMode(cfg) {
 async function _publisherFromRequest(req) {
   if (await requireCeoSession(req)) return { role: 'ceo' };
   const src = (req.method === 'POST' ? req.body : req.query) || {};
-  const token = src && typeof src === 'object' ? src.operator_session_token : null;
+  const token = (src && typeof src === 'object' ? src.operator_session_token : null) || (req.headers && req.headers['x-mmm-operator-session']) || null;   // S-F: the header form lets GET polls and fetch call sites carry the session without a body
   if (!token) return null;
   try {
     const [cfg, pub] = await Promise.all([_ceoLoadAuthConfig(), _publishAuthLoad()]);
@@ -468,9 +472,9 @@ function _familySecret(ceoSecret) {
   return createHmac('sha256', String(ceoSecret)).update('mmmos-family-session-v1').digest('base64url');
 }
 function _familyVerifySession(token, secret, pinFingerprint) {
-  if (typeof token !== 'string' || !token.includes('.') || !pinFingerprint) return null;
-  const [payload, sig] = token.split('.');
-  if (!payload || !sig) return null;
+  if (typeof token !== 'string' || !pinFingerprint) return null;
+  const _tok = _splitSessionToken(token); if (!_tok) return null;   // S-D: strict token shape (string, <= 4096 chars, exactly two non-empty base64url segments) for every role
+  const payload = _tok.payload, sig = _tok.sig;
   const expected = createHmac('sha256', secret).update(payload).digest('base64url');
   const sigBuf = Buffer.from(sig, 'utf8'); const expBuf = Buffer.from(expected, 'utf8');
   if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
@@ -21427,7 +21431,7 @@ async function smAssetGapReport(req, res) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MMM-CEO-Session, X-MMM-Operator-Session');
   // SRV-STUDIO-V2-017 — publishing actions answer cross-origin requests only for the app's own origin
   // (same-origin calls from MMMOS need no CORS header at all). Every other action keeps '*'.
   const _gatedAction = PUBLISH_GATED_ACTIONS.has(req.query?.action);

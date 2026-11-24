@@ -2,7 +2,7 @@
 // run against ONE fake world (no network, nothing written). SYNTHETIC data.
 // node tests/g0safety/test_g0_variants.mjs
 import * as G from '../../lib/generationInputs.mjs';
-import { world, resetWorld, loadPair, makeCall, cleanup, reporter, mkRes } from './world.mjs';
+import { world, resetWorld, loadPair, makeCall, cleanup, reporter, mkRes, signCeo } from './world.mjs';
 import { cronSignature } from '../../lib/cronAuth.mjs';
 const { check, done } = reporter();
 
@@ -57,7 +57,7 @@ try {
     check(`ops ${eid}${extra.srvStudioV2 ? '/V2' : ''}: alternative memory spellings/shapes == main(anti only), no sentinel`, cv.json === ba.json && !/SENTINEL/.test(cv.json));
   }
   /* Task path: variants in recentPackages; unknown engine spellings are refused before any model call */
-  const g = async (mod, body) => { Math.random = seeded(); resetWorld(); const res = mkRes(); await mod.default({ method: 'POST', headers: {}, body }, res); return { json: JSON.stringify(world.anthropic), code: res.code, n: world.anthropic.length }; };
+  const g = async (mod, body) => { Math.random = seeded(); resetWorld(); const res = mkRes(); await mod.default({ method: 'POST', headers: { 'x-mmm-ceo-session': signCeo() }, body }, res); return { json: JSON.stringify(world.anthropic), code: res.code, n: world.anthropic.length }; };
   const PK = [{ title: 'Quiet Window Light', mood: 'm', vocal: 'v', concept: 'c', hook: 'h', source: 'local_package', generatedAt: 1 }];
   const PV = [{ title: 'SENTINEL-W', retention: 9999, views: 3, source: 'Winning_Pattern' }, { type: 'activeRule', ruleType: 'x', ruleData: { mood: 'SENTINEL-R' } }, { action: 'INCREASE', detail: 'SENTINEL-D', priority: 'high' }, { statusReason: 'SENTINEL-S', cadencePerWeek: 1 }, { source: 'p_c_directive', detail: 'SENTINEL-P' }];
   for (const [engine, extra] of [['SRV Farsi', {}], ['SRV English', { srvStudioV2: true }], ['SRV English', {}]]) {
