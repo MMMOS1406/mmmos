@@ -1,3 +1,4 @@
+import { mutatingGate } from '../lib/endpointGate.mjs'; // S-G
 // MMM OS v12.3 — API Queue (combined handler)
 // Routes by URL path:
 //   POST /api/queue/process → pull & execute next job
@@ -291,10 +292,15 @@ async function handleStatus(req, res) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MMM-CEO-Session');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const url = req.url || '';
+  // S-G — enqueueing and processing start work (provider calls, syncs): scheduler bearer or CEO session only. /status stays a read.
+  if (url.includes('/process') || url.includes('/add')) {
+    const g = await mutatingGate(req, { supabaseUrl: process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co', serviceKey: process.env.SUPABASE_SERVICE_KEY });
+    if (!g.allow) return res.status(g.status).json({ ok: false, error: g.error });
+  }
   if (url.includes('/process')) return handleProcess(req, res);
   if (url.includes('/add'))     return handleAdd(req, res);
   if (url.includes('/status'))  return handleStatus(req, res);

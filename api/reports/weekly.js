@@ -15,6 +15,8 @@
 // CREATE INDEX IF NOT EXISTS idx_sysreports_generated ON system_reports(generated_at DESC);
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { mutatingGate } from '../../lib/endpointGate.mjs'; // S-G
+
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -389,6 +391,7 @@ async function generateShortFormIntelligence() {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MMM-CEO-Session');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).json({ error: 'GET or POST only' });
 
@@ -405,6 +408,11 @@ export default async function handler(req, res) {
 
   try {
     const forceGenerate = req.method === 'POST' || req.query?.gen === '1';
+    // S-G — forcing a new report writes a database row: scheduler bearer or CEO session only. Reading the latest stored report stays open (and never generates for an unauthorised caller).
+    if (forceGenerate) {
+      const g = await mutatingGate(req, { supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY });
+      if (!g.allow) return res.status(g.status).json({ error: g.error });
+    }
 
     if (!forceGenerate) {
       // Return latest stored report
@@ -414,7 +422,9 @@ export default async function handler(req, res) {
       if (stored?.length) {
         return res.status(200).json({ report: stored[0].data, cached: true, generatedAt: stored[0].generated_at });
       }
-      // No stored report — fall through to generate
+      // No stored report: only the scheduler or a signed-in CEO may generate the first one (S-G); anybody else just sees "no report yet".
+      const g0 = await mutatingGate(req, { supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY });
+      if (!g0.allow) return res.status(200).json({ report: null, cached: false, generatedAt: null });
     }
 
     const report = await generateReport();
