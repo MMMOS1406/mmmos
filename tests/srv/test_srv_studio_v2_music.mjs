@@ -6,6 +6,10 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createHmac as _sfHmac } from 'node:crypto';
+// S-F: api/generate.js now requires a signed-in CEO or VA — the tests sign a throw-away session against a synthetic secret
+const _SFSEC = 'sf-test-secret', _sfTok = (() => { const p = Buffer.from(JSON.stringify({ sub: 'ceo', exp: Date.now() + 3600e3 })).toString('base64url'); return p + '.' + _sfHmac('sha256', _SFSEC).update(p).digest('base64url'); })();
+const _sfAuthRows = [{ key: 'ceo_session_secret_production', value: _SFSEC }, { key: 'ceo_pin_hash_production', value: 'e'.repeat(64) }, { key: 'operator_pin_hash_production', value: 'f'.repeat(64) }];
 import * as M from '../../lib/srvStudioV2Music.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -106,12 +110,13 @@ ok('Mood mapping: Romantic/Emotional/Happy → colour and tempo inside deep hous
   let flagValue = 'false'; const sent = [];
   globalThis.fetch = async (url, opt = {}) => {
     const u = String(url);
+    if (u.includes('/rest/v1/ceo_auth_config')) return { ok: true, json: async () => _sfAuthRows };
     if (u.includes('/rest/v1/app_settings')) return { ok: true, json: async () => [{ value: flagValue }] };
     if (u.includes('api.anthropic.com')) { const b = JSON.parse(opt.body); sent.push(b); const v2 = b.system === M.SRV_STUDIO_V2_SYSTEM; return { ok: true, json: async () => ({ content: [{ text: JSON.stringify(v2 ? GOOD : { title: 'V1 Song', lyrics: 'x' }) }] }) }; }
     throw new Error('unexpected fetch ' + u);
   };
   const { default: handler } = await import('../../api/generate.js');
-  const call = async (body) => { let code = 0, json = null; const res = { setHeader() {}, status(c) { code = c; return this; }, json(j) { json = j; return this; }, end() { return this; } }; await handler({ method: 'POST', body }, res); return { code, json }; };
+  const call = async (body) => { let code = 0, json = null; const res = { setHeader() {}, status(c) { code = c; return this; }, json(j) { json = j; return this; }, end() { return this; } }; await handler({ method: 'POST', headers: { 'x-mmm-ceo-session': _sfTok }, body }, res); return { code, json }; };
   const body = { engine: 'SRV English', mood: 'Female — Emotional', contentType: 'Short Video', contentFormat: 'short', taskName: 't', recentPackages: [{ title: 'Old Song', mood: 'x' }] };
   const v1prompt = (base('api/generate.js').match(/const SRV_ENGLISH_PROMPT = `([\s\S]*?)`;/) || [])[1];
   M._resetSrvStudioV2FlagCache(); await call(body);

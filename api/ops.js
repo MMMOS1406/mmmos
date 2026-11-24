@@ -282,6 +282,9 @@ const SESSION_GATED_ACTIONS = new Set([
   'delete_asset', // production pipeline and assets
   'approve', // operator approvals
   'reject', // operator approvals
+  // S-F — paid model entry points (provider credit). Same gate as the rows above: a signed-in CEO or VA; fails closed unless the publish mode row is explicitly 'observe'.
+  'srv_build_package', 'farsi_regen_caption', 'srv_english_regen_caption', 'srv_english_build', 'srv_english_render_status',
+  'sm_va_task_generate_package', 'va_task_queue_generate', 'nextwave_v2_debug_storyboard',
 ]);
 // G0/C5 — mutating legacy optimization actions: refused unless a valid CEO session is presented (header or body/query token).
 const CEO_ONLY_MUTATING_ACTIONS = new Set(['optimization_apply_recs', 'optimization_toggle_auto', 'strategy_recompute', 'youtube_analytics_pull', 'youtube_snapshot_now']);   // G1/S-A adds the two analytics twins (the daily job calls them in-process)
@@ -329,7 +332,7 @@ function _publishAuthMode(cfg) {
 async function _publisherFromRequest(req) {
   if (await requireCeoSession(req)) return { role: 'ceo' };
   const src = (req.method === 'POST' ? req.body : req.query) || {};
-  const token = src && typeof src === 'object' ? src.operator_session_token : null;
+  const token = (src && typeof src === 'object' ? src.operator_session_token : null) || (req.headers && req.headers['x-mmm-operator-session']) || null;   // S-F: the header form lets GET polls and fetch call sites carry the session without a body
   if (!token) return null;
   try {
     const [cfg, pub] = await Promise.all([_ceoLoadAuthConfig(), _publishAuthLoad()]);
@@ -21428,7 +21431,7 @@ async function smAssetGapReport(req, res) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MMM-CEO-Session, X-MMM-Operator-Session');
   // SRV-STUDIO-V2-017 — publishing actions answer cross-origin requests only for the app's own origin
   // (same-origin calls from MMMOS need no CORS header at all). Every other action keeps '*'.
   const _gatedAction = PUBLISH_GATED_ACTIONS.has(req.query?.action);

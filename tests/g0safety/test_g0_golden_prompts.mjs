@@ -4,7 +4,7 @@
 //   C. this branch with learning entries present == main WITHOUT them (the only change is the removal).   D. with no learning entries the request is byte-identical to main (approved prompts unchanged).
 //   E. unrelated businesses (NextWave) and the Farsi Creative V2 path are byte-identical to main even with learning entries present.
 // node tests/g0safety/test_g0_golden_prompts.mjs
-import { world, resetWorld, loadPair, makeCall, cleanup, reporter, mkRes } from './world.mjs';
+import { world, resetWorld, loadPair, makeCall, cleanup, reporter, mkRes, signCeo } from './world.mjs';
 import { createHash } from 'node:crypto';
 const { check, done } = reporter(); const sha = (x) => createHash('sha256').update(x).digest('hex').slice(0, 12);
 const MARKERS = ['WINNING PATTERNS', 'TUNING DIRECTIVES', 'CHANNEL STRATEGY', 'APPLIED OPTIMIZATION RULES'];
@@ -20,7 +20,7 @@ try {
   const ops = await loadPair('ops.js'); const gen = await loadPair('generate.js');
   const seeded = () => { let x = 12345; return () => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; }; };   // fact-packet selection uses Math.random: make every call reproducible
   const run = async (mod, args) => { Math.random = seeded(); resetWorld(); const res = await makeCall(mod)(args); return { json: JSON.stringify(world.anthropic), code: res.code, n: world.anthropic.length }; };
-  const genCall = async (mod, body) => { Math.random = seeded(); resetWorld(); const res = mkRes(); await mod.default({ method: 'POST', headers: {}, body }, res); return { json: JSON.stringify(world.anthropic), code: res.code, n: world.anthropic.length }; };
+  const genCall = async (mod, body) => { Math.random = seeded(); resetWorld(); const res = mkRes(); await mod.default({ method: 'POST', headers: { 'x-mmm-ceo-session': signCeo() }, body }, res); return { json: JSON.stringify(world.anthropic), code: res.code, n: world.anthropic.length }; };
 
   /* ───────── api/ops.js generate_package (Factory path) ───────── */
   const OPS_CASES = [['srv_farsi', 'Female Voice — Romantic', 'short', {}], ['srv_farsi', 'Female Voice — Romantic', 'long', {}], ['srv_english', 'Love', 'short', {}], ['srv_english', 'Love', 'long', {}], ['srv_english', 'Love', 'short', { srvStudioV2: true }], ['srv_english', 'Love', 'long', { srvStudioV2: true }]];

@@ -9,6 +9,7 @@ import { generateFactPackets, factPacketToPromptBlock } from '../lib/nextwaveV2F
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, parseSrvStudioV2Reply, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs';
 // SRV Farsi Creative V2 — the one canonical SRV Farsi creative brain; used only when the srv_farsi_creative_v2 flag allows it.
 import { srvfCv2Handle } from '../lib/srvFarsiCreativeV2.mjs';
+import { paidSessionOk } from '../lib/sessionAuth.mjs'; // S-F — CEO or VA session required before any model call
 import { stripLearningInputs } from '../lib/generationInputs.mjs'; // G0/C4 — legacy learning inputs never reach SRV music generation
 
 // SRV FARSI IDENTITY LAYER v1 — 2026-06-08
@@ -751,9 +752,13 @@ ${winners.slice(0,8).map(w => {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MMM-CEO-Session, X-MMM-Operator-Session');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // S-F — paid model endpoint: a signed-in CEO or VA only. Checked BEFORE the key is read, the body is parsed for content or any model call is made; fails closed.
+  const _sess = await paidSessionOk(req, { fetchImpl: fetch, supabaseUrl: process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co', serviceKey: process.env.SUPABASE_SERVICE_KEY });
+  if (!_sess.ok) return res.status(401).json({ ok: false, error: 'session_required', message: 'Sign in to MMMOS again, then retry.' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'API key not configured.' });
