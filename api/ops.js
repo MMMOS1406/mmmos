@@ -44,6 +44,7 @@ import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer
 import { srvfRunMixOp, srvfVerifyAdapter } from '../lib/srvFarsiMixServer.mjs'; // SRV Farsi Mix (CEO order 2026-11-12): integrated private-first chunked YouTube upload; OFF unless app_settings.srv_farsi_mix enables it
 import * as NWFP from '../projects/nextwave-finance-pilot/lib/pilotState.mjs'; // 049 — NextWave Finance Pilot L1 state + L2 CEO status (pure logic in the pilot's own folder)
 import * as NWFP_PLAN from '../projects/nextwave-finance-pilot/lib/contentPlan.mjs'; // 051 — NextWave Finance Pilot L3 content planning (deterministic; no generation, no publishing)
+import { runReachSync as _grRun, reachAuthorization as _grAuth, reachDataKey as _grDataKey, REACH_SWITCH_KEY as _grSwitchKey, REACH_CONFIRMATION as _grConfirm, REACH_TYPES as _grTypes } from '../lib/growthReach.mjs'; // C3 reach reports (DISABLED by default; separate authorization record)
 const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
@@ -9126,6 +9127,58 @@ async function growthReport(req, res) {
     return res.status(200).json({ ok: true, role: who.role, reports });
   } catch (e) { return res.status(500).json({ ok: false, error: 'growth_report_failed', message: String(e && e.message || e).slice(0, 120) }); }
 }
+
+// ── growth_reach (C3): YouTube Reporting API reach reports (thumbnail impressions / CTR). DISABLED BY DEFAULT: nothing happens without the app_settings record `growth_reach` (written only by engineering after the CEO's
+// separate written authorization) AND, for a live run, the typed confirmation. A dry run is the default. Creating the Google-side job additionally needs `allow_create:true` in the record. CEO session only. ──
+const _reachGuard = _growthCreateRunGuard({ cooldownMs: 300000 });
+async function _reachLoadSwitch() { try { const r = await sbGet('app_settings?key=eq.' + _grSwitchKey + '&select=value&limit=1'); return Array.isArray(r) && r[0] ? r[0].value : null; } catch (_) { return null; } }
+async function _reachLoadDoc(business) { try { const r = await sbGet('app_settings?key=eq.' + _grDataKey(business) + '&select=value&limit=1'); if (!(Array.isArray(r) && r[0])) return null; const d = typeof r[0].value === 'string' ? JSON.parse(r[0].value) : r[0].value; return d && d.business === business && d.channel_id === _gaBiz[business].channelId ? d : null; } catch (_) { return null; } }
+async function _reachSaveDoc(business, doc) {
+  const key = _grDataKey(business), value = JSON.stringify(doc), existing = await sbGet('app_settings?key=eq.' + key + '&select=key&limit=1');
+  if (Array.isArray(existing) && existing[0]) await sbPatch('app_settings', 'key=eq.' + key, { value, updated_at: new Date().toISOString() });
+  else await sbInsert('app_settings', { key, value, updated_at: new Date().toISOString() });
+}
+async function _reachRun(business, { dryRun, confirm }) {
+  const want = _gaBiz[business] && _gaBiz[business].channelId; if (!want) return { ok: false, error: 'unknown_business' };
+  const rec = await _reachLoadSwitch(); let parsed = null; try { parsed = typeof rec === 'string' ? JSON.parse(rec) : rec; } catch (_) { parsed = null; }
+  const types = Array.isArray(parsed && parsed.types) ? parsed.types.filter((t) => Object.prototype.hasOwnProperty.call(_grTypes, t)) : [];
+  if (!types.length) return { ok: false, business, dryRun: !!dryRun, stopped: { kind: 'not_authorized', detail: 'reach sync is disabled (default)' }, steps: [] };
+  let token = null;
+  if (!dryRun) {
+    const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2'); const mine = (Array.isArray(conns) ? conns : []).filter((c) => c && c.channel_id === want);
+    if (mine.length !== 1) return { ok: false, business, error: mine.length ? 'ambiguous_connection' : 'no_connection' };
+    try { token = (await _refreshYoutubeToken(mine[0].refresh_token)).accessToken; } catch (_) { return { ok: false, business, error: 'token_refresh_failed' }; }   // no token ever leaves this function
+  }
+  const io = { loadDoc: () => _reachLoadDoc(business), saveDoc: (d) => _reachSaveDoc(business, d),
+    fetchJson: async (url, { method, body }) => { const r = await fetch(url, { method, headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) }); let json = null; try { json = await r.json(); } catch (_) { json = null; } return { status: r.status, json }; },
+    fetchText: async (url) => { const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, 'Accept-Encoding': 'gzip' }, signal: AbortSignal.timeout(30000) }); let text = ''; try { text = await r.text(); } catch (_) { text = ''; } return { status: r.status, text, json: null }; } };
+  const out = await _grRun({ business, record: parsed, nowMs: Date.now(), io, types, dryRun, confirm });
+  return { ...out, error: undefined };
+}
+async function growthReachStatus(req, res) {
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  try {
+    const rec = await _reachLoadSwitch(); const out = [];
+    for (const business of _GROWTH_BUSINESSES) { const doc = await _reachLoadDoc(business); const days = doc ? Object.keys(doc.days || {}).sort() : [];
+      out.push({ business, authorization: { basic: _grAuth(rec, Date.now(), business, 'basic').ok, combined: _grAuth(rec, Date.now(), business, 'combined').ok }, stored: doc ? { jobs: doc.jobs || {}, last_report: doc.last_report || null, days: days.length, first_day: days[0] || null, last_day: days[days.length - 1] || null, ctr_scale: doc.ctr_scale || null, updated_at: doc.updated_at || null } : null }); }
+    return res.status(200).json({ ok: true, reach: out, note: 'Reporting API reach reports are DISABLED by default: they need the Google project setting, the growth_reach record and a job (each separately authorized).' });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_reach_status_failed' }); }
+}
+async function growthReachSync(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const b = req.body || {}; const business = String(b.business || ''); let began = false;
+  try {
+    if (!_GROWTH_BUSINESSES.includes(business)) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    const dryRun = b.dryRun !== false;   // dry run unless explicitly false
+    if (!dryRun) { const g = _reachGuard.begin(business, Date.now()); if (!g.ok) return res.status(429).json({ ok: false, error: g.reason, retryAfterMs: g.retryAfterMs || null }); began = true; }
+    const out = await _reachRun(business, { dryRun, confirm: b.confirm });
+    const code = out.stopped && out.stopped.kind === 'not_authorized' ? 403 : out.stopped && out.stopped.kind === 'confirmation_required' ? 400 : out.error ? 502 : 200;
+    return res.status(code).json(out);
+  } catch (e) { return res.status(500).json({ ok: false, error: 'growth_reach_failed' }); }
+  finally { if (began) _reachGuard.end(business); }
+}
+// ── end growth_reach ──
 
 // R-B — read-only YouTube API probe. CEO session only, POST only. Deployment approval is NOT permission to contact Google: a live run also needs a time-boxed authorization record
 // (app setting `growth_probe_live`, written by engineering only after the CEO's separate written authorization; no browser can write that key).
@@ -21723,6 +21776,8 @@ export default async function handler(req, res) {
     if (action === 'growth_probe')               return await growthProbe(req, res); // R-B read-only probe (CEO session; not released)
     if (action === 'growth_collect')             return await growthCollect(req, res); // Growth system: read-only collection (default DISABLED; CEO session + authorization record)
     if (action === 'growth_collect_scheduled')   return await growthCollectScheduled(req, res); // Growth system: daily cron hook (signature; does nothing unless schedule is switched on)
+    if (action === 'growth_reach_status')        return await growthReachStatus(req, res); // C3 reach reports: status (CEO session; reads only)
+    if (action === 'growth_reach_sync')          return await growthReachSync(req, res); // C3 reach reports: DRY RUN by default; live only with the growth_reach record + typed confirmation (CEO session)
     if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
     if (action === 'growth_improvement_start')   return await growthImprovementStart(req, res); // improvement tracking (CEO session; records only)
     if (action === 'growth_improvement_update')  return await growthImprovementUpdate(req, res); // improvement tracking (CEO session; records only)
