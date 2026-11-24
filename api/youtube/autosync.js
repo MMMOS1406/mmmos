@@ -7,6 +7,9 @@
 import { createHash } from 'node:crypto';
 import { cronSignatureInput } from '../../lib/growthCollect.mjs'; // Growth system: signature for the scheduled collection hook (no new credential)
 import { loadDisabled, filterEnabled } from '../../lib/channelSyncControl.mjs'; // per-channel sync switch (default: nothing disabled = unchanged behaviour)
+import { cronEntryDecision, cronSignature } from '../../lib/cronAuth.mjs'; // G1/S-A — entry-point policy (fail closed) + the derived signature for the internal hops (no new credential)
+import { ceoSessionOk, tokenFromRequest } from '../../lib/ceoSession.mjs'; // G1/S-A — manual recovery run by a signed-in CEO
+import { acquire as lockAcquire, release as lockRelease, captureOutcome, runSucceeded } from '../../lib/cronLock.mjs'; // G1/S-B — database-backed single-flight + short duplicate-fire cooldown
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -42,7 +45,7 @@ async function sbLog(channelId, status, message) {
 async function syncChannel(channelId, appUrl) {
   const res = await fetch(`${appUrl}/api/youtube/sync`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-mmm-cron': cronSignature('sync', SUPABASE_SERVICE_KEY) },   // G1/S-A: the sync endpoint now refuses callers without this
     body: JSON.stringify({ channelId }),
   });
   const data = await res.json();
@@ -87,7 +90,7 @@ async function syncAllTikTokAccounts(appUrl) {
         }
         const res = await fetch(`${appUrl}/api/tiktok/sync`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-mmm-cron': cronSignature('sync', SUPABASE_SERVICE_KEY) },   // G1/S-A
           body: JSON.stringify({ openId }),
         });
         const data = await res.json();
@@ -129,13 +132,27 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Vercel injects CRON_SECRET and sends it as Bearer token on scheduled runs.
-  // If the secret is set, enforce it — allows safe manual POST triggers without the header
-  // only when CRON_SECRET is absent (dev/staging).
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && req.headers.authorization !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  // G1/S-A — entry-point policy (lib/cronAuth.mjs), FAIL CLOSED:
+  //   CRON_SECRET configured     → Vercel's scheduled call carries it as a Bearer token; a CEO session may also start a manual recovery run; everyone else gets 401.
+  //   CRON_SECRET not configured → on any Vercel deployment only a CEO session is accepted, everyone else gets 503. (Local development / tests, where VERCEL_ENV is absent, are allowed.)
+  // Authentication ALWAYS happens before the lock: an unauthorized request can never touch the lock, so it can never delay or starve the scheduled run.
+  const lockCfg = { fetchImpl: fetch, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY };
+  let decision = cronEntryDecision({ env: process.env, headers: req.headers, ceoOk: false });
+  if (!decision.allow && tokenFromRequest(req)) decision = cronEntryDecision({ env: process.env, headers: req.headers, ceoOk: await ceoSessionOk(req, lockCfg) });
+  if (!decision.allow) return res.status(decision.status).json({ error: decision.error === 'unauthorized' ? 'Unauthorized' : decision.error });
+  if (decision.mode === 'local') console.warn('[cron-auth] CRON_SECRET not configured; accepted only because this is not a Vercel deployment');
+
+  // G1/S-B — single-flight + short cooldown (duplicate-fire protection for authenticated callers). Of N simultaneous callers exactly one runs.
+  // FAIL CLOSED: if the lock cannot be taken because of an infrastructure error the run does NOT start (503). A CEO session may force a run (never overlapping one < 2 minutes old).
+  const force = decision.mode === 'ceo' && String((req.query && req.query.force) || '') === 'true';
+  const lock = await lockAcquire({ name: 'autosync', force, ...lockCfg });
+  if (!lock.ok) return lock.reason === 'lock_unavailable' ? res.status(503).json({ error: 'lock_unavailable' }) : res.status(429).json({ skipped: true, reason: lock.reason, retryAfterMs: lock.retryAfterMs || null });
+  // The lock follows the REAL outcome of the run (the response it sent), not merely "no exception": a run that answers 5xx, or in which a channel failed, frees the lock so a retry is possible.
+  const cap = captureOutcome(res); let threw = true;
+  try { await runAutosync(req, cap.res); threw = false; } finally { await lockRelease({ lock, success: !threw && runSucceeded('autosync', cap.outcome()), ...lockCfg }); }
+}
+
+async function runAutosync(req, res) {
 
   const appUrl = process.env.APP_URL || `https://${req.headers.host}`;
   const startedAt = new Date().toISOString();
@@ -201,7 +218,7 @@ export default async function handler(req, res) {
   // Pull → Foundation → Decision → Apply → Strategy. Operator never clicks.
   let analyticsAuto = null;
   try {
-    const aRes = await fetch(`${appUrl}/api/ops?action=analytics_auto_run`);
+    const aRes = await fetch(`${appUrl}/api/ops?action=analytics_auto_run`, { headers: { 'x-mmm-cron': cronSignature('analytics_auto_run', SUPABASE_SERVICE_KEY) } });   // G1/S-A
     analyticsAuto = await aRes.json();
     console.log('[A1] analytics_auto_run:', analyticsAuto && analyticsAuto.status);
   } catch (e) {

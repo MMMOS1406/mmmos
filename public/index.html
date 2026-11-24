@@ -3113,7 +3113,7 @@ async function ytPullAnalytics(){
   const btn = event && event.target;
   if(btn){ btn.disabled = true; btn.textContent = '⏳ pulling…'; }
   try{
-    const r = await fetch('/api/ops?action=youtube_analytics_pull&days=' + encodeURIComponent(days));
+    const r = await fetch('/api/ops?action=youtube_analytics_pull&days=' + encodeURIComponent(days),{headers:{'X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''}});   // G1/S-A
     const d = await r.json();
     if(!d.ok){ alert('Analytics pull failed: ' + (d.message || d.error || 'unknown')); return; }
     let msg = `✓ ANALYTICS PULL · ${d.startDate} → ${d.endDate}\n\n`;
@@ -3142,7 +3142,7 @@ async function ytSnapshotNow(){
   const btn = event && event.target;
   if(btn){ btn.disabled = true; btn.textContent = '⏳ snapshotting…'; }
   try{
-    const r = await fetch('/api/ops?action=youtube_snapshot_now');
+    const r = await fetch('/api/ops?action=youtube_snapshot_now',{headers:{'X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''}});   // G1/S-A
     const d = await r.json();
     if(!d.ok){ alert('Snapshot failed: ' + (d.message||d.error||'unknown')); return; }
     alert('✓ Snapshot saved for ' + d.snapshotDate + '\n  · ' + d.videosSnapshotted + ' videos\n  · ' + d.channelsSnapshotted + ' channels');
@@ -3613,7 +3613,7 @@ async function ytSync(channelId){
   try{
     const res=await fetch('/api/youtube/sync',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''},   // G1/S-A
       body:JSON.stringify({channelId})
     });
     const data=await res.json();
@@ -3758,7 +3758,7 @@ async function ttSync(openId){
   try{
     const res=await fetch('/api/tiktok/sync',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','X-MMM-CEO-Session':(typeof _ceoGetSessionToken==='function'&&_ceoGetSessionToken())||''},   // G1/S-A
       body:JSON.stringify({openId}),
     });
     const data=await res.json();

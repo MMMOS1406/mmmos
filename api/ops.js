@@ -33,6 +33,8 @@ import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSec
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs'; // SRV Studio V2 (Checkpoint B) — used only when the srv_studio_v2_enabled flag is on
 import { stripLearningInputs as _stripLearningInputs } from '../lib/generationInputs.mjs'; // G0/C4 — legacy learning inputs (directives, auto rules, stale strategy, retention-ranked winners) never reach SRV music generation
+import { verifyCronSignature as _verifyCronSignature } from '../lib/cronAuth.mjs'; // G1/S-A — the cron entry point's derived signature for the internal analytics hop
+import { acquire as _cronLockAcquire, release as _cronLockRelease, captureOutcome as _captureOutcome, runSucceeded as _runSucceeded } from '../lib/cronLock.mjs'; // G1/S-B — database-backed single-flight + short cooldown (no schema change)
 import { srv2RunPilotUpload, srv2RunVaUpload, srv2RunRetitleJob, srv2RunProductionUpload } from '../lib/srvStudioV2Pilot.mjs'; // SRV Studio V2 (E3 pilot; 023 VA allowance + one-time retitle), server-enforced
 import { srv2EnsurePlaylist, srv2RunPlaylistSync, srv2YouTubeAdapter } from '../lib/srvStudioV2Playlists.mjs'; // SRV-STUDIO-V2-030 SRV Studio playlists (verified IDs only)
 import { srv2RunMixOp, srv2MixYouTubeAdapter } from '../lib/srvStudioV2MixServer.mjs'; // SRV-STUDIO-V2-033 Monthly Mix (off unless app_settings.srv_studio_v2_mix is enabled)
@@ -281,7 +283,7 @@ const SESSION_GATED_ACTIONS = new Set([
   'reject', // operator approvals
 ]);
 // G0/C5 — mutating legacy optimization actions: refused unless a valid CEO session is presented (header or body/query token).
-const CEO_ONLY_MUTATING_ACTIONS = new Set(['optimization_apply_recs', 'optimization_toggle_auto', 'strategy_recompute']);
+const CEO_ONLY_MUTATING_ACTIONS = new Set(['optimization_apply_recs', 'optimization_toggle_auto', 'strategy_recompute', 'youtube_analytics_pull', 'youtube_snapshot_now']);   // G1/S-A adds the two analytics twins (the daily job calls them in-process)
 // G0/C5 — strict CEO check for those actions: the token must be a string of at most 4 KB with exactly two segments (payload.signature) BEFORE the shared HMAC / subject / expiry verification runs.
 // (The shared verifier ignores any extra trailing segments; that is left unchanged here so no other endpoint's behaviour moves.)
 async function _requireCeoSessionStrict(req) {
@@ -9083,7 +9085,7 @@ async function growthProbe(req, res) {
 }
 
 async function youtubeAnalyticsPull(req, res) {
-  const lookbackDays = parseInt((req.query && req.query.days) || (req.body && req.body.days) || '30', 10);
+  const lookbackDays = Math.min(400, Math.max(1, parseInt((req.query && req.query.days) || (req.body && req.body.days) || '30', 10) || 30));   // G1/S-A: bounded look-back (was unbounded)
   const startDate = new Date(Date.now() - lookbackDays * 86400 * 1000).toISOString().slice(0,10);
   const endDate = new Date().toISOString().slice(0,10);
   // v16.68.3 — CORRECTION: live validation against the real YouTube Analytics API (after the
@@ -9242,6 +9244,18 @@ async function _callInline(name, fn, req, steps, partial) {
   }
 }
 async function analyticsAutoRun(req, res) {
+  // G1/S-B — single-flight + short duplicate-fire cooldown. Authentication already happened in the router (signature or CEO session), so an unauthorized request never reaches the lock.
+  // Of N simultaneous callers exactly one proceeds. FAIL CLOSED: if the lock cannot be taken because of an infrastructure error the run does not start (503).
+  // A CEO session may force a run (still never overlapping a run that began < 2 minutes ago).
+  const _lockCfg = { fetchImpl: fetch, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY };
+  const _force = String((req.query && req.query.force) || '') === 'true' && await _requireCeoSessionStrict(req);
+  const _lock = await _cronLockAcquire({ name: 'analytics', force: _force, ..._lockCfg });
+  if (!_lock.ok) return _lock.reason === 'lock_unavailable' ? res.status(503).json({ ok: false, status: 'skipped', error: 'lock_unavailable' }) : res.status(429).json({ ok: false, status: 'skipped', error: _lock.reason, retryAfterMs: _lock.retryAfterMs || null });
+  // The lock follows the REAL outcome (the response the pipeline sent): only status "healthy" keeps the cooldown; a partial / failed run frees the lock so a retry is possible.
+  const _cap = _captureOutcome(res); let _threw = true;
+  try { await _analyticsAutoRunInner(req, _cap.res); _threw = false; } finally { await _cronLockRelease({ lock: _lock, success: !_threw && _runSucceeded('analytics', _cap.outcome()), ..._lockCfg }); }
+}
+async function _analyticsAutoRunInner(req, res) {
   // v13.62.7 — write start marker, run inline (no HTTP loopback), update marker, respond.
   const startedAt = new Date().toISOString();
   let logId = null;
@@ -9422,6 +9436,8 @@ function _classifyRecToRule(rec) {
   }
   return null;
 }
+// G1/S-C — JSON text with object keys sorted at every level (equality that ignores key order).
+function _canonJson(v) { if (Array.isArray(v)) return '[' + v.map(_canonJson).join(',') + ']'; if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _canonJson(v[k])).join(',') + '}'; return JSON.stringify(v === undefined ? null : v); }
 async function optimizationApplyRecommendations(req, res) {
   try {
     // Fetch decision engine output
@@ -9445,6 +9461,13 @@ async function optimizationApplyRecommendations(req, res) {
         const exArr = Array.isArray(existing) ? existing : [];
         const dupExists = exArr.some(e => JSON.stringify(e.rule_data) === JSON.stringify(rule.rule_data));
         if (dupExists) continue;
+        // G1/S-C — with auto-apply OFF, do not queue a recommendation that is already queued: an unexpired inactive, never-applied rule of the same engine and type with
+        // identical data. Compared in canonical (sorted-key) form because the database returns JSON with its own key order. Nothing is deleted; no audit row is written for a skip.
+        if (!autoOn) {
+          const queuedSame = await sbGet('optimization_rules?engine=eq.' + encodeURIComponent(engine) + '&rule_type=eq.' + encodeURIComponent(rule.rule_type) + '&active=eq.false&auto_applied=eq.false&expires_at=gt.' + encodeURIComponent(new Date().toISOString()) + '&select=id,rule_data');
+          const want = _canonJson(rule.rule_data);
+          if ((Array.isArray(queuedSame) ? queuedSame : []).some(q => _canonJson(q.rule_data) === want)) continue;
+        }
         // Supersede older active rules of same type — ONLY when auto-apply is ON for this engine (G0/C3): with auto-apply OFF the new rule is
         // queued inactive and existing rules are never touched by this job.
         if (exArr.length && autoOn) {
@@ -21433,6 +21456,10 @@ export default async function handler(req, res) {
     }
     // G0/C5 — optimization/strategy maintenance actions change rules, settings or strategy rows: CEO session only (no VA, no observe-mode pass-through).
     // The daily job calls optimizationApplyRecommendations in-process (analyticsAutoRun) and never passes through this router.
+    // G1/S-A — the daily job's internal analytics hop: the cron entry point's derived signature OR a CEO session (manual run). Nobody else.
+    if (action === 'analytics_auto_run' && !(_verifyCronSignature(req.headers, 'analytics_auto_run', SUPABASE_SERVICE_KEY) || await _requireCeoSessionStrict(req))) {
+      return res.status(401).json({ ok: false, error: 'cron_signature_required' });
+    }
     if (CEO_ONLY_MUTATING_ACTIONS.has(action) && !(await _requireCeoSessionStrict(req))) {
       return res.status(401).json({ ok: false, error: 'ceo_authorization_required', message: 'Sign in as CEO to use this action.' });
     }

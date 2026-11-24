@@ -3,6 +3,7 @@
 // node tests/g0safety/test_g0_variants.mjs
 import * as G from '../../lib/generationInputs.mjs';
 import { world, resetWorld, loadPair, makeCall, cleanup, reporter, mkRes } from './world.mjs';
+import { cronSignature } from '../../lib/cronAuth.mjs';
 const { check, done } = reporter();
 
 /* ── lib: engine identifiers ── */
@@ -75,7 +76,7 @@ try {
     { resetWorld(); world.rules = [{ id: 1, engine: 'SRV Farsi', rule_type: 'topic_weight', rule_data: {}, active: true, expires_at: null }]; const b = await makeCall(ops.base)({ action: 'optimization_state', method: 'GET' }), c = await makeCall(ops.cur)({ action: 'optimization_state', method: 'GET' });
       const strip = (o) => ({ ...o, activeRules: (o.activeRules || []).map(({ expired, ...r }) => r) }); check('optimization_state: identical to main apart from the added "expired" flag (recommendations/state stay visible)', JSON.stringify(strip(b.body)) === JSON.stringify(strip(c.body)) && c.body.activeRules[0].expired === false); }
     { resetWorld(); world.settings.forEach((s) => { s.auto_apply = false; }); world.decision = { ok: true, perChannel: [{ engine: 'SRV Farsi', recommendations: [{ action: 'INCREASE', priority: 'high', detail: 'Top retainers use "alpha" pattern.' }] }] };
-      await makeCall(ops.cur)({ action: 'analytics_auto_run', method: 'GET' }); const r = await makeCall(ops.cur)({ action: 'optimization_state', method: 'GET' });
+      await makeCall(ops.cur)({ action: 'analytics_auto_run', method: 'GET', headers: { 'x-mmm-cron': cronSignature('analytics_auto_run', 'svc-test') } }); const r = await makeCall(ops.cur)({ action: 'optimization_state', method: 'GET' });
       check('a new recommendation is stored (queued inactive) and the audit log shows it — advisory output still produced', world.rules.length === 1 && world.rules[0].active === false && world.audit.some((x) => x.action === 'rule_queued') && r.code === 200); }
   }
 } finally { cleanup(); }
