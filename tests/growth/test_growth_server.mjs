@@ -1,6 +1,7 @@
 // Growth server actions (growth_collect, growth_collect_scheduled, growth_report): the REAL handlers executed with stubs (no network, no database). SYNTHETIC data.
 import fs from 'node:fs'; import { createHash, timingSafeEqual } from 'node:crypto';
 import * as C from '../../lib/growthCollect.mjs'; import * as D from '../../lib/growthDecisions.mjs'; import * as Y from '../../lib/yppCard.mjs'; import * as GA from '../../lib/growthAnalytics.mjs'; import { createRunGuard } from '../../lib/growthProbe.mjs'; import { decide } from '../../lib/dataProxy.mjs';
+import * as HI from '../../lib/homeInsights.mjs';
 import { makeWorld, addDays } from './collect_fixtures.mjs';
 let pass = 0, fail = 0; const ok = (n, c, d) => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, d !== undefined ? JSON.stringify(d).slice(0, 400) : ''); } };
 const NOW = Date.parse('2030-03-15T18:00:00Z'), B1 = 'silk_road_voices', B2 = 'srv_studio', CH1 = GA.GROWTH_BUSINESSES[B1].channelId, CH2 = GA.GROWTH_BUSINESSES[B2].channelId, KEY = 'SERVICE-KEY-FOR-TEST';
@@ -16,6 +17,10 @@ const world = (over = {}) => {
     if (/^app_settings\?key=eq\.ypp_earn_capture&/.test(q)) return w.ypp === null ? [] : [{ value: JSON.stringify(w.ypp) }];
     if (/^youtube_connections/.test(q)) { const id = /channel_id=eq\.([^&]+)/.exec(q)[1]; return w.conns.filter((c) => c.channel_id === decodeURIComponent(id)); }
     if (/^youtube_videos_analytics/.test(q)) { const id = decodeURIComponent(/channel_id=eq\.([^&]+)/.exec(q)[1]); return w.rows[id] || []; }
+    if (/^youtube_channel_snapshots/.test(q)) { const id = decodeURIComponent(/channel_id=eq\.([^&]+)/.exec(q)[1]); return [{ snapshot_date: '2030-03-15', subscribers: 100, total_videos: 20, total_views: 5000 }, { snapshot_date: '2030-03-10', subscribers: 96, total_videos: 20, total_views: 4800, __ch: id }]; }
+    if (/^youtube_videos\?/.test(q) && w.catalog) return w.catalog;
+    if (/^app_settings\?key=eq\.growth_reach_/.test(q) && w.reachDocs) { const m2 = /growth_reach_(\w+)&/.exec(q); return m2 && w.reachDocs[m2[1]] ? [{ value: JSON.stringify(w.reachDocs[m2[1]]) }] : []; }
+    if (/^analytics_sync_log/.test(q)) return [{ id: 2, status: 'healthy', ts: '2030-03-15 00:49:00+00', steps: { a: { ok: true }, b: { ok: true } } }];
     if (/^youtube_channels/.test(q)) { const id = decodeURIComponent(/channel_id=eq\.([^&]+)/.exec(q)[1]); return [{ channel_id: id, subscribers: 100, total_views: 5000, updated_at: '2030-03-15T00:00:00Z' }]; }
     return []; };
   const stubs = { requireCeoSession: async () => w.role === 'ceo', _publisherFromRequest: async () => (w.role ? { role: w.role } : null), sbGet,
@@ -24,6 +29,7 @@ const world = (over = {}) => {
     createHash, timingSafeEqual, Buffer, SUPABASE_SERVICE_KEY: KEY, _growthCreateRunGuard: createRunGuard,
     _gcAuth: C.collectAuthorization, _gcSteps: C.collectSteps, _gcCollect: C.collectForBusiness, _gcMerge: C.mergeCollection, _gcParseDoc: C.parseDoc, _gcKey: C.dataKey, _gcSwitchKey: C.COLLECT_SWITCH_KEY, _gcConfirm: C.COLLECT_CONFIRMATION, _gcPeriod: C.collectPeriod, _gcCronInput: C.cronSignatureInput,
     _gdBuild: D.buildDashboard, _gaNorm: GA.normaliseRow, _gaBuild: GA.buildWorkspace, _gaBiz: GA.GROWTH_BUSINESSES, _yppParseStore: Y.parseCaptureStore, _yppBuild: Y.buildYppModel, _yppStoreKey: Y.YPP_STORE_KEY };
+  stubs._hiBuild = HI.buildHomeCard; stubs._hrLoad = async () => (w.useReach ? { reachDataKey: (b) => 'growth_reach_' + b, packagingComparison: (doc) => doc.__cmp } : null);   // stand-in for the optional reach library (its own PR); the real module is exercised in the integration tests   // CEO home card builder (added on its own line so it never conflicts with other changes to the stub list)
   const names = Object.keys(stubs); const f = new Function(...names, src + '\nreturn { growthCollect, growthCollectScheduled, growthReport };')(...names.map((k) => stubs[k]));
   const call = (fn) => async ({ method = 'POST', body = {}, headers = {} } = {}) => { const res = { code: 200, body: null, status(c) { res.code = c; return res; }, json(x) { res.body = x; return res; } }; await fn({ method, body, query: {}, headers }, res); return res; };
   w.collect = call(f.growthCollect); w.scheduled = call(f.growthCollectScheduled); w.report = call(f.growthReport);
@@ -85,6 +91,30 @@ const readOnlyHost = (u) => /^https:\/\/(www\.googleapis\.com\/youtube\/v3\/chan
   ok('VA role: same analytics, but NO collection controls/state and NO monetization statement; the capture store and the switch are not read', vd.collection === null && !vd.recommendations.some((x) => x.id === 'monetization') && vd.windows.d28.views === d.windows.d28.views && !w.reads.slice(mark).some((q) => /ypp_earn_capture|growth_collect&/.test(q)) && w.reads.length > mark);
   ok('the report contains no token, key or secret', !/AT-|RT-|Bearer|SERVICE-KEY/.test(JSON.stringify(r.body))); }
 { const w = world(); const r = await w.report({ body: { business: 'other' } }); ok('unknown business → 400', r.code === 400); }
+{ const w = world({ switch: switchRec() }); await w.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); await w.collect({ body: { business: B2, confirm: C.COLLECT_CONFIRMATION } });
+  const r = await w.report(); const fa = r.body.reports.find((x) => x.business === B1).recommendations.find((x) => x.id === 'format'), fb = r.body.reports.find((x) => x.business === B2).recommendations.find((x) => x.id === 'format');
+  ok('POLICY: the SRV Studio format recommendation is Long-only (never "keep producing all three formats"); Silk Road Voices keeps the original text', !!fa && !!fb && /Long-only/.test(fb.action) && /Do not resume Shorts/.test(fb.action) && !/all three formats/.test(fb.action) && /all three formats/.test(fa.action), [fa && fa.action, fb && fb.action]); }
+// 3b. CEO homepage card (home:true): CEO only, additive, read-only, each business's own channel only
+{ const w = world({ switch: switchRec() }); await w.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); await w.collect({ body: { business: B2, confirm: C.COLLECT_CONFIRMATION } });
+  const mark = w.reads.length, wr = w.writes.length, g = w.google.length; const r = await w.report({ body: { home: true } });
+  ok('home:true (CEO) → one home_card per business, nothing else in the report entry', r.code === 200 && r.body.reports.length === 2 && r.body.reports.every((x) => x.home_card && x.home_card.state === 'ok' && Object.keys(x).sort().join() === 'business,home_card'));
+  const a = r.body.reports.find((x) => x.business === B1).home_card, b = r.body.reports.find((x) => x.business === B2).home_card;
+  ok('home card isolation: channel ids differ and each card carries its own channel only', a.isolation.channel_id === CH1 && b.isolation.channel_id === CH2);
+  ok('home card carries the last successful sync from the sync log and the scheduled-collection state', a.freshness.last_ok_sync === '2030-03-15 00:49:00+00' && a.freshness.last_sync_steps_ok === '2/2' && a.collection.scheduled === false);
+  ok('home card reads only: the snapshot read is filtered to the business channel; no writes; no Google contact', w.reads.slice(mark).filter((q) => /^youtube_channel_snapshots/.test(q)).every((q) => /channel_id=eq\./.test(q)) && w.writes.length === wr && w.google.length === g);
+  ok('home card carries the diagnosis (state ok, root-cause label, four causes) and reads the catalog filtered to the business channel only', a.diagnosis.state === 'ok' && a.diagnosis.categories.length === 6 && /ROOT CAUSE/.test(a.diagnosis.root_cause_label) && w.reads.slice(mark).filter((q) => /^youtube_videos\?/.test(q)).every((q) => /channel_id=eq\./.test(q)) && w.reads.slice(mark).filter((q) => /^youtube_videos\?/.test(q)).length === 2);
+  { const cmp = { enough: true, recent: { n: 6, median_ctr: 0.035 }, earlier: { n: 6, median_ctr: 0.05 }, change_pct: -30, rule: 'needs 5+ uploads with 1,000+ impressions in each group and a settled CTR scale' };
+    const w2 = world({ switch: switchRec() }); await w2.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); w2.useReach = true; w2.reachDocs = { [B1]: { v: 1, business: B1, channel_id: CH1, __cmp: cmp } };
+    const rr = await w2.report({ body: { home: true } }); const pk = rr.body.reports.find((x) => x.business === B1).home_card.diagnosis.categories.find((c) => c.key === 'packaging');
+    ok('REACH INTEGRATION: when the reach document of THIS business exists, the packaging diagnosis uses its click-through comparison', /Click-through rate \(impressions\)/.test(pk.confirmed[0]) && pk.supported === true && pk.stats.change_pct === -30, pk.confirmed);
+    const w3 = world({ switch: switchRec() }); await w3.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); w3.useReach = true; w3.reachDocs = { [B2]: { v: 1, business: B2, channel_id: CH2, __cmp: cmp } };
+    const rr3 = await w3.report({ body: { home: true } }); const pk3 = rr3.body.reports.find((x) => x.business === B1).home_card.diagnosis.categories.find((c) => c.key === 'packaging'); ok('ISOLATION: another business\'s reach document is never read for this business (packaging stays "insufficient evidence")', pk3.status === 'insufficient_evidence' && !/Click-through rate \(impressions\)/.test(pk3.confirmed[0]));
+    const w4 = world({ switch: switchRec() }); await w4.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); w4.useReach = true; w4.reachDocs = { [B1]: { v: 1, business: B2, channel_id: CH2, __cmp: cmp } };
+    const rr4 = await w4.report({ body: { home: true } }); ok('ISOLATION: a reach document whose business/channel does not match is ignored', rr4.body.reports.find((x) => x.business === B1).home_card.diagnosis.categories.find((c) => c.key === 'packaging').status === 'insufficient_evidence'); }
+  ok('home card never states revenue or expenses as numbers', a.money.every((m) => m.state === 'unavailable') && b.money.every((m) => m.state === 'unavailable'));
+  w.role = 'operator'; const v = await w.report({ body: { home: true } });
+  ok('VA role with home:true gets the ordinary report (no home_card): gating unchanged', v.code === 200 && v.body.reports.every((x) => !x.home_card && x.windows));
+  const w2 = world({ switch: switchRec() }); w2.role = null; const u = await w2.report({ body: { home: true } }); ok('no session with home:true → 401', u.code === 401); }
 { const w = world({ switch: switchRec() }); await w.collect({ body: { business: B1, confirm: C.COLLECT_CONFIRMATION } }); w.docs[B2] = { business: B2, channel_id: CH2, days: 'garbage', periods: [null, 5], videos: 7, retention: [] };
   const origRows = w.rows; w.rows = new Proxy(origRows, { get(t, k) { if (k === CH2) throw new Error('db exploded'); return t[k]; } });
   const r = await w.report(); const a = r.body.reports.find((x) => x.business === B1), b = r.body.reports.find((x) => x.business === B2);
