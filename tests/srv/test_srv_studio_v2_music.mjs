@@ -11,6 +11,7 @@ import { createHmac as _sfHmac } from 'node:crypto';
 const _SFSEC = 'sf-test-secret', _sfTok = (() => { const p = Buffer.from(JSON.stringify({ sub: 'ceo', exp: Date.now() + 3600e3 })).toString('base64url'); return p + '.' + _sfHmac('sha256', _SFSEC).update(p).digest('base64url'); })();
 const _sfAuthRows = [{ key: 'ceo_session_secret_production', value: _SFSEC }, { key: 'ceo_pin_hash_production', value: 'e'.repeat(64) }, { key: 'operator_pin_hash_production', value: 'f'.repeat(64) }];
 import * as M from '../../lib/srvStudioV2Music.mjs';
+import * as G0 from '../../lib/generationInputs.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
@@ -144,6 +145,7 @@ ok('Mood mapping: Romantic/Emotional/Happy → colour and tempo inside deep hous
   const ctx = {
     console: { log() {}, warn() {}, error() {} }, process: { env: { ANTHROPIC_API_KEY: 'k' } }, AbortController, setTimeout, clearTimeout, JSON, Date, Math, Object, Array, String, Number, Set, Promise, RegExp, Error,
     SUPABASE_URL: 'https://stub.invalid', SUPABASE_SERVICE_KEY: 'svc',
+    _stripLearningInputs: G0.stripLearningInputs,   // G0/C4 added this call to generatePackage; the harness evaluates the function in isolation, so it supplies the real (pure) helper
     srvStudioV2FlagEnabled: async () => flagOn, SRV_STUDIO_V2_SYSTEM: M.SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt: M.buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package: M.finalizeSrvStudioV2Package,
     fetch: async (u, opt) => { const b = JSON.parse(opt.body); sent.push(b); return { ok: true, json: async () => ({ content: [{ text: '<package>' + JSON.stringify(b.system === M.SRV_STUDIO_V2_SYSTEM ? GOOD : { title: 'V1', lyrics: 'x' }) + '</package>' }] }) }; },
   };
