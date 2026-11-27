@@ -27,6 +27,7 @@ import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Grow
 import { buildHomeCard as _hiBuild } from '../lib/homeInsights.mjs'; // CEO homepage business card model (pure)
 import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
 import { improvementsKey as _impKey, emptyImprovements as _impEmpty, sanitizeImprovements as _impSanitize, startImprovement as _impStart, updateImprovement as _impUpdate, annotatePlan as _impAnnotate, activeSummary as _impSummary } from '../lib/growthImprovements.mjs'; // persistent improvement tracking (records only)
+import { contentKey as _csKey, buildFeatureDoc as _csBuildDoc, sanitizeFeatureDoc as _csSanitize, buildStrategy as _csStrategy, BUSINESS_ENGINE as _csEngine } from '../lib/contentStrategy.mjs'; // G5 content strategy intelligence (derived data; advisory)
 import { currentMetrics as _gpMetrics, evaluateImprovement as _gpEval } from '../lib/growthPlan.mjs'; // recommendation plan metrics / evaluation (pure)
 import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
@@ -9043,6 +9044,7 @@ async function growthCollectScheduled(req, res) {
       const g = _growthCollectGuard.begin(business, Date.now()); if (!g.ok) { results.push({ business, skipped: g.reason }); continue; }
       try { results.push(await _growthRunCollection(business, 'scheduled', Math.max(20000, 160000 - (Date.now() - t0)))); } catch (e) { results.push({ business, ok: false, error: 'collection_failed' }); } finally { _growthCollectGuard.end(business); }
     }
+    for (const r of results) { if (r && r.business && !r.skipped && r.ok !== false && Date.now() - t0 < 150000) { try { await _growthContentRefresh(r.business); r.content_linked = true; } catch (_) { r.content_linked = false; } } }   // G5: after each collection, relink videos to production packages (derived data; best effort)
     return res.status(200).json({ ok: true, results });
   } catch (e) { return res.status(500).json({ ok: false, error: 'growth_collect_scheduled_failed' }); }
 }
@@ -9104,7 +9106,35 @@ async function _growthHomeCardFor(business, store, sw) {
       const home_card = _hiBuild({ business, name: _gaBiz[business].name || business, dash, rows: Array.isArray(rows) ? rows : [], videoRows, catalog, reach, ypp: dash.ypp || null, counters: { subscribers: ch.subscribers, total_views: ch.total_views, updated_at: ch.updated_at, history: hist }, pipeline, collection: { scheduled: _gcAuth(sw, Date.now(), business, 'scheduled').ok === true }, nowMs: Date.now() });
   try { const impDoc = (await _impRead(business)).doc, now = Date.now(); if (home_card.plan) home_card.plan.proposals = _impAnnotate(home_card.plan, impDoc, now);
     home_card.improvements = { rev: impDoc.rev, summary: _impSummary(impDoc, now), items: impDoc.items.slice(0, 25), evaluations: Object.fromEntries(impDoc.items.filter((x) => x.status !== 'completed' && x.status !== 'abandoned').map((x) => [x.id, _gpEval(x, _gpMetrics(home_card), now)])) }; } catch (_) { home_card.improvements = { error: 'unavailable' }; }
+  try {   // G5 — the content strategy scorecard: stored production features + the latest collected per-video figures; advisory; a failure here never breaks the card
+    const fraw = await sbGet('app_settings?key=eq.' + _csKey(business) + '&select=value&limit=1'); const fd = _csSanitize(Array.isArray(fraw) && fraw[0] ? fraw[0].value : null, business);
+    const w = doc && doc.videos && doc.videos.from && doc.videos.to ? { from: doc.videos.from, to: doc.videos.to } : null;
+    const adv = w && doc.days ? Object.entries(doc.days).filter(([k]) => k >= w.from && k <= w.to).reduce((a2, [, v]) => a2 + (v && Number.isFinite(v.paid_views) ? v.paid_views : 0), 0) : null;
+    const advKnown = w && doc.days && Object.entries(doc.days).some(([k, v]) => k >= w.from && k <= w.to && v && Number.isFinite(v.paid_views));
+    const sRows = doc && doc.videos && Array.isArray(doc.videos.rows) ? doc.videos.rows.map((v) => ({ id: v.id, views: v.views, avd: v.avg_view_duration_sec, pct: v.avg_view_pct, subs_gained: v.subs_gained, minutes: v.minutes, paid_views: Number.isFinite(v.paid_views) ? v.paid_views : null })) : [];
+    home_card.strategy = w ? _csStrategy({ business, name: _gaBiz[business].name || business, featureDoc: fd, catalog, videoRows: sRows, window: w, advertising: advKnown ? adv : null, longOnly: !!(home_card.policy && home_card.policy.long_only), card: home_card, nowMs: Date.now() }) : { business, state: 'not_ready', reason: 'No collected per-video window is available yet.' };
+  } catch (_) { home_card.strategy = { business, state: 'not_ready', reason: 'The content assessment could not be built.' }; }
   return home_card;
+}
+// ── G5 content strategy: link published videos to production packages (exact YouTube video id only) and store the compact features per business (app_settings key growth_content_<business>).
+// DERIVED, advisory data: written only here, never read by any production workflow. Reads packages (this business's engine only) and the channel catalog; writes ONLY its own key.
+async function _growthContentRefresh(business) {
+  if (!_GROWTH_BUSINESSES.includes(business)) throw new Error('unknown_business');
+  const id = _gaBiz[business].channelId, eng = _csEngine[business];
+  const cg = await sbGet('youtube_videos?select=video_id,title,published_at,view_count,like_count,comment_count,synced_at&channel_id=eq.' + encodeURIComponent(id) + '&limit=1000'); const catalog = Array.isArray(cg) ? cg : [];
+  const pk = []; for (let off = 0; off < 1000; off += 50) { const r = await sbGet('packages?select=id,engine,youtube_video_id,full_package&engine=eq.' + encodeURIComponent(eng) + '&order=id.asc&limit=50&offset=' + off); if (!Array.isArray(r) || !r.length) break; pk.push(...r); if (r.length < 50) break; }
+  const doc = _csBuildDoc({ business, packages: pk, catalog, nowIso: new Date().toISOString() }); const value = JSON.stringify(doc);
+  if (value.length > 120000) throw new Error('content_document_too_large');
+  const key = _csKey(business), existing = await sbGet('app_settings?key=eq.' + key + '&select=key&limit=1');
+  if (Array.isArray(existing) && existing[0]) await sbPatch('app_settings', 'key=eq.' + key, { value, updated_at: new Date().toISOString() }); else await sbInsert('app_settings', { key, value, updated_at: new Date().toISOString() });
+  return { business, linked: doc.report.linked, catalog_videos: doc.report.catalog_videos, linked_pct: doc.report.linked_pct, conflicts: doc.report.conflicts.length, bytes: value.length };
+}
+// growth_content_refresh  POST, CEO session (or the daily cron after a collection). {business?} -> relink and store; reads only packages + catalog; writes only growth_content_<business>.
+async function growthContentRefresh(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const want = String((req.body || {}).business || ''); const list = want ? [want] : _GROWTH_BUSINESSES; if (!list.every((x) => _GROWTH_BUSINESSES.includes(x))) return res.status(400).json({ ok: false, error: 'unknown_business' });
+  try { const out = []; for (const b of list) out.push(await _growthContentRefresh(b)); return res.status(200).json({ ok: true, results: out }); } catch (e) { return res.status(500).json({ ok: false, error: 'content_refresh_failed' }); }
 }
 async function growthReport(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
@@ -21783,6 +21813,7 @@ export default async function handler(req, res) {
     if (action === 'growth_reach_status')        return await growthReachStatus(req, res); // C3 reach reports: status (CEO session; reads only)
     if (action === 'growth_reach_sync')          return await growthReachSync(req, res); // C3 reach reports: DRY RUN by default; live only with the growth_reach record + typed confirmation (CEO session)
     if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
+    if (action === 'growth_content_refresh')     return await growthContentRefresh(req, res); // G5 content strategy: relink videos to packages (CEO session; derived data only)
     if (action === 'growth_improvement_start')   return await growthImprovementStart(req, res); // improvement tracking (CEO session; records only)
     if (action === 'growth_improvement_update')  return await growthImprovementUpdate(req, res); // improvement tracking (CEO session; records only)
     if (action === 'decision_engine')            return await decisionEngine(req, res); // v13.58.1

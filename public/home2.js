@@ -103,6 +103,14 @@
       '.h2d-btns{display:flex;gap:8px;flex-wrap:wrap}.h2d .h2d-tt{unicode-bidi:plaintext;text-align:left}',
       '.h2d-sum{display:grid;gap:10px;grid-template-columns:repeat(4,minmax(0,1fr));margin:10px 0 8px}@media(max-width:900px){.h2d-sum{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.h2d-act>div{flex-direction:column;gap:2px;align-items:flex-start}.h2d-k{min-width:0}.h2d-sum{grid-template-columns:repeat(2,minmax(0,1fr))}.h2d-sum .h2d-st:first-child{grid-column:1/-1}}',
       '.h2d-st{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:9px 11px;min-width:0}.h2d-st .h2d-v{font-size:26px;line-height:1.1}.h2d-st .h2d-v small{font-size:11px;color:var(--dim);font-weight:600}.h2d-st .h2d-s{font-size:11px;color:#c3cde6;display:flex;flex-direction:column;gap:2px}',
+      '.h2s{display:grid;gap:12px;margin:10px 0 6px}.h2s-top{display:flex;gap:10px;flex-wrap:wrap}.h2s-top .h2d-st{flex:1 1 150px}.h2s-why{font-size:13px;color:#c3cde6;line-height:1.5}',
+      '.h2s-sec{font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--dim);font-family:"JetBrains Mono",monospace;text-transform:uppercase;margin:4px 0 4px}',
+      '.h2s-list{margin:0;padding:0;list-style:none;display:grid;gap:5px}.h2s-list li{font-size:13px;line-height:1.45;color:#e6ebf7;padding-left:16px;position:relative}.h2s-list li:before{content:"";position:absolute;left:2px;top:7px;width:7px;height:7px;border-radius:50%;background:var(--dim)}.h2s-list.ok li:before{background:#22c55e}.h2s-list.bad li:before{background:#ef4444}.h2s-list.sig li:before{background:#60a5fa}',
+      '.h2s-none{font-size:13px;color:var(--dim)}.h2s-grade{font-size:10px;font-family:"JetBrains Mono",monospace;color:var(--dim);margin-left:6px;white-space:nowrap}',
+      '.h2s-comp{display:grid;gap:4px}.h2s-row{display:grid;grid-template-columns:140px 150px minmax(0,1fr);gap:8px;align-items:baseline;font-size:13px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05)}@media(max-width:640px){.h2s-row{grid-template-columns:1fr;gap:2px}}',
+      '.h2s-chip{display:inline-block;border:1px solid;border-radius:999px;padding:1px 10px;font-size:11px;font-weight:700;white-space:nowrap}.h2s-r{color:var(--dim);font-size:12px;line-height:1.4}',
+      '.h2s-chg{margin:0;padding:0;list-style:none;display:grid;gap:8px;counter-reset:c}.h2s-chg li{counter-increment:c;border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:8px;padding:9px 12px;background:rgba(255,255,255,.02);font-size:13px;line-height:1.5}.h2s-chg li b{color:#fff}.h2s-tag{font-size:10px;font-family:"JetBrains Mono",monospace;letter-spacing:1px;text-transform:uppercase;color:var(--gold);margin-right:6px}.h2s-m{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-size:12px;color:#c3cde6}',
+      '.h2s-det{margin-top:10px}.h2s-det>summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--gold);padding:8px 0}',
       '.h2d-act{display:grid;gap:5px;margin:8px 0;padding:10px 12px;border:1px solid rgba(201,168,76,.35);border-left:3px solid var(--gold);border-radius:8px;background:rgba(201,168,76,.05)}.h2d-act>div{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:14px;color:#fff}.h2d-act b{font-weight:700}',
       '.h2d-k{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--gold);font-weight:800;min-width:92px;font-family:"JetBrains Mono",monospace}.h2d-adv{font-size:10px;color:var(--dim)}',
       '.h2d-obs{font-size:11px;color:#9aa4bd;line-height:1.45;margin:2px 0}.h2d-obs b{color:#c3cde6}.h2d-cav{font-size:11px;color:#fbbf24;margin:3px 0}',
@@ -474,6 +482,28 @@
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key]; if (!c || c.state !== 'ok') return '';
     return '<section class="h2dx" data-biz="' + key + '" aria-label="' + esc(nm) + ' diagnosis"><div class="h2d-h"><h3>' + esc(nm) + ' — diagnosis</h3></div>' + diagBlock(c) + improveBlock(c, key) + '</section>';
   }
+  var CS_COL = { working: '#22c55e', improve: '#f59e0b', not_working: '#ef4444', test: '#60a5fa', insufficient: '#9ca3af' };
+  function liStrip(items0, cls, none) { var items = items0 ? items0.slice(0, 3) : items0; var more = items0 && items0.length > 3 ? '<div class="h2s-r">+' + (items0.length - 3) + ' more in Detailed analytics</div>' : ''; return items && items.length ? '<ul class="h2s-list ' + cls + '">' + items.map(function (i) { return '<li dir="auto">' + esc(i.text) + (i.grade ? '<span class="h2s-grade">' + esc(i.grade) + (i.note ? ' · ' + esc(i.note) : '') + '</span>' : '') + '</li>'; }).join('') + '</ul>' + more : '<div class="h2s-none">' + esc(none) + '</div>'; }
+  function scoreBody(c, nm) {
+    var st = c.strategy, k = c.kpis, sp = c.split, f = c.freshness;
+    var tile = function (l, b, sub) { return '<div class="h2d-st"><div class="h2d-l">' + l + '</div><div class="h2d-v">' + b + '</div><div class="h2d-s">' + sub + '</div></div>'; };
+    var org = k.organic.value === null ? 'Not available' : n0(k.organic.value);
+    var orgSub = k.organic.comparable && k.organic.delta_pct !== null ? '<span class="h2d-d ' + (k.organic.delta_pct >= 0 ? 'up' : 'dn') + '">' + pct(k.organic.delta_pct) + '</span> vs previous 28 days' : '<span>no comparable previous period</span>';
+    var paid = sp.verifiable ? sp.paid_share_pct + '% <small>paid</small>' : 'Not available';
+    var sub = (k.subscribers.net_28d === null ? '—' : sgn(k.subscribers.net_28d)) + ' <small>net, 28 d</small>';
+    var top = '<div class="h2s-top">' + tile('Organic views · 28 d', org, orgSub) + tile('Advertising share', paid, sp.verifiable ? '<span>of the last 28 days\' views</span>' : '<span>' + esc(sp.note || '') + '</span>') + tile('Subscribers', sub, '<span>' + n0(k.subscribers.total) + ' total</span>') + '</div>';
+    if (!st || st.state !== 'ok') return top + '<div class="h2s-none">The content assessment is being prepared' + (st && st.reason ? ': ' + esc(st.reason) : '') + '.</div>';
+    var comps = '<div class="h2s-comp">' + st.components.map(function (x) { var col = CS_COL[x.key === undefined ? 'insufficient' : (x.word === 'Working' ? 'working' : x.word === 'Needs improvement' ? 'improve' : x.word === 'Not working' ? 'not_working' : x.word === 'Needs testing' ? 'test' : 'insufficient')]; return '<div class="h2s-row"><b>' + esc(x.label) + '</b><span><span class="h2s-chip" style="color:' + col + ';border-color:' + col + '55;background:' + col + '15">' + esc(x.word) + '</span></span><span class="h2s-r" dir="auto" title="' + esc(x.why) + '">' + esc(x.short || trunc(x.why, 90)) + '</span></div>'; }).join('') + '</div>';
+    var chg = st.changes && st.changes.length ? '<ol class="h2s-chg">' + st.changes.map(function (r) { return '<li><span class="h2s-tag">' + (r.kind === 'correction' ? 'Confirmed correction' : 'Proposed experiment') + '</span><b dir="auto">' + esc(r.change) + '</b><div class="h2s-r" dir="auto" style="margin-top:3px">Why: ' + esc(r.why_short || trunc(r.why, 150)) + '</div><div class="h2s-m">' + (r.baseline ? '<span>Baseline <b>' + esc(String(r.baseline.value)) + '</b> ' + esc(r.baseline.metric) + '</span>' : '') + (r.target ? '<span>Target <b>' + esc(String(r.target.value)) + '</b></span>' : '') + '<span>Owner <b>' + esc(r.owner || r.department) + '</b></span><span>Review <b>' + esc(dShort(r.review_by)) + '</b></span></div></li>'; }).join('') + '</ol>' : '<div class="h2s-none">No change is recommended on the evidence available.</div>';
+    var pv = st.previous || {}; var prevHtml = (pv.done && pv.done.length) ? '<ul class="h2s-list">' + pv.done.map(function (d) { return '<li dir="auto">' + esc(d.title) + ' — <b>' + esc(d.outcome) + '</b>' + (d.lesson ? '. ' + esc(d.lesson) : '') + '</li>'; }).join('') + '</ul>' : '<div class="h2s-none">No approved change has been completed and measured yet.</div>';
+    var act = pv.active && pv.active.length ? '<div class="h2s-r" style="margin-top:4px">In progress: ' + pv.active.map(function (a) { return esc(a.title) + ' (review ' + esc(dShort(a.review_by)) + ')'; }).join('; ') + '</div>' : '';
+    return top + '<div class="h2s-why" dir="auto">' + esc(trunc(st.status.reason || '', 150)) + '</div>' +
+      '<div><div class="h2s-sec">What is working</div>' + liStrip(st.working, 'ok', 'Nothing can be confirmed as working yet.') + (st.early_signals && st.early_signals.length ? '<div class="h2s-sec" style="margin-top:8px">Early signals (not yet proof)</div>' + liStrip(st.early_signals, 'sig', '') : '') + '</div>' +
+      '<div><div class="h2s-sec">What is not working</div>' + liStrip(st.not_working, 'bad', 'Nothing is confirmed as not working.') + '</div>' +
+      '<div><div class="h2s-sec">Content strategy</div>' + comps + (st.policy ? '<div class="h2s-r" style="margin-top:4px">' + esc(st.policy) + '</div>' : '') + '</div>' +
+      '<div><div class="h2s-sec">What needs to change</div>' + chg + '</div>' +
+      '<div><div class="h2s-sec">Results of previous improvements</div>' + prevHtml + act + '</div>';
+  }
   function dashCard(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key];
     var head = function (pill, sub) { return '<div class="h2d-h"><h3>' + esc(nm) + '</h3>' + (pill || '') + '</div>' + (sub || ''); };
@@ -531,12 +561,14 @@
       '<div class="h2d-meta"><span>Data through <b>' + esc(dShort(f.data_through)) + '</b></span><span>Last successful sync <b>' + esc(dTime(f.last_ok_sync)) + '</b></span>' + staleFlag + '<span>Monetization: ' + monLine + '</span><span>Revenue and expenses: not available</span></div>';
     var more = '<details class="h2d-more"><summary>Detailed view — trend, content, retention, all recommendations, data notes</summary>' + fresh + why + stale + '<div class="h2d-tiles">' + t1 + t2 + t3 + t4 + '</div>' +
       '<div class="h2d-sec">Weekly views · <i style="color:#34d399">■</i> organic <i style="color:#f59e0b">■</i> paid</div>' + spark(c.trend) + cont + ret + more2 + money + recs + ops + lim + '</details>';
-    return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(pill, '') + summary + btns + more + '</section>';
+    var sc = c.strategy ? c.strategy.status : null;
+    var spill = sc ? (function () { var col = { growing: '#22c55e', declining: '#ef4444', flat: '#eab308', unknown: '#9ca3af', reset: '#9ca3af' }[sc.code] || '#9ca3af'; return '<span class="h2d-pill" style="background:' + col + '22;border-color:' + col + ';color:' + col + '">' + (PILL[sc.code] || PILL.unknown)[1] + ' ' + esc(sc.word.toUpperCase()) + '</span>'; })() : pill;
+    var detail = '<details class="h2d-more h2s-det"' + (H.det && H.det[key] ? ' open' : '') + '><summary>Detailed analytics — evidence, diagnosis, data quality and engineering notes</summary>' + summary + more.replace(/^<details class="h2d-more">/, '<details class="h2d-more" open>').replace(/<summary>[^<]*<\/summary>/, '<summary>Trend, content, retention and data notes</summary>') + diagSection(key) + (c.strategy && c.strategy.state === 'ok' ? '<div class="h2d-sec">How the content assessment was made</div><div class="h2d-sm">' + esc(c.strategy.linkage.note || '') + ' Not recorded for any video: ' + c.strategy.unknown.map(esc).join('; ') + '.</div>' : '') + '</details>';
+    return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(spill, '') + '<div class="h2s">' + scoreBody(c, nm) + '</div>' + btns + detail + '</section>';
   }
   function homePage() {
     return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
-      '<div class="h2-lab">Your businesses — growth, content and next actions</div><div class="h2d-stack">' + dashCard('silk_road_voices') + dashCard('srv_studio') + '</div>' +
-      '<div class="h2-lab">Diagnosis — what is wrong, the evidence, and what to test next</div><div class="h2d-stack">' + diagSection('silk_road_voices') + diagSection('srv_studio') + '</div>' +
+      '<div class="h2-lab">Your businesses — what is working, what is not, and what to change</div><div class="h2d-stack">' + dashCard('silk_road_voices') + dashCard('srv_studio') + '</div>' +
       '<div class="h2-lab">Other businesses</div><div class="h2-grid c2">' + investCard() + circleCard() + '</div>' +
       '<div class="h2-lab">Goals — optional targets</div>' + goalsCard() +
       '<div class="h2-lab">Finance and analytics</div>' + moneyStrip() + '</div>';
@@ -663,6 +695,7 @@
   document.addEventListener('keydown', function (ev) { if (ev.key !== 'Enter' && ev.key !== ' ') return; var t = ev.target && ev.target.closest && ev.target.closest('[data-h2][role="link"]'); if (t && t.tagName !== 'BUTTON') activate(ev, t); });
   var app = $('appScreen');
   if (app && window.MutationObserver) new MutationObserver(function () { if (!app.classList.contains('show') || !authorized()) { if ($('h2Side') || app.classList.contains('h2-on')) scrub(); } }).observe(app, { attributes: true, attributeFilter: ['class'] });
+  document.addEventListener('toggle', function (e) { var t = e.target; if (t && t.classList && t.classList.contains('h2s-det')) { var sec = t.closest ? t.closest('section.h2d') : null; if (sec && sec.dataset.biz) { H.det = H.det || {}; H.det[sec.dataset.biz] = t.open; } } }, true);   // keep the Detailed analytics area open across repaints (an action inside it must not collapse it)
   window.Home2 = { active: active, go: go };
   style();
   if (active() && $('appScreen') && $('appScreen').classList.contains('show')) window.renderTab('home');
