@@ -111,6 +111,21 @@
       '.h2s-chip{display:inline-block;border:1px solid;border-radius:999px;padding:1px 10px;font-size:11px;font-weight:700;white-space:nowrap}.h2s-r{color:var(--dim);font-size:12px;line-height:1.4}',
       '.h2s-chg{margin:0;padding:0;list-style:none;display:grid;gap:8px;counter-reset:c}.h2s-chg li{counter-increment:c;border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:8px;padding:9px 12px;background:rgba(255,255,255,.02);font-size:13px;line-height:1.5}.h2s-chg li b{color:#fff}.h2s-tag{font-size:10px;font-family:"JetBrains Mono",monospace;letter-spacing:1px;text-transform:uppercase;color:var(--gold);margin-right:6px}.h2s-m{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;font-size:12px;color:#c3cde6}',
       '.h2s-det{margin-top:10px}.h2s-det>summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--gold);padding:8px 0}',
+      '.h2f-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-top:8px}@media(min-width:900px){.h2f-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}}',
+      '.h2f{border:1px solid var(--border);border-radius:var(--radius);padding:14px;background:rgba(255,255,255,.025);min-width:0;font-family:"Syne",sans-serif;color:var(--text);overflow-wrap:anywhere}.h2f *{box-sizing:border-box}',
+      '.h2f-h{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.h2f-h h3{margin:0;font-size:18px;font-weight:800}',
+      '.h2f-pill{border:1px solid;border-radius:999px;padding:3px 11px;font-size:12px;font-weight:800;white-space:nowrap}',
+      '.h2f-k{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:10px 0 4px}',
+      '.h2f-t{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:8px 8px 7px;min-width:0}.h2f-l{font-size:10.5px;line-height:1.25;color:var(--dim);min-height:26px}.h2f-v{font-size:20px;font-weight:800;line-height:1.15;margin-top:2px}.h2f-v small{font-size:10px;font-weight:600;color:var(--dim);margin-left:3px}.h2f-n{font-size:10.5px;line-height:1.3;margin-top:2px;color:#c3cde6}.h2f-n.up{color:#22c55e}.h2f-n.down{color:#ef4444}',
+      '.h2f-per{font-size:11px;color:var(--dim);margin:0 0 4px}',
+      '.h2f-s{font-size:11px;font-weight:700;letter-spacing:1.1px;color:var(--dim);font-family:"JetBrains Mono",monospace;text-transform:uppercase;margin:12px 0 5px}',
+      '.h2f-ul{margin:0;padding:0;list-style:none;display:grid;gap:5px}.h2f-ul li{font-size:14px;line-height:1.4;padding-left:15px;position:relative}.h2f-ul li:before{content:"";position:absolute;left:1px;top:7px;width:7px;height:7px;border-radius:50%;background:var(--dim)}.h2f-ul.ok li:before{background:#22c55e}.h2f-ul.bad li:before{background:#ef4444}',
+      '.h2f-r{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:34px;border-bottom:1px solid rgba(255,255,255,.05);font-size:14px}.h2f-r:last-child{border-bottom:0}.h2f-c{border:1px solid;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;white-space:nowrap}',
+      '.h2f-ol{margin:0;padding:0;list-style:none;display:grid;gap:7px}.h2f-ol li{font-size:14px;line-height:1.4;border-left:3px solid var(--gold);padding:2px 0 2px 10px}.h2f-ol b{color:var(--gold)}.h2f-keep{font-size:12px;color:var(--dim);margin-top:6px}',
+      '.h2f-d{margin-top:12px;padding:10px 12px;border:1px solid rgba(201,168,76,.4);border-radius:10px;background:rgba(201,168,76,.06);font-size:14px;line-height:1.4}.h2f-d.none{border-color:var(--border);background:transparent;color:var(--dim)}.h2f-b{margin-top:8px;min-height:44px;width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--gold);background:rgba(201,168,76,.18);color:var(--gold);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit}.h2f-b:disabled{opacity:.5}',
+      '.h2f-f{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--dim)}.h2f-f.stale span{color:#f59e0b}.h2f-a{min-height:44px;display:inline-flex;align-items:center;padding:0 4px;color:var(--gold);font-weight:700;font-size:13px;text-decoration:none;cursor:pointer}',
+      '.h2f-msg{font-size:12px;color:#c3cde6;margin-top:6px}.h2f-ex{font-size:14px;color:var(--dim)}',
+      '.h2s-tg{margin-top:8px}.h2s-tg>summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--gold);padding:8px 0}.h2s-tgb{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.h2s-tgb>.h2s-r,.h2s-tgb>.h2f-b,.h2s-tgb>.h2s-tgm{grid-column:1/-1}.h2s-tl{display:grid;gap:3px;font-size:11px;color:var(--dim)}.h2s-tl select,.h2s-tl input{min-height:40px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);padding:0 8px;font-size:14px;font-family:inherit;min-width:0;width:100%}',
       '.h2d-act{display:grid;gap:5px;margin:8px 0;padding:10px 12px;border:1px solid rgba(201,168,76,.35);border-left:3px solid var(--gold);border-radius:8px;background:rgba(201,168,76,.05)}.h2d-act>div{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:14px;color:#fff}.h2d-act b{font-weight:700}',
       '.h2d-k{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--gold);font-weight:800;min-width:92px;font-family:"JetBrains Mono",monospace}.h2d-adv{font-size:10px;color:var(--dim)}',
       '.h2d-obs{font-size:11px;color:#9aa4bd;line-height:1.45;margin:2px 0}.h2d-obs b{color:#c3cde6}.h2d-cav{font-size:11px;color:#fbbf24;margin:3px 0}',
@@ -461,6 +476,8 @@
     return '<div class="h2d-imp" data-biz="' + key + '"><div class="h2d-dxh"><b>Recommended improvements</b><span class="h2d-sm">advisory — nothing changes unless you decide</span></div>' + goal + props +
       '<div class="h2d-sec">Improvement history and tracking</div>' + last + '<div class="h2d-imsg" role="status">' + esc(H.msg && H.msgBiz === key ? H.msg : '') + '</div>' + list + '</div>';
   }
+  // Repaint whatever the CEO is looking at: the Home cards, or the growth panel inside a business's Analytics tab.
+  function repaint() { if (!active()) return; var pn = $('h2AnPanel'); if (pn && S.biz) { pn.outerHTML = analyticsPanel(S.biz); return; } if (S.cur === 'home') paintMain(homePage()); }
   function impAction(t) {
     var biz = t.getAttribute('data-biz'), act = t.getAttribute('data-imp-act'), id = t.getAttribute('data-id'), key = t.getAttribute('data-key'); var box = t.closest('.h2d-it'); var f = function (n) { var e = box && box.querySelector('[data-f="' + n + '"]'); return e ? e.value : ''; };
     var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; }
@@ -471,16 +488,36 @@
       else if (act === 'complete') { patch.status = 'completed'; if (f('outcome') || f('note')) patch.result = { outcome: f('outcome') || undefined, note: f('note') || undefined }; if (f('lessons')) patch.lessons = f('lessons'); if (f('next_action')) patch.next_action = f('next_action'); }
       else if (act === 'notes') { patch.lessons = f('lessons'); patch.next_action = f('next_action'); }
       body = { business: HB_KEY[biz], id: id, patch: patch, base_rev: rev }; }
-    if (!tok) { H.msg = 'Sign in again to record this.'; H.msgBiz = biz; paintMain(homePage()); return; }
+    if (!tok) { H.msg = 'Sign in again to record this.'; H.msgBiz = biz; repaint(); return; }
     t.disabled = true;
     fetch('/api/ops?action=' + req, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MMM-CEO-Session': tok }, body: JSON.stringify(body) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (x) { H.msg = x.ok ? 'Saved.' : ('Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); H.msgBiz = biz; H.at = 0; H.cards = H.cards; loadHome(function () { if (S.cur === 'home' && active()) paintMain(homePage()); }); })
-      .catch(function () { H.msg = 'Not saved: network error.'; H.msgBiz = biz; t.disabled = false; paintMain(homePage()); });
+      .then(function (x) { H.msg = x.ok ? 'Saved.' : ('Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); H.msgBiz = biz; H.at = 0; H.cards = H.cards; loadHome(repaint); })
+      .catch(function () { H.msg = 'Not saved: network error.'; H.msgBiz = biz; t.disabled = false; repaint(); });
   }
   function diagSection(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key]; if (!c || c.state !== 'ok') return '';
     return '<section class="h2dx" data-biz="' + key + '" aria-label="' + esc(nm) + ' diagnosis"><div class="h2d-h"><h3>' + esc(nm) + ' — diagnosis</h3></div>' + diagBlock(c) + improveBlock(c, key) + '</section>';
+  }
+  function tagForm(key, st) {
+    var tg = st.taggable || []; if (!tg.length || !st.tag_fields) return '';
+    var opts = tg.map(function (v) { return '<option value="' + esc(v.id) + '">' + esc(trunc(v.title, 48)) + (v.pub ? ' · ' + esc(v.pub) : '') + (v.tagged ? ' ✓' : '') + '</option>'; }).join('');
+    var sel = function (k, f) { return '<label class="h2s-tl">' + esc(f.label) + '<select data-tg="' + k + '"><option value="">—</option>' + f.options.map(function (o) { return '<option value="' + esc(o) + '">' + esc(o.replace(/_/g, ' ')) + '</option>'; }).join('') + '</select></label>'; };
+    var tf = st.tag_fields, fields = Object.keys(tf).filter(function (k) { return tf[k].options; }).map(function (k) { return sel(k, tf[k]); }).join('');
+    var txt = Object.keys(tf).filter(function (k) { return !tf[k].options; }).map(function (k) { return '<label class="h2s-tl">' + esc(tf[k].label) + '<input type="text" maxlength="40" data-tg="' + k + '" autocomplete="off"></label>'; }).join('');
+    return '<details class="h2s-tg"><summary>Record production details (opening, motion, thumbnail, genre, vocal style)</summary><div class="h2s-tgb" data-biz="' + key + '"><div class="h2s-r">Tag a recent Long so the content assessment can compare it. Nothing in production changes.</div><label class="h2s-tl">Video<select data-tg="video_id">' + opts + '</select></label>' + fields + txt + '<button type="button" class="h2f-b" data-tag-save="' + key + '">Save details</button><div class="h2f-msg h2s-tgm" role="status"></div></div></details>';
+  }
+  function saveTags(btn) {
+    var box = btn.closest('.h2s-tgb'), biz = btn.getAttribute('data-tag-save'); var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; }
+    var msg = box.querySelector('.h2s-tgm'); var say = function (t) { if (msg) msg.textContent = t; };
+    if (!tok) { say('Sign in again to save.'); return; }
+    var tags = {}, vid = ''; [].slice.call(box.querySelectorAll('[data-tg]')).forEach(function (e) { var k = e.getAttribute('data-tg'), v = String(e.value || '').trim(); if (k === 'video_id') vid = v; else if (v) tags[k] = v; });
+    if (!vid || !Object.keys(tags).length) { say('Choose a video and at least one detail.'); return; }
+    btn.disabled = true;
+    fetch('/api/ops?action=growth_tags_set', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MMM-CEO-Session': tok }, body: JSON.stringify({ business: biz, video_id: vid, tags: tags }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) { btn.disabled = false; say(x.ok ? 'Saved. The assessment updates with the next refresh.' : 'Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); if (x.ok) { H.at = 0; } })
+      .catch(function () { btn.disabled = false; say('Not saved: network error.'); });
   }
   var CS_COL = { working: '#22c55e', improve: '#f59e0b', not_working: '#ef4444', test: '#60a5fa', insufficient: '#9ca3af' };
   function liStrip(items0, cls, none) { var items = items0 ? items0.slice(0, 3) : items0; var more = items0 && items0.length > 3 ? '<div class="h2s-r">+' + (items0.length - 3) + ' more in Detailed analytics</div>' : ''; return items && items.length ? '<ul class="h2s-list ' + cls + '">' + items.map(function (i) { return '<li dir="auto">' + esc(i.text) + (i.grade ? '<span class="h2s-grade">' + esc(i.grade) + (i.note ? ' · ' + esc(i.note) : '') + '</span>' : '') + '</li>'; }).join('') + '</ul>' + more : '<div class="h2s-none">' + esc(none) + '</div>'; }
@@ -502,9 +539,9 @@
       '<div><div class="h2s-sec">What is not working</div>' + liStrip(st.not_working, 'bad', 'Nothing is confirmed as not working.') + '</div>' +
       '<div><div class="h2s-sec">Content strategy</div>' + comps + (st.policy ? '<div class="h2s-r" style="margin-top:4px">' + esc(st.policy) + '</div>' : '') + '</div>' +
       '<div><div class="h2s-sec">What needs to change</div>' + chg + '</div>' +
-      '<div><div class="h2s-sec">Results of previous improvements</div>' + prevHtml + act + '</div>';
+      '<div><div class="h2s-sec">Results of previous improvements</div>' + prevHtml + act + '</div>' + tagForm(c.business || '', st);
   }
-  function dashCard(key) {
+  function detailCard(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key];
     var head = function (pill, sub) { return '<div class="h2d-h"><h3>' + esc(nm) + '</h3>' + (pill || '') + '</div>' + (sub || ''); };
     if (!c) return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head('', '<div class="h2d-na">' + (H.err ? 'The analytics report could not be loaded (' + esc(H.err) + '). The business pages below still work.' : 'Loading analytics…') + '</div>') + navBtns(engine) + '</section>';
@@ -564,14 +601,49 @@
     var sc = c.strategy ? c.strategy.status : null;
     var spill = sc ? (function () { var col = { growing: '#22c55e', declining: '#ef4444', flat: '#eab308', unknown: '#9ca3af', reset: '#9ca3af' }[sc.code] || '#9ca3af'; return '<span class="h2d-pill" style="background:' + col + '22;border-color:' + col + ';color:' + col + '">' + (PILL[sc.code] || PILL.unknown)[1] + ' ' + esc(sc.word.toUpperCase()) + '</span>'; })() : pill;
     var detail = '<details class="h2d-more h2s-det"' + (H.det && H.det[key] ? ' open' : '') + '><summary>Detailed analytics — evidence, diagnosis, data quality and engineering notes</summary>' + summary + more.replace(/^<details class="h2d-more">/, '<details class="h2d-more" open>').replace(/<summary>[^<]*<\/summary>/, '<summary>Trend, content, retention and data notes</summary>') + diagSection(key) + (c.strategy && c.strategy.state === 'ok' ? '<div class="h2d-sec">How the content assessment was made</div><div class="h2d-sm">' + esc(c.strategy.linkage.note || '') + ' Not recorded for any video: ' + c.strategy.unknown.map(esc).join('; ') + '.</div>' : '') + '</details>';
-    return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(spill, '') + '<div class="h2s">' + scoreBody(c, nm) + '</div>' + btns + detail + '</section>';
+    return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(spill, '') + '<div class="h2s">' + scoreBody(c, nm) + '</div>' + detail + '</section>';
+  }
+  var CW = { working: '#22c55e', improve: '#f59e0b', not_working: '#ef4444', test: '#60a5fa', insufficient: '#9ca3af' };
+  var STCOL = { growing: '#22c55e', stable: '#eab308', declining: '#ef4444', early: '#9ca3af' }, STAR = { growing: '▲', stable: '■', declining: '▼', early: '◆' };
+  function finalCard(key) {
+    var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key];
+    var card = function (inner) { return '<section class="h2f" data-biz="' + key + '" aria-label="' + esc(nm) + '"><div class="h2f-h"><h3>' + esc(nm) + '</h3>' + (inner.pill || '') + '</div>' + inner.body + '</section>'; };
+    if (!c) return card({ body: '<div class="h2f-ex">' + (H.err ? 'The report could not be loaded (' + esc(H.err) + ').' : 'Loading…') + '</div><div class="h2f-f"><span></span><a class="h2f-a" role="link" tabindex="0" data-h2="ws:' + esc(engine) + ':analytics">Detailed analytics →</a></div>' });
+    var v = c.view; if (!v || v.state !== 'ok') return card({ body: '<div class="h2f-ex">' + esc((v && v.reason) || c.reason || 'No analytics are available for this business yet.') + '</div><div class="h2f-f"><span></span><a class="h2f-a" role="link" tabindex="0" data-h2="ws:' + esc(engine) + ':analytics">Detailed analytics →</a></div>' });
+    var col = STCOL[v.status.code] || '#9ca3af'; var pill = '<span class="h2f-pill" style="color:' + col + ';border-color:' + col + ';background:' + col + '22">' + STAR[v.status.code] + ' ' + esc(v.status.word) + '</span>';
+    var tiles = v.kpis.map(function (k) { var cl = k.trend === 'up' ? 'up' : k.trend === 'down' ? 'down' : ''; var ar = k.trend === 'up' ? '▲ ' : k.trend === 'down' ? '▼ ' : k.trend === 'flat' ? '■ ' : ''; return '<div class="h2f-t"><div class="h2f-l">' + esc(k.label) + '</div><div class="h2f-v">' + esc(k.value) + '<small>' + esc(k.unit) + '</small></div><div class="h2f-n ' + cl + '">' + ar + esc(k.note) + '</div></div>'; }).join('');
+    var li = function (a, cls) { return '<ul class="h2f-ul ' + cls + '">' + a.map(function (t) { return '<li dir="auto">' + esc(t) + '</li>'; }).join('') + '</ul>'; };
+    var strat = v.assessment === 'ok' ? v.strategy.map(function (x) { var cc = CW[x.status] || '#9ca3af'; return '<div class="h2f-r"><span>' + esc(x.label) + '</span><span class="h2f-c" style="color:' + cc + ';border-color:' + cc + '66;background:' + cc + '18">' + esc(x.word) + '</span></div>'; }).join('') : '<div class="h2f-ex">The content assessment is being prepared.</div>';
+    var chg = v.changes && v.changes.length ? '<ol class="h2f-ol">' + v.changes.map(function (x) { return '<li dir="auto"><b>' + esc(x.verb) + ':</b> ' + esc(x.text) + '</li>'; }).join('') + '</ol>' + (v.keep ? '<div class="h2f-keep">' + esc(v.keep) + '</div>' : '') : '<div class="h2f-ex">No change is recommended on the evidence available.</div>';
+    var dec = v.decision && v.decision.needed ? '<div class="h2f-d"><div dir="auto">' + esc(v.decision.text) + '</div><button type="button" class="h2f-b" data-dec="' + esc(v.decision.mode) + '" data-biz="' + key + '" data-key="' + esc(v.decision.key || '') + '" data-id="' + esc(v.decision.id || '') + '">Approve</button></div>' : '<div class="h2f-d none">No decision needed.</div>';
+    var fr = v.freshness, fresh = fr.data_through ? 'Data through ' + esc(dShort(fr.data_through)) + (fr.age_days !== null && fr.age_days >= 2 ? ' · ' + fr.age_days + ' days old' : '') : 'No data yet';
+    var msg = H.msg && H.msgBiz === key ? '<div class="h2f-msg" role="status">' + esc(H.msg) + '</div>' : '';
+    return card({ pill: pill, body: '<div class="h2f-k">' + tiles + '</div><div class="h2f-per">Last 28 days</div>' +
+      '<div class="h2f-s">What is working</div>' + li(v.working, 'ok') + '<div class="h2f-s">What is not working</div>' + li(v.not_working, 'bad') +
+      '<div class="h2f-s">Content strategy</div>' + strat + '<div class="h2f-s">What needs to change</div>' + chg + dec + msg +
+      '<div class="h2f-f' + (fr.stale ? ' stale' : '') + '"><span>' + fresh + '</span><a class="h2f-a" role="link" tabindex="0" data-h2="ws:' + esc(engine) + ':analytics">Detailed analytics →</a></div>' });
+  }
+  function decide(t) {
+    var biz = t.getAttribute('data-biz'), mode = t.getAttribute('data-dec'), key = t.getAttribute('data-key'), id = t.getAttribute('data-id');
+    var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; }
+    var done = function (m) { H.msg = m; H.msgBiz = biz; H.at = 0; loadHome(repaint); repaint(); };
+    if (!tok) { done('Sign in again to approve.'); return; }
+    t.disabled = true;
+    var post = function (action, body) { return fetch('/api/ops?action=' + action, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MMM-CEO-Session': tok }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); }); };
+    var approve = function (itemId, rev) { return post('growth_improvement_update', { business: biz, id: itemId, patch: { approval: { status: 'approved' } }, base_rev: rev }); };
+    var run = mode === 'approve_new' ? post('growth_improvement_start', { business: biz, key: key }).then(function (x) { if (!x.ok) return x; return approve(x.j.item.id, x.j.rev); }) : approve(id, (H.cards && H.cards[biz] && H.cards[biz].improvements) ? H.cards[biz].improvements.rev : undefined);
+    run.then(function (x) { done(x.ok ? 'Approved. The test is now tracked in Analytics.' : 'Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); }).catch(function () { done('Not saved: network error.'); });
+  }
+  function keyOfEngine(engine) { return Object.keys(HBIZ).filter(function (k) { return HBIZ[k] === engine; })[0] || null; }
+  // The full growth intelligence (scorecard detail, diagnosis, improvement tracking, data notes) lives in the business's Analytics tab, not on the homepage.
+  function analyticsPanel(engine) {
+    var key = keyOfEngine(engine); if (!key) return '';
+    var c = H.cards && H.cards[key];
+    var inner = c ? detailCard(key).replace(/<details class="h2d-more h2s-det"( open)?/, '<details class="h2d-more h2s-det" open') : '<div class="h2d-na">' + (H.err ? 'The growth report could not be loaded (' + esc(H.err) + ').' : 'Loading the growth analytics…') + '</div>';
+    return '<div class="h2an" id="h2AnPanel" data-biz="' + key + '"><div class="h2-lab">Growth intelligence — detail</div>' + inner + '</div>';
   }
   function homePage() {
-    return '<div class="h2-wrap"><div class="h2-title">Home</div>' +
-      '<div class="h2-lab">Your businesses — what is working, what is not, and what to change</div><div class="h2d-stack">' + dashCard('silk_road_voices') + dashCard('srv_studio') + '</div>' +
-      '<div class="h2-lab">Other businesses</div><div class="h2-grid c2">' + investCard() + circleCard() + '</div>' +
-      '<div class="h2-lab">Goals — optional targets</div>' + goalsCard() +
-      '<div class="h2-lab">Finance and analytics</div>' + moneyStrip() + '</div>';
+    return '<div class="h2-wrap"><div class="h2-title">Home</div><div class="h2-lab">Your businesses</div><div class="h2f-grid">' + finalCard('silk_road_voices') + finalCard('srv_studio') + '</div></div>';
   }
   function overviewPage(engine) {
     var i = bizIndex(engine), f = facts(i), n = engine;
@@ -648,6 +720,7 @@
     var r = _renderTab.apply(this, [tab].concat([].slice.call(arguments, 1)));
     if (S.biz && (tab === 'tasks' || tab === 'packages' || tab === 'analytics')) {
       var c = $('mainContent');
+      if (c && tab === 'analytics') { c.insertAdjacentHTML('afterbegin', analyticsPanel(S.biz)); if (!(H.cards && H.cards[keyOfEngine(S.biz)])) loadHome(function () { var pn = $('h2AnPanel'); if (pn && S.biz && active()) pn.outerHTML = analyticsPanel(S.biz); }); }
       if (c) { c.insertAdjacentHTML('afterbegin', wsHeader(S.biz, tab === 'tasks' ? 'production' : tab)); S.wsTab = tab === 'tasks' ? 'production' : tab; }
       if (tab === 'tasks') scopeTasks(S.biz); else if (tab === 'packages') scopePackages();
     }
@@ -691,12 +764,12 @@
     if (ev) ev.preventDefault();
     go(id);
   }
-  document.addEventListener('click', function (ev) { var ia = ev.target && ev.target.closest && ev.target.closest('[data-imp-act]'); if (ia) { ev.preventDefault(); impAction(ia); return; } activate(ev, ev.target && ev.target.closest && ev.target.closest('[data-h2]')); });
+  document.addEventListener('click', function (ev) { var tsv = ev.target && ev.target.closest && ev.target.closest('[data-tag-save]'); if (tsv) { ev.preventDefault(); saveTags(tsv); return; } var dc = ev.target && ev.target.closest && ev.target.closest('[data-dec]'); if (dc) { ev.preventDefault(); decide(dc); return; } var ia = ev.target && ev.target.closest && ev.target.closest('[data-imp-act]'); if (ia) { ev.preventDefault(); impAction(ia); return; } activate(ev, ev.target && ev.target.closest && ev.target.closest('[data-h2]')); });
   document.addEventListener('keydown', function (ev) { if (ev.key !== 'Enter' && ev.key !== ' ') return; var t = ev.target && ev.target.closest && ev.target.closest('[data-h2][role="link"]'); if (t && t.tagName !== 'BUTTON') activate(ev, t); });
   var app = $('appScreen');
   if (app && window.MutationObserver) new MutationObserver(function () { if (!app.classList.contains('show') || !authorized()) { if ($('h2Side') || app.classList.contains('h2-on')) scrub(); } }).observe(app, { attributes: true, attributeFilter: ['class'] });
   document.addEventListener('toggle', function (e) { var t = e.target; if (t && t.classList && t.classList.contains('h2s-det')) { var sec = t.closest ? t.closest('section.h2d') : null; if (sec && sec.dataset.biz) { H.det = H.det || {}; H.det[sec.dataset.biz] = t.open; } } }, true);   // keep the Detailed analytics area open across repaints (an action inside it must not collapse it)
-  window.Home2 = { active: active, go: go };
+  window.Home2 = { active: active, go: go, panel: analyticsPanel };
   style();
   if (active() && $('appScreen') && $('appScreen').classList.contains('show')) window.renderTab('home');
 })();

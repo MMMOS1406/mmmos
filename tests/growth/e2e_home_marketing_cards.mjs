@@ -33,7 +33,7 @@ try {
   ok('Home: each business shows its CORRECTED window total (oracle), not the legacy all-rows sum', cA.kv[vKey(cA.kv)] === L(sumV(dbF)) && cB.kv[vKey(cB.kv)] === L(sumV(dbS)), [cA.kv, sumV(dbF), sumV(dbS)]);
   ok('Home: the legacy sums appear nowhere on the page', !home.all.includes(L(legacyV(dbF))) && !home.all.includes(L(legacyV(dbS))), [legacyV(dbF), legacyV(dbS)]);
   ok('Home: subscribers gained are the same-window attributed totals (labeled "same window")', cA.kv[sKey(cA.kv)] === '+' + L(sumS(dbF)) && cB.kv[sKey(cB.kv)] === '+' + L(sumS(dbS)) && /same window/.test(sKey(cA.kv)), [cA.kv, sumS(dbF), sumS(dbS)]);
-  ok('Home: the analytics strip is labeled as the latest window and carries the same numbers', /latest analytics window/.test(home.strip) && home.strip.includes(L(sumV(dbF))) && home.strip.includes(L(sumV(dbS))) && !/all synced videos/.test(home.strip), home.strip);
+  ok('Home: the old analytics strip is gone (FINAL CEO order: one compact card per business only); the legacy "all synced videos" wording appears nowhere', !/latest analytics window/.test(home.strip || '') && !/all synced videos/.test(home.all || ''), home.strip);
   ok('Home: neither card shows zero, a dash or "Could not load" for views', ![cA, cB].some((c) => /^(0|—)$/.test(c.kv[vKey(c.kv)]) || /Could not load/.test(JSON.stringify(c))));
   ok('Home: isolation — business A card never carries business B numbers and vice versa', !JSON.stringify(cA.kv).includes(L(sumV(dbS)) + '"') && !JSON.stringify(cB.kv).includes(L(sumV(dbF)) + '"'));
   // the workspace overview page of one business

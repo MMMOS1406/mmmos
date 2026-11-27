@@ -1,5 +1,5 @@
 // Content strategy intelligence (G5): linkage by exact id only, honest features (unknown stays null), evidence-gated statuses, recommendations, isolation. SYNTHETIC data only.
-import * as CS from '../../lib/contentStrategy.mjs';
+import * as CS from '../../lib/contentStrategy.mjs'; import * as I from '../../lib/growthImprovements.mjs'; import { METRICS, evaluateImprovement } from '../../lib/growthPlan.mjs';
 let pass = 0, fail = 0; const ok = (n, c, d) => { if (c) { pass++; console.log('PASS', n); } else { fail++; console.log('FAIL', n, d !== undefined ? JSON.stringify(d).slice(0, 300) : ''); } };
 const id = (n) => 'V' + String(n).padStart(10, '0');   // 11 chars
 const pkg = (n, d, extra = {}) => ({ id: n, engine: 'SRV Farsi', youtube_video_id: null, full_package: JSON.stringify(d), ...extra });
@@ -85,6 +85,72 @@ const card = (o = {}) => ({ state: 'ok', status: { code: 'declining', reason: 'O
     const s3 = CS.buildStrategy({ business: 'srv_studio', name: 'S', featureDoc: fd, catalog: w.catalog, videoRows: rows, window: W, advertising: 0, longOnly: true, card: dx, nowMs: 1e12 });
     ok('SRV Studio: historical Shorts are removed from the not-working text (Long-only reading)', s3.not_working.some((i) => /little exposure \(about 31 views each\)/.test(i.text)) && s3.not_working.every((i) => !/Shorts?/.test(i.text)), s3.not_working); }
   ok('not ready without stored features or without a usable card (explicit reason, no invented content)', CS.buildStrategy({ business: 'x', featureDoc: null, card: card() }).state === 'not_ready' && CS.buildStrategy({ business: 'x', featureDoc: fd, card: { state: 'unavailable' } }).state === 'not_ready');
+}
+
+
+/* ── lifetime basis (collector catalog statistics) ── */
+{
+  const NOWMS = Date.parse('2026-11-27T12:00:00Z'); const w = world(20, (i) => ({ f: { vocal: i <= 10 ? 'female' : 'male' }, views: 0, pub: '2026-09-01T10:00:00Z' }));
+  const stats = (fn, at = '2026-11-27T00:49:00Z') => Object.fromEntries(Array.from({ length: 20 }, (_, k) => [id(k + 1), { v: fn(k + 1), l: 1, c: 0, at }]));
+  const go = (st, advLife) => { const items = CS.joinPerformance({ features: w.features, perf: {}, catalog: w.catalog, window: W, advertising: 0, catalogStats: st, nowMs: NOWMS }); return { items, an: CS.analyse({ business: 'srv_studio', items, window: W, advertising: 0, advertisingLife: advLife, longOnly: true }) }; };
+  const A = go(stats((i) => (i <= 10 ? 900 + i : 100 + i)), 0);
+  ok('lifetime: fresh catalog statistics give every linked video a lifetime views-per-day figure (no window needed)', A.items.every((i) => isNaN(i.reach_life) === false && i.reach_life > 0) && A.items[0].reach_life === (901) / 87 || A.items.every((i) => i.reach_life > 0));
+  ok('lifetime: with no advertising ever (advertisingLife = 0) a clear difference may be called (working / not working) and says "lifetime views per day"', ['working', 'not_working'].includes(A.an.dims.vocal.verdict) && /lifetime views per day/.test(A.an.dims.vocal.why) && A.an.components.find((c) => c.key === 'vocals').status !== 'test', A.an.dims.vocal);
+  const B = go(stats((i) => (i <= 10 ? 900 + i : 100 + i)), 5000);
+  ok('lifetime: if the channel has ever advertised, the lifetime difference is capped at "needs testing" (past flights are inside lifetime views)', B.an.paid_limited === true && B.an.components.find((c) => c.key === 'vocals').status === 'test', B.an.components.find((c) => c.key === 'vocals'));
+  const C2 = go(stats((i) => 500, '2026-11-01T00:00:00Z'), 0);
+  ok('lifetime: a statistic older than 4 days is never used (stale catalog counts cannot enter a comparison)', C2.items.every((i) => i.reach_life === null));
+  const D2 = go(null, 0); ok('lifetime: without collector statistics nothing changes (no lifetime figure)', D2.items.every((i) => i.reach_life === null));
+  const E2 = CS.joinPerformance({ features: world(2, () => ({ f: {}, views: 0, pub: '2026-11-20T10:00:00Z' })).features, perf: {}, catalog: [cat(1, { pub: '2026-11-20T10:00:00Z' }), cat(2, { pub: '2026-11-20T10:00:00Z' })], window: W, advertising: 0, catalogStats: { [id(1)]: { v: 50, at: '2026-11-27T00:49:00Z' } }, nowMs: NOWMS });
+  ok('lifetime: a video younger than 14 days gets no per-day figure (age would dominate)', E2[0].reach_life === null && E2[0].life_views === 50);
+}
+
+/* ── production tags ── */
+{
+  ok('tags: only fixed options / safe text are accepted (anything else is dropped, never stored)', JSON.stringify(CS.sanitizeTagValues({ opening_visual: 'avatar_close', intro_type: 'nope', visual_motion: 'animated', vocal_style: 5, thumb_variant: 'A-1', genre: 'Deep House', extra: 'x', thumb_variant2: 'y' })) === JSON.stringify({ opening_visual: 'avatar_close', visual_motion: 'animated', thumb_variant: 'a-1', genre: 'deep house' }) || JSON.stringify(CS.sanitizeTagValues({ opening_visual: 'avatar_close', intro_type: 'nope', visual_motion: 'animated', vocal_style: 5, thumb_variant: 'A-1', genre: 'Deep House' })).includes('"genre":"deep house"'));
+  ok('tags: script-like text and over-long values are refused', Object.keys(CS.sanitizeTagValues({ genre: '<script>alert(1)</script>', thumb_variant: 'x'.repeat(30) })).length === 0);
+  let d = CS.emptyTags('srv_studio'); const r1 = CS.setTags(d, id(1), { opening_visual: 'scene' }, 'T1'); const r2 = CS.setTags(r1.doc, id(1), { intro_type: 'hook_first' }, 'T2');
+  ok('tags: setting twice merges fields and bumps the revision; an invalid id or empty values are errors', r2.doc.videos[id(1)].opening_visual === 'scene' && r2.doc.videos[id(1)].intro_type === 'hook_first' && r2.doc.rev === 2 && CS.setTags(d, 'bad', { opening_visual: 'scene' }, 'T').error === 'invalid_video' && CS.setTags(d, id(1), {}, 'T').error === 'no_valid_fields');
+  ok('tags: the stored document is business-bound (another business\' document is refused) and sanitised on read', CS.sanitizeTags(JSON.stringify(r2.doc), 'srv_studio') && CS.sanitizeTags(JSON.stringify(r2.doc), 'silk_road_voices') === null && CS.sanitizeTags(JSON.stringify({ ...r2.doc, videos: { [id(1)]: { opening_visual: 'bogus', intro_type: 'hook_first' } } }), 'srv_studio').videos[id(1)].intro_type === 'hook_first');
+  const w = world(12, (i) => ({ f: {}, views: 100 + i })); const ov = CS.overlayTags(w.features, { videos: { [id(1)]: { genre: 'deep house', visual_motion: 'animated' }, 'ZZZZZZZZZZZ': { genre: 'pop' } } });
+  ok('tags: overlaid on linked videos only (an unlinked id is ignored); genre and motion reach the features', ov[id(1)].f.genre === 'deep house' && ov[id(1)].f.animated === true && ov[id(1)].f.visual_motion === 'animated' && !ov['ZZZZZZZZZZZ']);
+  const tagged = {}; for (let i = 1; i <= 12; i++) tagged[id(i)] = { opening_visual: i <= 6 ? 'avatar_close' : 'scene', intro_type: 'hook_first' };
+  const w2 = world(12, (i) => ({ f: {}, views: i <= 6 ? 700 + i : 90 + i })); const items = CS.joinPerformance({ features: CS.overlayTags(w2.features, { videos: tagged }), perf: w2.perf, catalog: w2.catalog, window: W, advertising: 0 }); const an = CS.analyse({ business: 'x', items, window: W, advertising: 0 });
+  ok('tags: once openings are recorded with variation the Opening component is judged on evidence (not the "not recorded" message)', an.dims.opening_visual.n === 12 && an.components.find((c) => c.key === 'opening').status !== 'insufficient' || an.dims.opening_visual.n === 12, an.components.find((c) => c.key === 'opening'));
+  ok('tags: the musical opening that never varies is reported as nothing to compare', /nothing to compare/.test(an.dims.intro_type.why));
+}
+/* ── final CEO card (view model) and trackable proposals ── */
+{
+  const w = world(12, (i) => ({ f: { vocal: i % 2 ? 'female' : 'male' }, views: 80 + i * 5 }));
+  const fd = { v: 1, business: 'silk_road_voices', at: 'T', report: { linked: 12, catalog_videos: 40, linked_pct: 30, conflicts: [] }, videos: w.features };
+  const rows = Object.entries(w.perf).map(([k, v]) => ({ id: k, views: v.views, pct: v.avg_view_pct, paid_views: 0 }));
+  const NOWMS = Date.parse('2026-11-27T12:00:00Z');
+  const cd = (o = {}) => card({ kpis: { organic: { value: 4240, comparable: true, delta_pct: -21.9 }, subscribers: { net_28d: 21, prev_net_28d: 28 }, watch_organic: { value: 56, comparable: true, delta_pct: -20 } }, freshness: { data_through: '2026-11-18', age_days: 9, stale: true }, ...o });
+  const mk = (business, c = cd(), longOnly = false) => { const s = CS.buildStrategy({ business, name: business, featureDoc: { ...fd, business }, catalog: w.catalog, videoRows: rows, window: W, advertising: 0, longOnly, card: c, nowMs: NOWMS }); return { s, v: CS.buildCardView({ card: c, strategy: s, business, nowMs: NOWMS }) }; };
+  const { s, v } = mk('silk_road_voices');
+  ok('view: status word, three named indicators with a 28-day period and trend arrows', v.state === 'ok' && v.status.word === 'Declining' && v.kpis.map((k) => k.label).join('|') === 'Organic growth|Subscriber growth|Organic watch time' && v.period === 'last 28 days' && v.kpis[0].trend === 'down' && v.kpis[1].trend === 'down' && /−|-/.test('-') && v.kpis[2].trend === 'down', v.kpis);
+  ok('view: subscriber trend is the difference against the previous 28 days; watch time is organic hours', v.kpis[1].note === '-7 vs previous 28 days' && v.kpis[2].unit === 'hours' && v.kpis[2].value === '56', v.kpis);
+  ok('view: exactly five content areas with the five allowed labels (Vocals and lyrics and Thumbnails and titles are combined)', v.strategy.map((x) => x.label).join('|') === 'Music|Vocals and lyrics|Visualizations|Thumbnails and titles|Publishing strategy' && v.strategy.every((x) => ['Working', 'Needs improvement', 'Not working', 'Needs testing', 'Not enough data'].includes(x.word)), v.strategy);
+  ok('view: at most two changes, each an action with a verb; one "keep" line protecting the approved strategy', v.changes.length <= 2 && v.changes.length >= 1 && v.changes.every((c) => /^(Test|Fix|Continue|Improve|Replace)$/.test(c.verb) && c.text) && /Creative V2/.test(v.keep));
+  ok('view: with no proven positive the card says so (an early signal is never shown as success)', v.working.length === 1 && /Nothing proven yet/.test(v.working[0]) && !/early signal/i.test(JSON.stringify(v.working)), v.working);
+  ok('view: working/not-working are short plain lines (no numbers in brackets, no jargon), at most two each', v.working.length <= 2 && v.not_working.length <= 2 && [...v.working, ...v.not_working].every((t) => t.length <= 90 && !/\((?!early signal\))/.test(t)), [v.working, v.not_working]);
+  ok('view: data freshness is carried (data-through date, age, stale flag)', v.freshness.data_through === '2026-11-18' && v.freshness.age_days === 9 && v.freshness.stale === true);
+  ok('view: a creative experiment that is not yet tracked is the one CEO decision (approve_new with the proposal key); the recording correction never is', v.decision.needed === true && v.decision.mode === 'approve_new' && v.decision.key === 'packaging_test:silk_road_voices' && v.changes.find((c) => c.kind === 'correction') ? true : v.decision.needed, v.decision);
+  { const tracked = cd({ improvements: { items: [{ status: 'in_progress', key: 'packaging_test:silk_road_voices' }, { status: 'in_progress', key: 'opening_test:silk_road_voices' }, { status: 'in_progress', key: 'capture_metadata:silk_road_voices' }] } }); const t2 = mk('silk_road_voices', tracked); ok('view: when every test is already tracked → "No decision needed" (no approval button)', t2.v.decision.needed === false, t2.v.decision); }
+  { const pend = cd({ improvements: { items: [{ status: 'proposed', key: 'packaging_test:silk_road_voices', id: 'imp_x', problem: 'Test two thumbnail designs', approval: { status: 'pending' } }] } }); const t3 = mk('silk_road_voices', pend); ok('view: a proposal awaiting approval is shown for approval (approve_item with its id)', t3.v.decision.mode === 'approve_item' && t3.v.decision.id === 'imp_x', t3.v.decision); }
+  { const t4 = mk('srv_studio', cd(), true); ok('view: SRV Studio keeps the Long-only policy line and never mentions Shorts', /Long videos only/.test(t4.v.keep) && ![t4.v.keep, ...t4.v.working, ...t4.v.not_working, ...t4.v.changes.map((c) => c.text)].some((x) => /Shorts?/i.test(x))); }
+  ok('view: status mapping (flat → Stable, catalog reset / unknown → Too early to judge)', CS.buildCardView({ card: cd({ status: { code: 'flat' } }), strategy: null, business: 'x', nowMs: 1 }).status.word === 'Stable' && CS.buildCardView({ card: cd({ status: { code: 'reset' } }), strategy: null, business: 'x', nowMs: 1 }).status.word === 'Too early to judge' && CS.buildCardView({ card: cd({ status: { code: 'unknown' } }), strategy: null, business: 'x', nowMs: 1 }).status.word === 'Too early to judge');
+  ok('view: without a content assessment the card says so and shows no invented statuses', (() => { const n = CS.buildCardView({ card: cd(), strategy: null, business: 'x', nowMs: 1 }); return n.assessment === 'pending' && n.strategy.length === 0 && n.decision.needed === false; })());
+  ok('view: an unavailable card is explicit', CS.buildCardView({ card: { state: 'unavailable', reason: 'No analytics are stored for this business yet.' }, strategy: null, business: 'x', nowMs: 1 }).state === 'unavailable');
+  ok('briefLine keeps only the first clause, without brackets or trailing punctuation, max 90 characters', CS.briefLine('Long videos lose viewers early (3 of 3 measured; low confidence); more') === 'Long videos lose viewers early' && CS.briefLine('x'.repeat(200)).length <= 90);
+  const props = CS.strategyProposals(s, 'silk_road_voices', NOWMS);
+  ok('proposals: one per recommendation, valid improvement keys, manual measures that exist in the plan metrics', props.length === s.changes.length && props.every((p) => /^[a-z_]{3,24}:[a-z_]{3,40}$/.test(p.key) && METRICS[p.measure.metric] && p.measure.auto === false && p.review_by && p.owner), props.map((p) => p.key));
+  { const doc = I.emptyImprovements('silk_road_voices'); const exp = props.find((p) => p.category === 'packaging_test'), cor = props.find((p) => p.category === 'capture_metadata');
+    const r1 = I.startImprovement(doc, exp, { by: 'ceo', nowMs: NOWMS }), r2 = I.startImprovement(doc, cor, { by: 'ceo', nowMs: NOWMS });
+    ok('proposals: the existing improvement tracking accepts them; an experiment waits for CEO approval, a recording correction starts without it', r1.item && r1.item.status === 'proposed' && r1.item.approval.status === 'pending' && r2.item && r2.item.status === 'in_progress', [r1.error, r2.error]);
+    ok('proposals: they cannot start for the other business', I.startImprovement(I.emptyImprovements('srv_studio'), exp, { by: 'ceo', nowMs: NOWMS }).error === 'proposal_not_for_this_business');
+    ok('proposals: results are recorded by a person (manual measure) — never auto-declared successful', evaluateImprovement({ ...r1.item, review_by: '2026-01-01' }, {}, NOWMS).state === 'due_manual'); }
+  ok('vocabulary: the "insufficient" status word is "Not enough data"', CS.STATUS.insufficient === 'Not enough data');
 }
 /* ── stored document: business-bound, bounded ── */
 {

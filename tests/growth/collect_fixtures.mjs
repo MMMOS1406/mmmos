@@ -15,6 +15,7 @@ export function makeWorld(business, over = {}) {
   w.fetchJson = async (url) => {
     w.calls.push(url); const u = new URL(url); const q = u.searchParams; const host = u.host;
     if (host === 'www.googleapis.com' && u.pathname === '/youtube/v3/videos') {   // Data API videos.list (part=contentDetails)
+      if (q.get('part') === 'statistics') { const sids = (q.get('id') || '').split(',').filter(Boolean); w.statsRequests = (w.statsRequests || []).concat([sids]); if (w.behave.stats) return w.behave.stats; return { status: 200, json: { items: sids.filter((id) => !(w.hiddenStats || []).includes(id)).map((id) => { const v = w.videos.find((x) => x.id === id); return { id, statistics: { viewCount: String(v ? v.views * 3 : 11), ...(w.noLikes ? {} : { likeCount: '5', commentCount: '2' }) } }; }) } }; }   // part=statistics (G6)
       if (w.behave.durations) return w.behave.durations; const ids = (q.get('id') || '').split(',').filter(Boolean); const iso = (sec) => `PT${Math.floor(sec / 60)}M${sec % 60}S`;
       return { status: 200, json: { items: ids.map((id) => { const v = w.videos.find((x) => x.id === id); const sec = (w.durations && w.durations[id]) ?? (v && v.avd && v.pct ? Math.round(v.avd / (v.pct / 100)) : 200); return { id, contentDetails: { duration: iso(sec) } }; }).concat(w.foreignDurationItems || []) } };
     }

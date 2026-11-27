@@ -45,7 +45,7 @@ try {
   // ---- 2 Home: every card, row and button goes to the right place, and Home is one click away from everywhere
   const homeTargets = async () => { await clickSel(p, '#h2Side button[data-h2="home"]'); return p.evaluate(() => [...document.querySelectorAll('#mainContent [data-h2]')].map((e, i) => ({ i, id: e.getAttribute('data-h2'), label: (e.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) }))); };
   const targets = await homeTargets();
-  check('Home offers links only to destinations that exist (no dead or double-labelled links)', targets.length >= 7 && targets.every((t) => /^(finance|analytics|invest|inv:(overview|holdings|performance|connection)|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics|avatars))$/.test(t.id)), targets.map((t) => t.id).join(','));
+  check('Home offers links only to destinations that exist (no dead or double-labelled links); FINAL order: just each business\'s Analytics link', targets.length >= 2 && targets.every((t) => /^(finance|analytics|invest|inv:(overview|holdings|performance|connection)|biz:SRV (Farsi|English)|ws:SRV (Farsi|English):(overview|production|packages|analytics|avatars))$/.test(t.id)), targets.map((t) => t.id).join(','));
   for (const t of targets) {
     await clickSel(p, '#h2Side button[data-h2="home"]');
     await p.evaluate((i) => document.querySelectorAll('#mainContent [data-h2]')[i].click(), t.i); await W(p, 700);
