@@ -126,6 +126,8 @@
       '.h2f-f{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--dim)}.h2f-f.stale span{color:#f59e0b}.h2f-a{min-height:44px;display:inline-flex;align-items:center;padding:0 4px;color:var(--gold);font-weight:700;font-size:13px;text-decoration:none;cursor:pointer}',
       '.h2f-msg{font-size:12px;color:#c3cde6;margin-top:6px}.h2f-ex{font-size:14px;color:var(--dim)}',
       '.h2s-tg{margin-top:8px}.h2s-tg>summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--gold);padding:8px 0}.h2s-tgb{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.h2s-tgb>.h2s-r,.h2s-tgb>.h2f-b,.h2s-tgb>.h2s-tgm{grid-column:1/-1}.h2s-tl{display:grid;gap:3px;font-size:11px;color:var(--dim)}.h2s-tl select,.h2s-tl input{min-height:40px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);padding:0 8px;font-size:14px;font-family:inherit;min-width:0;width:100%}',
+      '.h2f-dt{font-weight:700}.h2f-pl{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:3px}.h2f-pl li{font-size:12.5px;line-height:1.4;color:#c3cde6}.h2f-pl b{color:#e6ebf7;font-weight:700}.h2f-run{font-size:13px;line-height:1.4}.h2f-rec{font-size:12.5px;color:#c3cde6;margin-top:4px}.h2f-c.early{border-style:dashed}',
+      '.h2x{margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:13px}.h2x table{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}.h2x td,.h2x th{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left}.h2x .h2f-b{width:auto;min-height:40px;margin-right:6px}',
       '.h2d-act{display:grid;gap:5px;margin:8px 0;padding:10px 12px;border:1px solid rgba(201,168,76,.35);border-left:3px solid var(--gold);border-radius:8px;background:rgba(201,168,76,.05)}.h2d-act>div{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:14px;color:#fff}.h2d-act b{font-weight:700}',
       '.h2d-k{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--gold);font-weight:800;min-width:92px;font-family:"JetBrains Mono",monospace}.h2d-adv{font-size:10px;color:var(--dim)}',
       '.h2d-obs{font-size:11px;color:#9aa4bd;line-height:1.45;margin:2px 0}.h2d-obs b{color:#c3cde6}.h2d-cav{font-size:11px;color:#fbbf24;margin:3px 0}',
@@ -365,7 +367,7 @@
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('http_' + r.status)); })
       .then(function (j) { var m = {}; (j.reports || []).forEach(function (x) { if (x && x.business) m[x.business] = x.home_card || { state: 'unavailable', business: x.business, reason: 'The report could not be built.' }; }); H.cards = m; H.err = null; H.at = Date.now(); })
       .catch(function (e) { H.err = String(e && e.message || e).slice(0, 40); })
-      .then(function () { H.loading = false; try { cb && cb(); } catch (e) { } });
+      .then(function () { H.loading = false; try { expSync(); } catch (e) { } try { cb && cb(); } catch (e) { } });
   }
   function tsMs(t) { if (!t) return NaN; var s = String(t).replace(' ', 'T'); if (/[+-]\d\d$/.test(s)) s += ':00'; return Date.parse(s); }
   var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -477,7 +479,7 @@
       '<div class="h2d-sec">Improvement history and tracking</div>' + last + '<div class="h2d-imsg" role="status">' + esc(H.msg && H.msgBiz === key ? H.msg : '') + '</div>' + list + '</div>';
   }
   // Repaint whatever the CEO is looking at: the Home cards, or the growth panel inside a business's Analytics tab.
-  function repaint() { if (!active()) return; var pn = $('h2AnPanel'); if (pn && S.biz) { pn.outerHTML = analyticsPanel(S.biz); return; } if (S.cur === 'home') paintMain(homePage()); }
+  function repaint() { if (!active()) return; expSync(); var pn = $('h2AnPanel'); if (pn && S.biz) { pn.outerHTML = analyticsPanel(S.biz); return; } if (S.cur === 'home') paintMain(homePage()); }
   function impAction(t) {
     var biz = t.getAttribute('data-biz'), act = t.getAttribute('data-imp-act'), id = t.getAttribute('data-id'), key = t.getAttribute('data-key'); var box = t.closest('.h2d-it'); var f = function (n) { var e = box && box.querySelector('[data-f="' + n + '"]'); return e ? e.value : ''; };
     var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; }
@@ -519,6 +521,37 @@
       .then(function (x) { btn.disabled = false; say(x.ok ? 'Saved. The assessment updates with the next refresh.' : 'Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); if (x.ok) { H.at = 0; } })
       .catch(function () { btn.disabled = false; say('Not saved: network error.'); });
   }
+  var ARM_STATE = { 'measured': 'measured', 'published': 'published (not yet 14 days)', 'in production': 'in production', 'waiting for the VA': 'waiting for the VA' };
+  function expPanel(key) {
+    var c = cardOf(key), x = X(); if (!c || !x || !c.improvements || !Array.isArray(c.improvements.items)) return '';
+    var items = c.improvements.items.filter(function (q) { return q.plan && x.EXPERIMENTS[q.plan.experiment]; }).slice(0, 3); if (!items.length) return '';
+    return '<div class="h2s-sec" style="margin-top:10px">Experiments in the production workflow</div>' + items.map(function (q) {
+      var run = { id: q.id, exp: q.plan.experiment }; var live = q.status === 'approved' || q.status === 'in_progress'; var tr = trackFor(key, run);
+      var head = '<b>' + esc(q.plan.label) + '</b> — ' + esc(IMP_ST[q.status] || q.status) + (q.review_by ? ' · review ' + esc(dShort(q.review_by)) : '');
+      if (!tr || !tr.rows.length) return '<div class="h2x" data-biz="' + key + '">' + head + '<div class="h2s-r">No production task is tagged yet. The next ' + q.plan.releases + ' Long tasks are tagged as they appear.</div>' + (live ? '<button type="button" class="h2f-b" data-exp-stop="' + esc(q.id) + '" data-biz="' + key + '">Stop this test</button>' : '') + '</div>';
+      var rows = tr.rows.map(function (r) { return '<tr><td>' + r.slot + '</td><td>' + esc(trunc(r.name, 34)) + '</td><td>' + esc(r.arm) + '</td><td>' + esc(ARM_STATE[r.state] || r.state) + '</td><td>' + (r.per_day !== null && r.per_day !== undefined ? esc(String(Math.round(r.per_day * 10) / 10)) + '/day' : r.excluded_paid ? 'excluded (advertising)' : '—') + '</td></tr>'; }).join('');
+      var A = tr.arms.A, Bm = tr.arms.B, fm = function (a) { return a.median === null ? '—' : String(Math.round(a.median * 10) / 10) + (a.metric === 'pct' ? '%' : '/day'); };
+      var rec = tr.recommendation, ctrl = '';
+      if (live && rec.verdict !== 'pending') ctrl += '<button type="button" class="h2f-b" data-exp-complete="' + esc(q.id) + '" data-verdict="' + esc(rec.verdict) + '" data-biz="' + key + '">Record this result</button>';
+      if (live) ctrl += '<button type="button" class="h2f-b" data-exp-stop="' + esc(q.id) + '" data-biz="' + key + '">Stop this test</button>';
+      return '<div class="h2x" data-biz="' + key + '">' + head + '<div class="h2s-r">' + esc(x.statusLine(tr, null)) + '</div><table><tr><th>#</th><th>Release (task)</th><th>Arm</th><th>State</th><th>Result</th></tr>' + rows + '</table><div class="h2s-r" style="margin-top:6px">Arm A median ' + fm(A) + ' (' + A.measured + ' measured) · arm B median ' + fm(Bm) + ' (' + Bm.measured + ' measured)</div><div class="h2f-rec">' + esc(rec.text) + '</div>' + (ctrl ? '<div style="margin-top:6px">' + ctrl + '</div>' : '') + '</div>';
+    }).join('');
+  }
+  function expStop(btn) {
+    var biz = btn.getAttribute('data-biz'), id = btn.getAttribute('data-exp-stop'), c = cardOf(biz); var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; } if (!tok) { H.msg = 'Sign in again to record this.'; H.msgBiz = biz; repaint(); return; }
+    btn.disabled = true;
+    fetch('/api/ops?action=growth_improvement_update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MMM-CEO-Session': tok }, body: JSON.stringify({ business: biz, id: id, patch: { status: 'abandoned' }, base_rev: c && c.improvements ? c.improvements.rev : undefined }) })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); }).then(function () { var n = X() ? X().untagTasks({ tasks: dTasks(), packages: dPkgs(), itemId: id }) : 0; if (n) { try { if (typeof saveAppState === 'function') saveAppState(); } catch (e) { } } H.msg = 'Test stopped. ' + n + ' task tag' + (n === 1 ? '' : 's') + ' removed from tasks the VA had not started.'; H.msgBiz = biz; H.at = 0; loadHome(repaint); repaint(); })
+      .catch(function () { btn.disabled = false; H.msg = 'Not saved.'; H.msgBiz = biz; repaint(); });
+  }
+  function expComplete(btn) {
+    var biz = btn.getAttribute('data-biz'), id = btn.getAttribute('data-exp-complete'), verdict = btn.getAttribute('data-verdict'), c = cardOf(biz); var tok = ''; try { tok = (typeof _ceoGetSessionToken === 'function' && _ceoGetSessionToken()) || ''; } catch (e) { tok = ''; } if (!tok) { H.msg = 'Sign in again to record this.'; H.msgBiz = biz; repaint(); return; }
+    var outcome = verdict === 'retain' ? 'successful' : verdict === 'discontinue' ? 'unsuccessful' : 'inconclusive'; var it = c && c.improvements && c.improvements.items.filter(function (q) { return q.id === id; })[0]; var tr = it ? trackFor(biz, { id: id, exp: it.plan.experiment }) : null;
+    btn.disabled = true;
+    fetch('/api/ops?action=growth_improvement_update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MMM-CEO-Session': tok }, body: JSON.stringify({ business: biz, id: id, patch: { status: 'completed', result: { outcome: outcome, note: 'Recommendation recorded by the CEO: ' + (tr ? tr.recommendation.text : verdict) }, lessons: tr ? tr.recommendation.text : '' }, base_rev: c && c.improvements ? c.improvements.rev : undefined }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); }).then(function (x) { H.msg = x.ok ? 'Result recorded.' : 'Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error'); H.msgBiz = biz; H.at = 0; loadHome(repaint); repaint(); })
+      .catch(function () { btn.disabled = false; H.msg = 'Not saved.'; H.msgBiz = biz; repaint(); });
+  }
   var CS_COL = { working: '#22c55e', improve: '#f59e0b', not_working: '#ef4444', test: '#60a5fa', insufficient: '#9ca3af' };
   function liStrip(items0, cls, none) { var items = items0 ? items0.slice(0, 3) : items0; var more = items0 && items0.length > 3 ? '<div class="h2s-r">+' + (items0.length - 3) + ' more in Detailed analytics</div>' : ''; return items && items.length ? '<ul class="h2s-list ' + cls + '">' + items.map(function (i) { return '<li dir="auto">' + esc(i.text) + (i.grade ? '<span class="h2s-grade">' + esc(i.grade) + (i.note ? ' · ' + esc(i.note) : '') + '</span>' : '') + '</li>'; }).join('') + '</ul>' + more : '<div class="h2s-none">' + esc(none) + '</div>'; }
   function scoreBody(c, nm) {
@@ -539,7 +572,7 @@
       '<div><div class="h2s-sec">What is not working</div>' + liStrip(st.not_working, 'bad', 'Nothing is confirmed as not working.') + '</div>' +
       '<div><div class="h2s-sec">Content strategy</div>' + comps + (st.policy ? '<div class="h2s-r" style="margin-top:4px">' + esc(st.policy) + '</div>' : '') + '</div>' +
       '<div><div class="h2s-sec">What needs to change</div>' + chg + '</div>' +
-      '<div><div class="h2s-sec">Results of previous improvements</div>' + prevHtml + act + '</div>' + tagForm(c.business || '', st);
+      '<div><div class="h2s-sec">Results of previous improvements</div>' + prevHtml + act + '</div>' + expPanel(c.business || '') + tagForm(c.business || '', st);
   }
   function detailCard(key) {
     var engine = HBIZ[key], nm = dn(engine), c = H.cards && H.cards[key];
@@ -603,6 +636,29 @@
     var detail = '<details class="h2d-more h2s-det"' + (H.det && H.det[key] ? ' open' : '') + '><summary>Detailed analytics — evidence, diagnosis, data quality and engineering notes</summary>' + summary + more.replace(/^<details class="h2d-more">/, '<details class="h2d-more" open>').replace(/<summary>[^<]*<\/summary>/, '<summary>Trend, content, retention and data notes</summary>') + diagSection(key) + (c.strategy && c.strategy.state === 'ok' ? '<div class="h2d-sec">How the content assessment was made</div><div class="h2d-sm">' + esc(c.strategy.linkage.note || '') + ' Not recorded for any video: ' + c.strategy.unknown.map(esc).join('; ') + '.</div>' : '') + '</details>';
     return '<section class="h2d" data-biz="' + key + '" aria-label="' + esc(nm) + '">' + head(spill, '') + '<div class="h2s">' + scoreBody(c, nm) + '</div>' + detail + '</section>';
   }
+  // ── approved experiments: tags on the EXISTING production tasks (pure logic shared with the server: public/contentExperiments.js) ──
+  function X() { return window.MMMExp || null; }
+  function dTasks() { return (typeof D !== 'undefined' && D && Array.isArray(D.tasks)) ? D.tasks : []; }
+  function dPkgs() { return (typeof D !== 'undefined' && D && Array.isArray(D.packages)) ? D.packages : []; }
+  function cardOf(key) { return H.cards && H.cards[key]; }
+  function trackFor(key, run) { var x = X(), c = cardOf(key); if (!x || !run) return null; try { return x.trackExperiment({ itemId: run.id, expKey: run.exp, tasks: dTasks(), packages: dPkgs(), perf: (c && c.strategy && c.strategy.video_perf) || {}, nowMs: Date.now() }); } catch (e) { return null; } }
+  // Tag the next eligible Long tasks of THIS business with the experiment (idempotent; fills remaining slots as new tasks appear). Saves through the normal shared-state path.
+  function expApply(key, itemId, itemKey, expKey) {
+    var x = X(); if (!x || !expKey) return { tagged: 0, open: 0 };
+    var r = x.tagTasks({ tasks: dTasks(), packages: dPkgs(), business: key, itemId: itemId, key: itemKey, expKey: expKey }); var now = Date.now(); dTasks().forEach(function (t) { if (t && t.experiment && t.experiment.id === itemId && !t.experiment.tagged_at) t.experiment.tagged_at = now; });
+    if (r.tagged.length) { try { if (typeof saveAppState === 'function') saveAppState(); else if (typeof saveData === 'function') saveData(); } catch (e) { } }
+    return { tagged: r.tagged.length, open: r.slots_open };
+  }
+  function expSync() { try { if (!active() || !H.cards) return; ['silk_road_voices', 'srv_studio'].forEach(function (k) { var c = cardOf(k), run = c && c.view && c.view.running; if (run && run.status === 'in_progress') expApply(k, run.id, run.key, run.exp); }); } catch (e) { } }
+  function planLines(key, plan) {
+    var x = X(), n = x ? x.eligibleTasks(dTasks(), dPkgs(), key).length : 0;
+    return '<ul class="h2f-pl"><li><b>Changes:</b> ' + esc(plan.changes) + '</li><li><b>Affects:</b> the next ' + plan.releases + ' Long releases (' + plan.per_arm + ' per arm), ' + n + ' already assigned</li><li><b>Executed by:</b> ' + esc(plan.executor) + '</li><li><b>Unchanged:</b> ' + esc(plan.unchanged.join(', ')) + '</li>' + (plan.review_by ? '<li><b>Result review:</b> ' + esc(dShort(plan.review_by)) + '</li>' : '') + '</ul>';
+  }
+  function runningBox(key, run) {
+    var x = X(), tr = trackFor(key, run); if (!tr) return '<div class="h2f-d none">' + esc(run.label) + ' is running.</div>';
+    var line = x.statusLine(tr, run.review_by ? dShort(run.review_by) : null);
+    return '<div class="h2f-d none"><div class="h2f-run" dir="auto">' + esc(run.label) + ' — ' + esc(line) + '</div>' + (tr.recommendation.verdict !== 'pending' ? '<div class="h2f-rec">' + esc(tr.recommendation.text) + '</div>' : '') + '</div>';
+  }
   var CW = { working: '#22c55e', improve: '#f59e0b', not_working: '#ef4444', test: '#60a5fa', insufficient: '#9ca3af' };
   var STCOL = { growing: '#22c55e', stable: '#eab308', declining: '#ef4444', early: '#9ca3af' }, STAR = { growing: '▲', stable: '■', declining: '▼', early: '◆' };
   function finalCard(key) {
@@ -613,9 +669,9 @@
     var col = STCOL[v.status.code] || '#9ca3af'; var pill = '<span class="h2f-pill" style="color:' + col + ';border-color:' + col + ';background:' + col + '22">' + STAR[v.status.code] + ' ' + esc(v.status.word) + '</span>';
     var tiles = v.kpis.map(function (k) { var cl = k.trend === 'up' ? 'up' : k.trend === 'down' ? 'down' : ''; var ar = k.trend === 'up' ? '▲ ' : k.trend === 'down' ? '▼ ' : k.trend === 'flat' ? '■ ' : ''; return '<div class="h2f-t"><div class="h2f-l">' + esc(k.label) + '</div><div class="h2f-v">' + esc(k.value) + '<small>' + esc(k.unit) + '</small></div><div class="h2f-n ' + cl + '">' + ar + esc(k.note) + '</div></div>'; }).join('');
     var li = function (a, cls) { return '<ul class="h2f-ul ' + cls + '">' + a.map(function (t) { return '<li dir="auto">' + esc(t) + '</li>'; }).join('') + '</ul>'; };
-    var strat = v.assessment === 'ok' ? v.strategy.map(function (x) { var cc = CW[x.status] || '#9ca3af'; return '<div class="h2f-r"><span>' + esc(x.label) + '</span><span class="h2f-c" style="color:' + cc + ';border-color:' + cc + '66;background:' + cc + '18">' + esc(x.word) + '</span></div>'; }).join('') : '<div class="h2f-ex">The content assessment is being prepared.</div>';
+    var strat = v.assessment === 'ok' ? v.strategy.map(function (x) { var cc = CW[x.status] || '#9ca3af'; return '<div class="h2f-r"><span>' + esc(x.label) + '</span><span class="h2f-c' + (x.early ? ' early' : '') + '" style="color:' + cc + ';border-color:' + cc + '66;background:' + cc + '18">' + (x.early ? 'Early: ' : '') + esc(x.word) + '</span></div>'; }).join('') : '<div class="h2f-ex">The content assessment is being prepared.</div>';
     var chg = v.changes && v.changes.length ? '<ol class="h2f-ol">' + v.changes.map(function (x) { return '<li dir="auto"><b>' + esc(x.verb) + ':</b> ' + esc(x.text) + '</li>'; }).join('') + '</ol>' + (v.keep ? '<div class="h2f-keep">' + esc(v.keep) + '</div>' : '') : '<div class="h2f-ex">No change is recommended on the evidence available.</div>';
-    var dec = v.decision && v.decision.needed ? '<div class="h2f-d"><div dir="auto">' + esc(v.decision.text) + '</div><button type="button" class="h2f-b" data-dec="' + esc(v.decision.mode) + '" data-biz="' + key + '" data-key="' + esc(v.decision.key || '') + '" data-id="' + esc(v.decision.id || '') + '">Approve</button></div>' : '<div class="h2f-d none">No decision needed.</div>';
+    var dec = v.running ? runningBox(key, v.running) : (v.decision && v.decision.needed ? '<div class="h2f-d"><div class="h2f-dt" dir="auto">' + esc(v.decision.text) + '</div>' + (v.decision.plan ? planLines(key, v.decision.plan) : '') + '<button type="button" class="h2f-b" data-dec="' + esc(v.decision.mode) + '" data-biz="' + key + '" data-key="' + esc(v.decision.key || '') + '" data-id="' + esc(v.decision.id || '') + '">Approve</button></div>' : '<div class="h2f-d none">No decision needed.</div>');
     var fr = v.freshness, fresh = fr.data_through ? 'Data through ' + esc(dShort(fr.data_through)) + (fr.age_days !== null && fr.age_days >= 2 ? ' · ' + fr.age_days + ' days old' : '') : 'No data yet';
     var msg = H.msg && H.msgBiz === key ? '<div class="h2f-msg" role="status">' + esc(H.msg) + '</div>' : '';
     return card({ pill: pill, body: '<div class="h2f-k">' + tiles + '</div><div class="h2f-per">Last 28 days</div>' +
@@ -630,10 +686,21 @@
     if (!tok) { done('Sign in again to approve.'); return; }
     t.disabled = true;
     var post = function (action, body) { return fetch('/api/ops?action=' + action, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MMM-CEO-Session': tok }, body: JSON.stringify(body) }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); }); };
-    var approve = function (itemId, rev) { return post('growth_improvement_update', { business: biz, id: itemId, patch: { approval: { status: 'approved' } }, base_rev: rev }); };
-    var run = mode === 'approve_new' ? post('growth_improvement_start', { business: biz, key: key }).then(function (x) { if (!x.ok) return x; return approve(x.j.item.id, x.j.rev); }) : approve(id, (H.cards && H.cards[biz] && H.cards[biz].improvements) ? H.cards[biz].improvements.rev : undefined);
-    run.then(function (x) { done(x.ok ? 'Approved. The test is now tracked in Analytics.' : 'Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); }).catch(function () { done('Not saved: network error.'); });
+    var chain = function (itemId, rev, plan, itemKey) {
+      return post('growth_improvement_update', { business: biz, id: itemId, patch: { approval: { status: 'approved' } }, base_rev: rev }).then(function (a1) {
+        if (!a1.ok) return a1;
+        // approved → in progress: the test now runs through the existing production tasks
+        return post('growth_improvement_update', { business: biz, id: itemId, patch: { status: 'in_progress' }, base_rev: a1.j.rev }).then(function (a2) {
+          if (!a2.ok) return a2; var r = plan && plan.experiment ? expApply(biz, itemId, itemKey, plan.experiment) : { tagged: 0, open: 0 };
+          a2.applied = r; return a2; });
+      });
+    };
+    var run;
+    if (mode === 'approve_new') run = post('growth_improvement_start', { business: biz, key: key }).then(function (x) { if (!x.ok) return x; return chain(x.j.item.id, x.j.rev, x.j.item.plan, x.j.item.key); });
+    else { var c = cardOf(biz), it = c && c.improvements && (c.improvements.items || []).filter(function (q) { return q.id === id; })[0]; run = chain(id, c && c.improvements ? c.improvements.rev : undefined, it && it.plan, it && it.key); }
+    run.then(function (x) { done(x.ok ? ('Approved. ' + (x.applied && x.applied.tagged ? x.applied.tagged + ' upcoming Long task' + (x.applied.tagged > 1 ? 's' : '') + ' tagged for the VA' + (x.applied.open ? '; the other ' + x.applied.open + ' are tagged as new Long tasks appear.' : '.') : 'The VA will see the instruction on the next Long tasks as they are created.')) : 'Not saved: ' + ((x.j && (x.j.detail || x.j.error)) || 'error')); }).catch(function () { done('Not saved: network error.'); });
   }
+
   function keyOfEngine(engine) { return Object.keys(HBIZ).filter(function (k) { return HBIZ[k] === engine; })[0] || null; }
   // The full growth intelligence (scorecard detail, diagnosis, improvement tracking, data notes) lives in the business's Analytics tab, not on the homepage.
   function analyticsPanel(engine) {
@@ -643,6 +710,7 @@
     return '<div class="h2an" id="h2AnPanel" data-biz="' + key + '"><div class="h2-lab">Growth intelligence — detail</div>' + inner + '</div>';
   }
   function homePage() {
+    expSync();   // keeps the running test's task tags current (idempotent) every time the Home is drawn
     return '<div class="h2-wrap"><div class="h2-title">Home</div><div class="h2-lab">Your businesses</div><div class="h2f-grid">' + finalCard('silk_road_voices') + finalCard('srv_studio') + '</div></div>';
   }
   function overviewPage(engine) {
@@ -764,12 +832,12 @@
     if (ev) ev.preventDefault();
     go(id);
   }
-  document.addEventListener('click', function (ev) { var tsv = ev.target && ev.target.closest && ev.target.closest('[data-tag-save]'); if (tsv) { ev.preventDefault(); saveTags(tsv); return; } var dc = ev.target && ev.target.closest && ev.target.closest('[data-dec]'); if (dc) { ev.preventDefault(); decide(dc); return; } var ia = ev.target && ev.target.closest && ev.target.closest('[data-imp-act]'); if (ia) { ev.preventDefault(); impAction(ia); return; } activate(ev, ev.target && ev.target.closest && ev.target.closest('[data-h2]')); });
+  document.addEventListener('click', function (ev) { var xs = ev.target && ev.target.closest && ev.target.closest('[data-exp-stop]'); if (xs) { ev.preventDefault(); expStop(xs); return; } var xc = ev.target && ev.target.closest && ev.target.closest('[data-exp-complete]'); if (xc) { ev.preventDefault(); expComplete(xc); return; } var tsv = ev.target && ev.target.closest && ev.target.closest('[data-tag-save]'); if (tsv) { ev.preventDefault(); saveTags(tsv); return; } var dc = ev.target && ev.target.closest && ev.target.closest('[data-dec]'); if (dc) { ev.preventDefault(); decide(dc); return; } var ia = ev.target && ev.target.closest && ev.target.closest('[data-imp-act]'); if (ia) { ev.preventDefault(); impAction(ia); return; } activate(ev, ev.target && ev.target.closest && ev.target.closest('[data-h2]')); });
   document.addEventListener('keydown', function (ev) { if (ev.key !== 'Enter' && ev.key !== ' ') return; var t = ev.target && ev.target.closest && ev.target.closest('[data-h2][role="link"]'); if (t && t.tagName !== 'BUTTON') activate(ev, t); });
   var app = $('appScreen');
   if (app && window.MutationObserver) new MutationObserver(function () { if (!app.classList.contains('show') || !authorized()) { if ($('h2Side') || app.classList.contains('h2-on')) scrub(); } }).observe(app, { attributes: true, attributeFilter: ['class'] });
   document.addEventListener('toggle', function (e) { var t = e.target; if (t && t.classList && t.classList.contains('h2s-det')) { var sec = t.closest ? t.closest('section.h2d') : null; if (sec && sec.dataset.biz) { H.det = H.det || {}; H.det[sec.dataset.biz] = t.open; } } }, true);   // keep the Detailed analytics area open across repaints (an action inside it must not collapse it)
-  window.Home2 = { active: active, go: go, panel: analyticsPanel };
+  window.Home2 = { active: active, go: go, panel: analyticsPanel, sync: expSync };
   style();
   if (active() && $('appScreen') && $('appScreen').classList.contains('show')) window.renderTab('home');
 })();
