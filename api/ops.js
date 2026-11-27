@@ -27,7 +27,7 @@ import { buildDashboard as _gdBuild } from '../lib/growthDecisions.mjs'; // Grow
 import { buildHomeCard as _hiBuild } from '../lib/homeInsights.mjs'; // CEO homepage business card model (pure)
 import { normaliseRow as _gaNorm, buildWorkspace as _gaBuild, GROWTH_BUSINESSES as _gaBiz } from '../lib/growthAnalytics.mjs'; // R-A database snapshot (fallback when nothing has been collected)
 import { improvementsKey as _impKey, emptyImprovements as _impEmpty, sanitizeImprovements as _impSanitize, startImprovement as _impStart, updateImprovement as _impUpdate, annotatePlan as _impAnnotate, activeSummary as _impSummary } from '../lib/growthImprovements.mjs'; // persistent improvement tracking (records only)
-import { contentKey as _csKey, buildFeatureDoc as _csBuildDoc, sanitizeFeatureDoc as _csSanitize, buildStrategy as _csStrategy, BUSINESS_ENGINE as _csEngine } from '../lib/contentStrategy.mjs'; // G5 content strategy intelligence (derived data; advisory)
+import { contentKey as _csKey, buildFeatureDoc as _csBuildDoc, sanitizeFeatureDoc as _csSanitize, buildStrategy as _csStrategy, buildCardView as _csView, tagsKey as _tgKey, sanitizeTags as _tgSanitize, emptyTags as _tgEmpty, setTags as _tgSet, TAG_FIELDS as _tgFields, strategyProposals as _csProposals, BUSINESS_ENGINE as _csEngine } from '../lib/contentStrategy.mjs'; // G5 content strategy intelligence (derived data; advisory)
 import { currentMetrics as _gpMetrics, evaluateImprovement as _gpEval } from '../lib/growthPlan.mjs'; // recommendation plan metrics / evaluation (pure)
 import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel, packagesForEngine as _udPackagesForEngine, bestPackageMatch as _udBestMatch, createThrottle as _udCreateThrottle, createWarnLimiter as _udCreateWarnLimiter } from '../lib/uploadDetection.mjs'; // R-C1 A: upload detection via the uploads playlist (no search.list)
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
@@ -8999,8 +8999,9 @@ async function _growthRunCollection(business, mode, deadlineMs) {
   const conns = await sbGet('youtube_connections?channel_id=eq.' + encodeURIComponent(want) + '&select=channel_id,refresh_token,scope&limit=2');
   // this channel's own catalog rows (filtered by channel id): uploads of the last 36 days get day-1/3/7/28 performance until complete
   let recentUploads = []; try { const cg = await sbGet('youtube_videos?select=video_id,published_at&channel_id=eq.' + encodeURIComponent(want) + '&published_at=gte.' + encodeURIComponent(new Date(Date.now() - 37 * 86400000).toISOString()) + '&order=published_at.desc&limit=60'); recentUploads = (Array.isArray(cg) ? cg : []).filter((x) => x && x.video_id && x.published_at).map((x) => ({ id: x.video_id, published_at: x.published_at })); } catch (_) { recentUploads = []; }
+  let catalogIds = []; try { const cg2 = await sbGet('youtube_videos?select=video_id&channel_id=eq.' + encodeURIComponent(want) + '&order=published_at.desc.nullslast&limit=600'); catalogIds = (Array.isArray(cg2) ? cg2 : []).map((x) => x && x.video_id).filter(Boolean); } catch (_) { catalogIds = []; }   // this channel's own catalog ids (older-catalog freshness)
   const uploadsDone = prev && prev.uploads ? Object.entries(prev.uploads).filter(([, u]) => u && u.d28 !== null && u.d28 !== undefined).map(([id]) => id) : [];
-  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to, deadlineMs, knownDurationIds: prev && prev.catalog_meta ? Object.keys(prev.catalog_meta) : [], recentUploads, uploadsDone });
+  const out = await _gcCollect({ business, connections: Array.isArray(conns) ? conns : [], refresh: _refreshYoutubeToken, fetchImpl: fetch, to, deadlineMs, knownDurationIds: prev && prev.catalog_meta ? Object.keys(prev.catalog_meta) : [], catalogIds, recentUploads, uploadsDone });
   if (!out.ok) {
     console.warn('[growth_collect] ' + business + ' ' + mode + ' failed: ' + (out.error || '') + ' ' + (out.detail || ''));
     try { if (prev) await _growthSaveDoc(business, _gcNoteFailure(prev, { business, nowIso: new Date().toISOString(), error: (out.error || 'failed') + (out.detail ? ': ' + out.detail : '') })); } catch (_) { /* recording the attempt is best effort; stored data is untouched either way */ }
@@ -9101,7 +9102,7 @@ async function _growthHomeCardFor(business, store, sw) {
       let reach = null; try { const RM = await _hrLoad(); if (RM) { const rd = await sbGet('app_settings?key=eq.' + RM.reachDataKey(business) + '&select=value&limit=1'); if (Array.isArray(rd) && rd[0]) { const rdoc = typeof rd[0].value === 'string' ? JSON.parse(rd[0].value) : rd[0].value; if (rdoc && rdoc.business === business && rdoc.channel_id === id) reach = RM.packagingComparison(rdoc, catalog.map((c) => ({ video_id: c.video_id, published_at: c.published_at })), Date.now()); } } } catch (_) { reach = null; }
       const videoRows = doc && doc.videos && Array.isArray(doc.videos.rows) ? doc.videos.rows.map((v) => ({ id: v.id, views: v.views, avd: v.avg_view_duration_sec, pct: v.avg_view_pct, subs_gained: v.subs_gained })) : [];
       const home_card = _hiBuild({ business, name: _gaBiz[business].name || business, dash, rows: Array.isArray(rows) ? rows : [], videoRows, catalog, reach, ypp: dash.ypp || null, counters: { subscribers: ch.subscribers, total_views: ch.total_views, updated_at: ch.updated_at, history: hist }, pipeline, collection: { scheduled: _gcAuth(sw, Date.now(), business, 'scheduled').ok === true }, nowMs: Date.now() });
-  try { const impDoc = (await _impRead(business)).doc, now = Date.now(); if (home_card.plan) home_card.plan.proposals = _impAnnotate(home_card.plan, impDoc, now);
+  let impDocX = null; try { const impDoc = (await _impRead(business)).doc, now = Date.now(); impDocX = impDoc; if (home_card.plan) home_card.plan.proposals = _impAnnotate(home_card.plan, impDoc, now);
     home_card.improvements = { rev: impDoc.rev, summary: _impSummary(impDoc, now), items: impDoc.items.slice(0, 25), evaluations: Object.fromEntries(impDoc.items.filter((x) => x.status !== 'completed' && x.status !== 'abandoned').map((x) => [x.id, _gpEval(x, _gpMetrics(home_card), now)])) }; } catch (_) { home_card.improvements = { error: 'unavailable' }; }
   try {   // G5 — the content strategy scorecard: stored production features + the latest collected per-video figures; advisory; a failure here never breaks the card
     const fraw = await sbGet('app_settings?key=eq.' + _csKey(business) + '&select=value&limit=1'); const fd = _csSanitize(Array.isArray(fraw) && fraw[0] ? fraw[0].value : null, business);
@@ -9109,8 +9110,12 @@ async function _growthHomeCardFor(business, store, sw) {
     const adv = w && doc.days ? Object.entries(doc.days).filter(([k]) => k >= w.from && k <= w.to).reduce((a2, [, v]) => a2 + (v && Number.isFinite(v.paid_views) ? v.paid_views : 0), 0) : null;
     const advKnown = w && doc.days && Object.entries(doc.days).some(([k, v]) => k >= w.from && k <= w.to && v && Number.isFinite(v.paid_views));
     const sRows = doc && doc.videos && Array.isArray(doc.videos.rows) ? doc.videos.rows.map((v) => ({ id: v.id, views: v.views, avd: v.avg_view_duration_sec, pct: v.avg_view_pct, subs_gained: v.subs_gained, minutes: v.minutes, paid_views: Number.isFinite(v.paid_views) ? v.paid_views : null })) : [];
-    home_card.strategy = w ? _csStrategy({ business, name: _gaBiz[business].name || business, featureDoc: fd, catalog, videoRows: sRows, window: w, advertising: advKnown ? adv : null, longOnly: !!(home_card.policy && home_card.policy.long_only), card: home_card, nowMs: Date.now() }) : { business, state: 'not_ready', reason: 'No collected per-video window is available yet.' };
+    let tagsDoc = null; try { const tr = await sbGet('app_settings?key=eq.' + _tgKey(business) + '&select=value&limit=1'); tagsDoc = Array.isArray(tr) && tr[0] ? _tgSanitize(tr[0].value, business) : null; } catch (_) { tagsDoc = null; }
+    const advLife = doc && doc.days ? (Object.values(doc.days).every((v) => v && Number.isFinite(v.paid_views)) ? Object.values(doc.days).reduce((a2, v) => a2 + v.paid_views, 0) : null) : null;   // advertising over every stored day (lifetime views are only organic when this is 0)
+    home_card.strategy = w ? _csStrategy({ business, name: _gaBiz[business].name || business, featureDoc: fd, catalog, videoRows: sRows, window: w, advertising: advKnown ? adv : null, advertisingLife: advLife, catalogStats: doc && doc.catalog_stats ? doc.catalog_stats : null, tags: tagsDoc, longOnly: !!(home_card.policy && home_card.policy.long_only), card: home_card, nowMs: Date.now() }) : { business, state: 'not_ready', reason: 'No collected per-video window is available yet.' };
+    try { const props = _csProposals(home_card.strategy, business, Date.now()); if (props.length && home_card.plan) { home_card.plan.proposals = (home_card.plan.proposals || []).concat(impDocX ? _impAnnotate({ proposals: props }, impDocX, Date.now()) : props); } } catch (_) { /* proposals are optional */ }
   } catch (_) { home_card.strategy = { business, state: 'not_ready', reason: 'The content assessment could not be built.' }; }
+  try { home_card.view = _csView({ card: home_card, strategy: home_card.strategy, business, nowMs: Date.now() }); } catch (_) { home_card.view = { state: 'unavailable', reason: 'The summary could not be built.' }; }
   return home_card;
 }
 // ── G5 content strategy: link published videos to production packages (exact YouTube video id only) and store the compact features per business (app_settings key growth_content_<business>).
@@ -9132,6 +9137,24 @@ async function growthContentRefresh(req, res) {
   if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
   const want = String((req.body || {}).business || ''); const list = want ? [want] : _GROWTH_BUSINESSES; if (!list.every((x) => _GROWTH_BUSINESSES.includes(x))) return res.status(400).json({ ok: false, error: 'unknown_business' });
   try { const out = []; for (const b of list) out.push(await _growthContentRefresh(b)); return res.status(200).json({ ok: true, results: out }); } catch (e) { return res.status(500).json({ ok: false, error: 'content_refresh_failed' }); }
+}
+// growth_tags_set  POST, CEO session. {business, video_id, tags:{opening_visual, intro_type, visual_motion, vocal_style, thumb_variant, genre}} -> records what a package does not (the production tags the content strategy needs).
+// Derived data only: stored in growth_tags_<business> (compare-and-set), never written to packages; the video must belong to THIS business's channel catalog; values are validated against fixed options.
+async function growthTagsSet(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
+  if (!(await requireCeoSession(req))) return res.status(401).json({ ok: false, error: 'ceo_authorization_required' });
+  const b = req.body || {}; const business = String(b.business || ''), vid = String(b.video_id || '');
+  try {
+    if (!_GROWTH_BUSINESSES.includes(business)) return res.status(400).json({ ok: false, error: 'unknown_business' });
+    if (!/^[A-Za-z0-9_-]{11}$/.test(vid)) return res.status(400).json({ ok: false, error: 'invalid_video' });
+    const own = await sbGet('youtube_videos?select=video_id&channel_id=eq.' + encodeURIComponent(_gaBiz[business].channelId) + '&video_id=eq.' + encodeURIComponent(vid) + '&limit=1');
+    if (!Array.isArray(own) || !own[0]) return res.status(404).json({ ok: false, error: 'video_not_in_this_business' });
+    const key = _tgKey(business); const r = await sbGet('app_settings?key=eq.' + key + '&select=value&limit=1'); const oldText = Array.isArray(r) && r[0] ? (typeof r[0].value === 'string' ? r[0].value : JSON.stringify(r[0].value)) : null;
+    const cur = oldText === null ? _tgEmpty(business) : _tgSanitize(oldText, business); if (!cur) return res.status(409).json({ ok: false, error: 'tags_document_invalid' });
+    const out = _tgSet(cur, vid, b.tags, new Date().toISOString()); if (out.error) return res.status(400).json({ ok: false, error: out.error });
+    if (!(await srvStudioV2PilotCas(key, oldText, JSON.stringify(out.doc)))) return res.status(409).json({ ok: false, error: 'conflict', detail: 'the tags changed meanwhile; reload and try again' });
+    return res.status(200).json({ ok: true, video_id: vid, tags: out.doc.videos[vid], rev: out.doc.rev });
+  } catch (e) { return res.status(500).json({ ok: false, error: 'tags_failed' }); }
 }
 async function growthReport(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'POST only' });
@@ -21810,6 +21833,7 @@ export default async function handler(req, res) {
     if (action === 'growth_reach_status')        return await growthReachStatus(req, res); // C3 reach reports: status (CEO session; reads only)
     if (action === 'growth_reach_sync')          return await growthReachSync(req, res); // C3 reach reports: DRY RUN by default; live only with the growth_reach record + typed confirmation (CEO session)
     if (action === 'growth_report')              return await growthReport(req, res); // Growth system: Decision Center model (CEO or VA session; reads only)
+    if (action === 'growth_tags_set')            return await growthTagsSet(req, res); // G6 production tags (CEO session; derived data only)
     if (action === 'growth_content_refresh')     return await growthContentRefresh(req, res); // G5 content strategy: relink videos to packages (CEO session; derived data only)
     if (action === 'growth_improvement_start')   return await growthImprovementStart(req, res); // improvement tracking (CEO session; records only)
     if (action === 'growth_improvement_update')  return await growthImprovementUpdate(req, res); // improvement tracking (CEO session; records only)

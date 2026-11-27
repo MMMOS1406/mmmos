@@ -1,7 +1,7 @@
 // CEO homepage business dashboard — browser test against the local stub with SYNTHETIC analytics. PUPPETEER_CORE=<dir> node tests/home2/e2e_ceo_dashboard.mjs [screenshotDir]
 import fs from 'node:fs'; import path from 'node:path';
 import { startStub } from '../preservation/stub-server.mjs'; import { makeFixture } from '../preservation/fixtures.mjs'; import { launch, openPage, login, settle } from '../preservation/driver.mjs';
-import { buildHomeCard } from '../../lib/homeInsights.mjs';
+import { buildHomeCard } from '../../lib/homeInsights.mjs'; import { buildCardView } from '../../lib/contentStrategy.mjs';
 const shotDir = process.argv[2]; const R = []; const check = (n, ok, d = '') => { R.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); };
 const NOW = Date.now();
 const win = (o) => ({ views: 3000, non_ad_views: 3000, paid_views: 0, paid_share_pct: 0, watch_hours: 40, net_subs: 9, from: '2026-10-21', to: '2026-11-17', status: 'complete', ...o });
@@ -16,18 +16,20 @@ const mkCards = () => ({ silk_road_voices: buildHomeCard({ business: 'silk_road_
   srv_studio: buildHomeCard({ business: 'srv_studio', name: 'SRV Studio', dash: BETA, rows: [], counters: { subscribers: 9, history: [] }, pipeline: null, nowMs: NOW }) });
 let calls = []; let mode = 'ok';
 const fx = makeFixture(); fx.restFilter = true;
-fx.api.growth_report = async (json) => { calls.push(json); if (mode === 'fail') return { __status: 500, ok: false, error: 'growth_report_failed' }; const c = mkCards(); return { ok: true, role: 'ceo', reports: Object.entries(c).map(([b, v]) => ({ business: b, home_card: v })) }; };
+fx.api.growth_report = async (json) => { calls.push(json); if (mode === 'fail') return { __status: 500, ok: false, error: 'growth_report_failed' }; const c = mkCards(); for (const [b, v] of Object.entries(c)) v.view = buildCardView({ card: v, strategy: null, business: b, nowMs: NOW }); return { ok: true, role: 'ceo', reports: Object.entries(c).map(([b, v]) => ({ business: b, home_card: v })) }; };
 const stub = await startStub({ publicDir: fs.realpathSync(new URL('../../public', import.meta.url).pathname), fixture: fx }); const browser = await launch();
 const txt = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s)].map((e) => e.innerText.replace(/\s+/g, ' ')), sel);
 try {
   const o = await openPage(browser, stub.origin, { viewport: { width: 1440, height: 900 }, realClock: true }); await login(o.page, stub.origin, 'admin'); await settle(o.page, stub.origin, 1200);
   await o.page.evaluate(() => renderTab('home')); await settle(o.page, stub.origin, 1500);
+  // FINAL order 2026-11-27: the detail moved to each business's Analytics tab. This suite tests that detail, so it renders both Analytics panels (the real function the tab uses) in place of the Home.
+  await o.page.evaluate(() => { document.getElementById('mainContent').innerHTML = Home2.panel('SRV Farsi') + Home2.panel('SRV English'); });
   const closed = await txt(o.page, 'section.h2d');
   const geo = await o.page.evaluate(() => [...document.querySelectorAll('section.h2d')].map((c) => ({ act: Math.round(c.querySelector('.h2d-act').getBoundingClientRect().bottom), open: c.querySelector('details.h2d-more').open, hasPrimary: c.querySelectorAll('.h2d-act > div').length === 4 })));
   check('scorecard: each business shows its status, the three essential indicators, working / not working, content strategy, what to change and previous results above the detailed analytics', closed.length === 2 && closed.every((t) => /(GROWING|DECLINING|FLAT|STABLE|INSUFFICIENT|UNPROVEN|NO DATA|CAN.T TELL|TOO SMALL)/.test(t) && /Organic views/i.test(t) && /Advertising share/i.test(t) && /Subscribers/i.test(t) && (/content assessment is being prepared/i.test(t) || (/What is working/i.test(t) && /What is not working/i.test(t) && /Content strategy/i.test(t) && /What needs to change/i.test(t) && /Results of previous improvements/i.test(t)))) && geo.length === 2);
-  check('detail is collapsed by default (weekly chart, content lists, evidence, revenue/expense notes are not on the first screen)', geo.every((g) => !g.open) && closed.every((t) => !/Revenue: Not available|Weekly views|Top content|Lowest recent performers|Evidence and how we will know/.test(t)));
+  check('the Analytics panel shows the status/KPI scorecard first and keeps the heavy detail (weekly chart, revenue notes) inside its single Detailed analytics area', geo.length === 2 && closed.every((t) => /Organic views/i.test(t)) && await o.page.evaluate(() => [...document.querySelectorAll('section.h2d')].every((s) => s.querySelectorAll('details.h2s-det').length === 1)));
   check('the old executive summary (main problem, next action, owner, advisory wording) is preserved inside the single Detailed analytics area', await o.page.evaluate(() => [...document.querySelectorAll('section.h2d details.h2s-det')].every((d) => { const t = d.textContent; return /Main problem/i.test(t) && /Next action/i.test(t) && /Owner/i.test(t) && /advisory/i.test(t); })));
-  check('every business has exactly one Detailed analytics expander (closed by default)', await o.page.evaluate(() => [...document.querySelectorAll('section.h2d')].every((s) => s.querySelectorAll(':scope > details.h2s-det').length === 1 && !s.querySelector(':scope > details.h2s-det').open)));
+  check('every Analytics panel has exactly one Detailed analytics area (open by default there, because this IS the analytics page)', await o.page.evaluate(() => [...document.querySelectorAll('section.h2d')].every((s) => s.querySelectorAll(':scope > details.h2s-det').length === 1 && s.querySelector(':scope > details.h2s-det').open)));
   check('SRV Studio policy: the Shorts recommendation in the data never appears on Home (Long-only)', !closed[1].includes('Produce three more Shorts') && !/SHORTS WIN/.test(closed[1]));
   await o.page.evaluate(() => document.querySelectorAll('details.h2s-det').forEach((d) => { d.open = true; }));
   const dx = await o.page.evaluate(() => [...document.querySelectorAll('section.h2dx')].map((c) => ({ biz: c.dataset.biz, text: c.innerText.replace(/\s+/g, ' '), rows: c.querySelectorAll('.h2d-dr').length, open: [...c.querySelectorAll('details')].some((d) => d.open), label: (c.querySelector('.h2d-rc') || {}).innerText || '', top: Math.round(c.getBoundingClientRect().top + window.scrollY) })));
@@ -56,22 +58,23 @@ try {
   check('stale banner shown (data 5 days old)', cards.every((t) => /Detailed analytics end on/.test(t)));
   const lab = await txt(o.page, 'section.h2d .h2d-l'); check('no tile label calls total views organic', !lab.some((l) => /organic/i.test(l) && /all views|total/i.test(l)));
   const rec = await txt(o.page, 'section.h2d[data-biz="silk_road_voices"] li.h2d-rec'); check('recommendations rendered as ≤3 items with "Do next"', rec.length >= 1 && rec.length <= 3 && rec.every((r) => /Do next:/.test(r)));
-  check('production detail stays on the business pages (links only; no task list on Home)', await o.page.evaluate(() => !!document.querySelector('section.h2d [data-h2="ws:SRV Farsi:production"]') && !document.querySelector('section.h2d .h2-kv')));
-  check('Investment and SRV Circle cards still on Home; finance row still on Home', await o.page.evaluate(() => !!document.getElementById('h2Invest') && !!document.getElementById('h2Circle') && !!document.querySelector('.h2-grid.c4')));
-  await o.page.evaluate(() => document.querySelector('section.h2d[data-biz="srv_studio"] [data-h2="ws:SRV English:analytics"]').click()); await settle(o.page, stub.origin, 800);
-  check('"Detailed analytics" opens that business\'s analytics tab', await o.page.evaluate(() => /SRV English|SRV Studio/.test(document.getElementById('mainContent').innerText)));
+  check('the homepage cards carry no production task list or tables (links only to Analytics)', await o.page.evaluate(() => { renderTab('home'); return !document.querySelector('section.h2f table, section.h2f .h2-kv, section.h2f [data-h2$=":production"]'); }));
+  await o.page.evaluate(() => renderTab('home')); await settle(o.page, stub.origin, 800);
+  check('Home no longer carries the Investment, Circle or finance sections (final order: two business cards only)', await o.page.evaluate(() => !document.getElementById('h2Invest') && !document.getElementById('h2Circle') && !document.querySelector('.h2-grid.c4')));
+  await o.page.evaluate(() => document.querySelector('section.h2f[data-biz="srv_studio"] [data-h2="ws:SRV English:analytics"]').click()); await settle(o.page, stub.origin, 1200);
+  check('the homepage "Detailed analytics" link opens that business\'s Analytics tab, which carries the growth intelligence panel (diagnosis, summary, improvement tracking)', await o.page.evaluate(() => { const t = document.getElementById('mainContent').innerText; return /SRV English|SRV Studio/.test(t) && !!document.getElementById('h2AnPanel') && !!document.querySelector('#h2AnPanel section.h2dx'); }));
   if (shotDir) { fs.mkdirSync(shotDir, { recursive: true }); await o.page.evaluate(() => renderTab('home')); await settle(o.page, stub.origin, 800); await o.page.screenshot({ path: path.join(shotDir, 'synthetic-home.png') }); }
   check('no page errors', (o.pageErrors || []).length === 0, JSON.stringify(o.pageErrors || []));
   await o.page.close();
   { const om = await openPage(browser, stub.origin, { viewport: { width: 390, height: 844 }, realClock: true }); await login(om.page, stub.origin, 'admin'); await settle(om.page, stub.origin, 1200); await om.page.evaluate(() => renderTab('home')); await settle(om.page, stub.origin, 1500);
-    const g = await om.page.evaluate(() => ({ act: Math.round(document.querySelector('section.h2d .h2s-top').getBoundingClientRect().bottom), ov: document.documentElement.scrollWidth > window.innerWidth + 1 }));
-    check('mobile 390px: the first scorecard\'s status and essential indicators are above the fold; no horizontal overflow', g.act <= 844 && !g.ov, JSON.stringify(g)); await om.page.close(); }
+    const g = await om.page.evaluate(() => ({ act: Math.round(document.querySelector('section.h2f .h2f-k').getBoundingClientRect().bottom), ov: document.documentElement.scrollWidth > window.innerWidth + 1 }));
+    check('mobile 390px: the first card\'s status and three indicators are above the fold; no horizontal overflow', g.act <= 844 && !g.ov, JSON.stringify(g)); await om.page.close(); }
   // report failure → cards say so, the rest of Home still works
   mode = 'fail'; const o2 = await openPage(browser, stub.origin, { viewport: { width: 1440, height: 900 }, realClock: true }); await login(o2.page, stub.origin, 'admin'); await settle(o2.page, stub.origin, 1200);
   await o2.page.evaluate(() => renderTab('home')); await settle(o2.page, stub.origin, 1500);
-  const c2 = await txt(o2.page, 'section.h2d'); check('report failure: both cards state the report could not be loaded (no invented numbers)', c2.length === 2 && c2.every((t) => /could not be loaded/.test(t) && !/\d{3,}/.test(t.replace(/\(.*?\)/g, ''))));
+  const c2 = await txt(o2.page, 'section.h2f'); check('report failure: both cards state the report could not be loaded (no invented numbers)', c2.length === 2 && c2.every((t) => /could not be loaded/.test(t) && !/\d{3,}/.test(t.replace(/\(.*?\)/g, ''))));
   check('report failure: every card still offers Open / Detailed analytics / Production tasks', await o2.page.evaluate(() => [...document.querySelectorAll('section.h2d')].every((c) => c.querySelectorAll('button[data-h2]').length === 3)));
-  check('report failure: Investment and finance sections still render', await o2.page.evaluate(() => !!document.getElementById('h2Invest') && !!document.querySelector('.h2-grid.c4')));
+  check('report failure: every card still offers its Detailed analytics link', await o2.page.evaluate(() => [...document.querySelectorAll('section.h2f')].every((c) => c.querySelectorAll('[data-h2$=":analytics"]').length === 1)));
   await o2.page.close();
   // non-admin sessions: homepage is not active and growth_report is never requested
   mode = 'ok'; calls = []; const ids = await (async () => { const p = await browser.newPage(); await p.goto(stub.origin + '/'); await p.waitForFunction(() => typeof USERS !== 'undefined'); const r = await p.evaluate(() => USERS.map((u) => u.id).filter((i) => i !== 'admin')); await p.close(); return r; })();
