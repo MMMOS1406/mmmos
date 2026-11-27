@@ -32,6 +32,7 @@ import { selectChannels as _udSelectChannels, detectChannel as _udDetectChannel,
 import { loadDisabled as _syncLoadDisabled, filterEnabled as _syncFilterEnabled, isSkipped as _syncIsSkipped } from '../lib/channelSyncControl.mjs'; // per-channel sync switch: a retired business's channel can be skipped; default = unchanged
 import { BUSINESSES as SRVAV_BUSINESSES, BUILTIN_AVATARS as SRVAV_BUILTINS, LIMITS as SRVAV_LIMITS, REGISTRY_KEY as srvAvKey, normalizeRegistry as srvAvNormalize, validateUpload as srvAvValidate, newAvatarId as srvAvNewId, makeItem as srvAvMakeItem, applyUpdate as srvAvApply } from '../lib/srvAvatarLibrary.mjs'; // CEO order 2026-11-11 — SRV avatar library
 import { hashPin, verifyPin, pinFingerprint, isLegacyHash, pinPolicyError } from '../lib/pinHash.mjs'; // CEO-017B — salted scrypt PIN hashes; legacy SHA-256 hashes still verify
+import { studioShortGate as _slGate } from '../lib/srvStudioPolicy.mjs'; // SRV Studio Long-only: new Shorts are not generated
 import { parseSessionToken as _splitSessionToken } from '../lib/ceoSession.mjs'; // S-D: one strict token-shape check for the CEO, VA and Family verifiers
 import { nextwaveV2BindEvidenceDeterministically, nextwaveV2RecoverComparisonSecondSide } from '../lib/nextwaveV2EvidenceBinding.mjs'; // Phase 5.2/5.2A — deterministic evidence/label binding + one-slot comparison recovery, kept in their own zero-dependency module so they're testable without this file's ffmpeg dependency
 import { nextwaveV2BuildStoryboard } from '../lib/nextwaveV2StoryboardBrain.mjs'; // Autonomous Storyboard Brain — deterministic semantic grouping / role binding / evidence provenance; reuses this file's segmenter, number regex, words-to-number parser and treatment classifier via injected deps
@@ -3824,6 +3825,8 @@ async function generatePackage(req, res) {
   if (!engineId || !mode) return res.status(400).json({ success: false, error: 'engineId and mode required' });
   // CEO-017: AI Creation Studio is retired — fail closed instead of falling through to the generic prompt.
   if (engineId === 'ai_studio') return res.status(410).json({ success: false, error: 'engine_retired', engine: 'ai_studio' });
+  { const _sg = await _slGate({ engine: engineId, body: { contentFormat, contentType: (req.body || {}).contentType }, fetchImpl: fetch, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_KEY });   // SRV Studio is Long-only
+    if (!_sg.allow) return res.status(_sg.status).json({ success: false, error: _sg.error, message: _sg.message }); }
   // SRV Studio V2: honoured only when the client asks AND the flag row is on (fails closed).
   const _srvV2 = engineId === 'srv_english' && (req.body || {}).srvStudioV2 === true &&
     await srvStudioV2FlagEnabled({ supabaseUrl: SUPABASE_URL, supabaseKey: SUPABASE_SERVICE_KEY });
