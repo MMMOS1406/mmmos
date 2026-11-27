@@ -22,4 +22,11 @@ const merge = (prev, r) => C.mergeCollection(prev, r, { business: B1, from: FROM
   ok('with no catalog ids passed nothing extra is requested (the approved collector behaviour is unchanged)', !r.steps.some((s) => /^video_stats:/.test(s.id)) && !(w.statsRequests || []).length); }
 { const w = makeWorld(B1, { videos: vids }); const many = Array.from({ length: 900 }, (_, i) => 'big' + String(i).padStart(8, '0')); const r = await C.runCollection({ business: B1, steps: C.collectSteps({ to: END }), fetchJson: w.fetchJson, now: () => NOW, catalogIds: many });
   ok('bounded: at most 600 ids (12 requests) however large the catalog; budget and read-only rules still apply', (w.statsRequests || []).flat().length <= C.LIMITS.maxCatalogStats && r.requests.data + r.requests.analytics <= C.LIMITS.maxRequestsPerRun, [(w.statsRequests || []).flat().length]); }
+
+// ── quality: YouTube reporting latency is latency, an internal gap is a defect ──
+const qual = async (drop) => { const w = makeWorld(B1, { videos: vids }); for (const d of drop) delete w.series[d]; const r = await run(w); return merge(null, r).quality; };
+{ const q0 = await qual([]); ok('quality: a complete window passes the day checks', !q0.failed.includes('days_present') && !q0.failed.includes('missing_days'), q0.failed);
+  const q2 = await qual([addDays(END, 0), addDays(END, -1)]); ok('quality: the newest 2 days not yet reported by YouTube (latency) are NOT a failure; data-through is stated', !q2.failed.includes('days_present') && !q2.failed.includes('missing_days') && q2.checks.find((c) => c.id === 'days_present').value.trailing_days === 2, q2.checks.find((c) => c.id === 'days_present'));
+  const q5 = await qual([0, 1, 2, 3, 4].map((i) => addDays(END, -i))); ok('quality: more than 3 trailing days missing IS a failure (the collection is lagging)', q5.failed.includes('days_present') && q5.failed.includes('missing_days'), q5.failed);
+  const qg = await qual([addDays(END, -10)]); ok('quality: a gap before the newest reported day IS a failure and names the day', qg.failed.includes('missing_days') && /missing: /.test(qg.checks.find((c) => c.id === 'missing_days').detail || ''), qg.checks.find((c) => c.id === 'missing_days')); }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
