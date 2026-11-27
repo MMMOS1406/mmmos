@@ -107,6 +107,7 @@ ok('Mood mapping: Romantic/Emotional/Happy → colour and tempo inside deep hous
   let flagValue = 'false'; const sent = [];
   globalThis.fetch = async (url, opt = {}) => {
     const u = String(url);
+    if (u.includes('srv_studio_v2_production')) return { ok: true, json: async () => [{ value: '{"enabled":true,"format":"long","formats":["long","short"],"dailyCap":5,"channelId":"UC0nzWQX6AaUqlF5FozNpWPg"}' }] };   // pre-2026-11-24 production configuration: this test is about the music prompt, not the Long-only policy (tests/srv/test_studio_long_only_enforcement.mjs)
     if (u.includes('/rest/v1/app_settings')) return { ok: true, json: async () => [{ value: flagValue }] };
     if (u.includes('api.anthropic.com')) { const b = JSON.parse(opt.body); sent.push(b); const v2 = b.system === M.SRV_STUDIO_V2_SYSTEM; return { ok: true, json: async () => ({ content: [{ text: JSON.stringify(v2 ? GOOD : { title: 'V1 Song', lyrics: 'x' }) }] }) }; }
     throw new Error('unexpected fetch ' + u);
@@ -140,7 +141,7 @@ ok('Mood mapping: Romantic/Emotional/Happy → colour and tempo inside deep hous
   const ctx = {
     console: { log() {}, warn() {}, error() {} }, process: { env: { ANTHROPIC_API_KEY: 'k' } }, AbortController, setTimeout, clearTimeout, JSON, Date, Math, Object, Array, String, Number, Set, Promise, RegExp, Error,
     SUPABASE_URL: 'https://stub.invalid', SUPABASE_SERVICE_KEY: 'svc',
-    _stripLearningInputs: G0.stripLearningInputs,   // G0/C4 added this call to generatePackage; the harness evaluates the function in isolation, so it supplies the real (pure) helper
+    _stripLearningInputs: G0.stripLearningInputs, _slGate: (o) => import('../../lib/srvStudioPolicy.mjs').then((P) => P.studioShortGate({ ...o, fetchImpl: async () => ({ ok: true, json: async () => [{ value: '{"enabled":true,"format":"long","formats":["long","short"],"dailyCap":5,"channelId":"UC0nzWQX6AaUqlF5FozNpWPg"}' }] }) }))   /* the sliced handler gets the real gate with its own configuration read (pre-2026-11-24 value: this test is about the music prompt) */,   // G0/C4 added this call to generatePackage; the harness evaluates the function in isolation, so it supplies the real (pure) helper
     srvStudioV2FlagEnabled: async () => flagOn, SRV_STUDIO_V2_SYSTEM: M.SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt: M.buildSrvStudioV2UserPrompt, finalizeSrvStudioV2Package: M.finalizeSrvStudioV2Package,
     fetch: async (u, opt) => { const b = JSON.parse(opt.body); sent.push(b); return { ok: true, json: async () => ({ content: [{ text: '<package>' + JSON.stringify(b.system === M.SRV_STUDIO_V2_SYSTEM ? GOOD : { title: 'V1', lyrics: 'x' }) + '</package>' }] }) }; },
   };

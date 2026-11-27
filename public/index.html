@@ -466,6 +466,7 @@ canvas.mini-chart{width:100%!important;height:100px!important;display:block}
 
 <script>
 const API_URL='/api/generate';
+const SRV_STUDIO_LONG_ONLY=true; // CEO policy (effective 2026-11-23): SRV Studio produces Long videos only; no new Shorts. The server enforces the same rule from the production configuration.
 const SUPABASE_URL='https://tldcwvtwjypmwynsklsd.supabase.co';
 const SUPABASE_KEY='sb_publishable_ef6g4pLPYfDrXnTwGxSUuA_hAjrrF_i';
 // CEO-017B — database access goes through the server. Every browser call to <SUPABASE_URL>/rest/v1/... is replayed by
@@ -17047,7 +17048,7 @@ function _srvEnglishV2PromoGenerateHtml(task,taskId){
         <button onclick="_srvEnglishV2PromoPreview('${T}')" id="srv2promo_play_${T}" style="padding:8px 12px;background:rgba(139,92,246,0.10);border:1px solid rgba(139,92,246,0.35);border-radius:8px;color:#a78bfa;font-size:11px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif;margin-bottom:12px">▶ Preview this section</button>`:''}
         <div style="font-size:10px;color:var(--dim);line-height:1.6;margin-bottom:12px">The Short reuses the Long's song: same title, same audio, same lyrics — nothing new is generated. It renders 1080×1920 with the cover image you choose next.</div>
         <div id="srv2promo_st_${T}" style="font-size:11px;margin-bottom:8px;font-family:'JetBrains Mono',monospace"></div>
-        <button onclick="_srvEnglishV2CreatePromoShort('${T}')" style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✦ Create Short from this Long</button>`;
+        <button onclick="_srvEnglishV2CreatePromoShort('${T}')" ${SRV_STUDIO_LONG_ONLY?'disabled title="SRV Studio is Long-only"':''} style="width:100%;padding:13px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.45);border-radius:10px;color:#c9a84c;font-weight:800;font-size:13px;cursor:pointer;font-family:'Syne',sans-serif">✦ Create Short from this Long</button>`;
   return `
       <div style="padding:14px;background:rgba(201,168,76,0.05);border:1px solid rgba(201,168,76,0.2);border-radius:10px">
         <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:6px">SRV Studio — Female Emotional Deep House — Short</div>
@@ -17081,6 +17082,7 @@ function _srvEnglishV2PromoPreview(taskId){
 async function _srvEnglishV2CreatePromoShort(taskId){
   const st=document.getElementById('srv2promo_st_'+taskId);
   const say=function(t,c){if(st){st.textContent=t;st.style.color=c||'var(--dim)';}};
+  if(SRV_STUDIO_LONG_ONLY){say('SRV Studio is Long-only (CEO policy): new Shorts are not produced.','#f59e0b');return false;}
   const task=_srvEnglishTaskById(taskId);
   if(!task||!_srvEnglishV2IsPromoTask(task)){say('⚠ This task is not a SRV Studio Short.','#ef4444');return false;}
   if(_srvEnglishV2PkgForTask(task)){say('⚠ This Short already has its package.','#ef4444');return false;}
@@ -24347,7 +24349,7 @@ async function generatePackage(taskId){
     });
     const data=await res.json();
     console.log('[MMM] Claude response received | success:',data.success,'| engineType:',data.engineType);
-    if(!res.ok||!data.success)throw new Error(data.error||'Generation failed');
+    if(!res.ok||!data.success)throw new Error(data.message||data.error||'Generation failed');
 
     // v13.50.5 — R2: auto-select avatar/look/voice/background for HeyGen channels (NextWave + AI Studio).
     // Returns null for SRV (music — no avatar). Operator still uses HeyGen Studio manually for now;

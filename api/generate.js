@@ -9,6 +9,7 @@ import { generateFactPackets, factPacketToPromptBlock } from '../lib/nextwaveV2F
 import { srvStudioV2FlagEnabled, SRV_STUDIO_V2_SYSTEM, buildSrvStudioV2UserPrompt, parseSrvStudioV2Reply, finalizeSrvStudioV2Package } from '../lib/srvStudioV2Music.mjs';
 // SRV Farsi Creative V2 — the one canonical SRV Farsi creative brain; used only when the srv_farsi_creative_v2 flag allows it.
 import { srvfCv2Handle } from '../lib/srvFarsiCreativeV2.mjs';
+import { studioShortGate } from '../lib/srvStudioPolicy.mjs'; // SRV Studio is Long-only: new Shorts are not generated
 import { stripLearningInputs } from '../lib/generationInputs.mjs'; // G0/C4 — legacy learning inputs never reach SRV music generation
 
 // SRV FARSI IDENTITY LAYER v1 — 2026-06-08
@@ -762,6 +763,8 @@ export default async function handler(req, res) {
   const recentPackages = stripLearningInputs(req.body.recentPackages, engine); // G0/C4 — SRV engines only; anti-repetition entries are kept
 
   if (!engine) return res.status(400).json({ error: 'Engine is required.' });
+  { const _pg = await studioShortGate({ engine, body: req.body, fetchImpl: fetch, supabaseUrl: process.env.SUPABASE_URL || 'https://tldcwvtwjypmwynsklsd.supabase.co', serviceKey: process.env.SUPABASE_SERVICE_KEY });   // before any model call
+    if (!_pg.allow) return res.status(_pg.status).json({ success: false, error: _pg.error, message: _pg.message }); }
   // SRV Farsi Creative V2: the client asks for V2 only from the SRV Farsi lifecycle; the server re-checks the flag row
   // (fails closed) and answers code 'srv_farsi_creative_v2_off' so the client falls back to the unchanged path below.
   if (engine === 'SRV Farsi' && req.body.srvFarsiCreativeV2 === true) {
